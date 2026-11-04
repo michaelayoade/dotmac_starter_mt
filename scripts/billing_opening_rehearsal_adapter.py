@@ -661,7 +661,6 @@ def _assemble(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    uncarried_residue: frozenset[UUID] = frozenset(),
     held_reasons: Mapping[UUID, str] | None = None,
 ) -> _AssemblyOutcome:
     # F2: the shared manifest is qualified once; the per-partition commands and
@@ -674,7 +673,6 @@ def _assemble(
             original_documents,
             historical_discharges,
             service_refs,
-            uncarried_residue,
             held_reasons,
         )
 
@@ -688,7 +686,6 @@ def _assemble_run(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    uncarried_residue: frozenset[UUID] = frozenset(),
     held_reasons: Mapping[UUID, str] | None = None,
 ) -> _AssemblyOutcome:
     precisions = {row.currency: row.precision for row in obs.currency_precisions}
@@ -857,10 +854,6 @@ def _assemble_run(
                 )
                 disposition, reason = "blocking", "currency_precision_mismatch"
                 residual_minor = 0  # blocked placeholder; never a rounded value
-            if disposition == "excluded" and invoice.invoice_id in uncarried_residue:
-                # M8 (recorded widening): the rules declared this closed
-                # invoice's residue informational, so it is not carried.
-                residual_minor = 0
             if partition is None:
                 continue
             mapping = invoice_mappings.get(invoice.invoice_id)
@@ -1101,7 +1094,6 @@ def assemble_rehearsal_run(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    uncarried_residue: frozenset[UUID] = frozenset(),
     held_reasons: Mapping[UUID, str] | None = None,
 ) -> OpeningRehearsalRunV1:
     """Build a candidate run, preserving only explicitly supplied typed originals.
@@ -1122,7 +1114,6 @@ def assemble_rehearsal_run(
         original_documents,
         historical_discharges,
         service_refs,
-        uncarried_residue,
         held_reasons,
     ).run
 
@@ -1204,7 +1195,6 @@ def rehearsal_census(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    uncarried_residue: frozenset[UUID] = frozenset(),
     held_reasons: Mapping[UUID, str] | None = None,
 ) -> OpeningRehearsalCensusV1:
     """Run the census, preserving independently supplied typed originals.
@@ -1221,7 +1211,6 @@ def rehearsal_census(
         original_documents,
         historical_discharges,
         service_refs,
-        uncarried_residue,
         held_reasons,
     )
     run = outcome.run
@@ -1456,9 +1445,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             original_documents=originals,
             historical_discharges=histories,
             service_refs=service_refs,
-            uncarried_residue=(
-                projection.uncarried_residue if projection else frozenset()
-            ),
             held_reasons=projection.held_invoice_reasons if projection else None,
         )
         if projection is not None and args.decisions_out:

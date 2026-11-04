@@ -47,16 +47,7 @@ def rules_doc(**over):
             "matching_post_cause": "match",
             "draft_allocation_post_causes": ["known:stale_draft_allocation"],
         },
-        "code_policies": [
-            {
-                "code": "settlement_provenance",
-                "policy": "informational_on_closed_invoice",
-            },
-            {
-                "code": "excluded_nonzero_residue",
-                "policy": "informational_on_closed_invoice",
-            },
-        ],
+        "code_policies": [],
         "closed_invoice_statuses": ["paid", "written_off", "void"],
         "open_invoice_statuses": ["issued", "overdue", "partially_paid"],
         "drafts": {"draft_status": "draft"},
@@ -262,28 +253,22 @@ def test_precedence_picks_one_reason_when_several_apply():
     assert only(run(r=reordered, classes=classes)).reason == "a10_opening_not_exact"
 
 
-def test_m8_relaxation_applies_only_to_closed_invoices_and_is_counted():
-    closed = census(
-        blocking_exceptions=[
-            exc("a", "settlement_provenance", "i-closed"),
-            exc("a", "excluded_nonzero_residue", "i-closed"),
-        ]
-    )
-    result = run(closed)
-    assert only(result).admitted
-    assert result.informational == {
-        "settlement_provenance": 1,
-        "excluded_nonzero_residue": 1,
-    }
-    assert result.census["blocking_exceptions"] == []
-    assert result.counts()["informational:settlement_provenance"] == 1
-    # The same code on an OPEN invoice is not relaxed.
-    opened = census(blocking_exceptions=[exc("a", "settlement_provenance", "i-open")])
-    held = only(run(opened))
-    assert (held.reason, held.detail) == (
-        "census_blocking_exception",
-        ("settlement_provenance",),
-    )
+def test_no_census_code_is_relaxed_on_any_invoice():
+    for source in ("i-closed", "i-open"):
+        for code in ("settlement_provenance", "excluded_nonzero_residue"):
+            held = only(run(census(blocking_exceptions=[exc("a", code, source)])))
+            assert (held.admitted, held.reason, held.detail) == (
+                False,
+                "census_blocking_exception",
+                (code,),
+            )
+
+
+def test_a_relaxing_policy_is_refused_by_the_closed_rules_parse():
+    for policy in ("informational_on_closed_invoice", "informational_when_a10_exact"):
+        with pytest.raises(AdmissibilityError) as info:
+            rules(code_policies=[{"code": "residual_mismatch", "policy": policy}])
+        assert info.value.code == "malformed_rules"
 
 
 def test_an_unlisted_code_and_an_unresolvable_source_stay_blocking():
@@ -291,15 +276,6 @@ def test_an_unlisted_code_and_an_unresolvable_source_stay_blocking():
     assert only(res).reason == "census_blocking_exception"
     ghost = census(blocking_exceptions=[exc("a", "settlement_provenance", "ghost")])
     assert only(run(ghost)).reason == "census_blocking_exception"
-
-
-def test_a_settlement_id_resolves_to_its_closed_invoice():
-    settlement = {"id": uid("s-1"), "invoice_id": uid("i-closed")}
-    c = census(
-        settlements=[settlement],
-        blocking_exceptions=[exc("a", "settlement_provenance", "s-1")],
-    )
-    assert only(run(c)).admitted
 
 
 def test_a_held_partition_stays_in_the_manifest_marked_held_with_one_reason():
@@ -542,17 +518,15 @@ def test_a10_input_carries_no_amounts_and_refuses_duplicates():
     assert info.value.code == "duplicate_a10_account"
 
 
-def test_a_relaxed_excluded_residue_is_not_carried_but_others_still_block():
-    c = census()
-    c["invoices"].append(inv("v-1", "a", "void", residual="5.00"))
-    c["exclusions"] = [{"source_id": uid("v-1"), "reason": "void"}]
-    c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-1")]
-    result = run(c)
-    assert only(result).admitted
-    assert result.uncarried_residue == frozenset({UUID(uid("v-1"))})
-    # without the exception nothing is declared uncarried: the validators block
-    c["blocking_exceptions"] = []
-    assert run(c).uncarried_residue == frozenset()
+def test_an_excluded_residue_is_never_dropped_it_holds_the_partition():
+    for residual in ("5.00", "-5.00"):
+        c = census()
+        c["invoices"].append(inv("v-1", "a", "void", residual=residual))
+        c["exclusions"] = [{"source_id": uid("v-1"), "reason": "void"}]
+        c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-1")]
+        result = run(c)
+        assert only(result).reason == "census_blocking_exception"
+        assert "dropped_residue_total" not in render_admissibility_decisions(result)
 
 
 def test_every_member_of_a_reseller_partition_must_pass_a10():
@@ -571,46 +545,6 @@ def test_every_member_of_a_reseller_partition_must_pass_a10():
     assert ok.a10_accounts_unused == 0
 
 
-def _d2_rules():
-    return rules(
-        code_policies=[
-            *rules_doc()["code_policies"],
-            {"code": "residual_mismatch", "policy": "informational_when_a10_exact"},
-        ]
-    )
-
-
-def test_residual_mismatch_blocks_by_default_and_is_a10_gated_when_named():
+def test_residual_mismatch_blocks_even_when_a10_is_exact():
     mismatch = census(blocking_exceptions=[exc("a", "residual_mismatch", "i-open")])
-    assert only(run(mismatch)).reason == "census_blocking_exception"  # default
-    named = run(mismatch, r=_d2_rules())
-    assert only(named).admitted
-    assert only(named).relaxed == (("residual_mismatch", 1),)
-    assert named.counts()["informational:residual_mismatch"] == 1
-    # not A10 exact+match: stays blocking (here the A10 reason ranks first)
-    drift = a10(("a", "opening_exact", "other"))
-    assert only(run(mismatch, r=_d2_rules(), classes=drift)).admitted is False
-    # lane must equal the imported residuals
-    lane_off = census(
-        lanes=[lane("a", "59.00")],
-        blocking_exceptions=[exc("a", "residual_mismatch", "i-open")],
-    )
-    held = only(run(lane_off, r=_d2_rules()))
-    assert (held.reason, held.relaxed) == ("census_blocking_exception", ())
-
-
-def test_negative_excluded_residue_is_never_relaxed_and_dropped_amount_is_recorded():
-    c = census()
-    c["invoices"].append(inv("v-neg", "a", "void", residual="-5.00"))
-    c["exclusions"] = [{"source_id": uid("v-neg"), "reason": "void"}]
-    c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-neg")]
-    assert only(run(c)).reason == "census_blocking_exception"
-    c = census()
-    c["invoices"].append(inv("v-1", "a", "void", residual="5.00"))
-    c["exclusions"] = [{"source_id": uid("v-1"), "reason": "void"}]
-    c["blocking_exceptions"] = [exc("a", "excluded_nonzero_residue", "v-1")]
-    result = run(c)
-    assert only(result).dropped_residue == "5.00"
-    record = render_admissibility_decisions(result)
-    assert '"dropped_residue_total": "5.00"' in record
-    assert '"relaxed": {\n        "excluded_nonzero_residue": 1' in record
+    assert only(run(mismatch)).reason == "census_blocking_exception"
