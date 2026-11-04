@@ -193,9 +193,9 @@ from dotmac_billing.opening_receivable_validation import (
     _opening_replay_identity,
     opening_account_command_digest_v2,
     opening_account_import_blockers_v2,
-    require_hold_list_covers_manifest,
     opening_manifest_fingerprint_v2,
     opening_withholding_component_identity,
+    require_hold_list_covers_manifest,
     verify_opening_account_import_v2,
 )
 from dotmac_billing.opening_validation import (

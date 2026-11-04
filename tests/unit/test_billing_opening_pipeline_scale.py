@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 from dotmac_billing import opening_receivable_validation as validation
