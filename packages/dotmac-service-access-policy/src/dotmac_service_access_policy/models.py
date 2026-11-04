@@ -10,7 +10,9 @@ import sqlalchemy as sa
 from dotmac_kernel.models import Base, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -36,6 +38,11 @@ class ServiceAccessInput(Base, TimestampMixin):
             "service_reference",
             "signal",
             name="uq_service_access_inputs_tenant_service_signal",
+        ),
+        CheckConstraint(
+            "(source_version IS NULL) = (policy_version IS NULL) "
+            "AND (source_version IS NULL OR source_version >= 0)",
+            name="ck_service_access_inputs_version_pair",
         ),
         Index(
             "ix_service_access_inputs_tenant_service",
@@ -64,6 +71,9 @@ class ServiceAccessInput(Base, TimestampMixin):
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # NULL for rows written through the V1 contract; set together by V2.
+    source_version: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
+    policy_version: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
 
 class DesiredAccessDecision(Base, TimestampMixin):
