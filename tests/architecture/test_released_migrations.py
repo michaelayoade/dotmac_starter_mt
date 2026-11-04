@@ -2414,6 +2414,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-inbox ──
+    "dotmac-inbox-v0.1.0a3": (
+        "dotmac-inbox",
+        "2e67b5dd258560280de74d2987b04a142e55da33",
+        {
+            "ib_0001_conversations.py": (
+                "cd9b7a6189ecf7fde8b2d55279b5a5feff68947b2639de6cdb566c4422349a53"
+            ),
+            "ib_0002_supplied_identity.py": (
+                "7f1feaa49fb7c6220b0300c18319ffb758f88f2e9c26dde6433d77bd0786f819"
+            ),
+            "ib_0003_transport_refs.py": (
+                "2a411c7ff09d829be080131b7232eebf198cef4f6569d92c46cfe3072ccf3079"
+            ),
+        },
+    ),
     "dotmac-inbox-v0.1.0a2": (
         "dotmac-inbox",
         "c3e651cf3e220a64ab3dd51cdf7c98553c0997e8",
@@ -8190,9 +8205,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
-    "dotmac-inbox": frozenset(
-        {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
-    ),
+    "dotmac-inbox": frozenset(),
     # Tenant-qualified credential key remains editable until a verified published
     # tag carries this revision and its digest is recorded above.
     "dotmac-kernel": frozenset(),

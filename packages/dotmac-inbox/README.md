@@ -19,13 +19,25 @@ admission identity and observation evidence remain distinct. Correlation rows
 are append-only evidence, so their parent message and tenant cannot be deleted
 while a correlation exists.
 
-The read surface is exposed by `get_conversation`, `list_conversations`, and
-`list_messages`. It returns frozen value DTOs, always requires a tenant id,
-and uses bounded opaque keyset cursors. Conversation lists support only the
-declared status, channel, and account-scope filters; message timelines are
-ordered by occurrence time and UUID, so equal timestamps cannot create gaps or
-duplicates between pages. Reads do not expose ORM rows or accept SQL
-predicates from products.
+The read surface is exposed by `get_conversation`, `list_conversations`,
+`list_messages`, and `list_recent_messages`. It returns frozen value DTOs,
+always requires a tenant id, and uses bounded opaque keyset cursors.
+`list_messages` walks the complete timeline forward. `list_recent_messages`
+starts with the newest ten by default and walks backward through an opaque
+`before_cursor`; each returned page remains ascending so a product can prepend
+older messages without reordering them. Conversation lists support only the
+declared status, channel, and account-scope filters. Message ordering uses
+occurrence time plus UUID, so equal timestamps cannot create gaps or duplicates
+between pages. Reads do not expose ORM rows or accept SQL predicates from
+products.
+
+Message-content search is not part of this source candidate. A bounded result
+limit does not bound an unindexed `%term%` scan, and neither source product has
+yet established one provider-neutral normalization and index contract worth
+extracting. A product must not query `mod_inbox.messages` directly after
+cutover: adoption therefore owes either a module-owned indexed search contract
+or a product-owned projection fed from typed module output. Contact, subscriber,
+phone, and email search remain product-owned in either design.
 
 Snoozing has two explicit forms: a timezone-aware finite deadline, or the
 typed `UNTIL_REPLY` value (`SnoozeUntilReply`) for an indefinite snooze. An
