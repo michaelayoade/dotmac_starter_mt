@@ -2471,7 +2471,9 @@
           "dotmac_payments/migrations/versions/pm_0004_purchase_funding.py",
           "dotmac_payments/migrations/versions/pm_0005_merchant_context.py",
           "dotmac_payments/migrations/versions/pm_0006_cash_qualification.py",
+          "dotmac_payments/migrations/versions/pm_0007_refund_outcomes.py",
           "dotmac_payments/cash_qualification.py",
+          "dotmac_payments/refunds.py",
           "dotmac_payments/models.py",
           "dotmac_payments/service.py"
         ],

@@ -23,9 +23,22 @@ Three invariants are the point of the module:
   review locks that intent before its proof and records acceptance only after
   the shared confirmation path succeeds.
 
-Version `0.1.0a2` is published. Successor `0.1.0a3` is proposed and unpublished;
+Version `0.1.0a3` is published. Successor `0.1.0a4` is proposed and unpublished;
 its release allocation and authorization remain separate. Sub remains the live writer until
-its history backfill, zero-drift shadow and separately authorized cutover pass.
+its history backfill, saved tests plus backtest and a separately authorized cutover pass.
+
+`instruct_refund(db, scope=..., command=InstructRefund(request_id, confirmation_id,
+amount))` records one refund instruction. The request id is the idempotency key and
+`derive_refund_provider_reference` derives the provider reference from it. The amount
+may not exceed the confirmation's cash less prior and in-flight refunds; a refund
+observed to have failed releases its hold. `observe_cash_outcome` records
+`REFUND_COMPLETED`, `REFUND_FAILED`, `CHARGEBACK`, `BOUNCE` or `ADMIN_CORRECTION`;
+an outcome that cannot be matched is stored as `ATTENTION_REQUIRED` with a reason,
+never dropped. Chargebacks, bounces and admin corrections returning cash reduce
+the refundable amount like refunds; an `ADMIN_CORRECTION` names a closed direction
+and its approval reference. An attention row is immutable evidence: its resolution
+lives in the owning flow's instance state keyed by the outcome id, and a parked
+`REFUND_FAILED` keeps the cash held. There is no provider fee and no saved-payment mandate here.
 
 The tenant-only `pm` lineage owns `mod_payments`.
 
