@@ -127,6 +127,16 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
+    "dotmac-durable-timers": {
+      "declared": "0.1.0a2",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 is a fresh build through the modern release provenance lane for the cutover-release-1 aggregate; runtime behavior, public API and migrations are unchanged from the published a1 source (tag dotmac-durable-timers-v0.1.0a1) and the Kernel floor remains >=0.1.0a72. The a1 tag is not reissued or relabeled. A publication dispatch, install-back verification, canonical tag evidence and an accepted release record remain due; this declaration does not switch product authority. Remove this row only with the verified a2 publication record.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-imports": {
+      "declared": "0.2.0a2",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Released 0.2.0a1 (tag dotmac-imports-v0.2.0a1) and migration im_0001_import_runs remain immutable. 0.2.0a2 adds the domain-free, versioned and self-digested partition-manifest loader (ST-9): a generated manifest becomes the existing PartitionDescriptor plan through register_partition_plan, reusing leases, checkpoints and the RowApplier port; no migration or model change. It lands through the cutover-release-1 aggregate. Kernel floor unchanged (>=0.1.0a56). No publication, tag, ERP/Sub pin or adoption is claimed; release is a separate dispatch.",
+      "state": "declared-unpublished"
+    },
     "dotmac-inbox": {
       "declared": "0.1.0a2+dev",
       "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",
@@ -151,6 +161,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
+    },
+    "dotmac-service-access-policy": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Published 0.1.0a1 (tag dotmac-service-access-policy-v0.1.0a1) and its sap_0001 migration remain immutable. 0.1.0a2 adds RecordAccessInputV2 with stale refusal, a pure public ordering helper and migration sap_0002_input_versions (ST-8), landing through the cutover-release-1 aggregate. Kernel floor unchanged (>=0.1.0a91). No publication, tag, Sub adoption, enforcement switch or writer retirement is claimed; release is a separate dispatch.",
+      "state": "declared-unpublished"
     },
     "dotmac-usage": {
       "declared": "0.1.0a1",
