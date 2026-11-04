@@ -62,6 +62,11 @@ class Qualification:
             "SESSION_HASH_SECRET": secrets.token_urlsafe(48),
             "CSRF_SECRET": secrets.token_urlsafe(48),
             "QUALIFICATION_PASSWORD": secrets.token_urlsafe(24),
+            # Graph inspection does not run alembic/env.py. Use the same
+            # assembly binding pointer as `make migrate-graph`.
+            "DOTMAC_MIGRATION_BINDINGS": (
+                "app.migration_bindings:ASSEMBLY_PREREQUISITE_BINDINGS"
+            ),
         }
         self.private_values = [
             self.environment[key]
@@ -130,6 +135,7 @@ class Qualification:
             "PLATFORM_DATABASE_URL",
             "MIGRATION_DATABASE_URL",
             "QUALIFICATION_PASSWORD",
+            "DOTMAC_MIGRATION_BINDINGS",
         )
 
     def sql(
