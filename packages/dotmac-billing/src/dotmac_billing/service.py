@@ -6518,7 +6518,7 @@ def seal_opening_window(
                 "opening_hold_list_invalid",
                 "held partitions must come from the frozen manifest population",
             )
-        if window.manifest_version == 2:
+        if isinstance(window.manifest, OpeningManifestV2):
             try:
                 require_hold_list_covers_manifest(
                     window.manifest, command.held_account_ids
