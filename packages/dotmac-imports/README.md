@@ -110,6 +110,61 @@ The default partition is 200 rows and 8 MiB; both are explicit caller choices.
 The package supplies claims, not a worker-count policy. Deployments can add
 workers without putting scheduling or product vocabulary into this module.
 
+## Partition manifests (0.2.0a2)
+
+A producer that already wrote its bounded partition objects through
+`dotmac-files` (for example a generated opening dataset) hands over one manifest
+file instead of calling `iter_csv_partitions`. The loader turns it into the same
+`PartitionDescriptor` plan:
+
+```python
+manifest = load_partition_manifest(path, expected_sha256=pinned_digest)  # required
+verify_manifest_partitions(manifest, open_partition=open_by_file_id)  # no session
+register_manifest_plan(db, tenant_id=t, run_id=run.id, source=source, manifest=manifest)
+db.commit()
+# then the unchanged lane: claim_partition -> read_claimed_partition ->
+# validate_claimed_partition / apply_claimed_partition (your RowApplier)
+```
+
+Format `dotmac.imports.partition-manifest`, version 1, UTF-8 JSON:
+
+```json
+{
+  "format": "dotmac.imports.partition-manifest",
+  "version": 1,
+  "source": {"file_id": "<uuid>", "checksum_sha256": "<64 lowercase hex>"},
+  "partitions": [
+    {"ordinal": 0, "start_row": 0, "row_count": 200,
+     "file_id": "<uuid>", "byte_size": 4096, "checksum_sha256": "<64 lowercase hex>"}
+  ],
+  "manifest_sha256": "<64 lowercase hex>"
+}
+```
+
+- `manifest_sha256` is SHA-256 of the canonical JSON (sorted keys, `,` and `:`
+  separators, ASCII-escaped, UTF-8) of every other top-level member. It detects
+  corruption and partial edits; it does not authenticate the producer, since an
+  editor can recompute it. Pass `expected_sha256` (obtained out of band) when
+  tamper evidence is needed.
+- Partitions are listed in ordinal order, contiguous from row 0, one file per
+  partition. UUIDs are canonical lowercase; digests are lowercase hex.
+- Closed format: unknown members, repeated keys, an unknown `format` or
+  `version`, a duplicate ordinal or file id, or a digest mismatch is refused
+  (`ManifestError`, `ManifestVersionUnsupported`, `ManifestDigestMismatch`).
+  Version 1 never gains members; a new shape is a new version this release
+  would refuse.
+- `expected_sha256` is REQUIRED (keyword-only) on `parse_partition_manifest` and
+  `load_partition_manifest`: the digest the operator approved, obtained out of
+  band. `parse_partition_manifest_unpinned` exists for generators and tests only.
+- `register_manifest_plan` does NOT stream-verify the stored objects. Run
+  `verify_manifest_partitions` first for an early, whole-plan check; independently,
+  `read_claimed_partition` re-verifies each partition's byte size and SHA-256 before
+  decoding it, so a tampered object can never be validated or applied.
+- The manifest's `source` must equal the run's source document. Registration
+  stores nothing new: the plan is the existing immutable partition rows, so
+  redelivering the same manifest is a no-op and a different plan is refused.
+- The module learns no storage path, provider or domain meaning from a manifest.
+
 ## Transactions
 
 No function here commits or rolls back. `dotmac_kernel.db` stays the one
@@ -155,4 +210,4 @@ optimisations require their own source evidence and measured cutover.
 
 ## Native computation candidate
 
-The unreleased `0.2.0a1` candidate includes a private Rust `_native` extension behind the existing public Python API. Authorization, tenant isolation, transactions and persistence retain their current owners. Installing a matching wheel needs no compiler. Building from source requires the exact Rust and build-tool pins in the packaged `build.py`, plus a C linker; the source archive includes locked Cargo inputs. No Python computation fallback is installed. Hosted qualification and publication remain separate from this source change.
+The released `0.2.0a1` includes a private Rust `_native` extension behind the existing public Python API. Authorization, tenant isolation, transactions and persistence retain their current owners. Installing a matching wheel needs no compiler. Building from source requires the exact Rust and build-tool pins in the packaged `build.py`, plus a C linker; the source archive includes locked Cargo inputs. No Python computation fallback is installed. `0.2.0a2` is source-only until its own release dispatch.

@@ -1288,6 +1288,7 @@
           "dotmac_imports/migrations/__init__.py",
           "dotmac_imports/migrations/versions/im_0001_import_runs.py",
           "dotmac_imports/models.py",
+          "dotmac_imports/partition_manifest.py",
           "dotmac_imports/partitioning.py",
           "dotmac_imports/service.py",
           "dotmac_imports/tabular.py"
