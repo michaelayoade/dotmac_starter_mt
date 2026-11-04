@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 0.1.0a2+dev
+## 0.1.0a3 — 2026-11-04 — prepared, unpublished
 
 - Adds append-only provider transport-message correlations supporting multiple
   global or account-scoped aliases per message, with typed historical import.
@@ -15,6 +15,9 @@
   every returned page in ascending display order.
 - Records indexed message-content search as an adoption gate rather than
   shipping an unindexed cross-product scan; contact search remains product-owned.
+- Allocates this accumulated capability slice as the next public prerelease;
+  publication, registry install-back verification, tagging, and the immutable
+  release record remain owned by the protected module-release workflow.
 
 ## 0.1.0a2 — 2026-08-23
 
