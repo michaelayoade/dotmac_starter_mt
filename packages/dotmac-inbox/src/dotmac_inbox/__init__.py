@@ -60,11 +60,13 @@ from dotmac_inbox.read import (
     ConversationView,
     MessagePage,
     MessageView,
+    RecentMessagePage,
 )
 from dotmac_inbox.read_service import (
     get_conversation,
     list_conversations,
     list_messages,
+    list_recent_messages,
 )
 from dotmac_inbox.service import (
     ConversationConflict,
@@ -81,7 +83,7 @@ from dotmac_inbox.service import (
 from dotmac_inbox.threading import DedupKey, InboundIdentity, dedup_key, thread_key
 from dotmac_inbox.transport import TransportMessageIdentity
 
-__version__ = "0.1.0a2+dev"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "__version__",
@@ -112,6 +114,7 @@ __all__ = [
     "MessageTransportRef",
     "MessageView",
     "ReasonSpec",
+    "RecentMessagePage",
     "SnoozeUntilReply",
     "StaleConversationState",
     "Status",
@@ -135,6 +138,7 @@ __all__ = [
     "is_open",
     "list_conversations",
     "list_messages",
+    "list_recent_messages",
     "mark_conversation_read",
     "module",
     "record_message",

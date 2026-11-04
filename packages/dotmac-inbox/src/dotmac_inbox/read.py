@@ -13,6 +13,7 @@ from dotmac_inbox.lifecycle import Direction, Status
 class CursorKind(StrEnum):
     CONVERSATIONS = "conversations"
     MESSAGES = "messages"
+    RECENT_MESSAGES = "recent_messages"
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +82,15 @@ class MessagePage:
     next_cursor: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class RecentMessagePage:
+    """One ascending display page selected from the newest messages backward."""
+
+    items: tuple[MessageView, ...]
+    before_cursor: str | None
+    has_older_messages: bool
+
+
 __all__ = [
     "ConversationFilter",
     "ConversationPage",
@@ -88,4 +98,5 @@ __all__ = [
     "CursorKind",
     "MessagePage",
     "MessageView",
+    "RecentMessagePage",
 ]
