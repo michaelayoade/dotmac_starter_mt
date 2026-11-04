@@ -62,11 +62,6 @@ class Qualification:
             "SESSION_HASH_SECRET": secrets.token_urlsafe(48),
             "CSRF_SECRET": secrets.token_urlsafe(48),
             "QUALIFICATION_PASSWORD": secrets.token_urlsafe(24),
-            # Graph inspection does not run alembic/env.py. Use the same
-            # assembly binding pointer as `make migrate-graph`.
-            "DOTMAC_MIGRATION_BINDINGS": (
-                "app.migration_bindings:ASSEMBLY_PREREQUISITE_BINDINGS"
-            ),
         }
         self.private_values = [
             self.environment[key]
@@ -135,7 +130,6 @@ class Qualification:
             "PLATFORM_DATABASE_URL",
             "MIGRATION_DATABASE_URL",
             "QUALIFICATION_PASSWORD",
-            "DOTMAC_MIGRATION_BINDINGS",
         )
 
     def sql(
@@ -187,11 +181,29 @@ class Qualification:
 
     def migrate(self, image: str) -> list[str]:
         self.image(image, "alembic", "upgrade", "heads")
-        expected = {
-            line.split()[0]
-            for line in self.image(image, "alembic", "heads").splitlines()
-            if "(head)" in line
-        }
+        # Unlike `upgrade`, graph inspection does not run env.py. Install BOTH
+        # declarations from the owning assembly before reading its actual heads.
+        expected = set(
+            json.loads(
+                self.image(
+                    image,
+                    "python",
+                    "-",
+                    stdin="""
+import json
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from dotmac_kernel.planes import install_module_plane_selections
+from dotmac_kernel.prerequisites import install_prerequisite_bindings
+from app.assembly import assembly
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+install_module_plane_selections(assembly.module_planes)
+install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
+print(json.dumps(sorted(ScriptDirectory.from_config(Config('alembic.ini')).get_heads())))
+""",
+                )
+            )
+        )
         actual = self.sql(
             "SELECT version_num FROM alembic_version ORDER BY version_num;",
             role="app_admin",
