@@ -1,5 +1,45 @@
 # Changelog — dotmac-payments
 
+## 0.1.0a4 — proposed, unpublished
+
+- Add `instruct_refund` (`InstructRefund`): the refund request id is the
+  idempotency key and the provider reference is DERIVED from it
+  (`derive_refund_provider_reference`, `rf1-` plus 32 hex), so a retry cannot
+  create a second provider-side refund. An amount above the confirmation's cash
+  minus every earlier instruction not observed to fail, in-flight ones included,
+  is refused (`RefundExceedsConfirmedCash`). Currency must match; replay with a
+  changed confirmation, amount or instant conflicts. The module records and
+  bounds the instruction; provider I/O stays with the connector and what a
+  refund means for a receivable stays with Billing.
+- Add `get_refundable_cash_v1`: confirmed, held and still-refundable cash.
+- Add `observe_cash_outcome` (`ObserveCashOutcome`) for `REFUND_COMPLETED`,
+  `REFUND_FAILED`, `CHARGEBACK`, `BOUNCE` and `ADMIN_CORRECTION`. Identity is
+  `(provider_type, outcome_reference)`, or the correction id alone for an admin
+  correction. An outcome that names no confirmation of the tenant, or disagrees
+  with the confirmation or refund instruction it names, is stored as
+  `ATTENTION_REQUIRED` with a reason and is never dropped. Replay is idempotent
+  (a parked outcome stays parked); changed evidence conflicts. Exactly one
+  terminal refund outcome is applied per instruction.
+- Chargebacks, bounces and admin corrections (closed `direction`, required
+  `approval_ref`) count against refundable cash, in the module and in the
+  database (`cash_reversal_total`). A reversal beyond confirmed cash less prior
+  refunds and reversals is parked as `EXCEEDS_CONFIRMED_CASH`.
+- A `BEFORE INSERT` trigger guards applied outcomes: the confirmation must
+  exist and match, a refund outcome must reference one open instruction of the
+  same confirmation, provider, reference and amount (at most one terminal), and
+  reversals obey the cumulative bound under the intent-row lock. A forged
+  `REFUND_FAILED` can no longer free held cash.
+- Add `pm_0007_refund_outcomes`: append-only `refund_instructions` and
+  `payment_cash_outcomes`, forced RLS, `SELECT, INSERT` grants only, mutation and
+  TRUNCATE refusal, and an insert trigger that repeats the over-refund bound
+  under a lock on the owning intent row for writers that bypass the service.
+  Downgrade is refused while history exists.
+- No fee field and no mandate field: provider fees and autopay mandates are not
+  part of this package.
+- Published a3 migrations and release history are unchanged. This is a proposal:
+  hosted PostgreSQL acceptance, security review, publication and install-back
+  verification remain required before adoption.
+
 ## 0.1.0a3 — proposed, unpublished
 
 - Extract existing purchase checkout as `PURCHASE_FUNDING`, requiring an exact

@@ -1,6 +1,38 @@
 # dotmac-imports changelog
 
-## 0.2.0a1 — unreleased
+## 0.2.0a2 — 2026-11-03
+
+Fresh allocation (pyproject, `__version__` and manifest agree); released
+`0.2.0a1` and `im_0001_import_runs` remain immutable. Kernel floor unchanged
+(`>=0.1.0a56`). No migration, no model change.
+
+- **Partition-manifest loader** (`dotmac_imports.partition_manifest`): a
+  generated manifest file listing partition objects with SHA-256 digests becomes
+  `PartitionDescriptor` values and is registered through the existing
+  `register_partition_plan` (new `register_manifest_plan`). Leases, expiring
+  claims, checkpoints, claimed-partition settlement and the `RowApplier` port
+  are reused unchanged. No domain vocabulary.
+- **Format `dotmac.imports.partition-manifest` version 1** (UTF-8 JSON, closed
+  members, documented in the README and module docstring) carries the run's
+  source identity, the ordered partitions (`ordinal`, `start_row`, `row_count`,
+  `file_id`, `byte_size`, `checksum_sha256`) and a `manifest_sha256` over the
+  canonical form of everything else.
+- **Refused, never interpreted:** unknown format or version, unknown or missing
+  members, repeated JSON keys, duplicate partition ordinal or file id, non-
+  canonical UUIDs or digests, non-contiguous ranges, partitions out of ordinal
+  order, a digest that does not match the document, a digest that does not match
+  a caller-pinned `expected_sha256`, and a document over 16 MiB or 100,000
+  partitions. A manifest for another source is a `SourceMismatch`.
+- `verify_manifest_partitions` streams each stored object (no session) and
+  proves size and SHA-256. `render_partition_manifest` emits the canonical form
+  for generators. `load_partition_manifest` reads a bounded file without echoing
+  its path.
+- Registration is idempotent: identical redelivery returns the existing plan; a
+  different plan for the run is refused as immutable (existing contract).
+- Corrects the `0.2.0a1` heading below: it was released (tag
+  `dotmac-imports-v0.2.0a1`) and had been mislabelled "unreleased".
+
+## 0.2.0a1 — 2026-10-15
 
 - Replace domain computation with a private batched Rust extension behind the existing Python API.
 - Ship a platform-specific CPython wheel and a complete locked native source archive.
