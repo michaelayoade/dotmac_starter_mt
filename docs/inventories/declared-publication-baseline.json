@@ -77,6 +77,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a11",
+      "reason": "UNPUBLISHED SUCCESSOR OF PUBLISHED a10 (cutover-release-1, ST-2 with ST-3 and ST-4). a11 adds the numbering document_reference, discount snapshots on the V3 rated intake, the per-document exposure and withholding evidence queries, the ordered accounting-fact query with count and digest, and the exposure_service_ambiguous refusal. ST-3 adds the unreleased migration bi_0013_opening_hold_admission (sealed hold list guards, hold-admission audit table with a deferred required-row trigger, authority-switch receipt table) and the opening hold admission, authority-switch participant and opening-lane port source; there is no other DDL and published bi1-bi12 bytes are untouched. Source preparation only: full hosted CI, a verified a11 publication, install-back, canonical tag and a truthful release record remain due, and nothing here grants production authority. Remove only with the verified a11 publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-collections": {
       "declared": "0.1.0a2",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 proposes a fresh modern-provenance build under a new version; runtime behavior, public API and migrations remain unchanged from the published a1 source, and the Kernel floor remains >=0.1.0a89. The legacy a1 release is not reissued or relabeled. Hold pending root review and Michael's source/release authorization, acceptance of the Kernel a105 publication record on main, and a refreshed tag/census check before integration. A fresh build, publication, install-back verification, canonical tag evidence and accepted release record remain due; this proposal does not switch product authority. Remove this row only with the verified a2 publication record.",
@@ -127,14 +132,24 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
-    "dotmac-inbox": {
-      "declared": "0.1.0a2+dev",
-      "reason": "DEVELOPMENT MARKER, DELIBERATELY UNPUBLISHABLE AND NOT A PENDING RELEASE. 0.1.0a2 IS published and tagged (dotmac-inbox-v0.1.0a2). This Inbox capability slice adds explicit snooze-until-reply, late transport-observation correlation, opaque product-supplied thread/message identities and the unreleased ib_0002 migration, so continuing to declare bare 0.1.0a2 would make one released version name two contracts. The local segment allocates no successor, cannot be published and requires no release authorization. Remove this row only by separately ALLOCATING the next public version at release time; never remove the marker merely to quiet a gate.",
+    "dotmac-durable-timers": {
+      "declared": "0.1.0a2",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. 0.1.0a2 is a fresh build through the modern release provenance lane for the cutover-release-1 aggregate; runtime behavior, public API and migrations are unchanged from the published a1 source (tag dotmac-durable-timers-v0.1.0a1) and the Kernel floor remains >=0.1.0a72. The a1 tag is not reissued or relabeled. A publication dispatch, install-back verification, canonical tag evidence and an accepted release record remain due; this declaration does not switch product authority. Remove this row only with the verified a2 publication record.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-imports": {
+      "declared": "0.2.0a2",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Released 0.2.0a1 (tag dotmac-imports-v0.2.0a1) and migration im_0001_import_runs remain immutable. 0.2.0a2 adds the domain-free, versioned and self-digested partition-manifest loader (ST-9): a generated manifest becomes the existing PartitionDescriptor plan through register_partition_plan, reusing leases, checkpoints and the RowApplier port; no migration or model change. It lands through the cutover-release-1 aggregate. Kernel floor unchanged (>=0.1.0a56). No publication, tag, ERP/Sub pin or adoption is claimed; release is a separate dispatch.",
       "state": "declared-unpublished"
     },
     "dotmac-inbox-operations": {
       "declared": "0.1.0a5",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-payments": {
+      "declared": "0.1.0a4",
+      "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. Published a3 (tag dotmac-payments-v0.1.0a3) and its migrations remain unchanged. Candidate a4 adds P3 InstructRefund (request id is the idempotency key, provider reference derived from it, amount bounded by confirmed cash minus prior and in-flight refunds), P4 ObserveCashOutcome (refund completed or failed, chargeback, bounce, admin correction; an unmatched outcome is parked in an attention state) and the additive pm_0007_refund_outcomes migration, with no fee field and no mandate field. Hosted PostgreSQL acceptance, security review of the money-egress bound, an authorized publication dispatch, install-back verification, canonical tag evidence and an accepted release record remain due; this declaration does not switch a product authority. Remove this row only with the verified a4 publication record.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
@@ -146,6 +161,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
+    },
+    "dotmac-service-access-policy": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET RELEASED. Published 0.1.0a1 (tag dotmac-service-access-policy-v0.1.0a1) and its sap_0001 migration remain immutable. 0.1.0a2 adds RecordAccessInputV2 with stale refusal, a pure public ordering helper and migration sap_0002_input_versions (ST-8), landing through the cutover-release-1 aggregate. Kernel floor unchanged (>=0.1.0a91). No publication, tag, Sub adoption, enforcement switch or writer retirement is claimed; release is a separate dispatch.",
+      "state": "declared-unpublished"
     },
     "dotmac-usage": {
       "declared": "0.1.0a1",

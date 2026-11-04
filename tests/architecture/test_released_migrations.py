@@ -2414,6 +2414,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-inbox ──
+    "dotmac-inbox-v0.1.0a3": (
+        "dotmac-inbox",
+        "2e67b5dd258560280de74d2987b04a142e55da33",
+        {
+            "ib_0001_conversations.py": (
+                "cd9b7a6189ecf7fde8b2d55279b5a5feff68947b2639de6cdb566c4422349a53"
+            ),
+            "ib_0002_supplied_identity.py": (
+                "7f1feaa49fb7c6220b0300c18319ffb758f88f2e9c26dde6433d77bd0786f819"
+            ),
+            "ib_0003_transport_refs.py": (
+                "2a411c7ff09d829be080131b7232eebf198cef4f6569d92c46cfe3072ccf3079"
+            ),
+        },
+    ),
     "dotmac-inbox-v0.1.0a2": (
         "dotmac-inbox",
         "c3e651cf3e220a64ab3dd51cdf7c98553c0997e8",
@@ -8163,7 +8178,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset(),
+    # `pm_0007` adds append-only refund instructions and cash outcomes; still
+    # editable until `dotmac-payments` 0.1.0a4 is tagged.
+    "dotmac-payments": frozenset({"pm_0007_refund_outcomes.py"}),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
@@ -8171,7 +8188,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
-    "dotmac-billing": frozenset(),
+    # `bi_0013` adds the sealed hold list guards and post-seal hold admission
+    # audit table; still editable until billing 0.1.0a11 is tagged.
+    "dotmac-billing": frozenset({"bi_0013_opening_hold_admission.py"}),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8181,14 +8200,14 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-qualification": frozenset(),
     "dotmac-response-obligations": frozenset(),
     "dotmac-sales": frozenset(),
-    "dotmac-service-access-policy": frozenset(),
+    # `sap_0002` adds the source/policy version columns; still editable until
+    # `dotmac-service-access-policy` 0.1.0a2 is tagged.
+    "dotmac-service-access-policy": frozenset({"sap_0002_input_versions.py"}),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
-    "dotmac-inbox": frozenset(
-        {"ib_0002_supplied_identity.py", "ib_0003_transport_refs.py"}
-    ),
+    "dotmac-inbox": frozenset(),
     # Tenant-qualified credential key remains editable until a verified published
     # tag carries this revision and its digest is recorded above.
     "dotmac-kernel": frozenset(),

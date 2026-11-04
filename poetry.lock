@@ -667,7 +667,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a10"
+version = "0.1.0a11"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1111,7 +1111,7 @@ url = "packages/dotmac-documents"
 
 [[package]]
 name = "dotmac-durable-timers"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1273,7 +1273,7 @@ url = "packages/dotmac-fx-policy"
 
 [[package]]
 name = "dotmac-imports"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1291,7 +1291,7 @@ url = "packages/dotmac-imports"
 
 [[package]]
 name = "dotmac-inbox"
-version = "0.1.0a2+dev"
+version = "0.1.0a3"
 description = "Dotmac Inbox — tenant-scoped conversation, message, lifecycle, threading, and read-state ownership"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1644,7 +1644,7 @@ url = "packages/dotmac-payables"
 
 [[package]]
 name = "dotmac-payments"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Payment intent and confirmation correlation"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1981,7 +1981,7 @@ url = "packages/dotmac-sales"
 
 [[package]]
 name = "dotmac-service-access-policy"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Per-service desired network-access policy decisions"
 optional = false
 python-versions = ">=3.11,<3.14"

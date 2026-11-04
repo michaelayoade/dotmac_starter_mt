@@ -140,10 +140,10 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
       module" -- that phrase is the impostor test's signature, and seeing it
       here would mean this partition is failing for the wrong reason.
 
-    Both partitions must be non-empty. An empty clean partition means nothing
-    here proves `resolve` can succeed at all, and the impostor test silently
-    loses its control. An empty local-segment partition means the guard has
-    no live subject in this sweep.
+    The clean partition must be non-empty. The local-segment partition may be
+    empty when every development marker has been allocated; the planted
+    control below keeps that refusal reachable without requiring real
+    repository debt solely to exercise a guard.
     """
     clean: list[str] = []
     local_segment: list[str] = []
@@ -161,13 +161,6 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
         "on anything, so the impostor test above has lost its non-vacuity "
         "control"
     )
-    assert local_segment, (
-        "no allowlisted distribution currently declares a local version "
-        "segment -- the local-segment refusal has no live subject in this "
-        "sweep; that is fine on its own but should be noted, not silently "
-        "passed over"
-    )
-
     for distribution in clean:
         result = _resolve(distribution)
         assert result.returncode == 0, result.stderr
@@ -186,6 +179,35 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
         )
         assert "local version segment" in result.stderr, result.stderr
         assert "not an allowlisted module" not in result.stderr, result.stderr
+
+
+def test_a_planted_local_version_segment_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the local-version refusal live when the repository has no real
+    ``+dev`` candidate. A release gate must not depend on accepted source debt
+    continuing to exist merely to retain its negative control.
+    """
+    module = _release_module_script()
+    entry = {"distribution": "dotmac-planted"}
+    monkeypatch.setattr(module, "resolve", lambda _distribution: entry)
+    monkeypatch.setattr(
+        module,
+        "_declared",
+        lambda _entry: {
+            "name": "dotmac-planted",
+            "version": "0.1.0a1+dev",
+            "dependencies": {},
+        },
+    )
+
+    with pytest.raises(SystemExit) as refused:
+        module.cmd_resolve(
+            argparse.Namespace(distribution="dotmac-planted", version="")
+        )
+
+    assert "local version segment" in str(refused.value)
+    assert "0.1.0a1+dev" in str(refused.value)
 
 
 def _files_declared_version() -> str:

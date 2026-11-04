@@ -8,9 +8,14 @@ from dotmac_payments.cash_qualification import (
     require_provider_cash_admission,
 )
 from dotmac_payments.contracts import (
+    REFUND_OUTCOME_KINDS,
     AcceptMerchantContextV1,
+    AdminCorrectionDirection,
+    AttentionReason,
     AuthorizedMerchantReviewV1,
     AuthorizedProviderCashV1,
+    CashOutcomeKind,
+    CashOutcomeState,
     ConfirmationNotFound,
     ConfirmationSource,
     ConfirmedCashObservationV1,
@@ -18,6 +23,8 @@ from dotmac_payments.contracts import (
     GetConfirmedCashV1,
     GetOriginalMerchantContextV1,
     GetPaymentIntentV1,
+    GetRefundableCashV1,
+    InstructRefund,
     MerchantConfigurationV1,
     MerchantContextEndV1,
     MerchantContextV1,
@@ -25,6 +32,7 @@ from dotmac_payments.contracts import (
     MerchantReviewEvidenceV1,
     MerchantReviewOperation,
     MerchantTransportContextV1,
+    ObserveCashOutcome,
     OpenPaymentIntent,
     OriginalProviderCashEvidenceV1,
     PaymentError,
@@ -35,6 +43,8 @@ from dotmac_payments.contracts import (
     ProviderCashQualificationV1,
     QualifyProviderCashV1,
     RecordConfirmation,
+    RefundableCashObservationV1,
+    RefundExceedsConfirmedCash,
     ResolveMerchantContextV1,
     ReviewTransferProof,
     RevokeMerchantContextV1,
@@ -45,10 +55,18 @@ from dotmac_payments.contracts import (
 from dotmac_payments.manifest import module
 from dotmac_payments.migrations import versions_dir
 from dotmac_payments.models import (
+    PaymentCashOutcome,
     PaymentConfirmation,
     PaymentConfirmationImmutableError,
     PaymentIntent,
     PaymentTransferProof,
+    RefundInstruction,
+)
+from dotmac_payments.refunds import (
+    derive_refund_provider_reference,
+    get_refundable_cash_v1,
+    instruct_refund,
+    observe_cash_outcome,
 )
 from dotmac_payments.service import (
     accept_merchant_context,
@@ -66,8 +84,24 @@ from dotmac_payments.service import (
     submit_transfer_proof,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 __all__ = [
+    "AdminCorrectionDirection",
+    "REFUND_OUTCOME_KINDS",
+    "AttentionReason",
+    "CashOutcomeKind",
+    "CashOutcomeState",
+    "GetRefundableCashV1",
+    "InstructRefund",
+    "ObserveCashOutcome",
+    "PaymentCashOutcome",
+    "RefundExceedsConfirmedCash",
+    "RefundInstruction",
+    "RefundableCashObservationV1",
+    "derive_refund_provider_reference",
+    "get_refundable_cash_v1",
+    "instruct_refund",
+    "observe_cash_outcome",
     "MerchantTransportContextV1",
     "MerchantConfigurationV1",
     "MerchantReviewEvidenceV1",
