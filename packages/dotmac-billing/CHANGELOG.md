@@ -39,6 +39,15 @@ All notable changes follow Semantic Versioning.
   (`credit_exceeds_receivable`). Excess is composed above Billing (unapply prior
   discharges, then issue the full credit note); Billing gains no excess path.
 - Source preparation only; hosted CI and publication remain required.
+- ST-3 (recorded widening D-5; includes unreleased `bi_0013`): the opening seal
+  records a hold list (`SealOpeningWindowV1.held_account_ids`); one held partition
+  per command may later be admitted by `admit_held_opening_account_v2` with a
+  reviewed disposition digest and an Approvals maker-checker decision (port only;
+  tenant-plane hold awaits approvals 0.1.0a9). A deferred constraint trigger makes
+  its `opening_hold_admissions` audit row mandatory. `seal_opening_window` accepts
+  an `authority_switch` participant inside the seal savepoint; its
+  `OpeningAuthoritySwitchReceiptV1` is stored append-only. `opening_lane` is the
+  import-specific assembly authority port.
 
 ## 0.1.0a10 — released
 

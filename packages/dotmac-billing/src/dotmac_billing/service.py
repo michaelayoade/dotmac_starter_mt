@@ -151,6 +151,16 @@ from dotmac_billing.opening_contracts import (
     OpeningPreviewRequestV1,
     OpeningVerificationUnavailable,
 )
+from dotmac_billing.opening_hold_contracts import (
+    HOLD_APPROVAL_SUBJECT_TYPE,
+    AdmitHeldOpeningAccountV2,
+    HeldOpeningHoldApprovalV1,
+    OpeningHoldAdmissionV1,
+    OpeningHoldApprovalPort,
+    opening_hold_content_digest,
+    opening_hold_subject_id,
+    require_hold_maker_checker,
+)
 from dotmac_billing.opening_queries import (
     _scoped,
     _table,
@@ -168,6 +178,7 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningImportReceiptV2,
     OpeningImportReversalVerificationRequestV2,
     OpeningImportReversalVerificationV2,
+    OpeningImportVerificationV2,
     OpeningManifestV2,
     OpeningReceivableBasisV1,
     ReceivableExposureV2,
@@ -190,6 +201,9 @@ from dotmac_billing.opening_validation import (
     preview_opening_account_import,
 )
 from dotmac_billing.opening_window_contracts import (
+    OpeningAuthoritySwitchContextV1,
+    OpeningAuthoritySwitchParticipant,
+    OpeningAuthoritySwitchReceiptV1,
     OpeningWindowProvisionVerificationRequestV1,
     OpeningWindowProvisionVerificationV1,
     OpeningWindowProvisionVerifier,
@@ -200,10 +214,12 @@ from dotmac_billing.opening_window_contracts import (
     OpeningWindowV1,
     ProvisionOpeningWindowV1,
     SealOpeningWindowV1,
+    StoredOpeningAuthoritySwitchReceiptV1,
     StoredOpeningWindowV1,
     opening_admission_population_digest,
 )
 from dotmac_billing.opening_window_queries import (
+    get_opening_hold_admissions,
     get_opening_window,
     get_opening_window_admissions,
     get_opening_window_seal,
@@ -6420,7 +6436,14 @@ def seal_opening_window(
     scope: Scope,
     command: SealOpeningWindowV1,
     verifier: OpeningWindowSealVerifier | None = None,
+    authority_switch: OpeningAuthoritySwitchParticipant | None = None,
 ) -> OpeningWindowSealV1:
+    """Seal the window; an optional participant switches authority atomically.
+
+    ADR 0031: fence, re-observe, seal and switch are one transaction. The
+    participant runs inside the same savepoint as the seal insert, so any
+    participant failure rolls the seal back and nothing is sealed.
+    """
     if type(command) is not SealOpeningWindowV1:
         raise BillingRuleViolation("opening_command_invalid", "expected seal command")
     _require_scope_matches(routed=scope, declared=command.scope)
@@ -6479,7 +6502,7 @@ def seal_opening_window(
         # Only fresh evidence observed under the physical custody lock seals.
         verified = qualify()
         actual = get_opening_window_admissions(session, scope=scope)
-        expected = {
+        positive = {
             item.partition.account_id
             for item in (
                 *window.manifest.cash_lots,
@@ -6487,6 +6510,13 @@ def seal_opening_window(
             )
             if item.residual_minor > 0
         }
+        held = set(command.held_account_ids)
+        if not held <= positive:
+            raise BillingRuleViolation(
+                "opening_hold_list_invalid",
+                "held partitions must come from the frozen manifest population",
+            )
+        expected = positive - held
         if {item.billing_account_id for item in actual} != expected or len(
             actual
         ) != len(expected):
@@ -6519,6 +6549,50 @@ def seal_opening_window(
             values["tenant_id"] = scope.tenant_id
         session.execute(insert(_table(scope, "opening_window_seals")).values(**values))
         session.flush()
+        if authority_switch is not None:
+            try:
+                receipt = authority_switch.switch_authority(
+                    session, OpeningAuthoritySwitchContextV1(scope, seal)
+                )
+                if type(receipt) is not OpeningAuthoritySwitchReceiptV1:
+                    raise BillingRuleViolation(
+                        "opening_authority_switch_failed",
+                        "participant returned no receipt",
+                    )
+                stored = StoredOpeningAuthoritySwitchReceiptV1(
+                    window.window_id, receipt, datetime.now(UTC)
+                )
+                receipt_evidence = _jsonable(stored)
+                receipt_values = {
+                    "id": uuid4(),
+                    "window_id": window.window_id,
+                    "participant_ref": receipt.participant_ref,
+                    "participant_version": receipt.participant_version,
+                    "switched_to": receipt.switched_to,
+                    "state_digest": receipt.state_digest,
+                    "evidence": receipt_evidence,
+                    "evidence_digest": fingerprint_of(receipt_evidence),
+                }
+                if isinstance(scope, TenantScope):
+                    receipt_values["tenant_id"] = scope.tenant_id
+                session.execute(
+                    insert(_table(scope, "opening_authority_switch_receipts")).values(
+                        **receipt_values
+                    )
+                )
+                session.flush()
+            except Exception as exc:
+                raise BillingRuleViolation(
+                    "opening_authority_switch_failed",
+                    "authority switch participant failed; the seal is rolled back",
+                ) from exc
+            if not session.in_transaction() or (
+                get_opening_window_seal(session, scope=scope) is None
+            ):
+                raise BillingRuleViolation(
+                    "opening_authority_switch_failed",
+                    "authority switch participant ended the seal transaction",
+                )
         return {"window_id": str(window.window_id)}
 
     _idempotent_opening_admission(
@@ -7901,6 +7975,35 @@ def import_opening_account_v2(
     command: ImportOpeningAccountV2,
     verifier: OpeningAccountImportVerifierV2 | None = None,
 ) -> OpeningImportReceiptV2:
+    return _import_opening_account_v2(
+        db,
+        scope=scope,
+        command=command,
+        verifier=verifier,
+        operation_scope="billing.opening.import.v2",
+        fingerprint=None,
+        admit=lambda session, verified: _admit_opening_window(
+            session,
+            scope=scope,
+            manifest_fingerprint=verified.manifest_fingerprint,
+            manifest_version=2,
+        ),
+        after_import=None,
+    )
+
+
+def _import_opening_account_v2(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ImportOpeningAccountV2,
+    verifier: OpeningAccountImportVerifierV2 | None,
+    operation_scope: str,
+    fingerprint: str | None,
+    admit: Callable[[Session, OpeningImportVerificationV2], object],
+    after_import: Callable[[Session, OpeningImportReceiptV2], None] | None,
+) -> OpeningImportReceiptV2:
+    """Shared V2 import body: the window-entry rule and the idempotency scope vary."""
     if type(command) is not ImportOpeningAccountV2:
         raise BillingRuleViolation(
             "opening_command_invalid", "expected ImportOpeningAccountV2"
@@ -7949,12 +8052,7 @@ def import_opening_account_v2(
     digest = opening_account_command_digest_v2(command)
 
     def operation(session: Session) -> dict[str, object]:
-        _admit_opening_window(
-            session,
-            scope=scope,
-            manifest_fingerprint=verified.manifest_fingerprint,
-            manifest_version=2,
-        )
+        admit(session, verified)
         account = _one(
             session,
             scope=scope,
@@ -8143,18 +8241,157 @@ def import_opening_account_v2(
             opening_effects=opening,
             opening_bases=tuple(bases),
         )
+        if after_import is not None:
+            after_import(session, receipt)
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
 
     outcome = _idempotent_cash_claim(
         db,
         scope=scope,
-        operation_scope="billing.opening.import.v2",
+        operation_scope=operation_scope,
         key=command.idempotency_key,
-        fingerprint=digest,
+        fingerprint=fingerprint or digest,
         operation=operation,
     )
     return get_opening_import_receipt_v2(
         db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )
+
+
+@_exact_cash_operation
+def admit_held_opening_account_v2(
+    db: Session,
+    *,
+    scope: Scope,
+    command: AdmitHeldOpeningAccountV2,
+    verifier: OpeningAccountImportVerifierV2 | None = None,
+    approvals: OpeningHoldApprovalPort | None = None,
+) -> OpeningImportReceiptV2:
+    """Admit ONE sealed-hold partition after the seal (recorded widening, D-5).
+
+    Reuses the V2 import validators, verifier and writer. Additionally requires:
+    the partition is on the hold list recorded in the seal; no activity since
+    the seal; a reviewed disposition digest; and a standing Approvals decision
+    whose maker is not a checker. The database independently refuses any
+    post-seal opening write for an account that is not held and unadmitted.
+    """
+    if type(command) is not AdmitHeldOpeningAccountV2:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected AdmitHeldOpeningAccountV2"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    if approvals is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted approvals port is required"
+        )
+    imported = command.import_command
+    content_digest = opening_hold_content_digest(command)
+    fingerprint = fingerprint_of(
+        {
+            "domain": "billing.opening.hold.admit.v1",
+            "content_digest": content_digest,
+            "approval_request_id": str(command.approval_request_id),
+        }
+    )
+    standing: list[HeldOpeningHoldApprovalV1] = []
+
+    def admit(session: Session, verified: OpeningImportVerificationV2) -> None:
+        window = get_opening_window(session, scope=scope)
+        if window is None:
+            raise BillingRuleViolation(
+                "opening_window_missing", "opening window is required"
+            )
+        seal = get_opening_window_seal(session, scope=scope)
+        if seal is None:
+            raise BillingRuleViolation(
+                "opening_hold_window_not_sealed",
+                "held partitions are admitted only after the seal",
+            )
+        if (
+            window.window_id != command.window_id
+            or window.manifest_version != 2
+            or window.manifest_fingerprint != verified.manifest_fingerprint
+        ):
+            raise BillingRuleViolation(
+                "opening_window_binding", "hold admission window binding differs"
+            )
+        account_id = imported.partition.account_id
+        if account_id not in seal.command.held_account_ids:
+            raise BillingRuleViolation(
+                "opening_hold_not_listed", "partition is not on the sealed hold list"
+            )
+        if any(
+            item.billing_account_id == account_id
+            for item in get_opening_hold_admissions(session, scope=scope)
+        ):
+            raise BillingConflict(
+                "opening_hold_already_admitted", "held partition is already admitted"
+            )
+        try:
+            _require_pristine_opening_target(session, scope=scope, command=imported)
+        except (BillingRuleViolation, BillingConflict) as exc:
+            raise BillingRuleViolation(
+                "opening_hold_post_seal_activity",
+                "held account has activity since the seal",
+            ) from exc
+        try:
+            held = approvals.hold_approval(
+                session,
+                scope=scope,
+                request_id=command.approval_request_id,
+                subject_type=HOLD_APPROVAL_SUBJECT_TYPE,
+                subject_id=opening_hold_subject_id(command),
+                content_digest=content_digest,
+            )
+        except OpeningVerificationUnavailable as exc:
+            raise BillingRuleViolation(
+                "opening_verifier_unavailable", "approval qualification unavailable"
+            ) from exc
+        standing.append(require_hold_maker_checker(command, held))
+
+    def record(session: Session, receipt: OpeningImportReceiptV2) -> None:
+        admission = OpeningHoldAdmissionV1(
+            scope,
+            uuid4(),
+            command.window_id,
+            receipt.billing_account_id,
+            receipt.receipt_id,
+            opening_account_command_digest_v2(imported),
+            content_digest,
+            command.disposition,
+            command.maker_ref,
+            standing[0],
+            datetime.now(UTC),
+        )
+        evidence = _jsonable(admission)
+        values = {
+            "id": admission.admission_id,
+            "window_id": admission.window_id,
+            "billing_account_id": admission.billing_account_id,
+            "receipt_id": admission.receipt_id,
+            "disposition_digest": command.disposition.disposition_digest,
+            "maker_ref": command.maker_ref,
+            "approval_request_id": command.approval_request_id,
+            "approver_refs": list(standing[0].approver_refs),
+            "evidence": evidence,
+            "evidence_digest": fingerprint_of(evidence),
+        }
+        if isinstance(scope, TenantScope):
+            values["tenant_id"] = scope.tenant_id
+        session.execute(
+            insert(_table(scope, "opening_hold_admissions")).values(**values)
+        )
+        session.flush()
+
+    return _import_opening_account_v2(
+        db,
+        scope=scope,
+        command=imported,
+        verifier=verifier,
+        operation_scope="billing.opening.hold.admit.v2",
+        fingerprint=fingerprint,
+        admit=admit,
+        after_import=record,
     )
 
 
