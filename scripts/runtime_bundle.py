@@ -72,8 +72,10 @@ def bundle(root: Path, output: Path) -> None:
     )
     site = Path(sysconfig.get_path("purelib")).resolve()
     scripts = Path(sysconfig.get_path("scripts")).resolve()
+    include = Path(sysconfig.get_path("include")).resolve()
     selected_sources = {name: local[name] for name in closure if name in local}
     output.mkdir(parents=True)
+    (output / "include").mkdir()
     for name in sorted(closure):
         distribution = metadata.distribution(name)
         if distribution.files is None:
@@ -88,6 +90,9 @@ def bundle(root: Path, output: Path) -> None:
                 destination = output / "site-packages" / source.relative_to(site)
             elif source.is_relative_to(scripts):
                 destination = output / "bin" / source.relative_to(scripts)
+            elif source.is_relative_to(include):
+                # Native wheels such as greenlet record public C headers too.
+                destination = output / "include" / source.relative_to(include)
             elif any(source.is_relative_to(path) for path in selected_sources.values()):
                 continue
             else:

@@ -94,6 +94,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /srv/app
 COPY --from=dependency-builder /runtime/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=dependency-builder /runtime/bin /usr/local/bin
+COPY --from=dependency-builder /runtime/include /usr/local/include/python3.12
 COPY --from=dependency-builder /runtime/packages ./packages
 COPY --from=dependency-builder /runtime/runtime-inventory.json ./runtime-inventory.json
 
