@@ -202,7 +202,9 @@ class _Numbering:
         series_code: str,
         reference_date: date,
         idempotency_key: str,
+        document_reference: str,
     ) -> str:
+        assert document_reference
         scope_code = "tenant" if isinstance(scope, TenantScope) else "platform"
         scope_identity = (
             f"tenant:{scope.tenant_id}"

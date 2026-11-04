@@ -2,9 +2,44 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a10 — UNRELEASED
+## 0.1.0a11 — UNRELEASED
 
-- ST-3 (recorded widening D-5; includes `bi_0013`, unreleased): the opening seal
+- Breaking for adapters: `NumberingProvider.allocate` now also receives a
+  required `document_reference`, the stable identity of the document being
+  numbered (an invoice: `billing:<document id>`; a credit note: the
+  command-stable `billing:credit:<correlation id>`, never a per-execution
+  value). A locked or enrolled Numbering series requires it; the adapter decides
+  whether to forward it for a series that does not accept it.
+- Add `discounts` (`DiscountSnapshotV1`) to the one rated intake Sub uses,
+  `AcceptRatedObligationV3`; no other intake version changes. `pre_tax_amount`
+  is the net taxable base and the gross is net plus discounts. Discounts are
+  retained in the existing immutable obligation envelope (only when present, so
+  a10 bytes and replay fingerprints are unchanged; no DDL). Issued line facts
+  carry the real `discount_total` and snapshots. Malformed or duplicate
+  discounts, and Tax determined on a base larger than the net, are refused.
+- Add `get_document_exposure` (latest sealed per-document exposure, re-verified
+  against receivable resolution; imported items return the opening-owned V2),
+  `get_document_withholding_evidence`, and `list_accounting_facts`: a
+  total-ordered keyset-paged accounting-fact index, and
+  `summarize_accounting_fact_window`, the separate once-per-window-close count
+  and chained digest. A consumer closes a window only after a summary taken at
+  least one settle interval after its end, because `occurred_at` is business time.
+- Refuse a document whose lines carry different `service_ref` with
+  `exposure_service_ambiguous` at drafting, issuing and exposure derivation,
+  because exposure is anchored to the first line.
+- An unlinked taxed credit needs no new code: a credit note always requires an
+  issued invoice and non-cash grants carry no tax.
+- Adapters should raise a number collision as
+  `BillingRuleViolation("document_number_collision")`; Billing does not import
+  Numbering and does not map it.
+- Write-off needs no new command: it is a `grant_non_cash_credit` whose
+  classification category is a policy value, restricted to the document and
+  applied on issue. Choosing credit note or grant is the caller's policy.
+- Not changed: a credit note larger than the open receivable is still refused
+  (`credit_exceeds_receivable`). Excess is composed above Billing (unapply prior
+  discharges, then issue the full credit note); Billing gains no excess path.
+- Source preparation only; hosted CI and publication remain required.
+- ST-3 (recorded widening D-5; includes unreleased `bi_0013`): the opening seal
   records a hold list (`SealOpeningWindowV1.held_account_ids`); one held partition
   per command may later be admitted by `admit_held_opening_account_v2` with a
   reviewed disposition digest and an Approvals maker-checker decision (port only;
@@ -13,6 +48,8 @@ All notable changes follow Semantic Versioning.
   an `authority_switch` participant inside the seal savepoint; its
   `OpeningAuthoritySwitchReceiptV1` is stored append-only. `opening_lane` is the
   import-specific assembly authority port.
+
+## 0.1.0a10 — released
 
 - Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,
   original commercial identity, prior references and selected component snapshots.

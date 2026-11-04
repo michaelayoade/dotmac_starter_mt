@@ -82,6 +82,19 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
 )
+from dotmac_billing.document_queries import (
+    AccountingFactCursorV1,
+    AccountingFactIndexEntryV1,
+    AccountingFactIndexPageV1,
+    AccountingFactWindowSummaryV1,
+    DocumentWithholdingEvidenceV1,
+    ListAccountingFactsV1,
+    SummarizeAccountingFactWindowV1,
+    get_document_exposure,
+    get_document_withholding_evidence,
+    list_accounting_facts,
+    summarize_accounting_fact_window,
+)
 from dotmac_billing.earmark_authority import (
     CorrectSettlementEarmarkV1,
     EarmarkCorrectionVerificationRequestV1,
@@ -328,7 +341,7 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a10"
+__version__ = "0.1.0a11"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
@@ -348,6 +361,17 @@ from dotmac_billing.tax_evidence import (
 )
 
 __all__ = [
+    "AccountingFactCursorV1",
+    "AccountingFactIndexEntryV1",
+    "AccountingFactIndexPageV1",
+    "DocumentWithholdingEvidenceV1",
+    "ListAccountingFactsV1",
+    "get_document_exposure",
+    "get_document_withholding_evidence",
+    "list_accounting_facts",
+    "summarize_accounting_fact_window",
+    "AccountingFactWindowSummaryV1",
+    "SummarizeAccountingFactWindowV1",
     "InvoiceTaxEvidenceV2",
     "TaxCommercialSourceEvidenceV1",
     "TaxFactSignatureEvidenceV1",

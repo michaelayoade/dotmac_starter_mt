@@ -20,7 +20,7 @@ from dotmac_durable_timers.service import (
     schedule_timer,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AcceptanceOutcome",

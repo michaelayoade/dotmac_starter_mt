@@ -71,6 +71,7 @@ from dotmac_billing.contracts import (
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
     CollectionTiming,
+    DiscountSnapshotV1,
     DueDateBasisStatus,
     DueDateBasisV1,
     FinancialState,
@@ -606,6 +607,123 @@ def _rated_obligation_natural_key(command: AcceptRatedObligationV1) -> str:
     return fingerprint_of(natural_payload)
 
 
+def _rated_fingerprint_payload(
+    command: AcceptRatedObligationV1 | IssueRatedInvoiceV1,
+) -> dict[str, object]:
+    """Request payload for idempotency, byte-stable for commands without discounts.
+
+    ``discounts`` joined the V3 intake after a10 published. An empty tuple is
+    omitted so an a10 request (which had no such field) keeps its fingerprint and
+    still replays; a non-empty tuple is always part of the identity.
+    """
+    payload = cast(dict[str, object], asdict(command))
+    holders: list[dict[str, object]] = [payload]
+    nested = payload.get("obligation")
+    if isinstance(nested, dict):
+        holders.append(cast(dict[str, object], nested))
+    for holder in holders:
+        if "discounts" in holder and not holder["discounts"]:
+            del holder["discounts"]
+    return payload
+
+
+def _discount_total(discounts: tuple[DiscountSnapshotV1, ...], like: Money) -> Money:
+    total = Decimal("0")
+    for item in discounts:
+        total += item.amount.amount
+    return Money.of(total, like.currency)
+
+
+def _require_discount_snapshots(
+    discounts: tuple[DiscountSnapshotV1, ...], *, total: Money
+) -> None:
+    """Fail closed on any discount that is not exact, positive, same-money evidence."""
+    seen: set[str] = set()
+    for item in discounts:
+        if not isinstance(item, DiscountSnapshotV1) or not isinstance(
+            item.amount, Money
+        ):
+            raise BillingRuleViolation(
+                "discount_invalid", "discounts must be typed exact snapshots"
+            )
+        _require_same_money(total, item.amount)
+        text_fields = (item.discount_code, item.description, item.source_version)
+        if any(
+            not isinstance(value, str) or not value.strip() or len(value) > 255
+            for value in text_fields
+        ):
+            raise BillingRuleViolation(
+                "discount_invalid",
+                "a discount requires a bounded code, description and source version",
+            )
+        if (
+            not item.amount.amount.is_finite()
+            or item.amount.amount <= 0
+            or _money(
+                item.amount.amount,
+                item.amount.currency.code,
+                item.amount.currency.minor_units,
+            ).amount
+            != item.amount.amount
+        ):
+            raise BillingRuleViolation(
+                "discount_invalid",
+                "a discount amount must be a positive exact currency amount",
+            )
+        if item.discount_code in seen:
+            raise BillingRuleViolation(
+                "discount_duplicate", "a discount code may appear once per charge"
+            )
+        seen.add(item.discount_code)
+
+
+def _require_rated_discounts(command: AcceptRatedObligationV1) -> None:
+    """Discounts exist only on the V3 intake and reduce the taxable base."""
+    if not isinstance(command, AcceptRatedObligationV3) or not command.discounts:
+        return
+    _require_discount_snapshots(command.discounts, total=command.total_amount)
+    for item in command.tax_evidence:
+        if (
+            item.purpose == "invoice_tax"
+            and item.determination.net_amount.amount > command.pre_tax_amount.amount
+        ):
+            # pre_tax_amount is already net of the discounts; a determination
+            # on a larger base was made on the undiscounted gross.
+            raise BillingRuleViolation(
+                "discount_base_not_reduced",
+                "Tax must be determined on the base net of discounts",
+            )
+
+
+def _obligation_discounts(obligation: _ObligationRow) -> tuple[DiscountSnapshotV1, ...]:
+    """Immutable discount snapshots retained with a V3 obligation, else none."""
+    payload = obligation.tax_evidence
+    if (
+        not _is_dependency_evidence_payload(payload)
+        or "discounts" not in cast(list[dict[str, object]], payload)[0]
+    ):
+        return ()
+    try:
+        discounts = cast(
+            tuple[DiscountSnapshotV1, ...],
+            _decode(
+                cast(list[dict[str, object]], payload)[0]["discounts"],
+                tuple[DiscountSnapshotV1, ...],
+            ),
+        )
+        _require_discount_snapshots(
+            discounts,
+            total=_money(
+                obligation.total_amount, obligation.currency, obligation.minor_units
+            ),
+        )
+    except (ValueError, TypeError, DecimalException) as exc:
+        raise BillingRuleViolation(
+            "discount_invalid", "stored discount evidence is invalid"
+        ) from exc
+    return discounts
+
+
 def _require_rated_tax_evidence(
     command: AcceptRatedObligationV1, *, scope: Scope
 ) -> None:
@@ -655,6 +773,7 @@ def accept_rated_obligation(
             "obligation_total_mismatch", "pre-tax plus tax must equal total"
         )
     _require_rated_tax_evidence(command, scope=scope)
+    _require_rated_discounts(command)
     plane = _models(scope)
     account = _one(
         db,
@@ -665,7 +784,7 @@ def accept_rated_obligation(
     )
     _require_account_money(account, command.total_amount)
     natural_key = _rated_obligation_natural_key(command)
-    offered = fingerprint_of(asdict(command))
+    offered = fingerprint_of(_rated_fingerprint_payload(command))
 
     def operation(session: Session) -> dict[str, object]:
         if command.supersedes_obligation_id is not None:
@@ -743,6 +862,13 @@ def accept_rated_obligation(
                                 command.commercial_sources
                             ),
                             "evidence": _wire_value(command.tax_evidence),
+                            # Present only when discounts exist, so the a10
+                            # envelope bytes are unchanged for every other charge.
+                            **(
+                                {"discounts": _wire_value(command.discounts)}
+                                if command.discounts
+                                else {}
+                            ),
                         }
                     ]
                     if isinstance(command, AcceptRatedObligationV3)
@@ -890,7 +1016,17 @@ def create_draft_document(
                     "description": command.description,
                     "quantity": command.quantity,
                     "unit_code": command.unit_code,
-                    "unit_amount": obligation.pre_tax_amount,
+                    # Gross before discounts; equals the net for an undiscounted
+                    # charge. ``pre_tax_amount`` below is always the net base.
+                    "unit_amount": obligation.pre_tax_amount
+                    + _discount_total(
+                        _obligation_discounts(obligation),
+                        _money(
+                            obligation.pre_tax_amount,
+                            obligation.currency,
+                            obligation.minor_units,
+                        ),
+                    ).amount,
                     "pre_tax_amount": obligation.pre_tax_amount,
                     "tax_amount": obligation.tax_amount,
                     "total_amount": obligation.total_amount,
@@ -959,6 +1095,7 @@ def issue_rated_invoice(
         )
     obligation_command = command.obligation
     _require_rated_tax_evidence(obligation_command, scope=scope)
+    _require_rated_discounts(obligation_command)
     _require_scope_matches(routed=scope, declared=obligation_command.scope)
     obligation_sources.require_obligation_source(obligation_command.source_kind)
     command.due_date_basis.require_collectible(native=True)
@@ -1049,7 +1186,7 @@ def issue_rated_invoice(
         scope=scope,
         operation_scope="billing.invoice.issue.rated.v1",
         key=_rated_obligation_natural_key(obligation_command),
-        fingerprint=fingerprint_of(asdict(command)),
+        fingerprint=fingerprint_of(_rated_fingerprint_payload(command)),
         operation=operation,
     )
     result = outcome.result
@@ -1094,18 +1231,34 @@ def _require_line_input(line: DraftDocumentLine, obligation: _ObligationRow) -> 
     with localcontext() as context:
         context.prec = 60  # Numeric(20,6) operands multiply without context rounding.
         product = amount.amount * quantity
-    if (
-        not amount.amount.is_finite()
-        or amount.amount < 0
-        or product != obligation.pre_tax_amount
-    ):
+        gross = (
+            obligation.pre_tax_amount
+            + _discount_total(_obligation_discounts(obligation), amount).amount
+        )
+    if not amount.amount.is_finite() or amount.amount < 0 or product != gross:
         raise BillingRuleViolation(
             "line_amount_mismatch",
-            "explicit unit price times quantity must exactly equal rated pre-tax",
+            "explicit unit price times quantity must exactly equal rated pre-tax "
+            "plus its discounts",
+        )
+
+
+def _require_single_exposure_service(obligations: tuple[_ObligationRow, ...]) -> None:
+    """One collectible document exposes exactly one service.
+
+    The document exposure is anchored to the first line's obligation. A document
+    whose lines carry different ``service_ref`` values (``None`` counts as a
+    value) would silently expose only the first one, so it is refused outright.
+    """
+    if len({row.service_ref for row in obligations}) > 1:
+        raise BillingRuleViolation(
+            "exposure_service_ambiguous",
+            "a collectible document's lines must share one service_ref",
         )
 
 
 def _require_homogeneous(obligations: tuple[_ObligationRow, ...]) -> None:
+    _require_single_exposure_service(obligations)
     attributes = (
         "billing_account_id",
         "currency",
@@ -1454,6 +1607,25 @@ def _receivable_exposure(
         model=plane.obligation,
         row_id=document.obligation_id,
     )
+    line_obligation_ids = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.line.obligation_id).where(
+                    plane.line.document_id == document.id,
+                    plane.line.obligation_id.is_not(None),
+                ),
+                scope,
+                plane.line,
+            )
+        ).scalars()
+    )
+    if line_obligation_ids:
+        _require_single_exposure_service(
+            tuple(
+                _one(db, scope=scope, model=plane.obligation, row_id=identity)
+                for identity in dict.fromkeys(line_obligation_ids)
+            )
+        )
     void_statement = select(plane.event.id).where(
         plane.event.document_id == document.id,
         plane.event.event_kind == "voided",
@@ -1554,7 +1726,15 @@ def _decode_tax_evidence(
                 raise ValueError("invalid Tax evidence envelope")
             if (
                 set(payload[0])
-                != {"contract_version", "evidence", "commercial_sources"}
+                not in (
+                    {"contract_version", "evidence", "commercial_sources"},
+                    {
+                        "contract_version",
+                        "evidence",
+                        "commercial_sources",
+                        "discounts",
+                    },
+                )
                 or payload[0]["contract_version"] != "billing.tax.evidence.v2"
             ):
                 raise ValueError("unsupported Tax evidence envelope")
@@ -2612,6 +2792,17 @@ def _due_date_basis(value: object) -> DueDateBasisV1:
     )
 
 
+def _line_discounts(
+    db: Session, *, scope: Scope, plane: _PlaneModels, line: Any
+) -> tuple[DiscountSnapshotV1, ...]:
+    """Discount snapshots of the rated obligation behind one document line."""
+    if line.obligation_id is None:
+        return ()
+    return _obligation_discounts(
+        _one(db, scope=scope, model=plane.obligation, row_id=line.obligation_id)
+    )
+
+
 def _document_fact(
     db: Session,
     *,
@@ -2663,12 +2854,19 @@ def _document_fact(
             unit_code=line.unit_code,
             unit_amount=_money(line.unit_amount, line.currency, line.minor_units),
             pre_tax_amount=_money(line.pre_tax_amount, line.currency, line.minor_units),
-            discount_total=_money(Decimal("0"), line.currency, line.minor_units),
+            discount_total=_discount_total(
+                line_discounts,
+                _money(line.pre_tax_amount, line.currency, line.minor_units),
+            ),
             tax_amount=_money(line.tax_amount, line.currency, line.minor_units),
             total_amount=_money(line.total_amount, line.currency, line.minor_units),
             price_source_version=line.price_source_version,
+            discounts=line_discounts,
         )
         for line in lines
+        for line_discounts in (
+            _line_discounts(db, scope=scope, plane=plane, line=line),
+        )
     )
     party_tax_facts = tuple(
         PartyTaxIdentitySnapshotV1(
@@ -2917,6 +3115,7 @@ def issue_document(
             series_code=command.series_code,
             reference_date=command.reference_date,
             idempotency_key=f"billing:{document.id}",
+            document_reference=f"billing:{document.id}",
         )
         document.series_code = command.series_code
         document.document_number = number
@@ -3234,6 +3433,8 @@ def issue_credit_note(
             series_code=command.series_code,
             reference_date=command.reference_date,
             idempotency_key=f"billing:credit:{command.correlation_id}",
+            # Command-stable, not the per-execution ``document_id`` above.
+            document_reference=f"billing:credit:{command.correlation_id}",
         )
         document = plane.document(
             **_values(
