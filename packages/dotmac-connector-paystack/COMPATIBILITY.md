@@ -54,3 +54,11 @@ More than one match, a truncated list or an unreadable list is not SUCCEEDED
 "not found as of this read", not proof the refund never landed: the caller waits
 a settle interval since the ambiguous send before acting on it. Payments
 publishes this shape as the capability's `result_schema` in the wiring change.
+
+**Any `result_schema` published for `payments.refund.v1` MUST ACCEPT NULL.** The
+engine skips the result check only when the capability has no schema and the
+result is `None`, and there is one schema per capability. A schema that demanded
+the lookup shape above would reject a successful `refund` (which carries
+`result=None`), leave it in flight, and let the lease expire so the delivery is
+claimed and POSTed again: repeated refunds. `refund_status` is bounded: a status
+token longer than 32 characters is dropped rather than truncated.

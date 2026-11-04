@@ -440,9 +440,12 @@ def _refund_event(
     if provider_refund is not None:
         payload["provider_refund_reference"] = provider_refund
     # The handle that ties the outcome to the instruction: the reference
-    # `refund` stamped into `merchant_note`. Taken only if it has exactly the
-    # reference shape, so a hand-typed note is never mistaken for one; without it
-    # the observation is still emitted and the consumer parks it unmatched.
+    # `refund` stamped into `merchant_note`. The shape check is only a SHAPE
+    # check: a hand-typed note that happens to fit it (for example
+    # `customer-requested-refund`) becomes a `refund_reference` too. The
+    # consumer therefore matches it against its own instruction references and
+    # PARKS an unknown one (never discards it, never applies it). Without a
+    # fitting note the observation is still emitted and parks unmatched.
     note = _text(data.get("merchant_note"))
     if note is not None and REFERENCE_RE.fullmatch(note) is not None:
         payload["refund_reference"] = note

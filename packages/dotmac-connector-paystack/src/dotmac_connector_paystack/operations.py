@@ -525,9 +525,18 @@ def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+#: The longest provider status token kept. The token is stored (it travels in
+#: `Outcome.result` for a lookup), so an over-long one is dropped, not truncated:
+#: a truncated token could read as a different status.
+_MAX_STATUS_LENGTH: Final = 32
+
+
 def _status_token(data: Mapping[str, object]) -> str | None:
     value = data.get("status")
-    return value.strip().lower() if isinstance(value, str) and value.strip() else None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    token = value.strip().lower()
+    return token if len(token) <= _MAX_STATUS_LENGTH else None
 
 
 def _retry_after(response: httpx.Response) -> int | None:

@@ -400,11 +400,11 @@ Flutterwave's charge id become connector internals.
 
 The as-built fact that shapes the refund rule: **Paystack's `/refund` accepts no
 client reference.** There is no field for the engine's idempotency key, so the
-connector stamps a derived key into `merchant_note`
-(`packages/dotmac-connector-paystack/src/dotmac_connector_paystack/
-operations.py:626-630`) and classifies an unanswered send as `AMBIGUOUS`
-(`:368`), resolving it by reading the provider's refund list and matching the
-note (`:68-73`). **That makes an ambiguous refund DECIDABLE; it does not make a
+connector stamps the engine's idempotency key, verbatim, into `merchant_note`
+(`dotmac_connector_paystack.operations`, the `refund` branch of `_build`) and
+classifies an unanswered send as `AMBIGUOUS`, resolving it with `find_refund`,
+which reads the provider's refund list and matches the note exactly given the
+refund's reference. Zero matches means "not found as of this read". **That makes an ambiguous refund DECIDABLE; it does not make a
 second refund REFUSED.** A duplicated payout is refusable at the provider
 because its derived reference rides Paystack's own `reference` field; a
 duplicated refund is not. The reconciliation read is therefore mandatory before

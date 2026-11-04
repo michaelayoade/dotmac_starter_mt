@@ -848,3 +848,17 @@ def test_the_lookup_through_the_delivery_handler_carries_the_result() -> None:
     )
     assert outcome.status is OutcomeStatus.SUCCEEDED
     assert outcome.result is not None and outcome.result["matches"] == "1"
+
+
+def test_an_over_long_provider_status_is_dropped_not_stored_or_truncated() -> None:
+    long = "x" * 200
+    result = _find(_ops(_responder(_envelope([_record(status=long)]))))
+    assert result.outcome is OperationOutcome.SUCCEEDED
+    assert "refund_status" not in result.reply
+    assert result.provider_status is None
+    kept = _find(_ops(_responder(_envelope([_record(status="y" * 32)]))))
+    assert kept.reply["refund_status"] == "y" * 32
+    over = _find(_ops(_responder(_envelope([_record(status="y" * 33)]))))
+    assert "refund_status" not in over.reply
+    stored = result.as_outcome().result
+    assert stored is not None and all(len(v) <= 120 for v in stored.values())
