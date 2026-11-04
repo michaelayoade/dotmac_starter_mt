@@ -1467,12 +1467,23 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class AcceptRatedObligationV3(AcceptRatedObligationV1):
+    """Rated intake with Tax V2 evidence and, optionally, discount snapshots.
+
+    ``pre_tax_amount`` is the NET taxable base: the rated gross less
+    ``discounts``. The gross is therefore ``pre_tax_amount`` plus the sum of the
+    discount amounts, and Tax evidence must have been determined on the net, never
+    on the gross. ``discounts`` is the only intake extension for discounts; the
+    older intake versions stay unchanged.
+    """
+
     tax_evidence: tuple[InvoiceTaxEvidenceV2, ...] = ()
     commercial_sources: tuple[TaxCommercialSourceEvidenceV1, ...] = ()
+    discounts: tuple[DiscountSnapshotV1, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tax_evidence", tuple(self.tax_evidence))
         object.__setattr__(self, "commercial_sources", tuple(self.commercial_sources))
+        object.__setattr__(self, "discounts", tuple(self.discounts))
         validate_commercial_source_binding(
             self.tax_evidence, commercial_sources=self.commercial_sources
         )
