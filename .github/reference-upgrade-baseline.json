@@ -1,0 +1,5 @@
+{
+  "kind": "source-compatibility",
+  "source_sha": "eec5d6bc765649a79947e30ae71b611c5d9764bb",
+  "reason": "Immutable pre-hardening PR 968 base, selected by the product owner on 2026-11-04. No supported reference-app image release was identified. This source-built baseline proves source-to-source compatibility, never released-image support."
+}
