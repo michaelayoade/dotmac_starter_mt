@@ -118,8 +118,16 @@ def _refund(ops: PaystackOperations, *, key: str = KEY, **overrides: object):
     return ops.run("refund", params, idempotency_key=key, api_secret=SECRET)
 
 
-def _find(ops: PaystackOperations, *, key: str = KEY, **overrides: object):
-    params: dict[str, object] = {"transaction": "TRX_target"}
+LOOKUP_KEY = "lookup-delivery-9a1e-another-key"
+
+
+def _find(ops: PaystackOperations, *, key: str = LOOKUP_KEY, **overrides: object):
+    # A lookup is its OWN delivery: a different engine key from the refund it
+    # asks about. The subject travels in the payload.
+    params: dict[str, object] = {
+        "transaction": "TRX_target",
+        "refund_reference": provider_reference(KEY),
+    }
     params.update(overrides)
     return ops.run("find_refund", params, idempotency_key=key, api_secret=SECRET)
 
@@ -316,12 +324,32 @@ def test_a_different_delivery_gets_a_different_reference() -> None:
     assert provider_reference(KEY) != provider_reference(KEY + "-2")
 
 
-def test_a_refund_with_no_idempotency_key_is_refused_not_improvised() -> None:
+@pytest.mark.parametrize(
+    "key",
+    [
+        "",
+        "short",
+        "UPPER-case-key-0123456789",
+        "has space in the key-123",
+        "a" * 65,
+        "-leading-dash-0123456",
+    ],
+)
+def test_a_refund_whose_key_is_not_a_reference_is_refused_not_repaired(key) -> None:
     seen, respond = _recording(_envelope({"id": 1}))
-    result = _refund(_ops(respond), key="")
+    result = _refund(_ops(respond), key=key)
     assert result.outcome is OperationOutcome.TERMINAL
-    assert result.error_code == "idempotency_key_required"
+    assert result.error_code == "idempotency_key_shape"
+    # Nothing was sent: a normalised or generated note would never be found.
     assert seen == []
+
+
+def test_the_key_is_stamped_verbatim_and_a_payments_reference_is_accepted() -> None:
+    seen, respond = _recording(_envelope(_record()))
+    reference = "rf1-" + "0123456789abcdef" * 2
+    _refund(_ops(respond), key=reference)
+    assert json.loads(seen[0].content)["merchant_note"] == reference
+    assert provider_reference(reference) == reference
 
 
 def test_a_refund_carries_the_derived_key_where_a_reconciler_can_read_it() -> None:
@@ -392,7 +420,7 @@ def test_find_refund_is_a_get_that_filters_by_transaction_and_sends_no_body() ->
     assert request.headers["authorization"] == f"Bearer {SECRET}"
 
 
-def test_find_refund_zero_matches_means_the_refund_did_not_land() -> None:
+def test_find_refund_zero_matches_means_not_found_as_of_this_read() -> None:
     other = _record(merchant_note=provider_reference("another-delivery"), id=1)
     result = _find(_ops(_responder(_envelope([other]))))
     assert result.outcome is OperationOutcome.SUCCEEDED
@@ -400,13 +428,13 @@ def test_find_refund_zero_matches_means_the_refund_did_not_land() -> None:
     assert result.provider_reference == provider_reference(KEY)
 
 
-def test_find_refund_an_empty_list_means_the_refund_did_not_land() -> None:
+def test_find_refund_an_empty_list_means_not_found_as_of_this_read() -> None:
     result = _find(_ops(_responder(_envelope([]))))
     assert result.outcome is OperationOutcome.SUCCEEDED
     assert result.reply == {"matches": "0"}
 
 
-def test_find_refund_one_exact_match_means_it_landed_and_carries_evidence() -> None:
+def test_find_refund_one_exact_match_means_found_and_carries_evidence() -> None:
     other = _record(merchant_note="hand typed note", id=1)
     result = _find(_ops(_responder(_envelope([other, _record()]))))
     assert result.outcome is OperationOutcome.SUCCEEDED
@@ -467,13 +495,17 @@ def test_find_refund_never_sends_the_refund() -> None:
     assert [request.method for request in seen] == ["GET"]
 
 
-def test_find_refund_requires_the_transaction_and_the_key() -> None:
+def test_find_refund_requires_the_transaction_and_a_well_formed_subject() -> None:
     seen, respond = _recording(_envelope([]))
     missing = _find(_ops(respond), transaction="")
     assert missing.error_code == "transaction_required"
-    keyless = _find(_ops(respond), key="")
-    assert keyless.error_code == "idempotency_key_required"
+    for bad in (None, "", "hand typed note", "X" * 20, "a" * 65, 7):
+        refused = _find(_ops(respond), refund_reference=bad)
+        assert refused.outcome is OperationOutcome.TERMINAL
+        assert refused.error_code == "refund_reference_invalid"
     assert seen == []
+    # The lookup's own delivery key is irrelevant to what it searches for.
+    assert _find(_ops(respond), key="").outcome is OperationOutcome.SUCCEEDED
 
 
 def test_find_refund_a_forbidden_credential_is_terminal() -> None:
@@ -662,7 +694,11 @@ def test_the_delivery_handler_hands_the_engine_its_own_vocabulary() -> None:
 def test_find_refund_is_dispatchable_through_the_refund_binding() -> None:
     seen, respond = _recording(_envelope([]))
     outcome = _handler(REFUND, respond)(
-        _dispatch(REFUND, "find_refund", {"transaction": "TRX_target"})
+        _dispatch(
+            REFUND,
+            "find_refund",
+            {"transaction": "TRX_target", "refund_reference": provider_reference(KEY)},
+        )
     )
     assert outcome.status is OutcomeStatus.SUCCEEDED
     assert [request.method for request in seen] == ["GET"]
@@ -741,3 +777,74 @@ def test_a_contract_error_names_a_field_rather_than_echoing_a_payload() -> None:
     with pytest.raises(OperationContractError) as raised:
         raise OperationContractError("transaction_required")
     assert raised.value.code.isidentifier()
+
+
+# ── the lookup through the engine: its own key, a verdict that survives ──────
+
+
+def test_a_lookup_under_another_delivery_key_finds_the_refund_the_first_sent() -> None:
+    """The double-refund case. The refund and the lookup are separate deliveries
+    (the engine refuses to reuse a key for a different payload), so the lookup's
+    key differs and the subject must come from the payload."""
+    store: list[dict[str, object]] = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            body = json.loads(request.content)
+            record = {
+                "id": 77,
+                "status": "pending",
+                "merchant_note": body["merchant_note"],
+                "amount": body["amount"],
+                "currency": body["currency"],
+            }
+            store.append(record)
+            return httpx.Response(200, json=_envelope(record))
+        return httpx.Response(200, json=_envelope(list(store)))
+
+    ops = _ops(provider)
+    sent = _refund(ops, key="rf1-" + "aa" * 16)
+    # The answer to the send is lost; reconcile with a different delivery key.
+    found = ops.run(
+        "find_refund",
+        {"transaction": "TRX_target", "refund_reference": sent.provider_reference},
+        idempotency_key="rf1-" + "bb" * 16 + "-lookup",
+        api_secret=SECRET,
+    )
+    assert found.outcome is OperationOutcome.SUCCEEDED
+    assert found.reply["matches"] == "1"
+    assert found.reply["refund_id"] == "77"
+
+
+def test_the_lookup_verdict_reaches_the_engine_in_the_outcome_result() -> None:
+    none = _find(_ops(_responder(_envelope([])))).as_outcome()
+    one = _find(_ops(_responder(_envelope([_record()])))).as_outcome()
+    assert none.status is one.status is OutcomeStatus.SUCCEEDED
+    assert none.result == {"matches": "0"}
+    assert one.result == {
+        "matches": "1",
+        "refund_id": "4242",
+        "refund_status": "processed",
+    }
+    assert none.result != one.result
+
+
+def test_only_a_successful_lookup_carries_a_result() -> None:
+    many = _find(_ops(_responder(_envelope([_record(), _record(id=1)])))).as_outcome()
+    assert many.status is OutcomeStatus.RECONCILIATION_REQUIRED
+    assert many.result is None
+    seen, respond = _recording(_envelope(_record()))
+    assert _refund(_ops(respond)).as_outcome().result is None
+
+
+def test_the_lookup_through_the_delivery_handler_carries_the_result() -> None:
+    seen, respond = _recording(_envelope([_record()]))
+    outcome = _handler(REFUND, respond)(
+        _dispatch(
+            REFUND,
+            "find_refund",
+            {"transaction": "TRX_target", "refund_reference": provider_reference(KEY)},
+        )
+    )
+    assert outcome.status is OutcomeStatus.SUCCEEDED
+    assert outcome.result is not None and outcome.result["matches"] == "1"

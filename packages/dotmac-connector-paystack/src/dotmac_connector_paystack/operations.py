@@ -43,20 +43,23 @@ Checked against the provider's own contract: **Paystack publishes no
 reference either — the one money-moving endpoint here with no provider-side
 at-most-once key. Nothing at the provider refuses a second refund, so the
 protection is ours: the classification above never lets an ambiguous send be
-retried, and every refund carries a reference derived from the ENGINE's
-idempotency key (stable across attempts of one delivery) in ``merchant_note``,
-where ``find_refund`` matches it exactly. Sub solved it the same way in
-production.
+retried, and every refund carries the ENGINE's idempotency key (stable across
+attempts of one delivery), verbatim, in ``merchant_note``, where ``find_refund``
+matches it exactly. The lookup is its own delivery with its own key, so it is
+given the refund's reference as ``params.refund_reference``. Sub solved it the
+same way in production.
 
 ``find_refund`` reads the list of refunds for a transaction and compares the
-derived reference with each record's ``merchant_note``: zero matches means the
-refund did not land, one means it did (its id and status travel as evidence),
-more than one is an anomaly for a human. A list that is unreadable or reports
-another page decides nothing and is AMBIGUOUS.
+caller's ``refund_reference`` with each record's ``merchant_note``: zero matches
+means the refund was not found as of this read, one means it was found (its id
+and status travel as evidence), more than one is an anomaly for a human. A
+list that is unreadable or reports another page decides nothing and is
+AMBIGUOUS.
 
-The reference is derived from the key and never read from the payload. A guard
-whose value arrives in a mutable command payload is a guard a caller defeats by
-accident.
+A refund's reference is the engine's key and is never read from the payload: a
+guard whose value arrives in a mutable command payload is a guard a caller
+defeats by accident. Only the lookup's SUBJECT is read from the payload, because
+it names a refund sent by another delivery.
 
 ## Money is exact, and it is never a `float`
 
@@ -78,7 +81,6 @@ outbound translation cannot drift into disagreeing about what a kobo is.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -114,10 +116,13 @@ API_HOST: Final = "api.paystack.co"
 # both the inbound and the outbound conversion below, so the two cannot drift.
 PAYSTACK_WIRE_SCALE: Final = 2
 
-#: The engine's own idempotency key, hashed, is what becomes a provider
-#: reference. The prefix is a fixed marker so an operator reading a Paystack
-#: dashboard can tell a Dotmac-issued reference from a hand-made one.
-REFERENCE_PREFIX: Final = "dmi"
+#: The shape of a refund reference: the engine's idempotency key, stamped
+#: VERBATIM into ``merchant_note`` and matched verbatim by ``find_refund`` and
+#: by ingress. Payments' instruction reference (``rf1-`` plus 32 hex) satisfies
+#: it, so one identity runs from instruction to provider and back. FIXED once
+#: a3 is tagged: a refund stamped under one shape could not be found under
+#: another.
+REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9][a-z0-9-]{15,63}")
 
 #: An exact amount in MAJOR units. Anchored, digits plus an explicit decimal
 #: point and at most six fraction digits — wide enough for any minor-unit scale,
@@ -277,25 +282,35 @@ def _currency(value: object) -> str:
     return value.strip().upper()
 
 
-# ── the provider reference, derived from the engine's key ────────────────────
+# ── the refund reference: the engine's key, verbatim ──────────────────────────
 
 
 def provider_reference(idempotency_key: object) -> str:
-    """The provider-side at-most-once key for one command.
+    """The reference a refund is stamped with: the engine's key, verbatim.
 
-    Lower-case hexadecimal with a fixed prefix, so ONE derivation satisfies both
-    of Paystack's charset rules at once — transactions allow ``- . =`` and
-    alphanumerics, transfers allow ``- _`` and alphanumerics and want lower
-    case. Deterministic in the engine's key, so every attempt of one delivery
-    presents the identical reference and the provider refuses the second.
+    Stable across attempts of one delivery, so every attempt presents the same
+    ``merchant_note``. Refused, never repaired, when it does not have the
+    reference shape: a normalised or generated value would not equal the one
+    the product holds, and the lookup that decides an ambiguous refund would
+    then report "not found" about a refund that landed.
     """
-    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
-        # Refused rather than substituted. A generated key would be unique per
-        # attempt, which is precisely the duplicate-charge machine this exists
-        # to prevent — an absent key must stop the send, not weaken it.
-        raise OperationContractError("idempotency_key_required")
-    digest = hashlib.sha256(idempotency_key.strip().encode()).hexdigest()
-    return f"{REFERENCE_PREFIX}{digest}"
+    if (
+        not isinstance(idempotency_key, str)
+        or REFERENCE_RE.fullmatch(idempotency_key) is None
+    ):
+        raise OperationContractError("idempotency_key_shape")
+    return idempotency_key
+
+
+def lookup_reference(value: object) -> str:
+    """The reference ``find_refund`` searches for, supplied by the caller.
+
+    A lookup is a different delivery from the refund it asks about, so it has a
+    different idempotency key; the subject must come from the payload.
+    """
+    if not isinstance(value, str) or REFERENCE_RE.fullmatch(value) is None:
+        raise OperationContractError("refund_reference_invalid")
+    return value
 
 
 # ── the operation table ──────────────────────────────────────────────────────
@@ -312,8 +327,9 @@ class _Operation:
     #: `AMBIGUOUS` wherever a duplicate would cost real money; `RETRYABLE` only
     #: where the operation is a pure read.
     indeterminate: OperationOutcome
-    #: Whether the command needs the engine's key at all (a refund does, to
-    #: stamp ``merchant_note``; a refund lookup does, to match on it).
+    #: Whether the command stamps the engine's key (a refund does, into
+    #: ``merchant_note``). A refund lookup does NOT: it is a separate delivery
+    #: with its own key and searches for the ``refund_reference`` it is given.
     needs_key: bool = False
 
 
@@ -329,9 +345,7 @@ OPERATIONS: Final[Mapping[str, _Operation]] = MappingProxyType(
             _Operation("refund", "POST", OperationOutcome.AMBIGUOUS, needs_key=True),
             # A pure read. Repeating it changes nothing at the provider. It is
             # how an AMBIGUOUS refund is decided without ever re-sending it.
-            _Operation(
-                "find_refund", "GET", OperationOutcome.RETRYABLE, needs_key=True
-            ),
+            _Operation("find_refund", "GET", OperationOutcome.RETRYABLE),
         )
     }
 )
@@ -393,12 +407,22 @@ class OperationResult:
         carry a customer's details and was produced by a call made with
         materialized credentials. The machine code is enough to act on.
         """
+        # The verdict of a refund lookup is the one reply the engine must keep:
+        # without it "not found" and "found" reach the product as the same
+        # SUCCEEDED. Bounded strings from `_find_refund_result` only.
+        result: dict[str, object] | None = (
+            dict(self.reply)
+            if self.operation == "find_refund"
+            and self.outcome is OperationOutcome.SUCCEEDED
+            else None
+        )
         return Outcome(
             status=ENGINE_STATUS[self.outcome],
             error_code=self.error_code,
             retry_after_seconds=self.retry_after_seconds,
             provider_reference=self.provider_reference,
             provider_status_code=self.http_status,
+            result=result,
         )
 
 
@@ -459,14 +483,14 @@ def _build(
             "customer_note",
             _text(params, "customer_note", "customer_note_invalid", required=False),
         )
-        # Paystack accepts no client reference on a refund, so the derived key
+        # Paystack accepts no client reference on a refund, so the engine key
         # is stamped here — the durable handle Sub matches on when it has to
         # decide whether an ambiguous refund already exists.
         body["merchant_note"] = reference
         return "/refund", body, None
 
     if name == "find_refund":
-        # The list is filtered by transaction only; matching on the derived
+        # The list is filtered by transaction only; matching on the given
         # reference in `merchant_note` is done on the answer, exactly.
         return (
             "/refund",
@@ -608,8 +632,10 @@ def _find_refund_result(
 ) -> OperationResult:
     """Decide, from the provider's own refund list, whether a refund landed.
 
-    Zero exact matches on the derived ``merchant_note`` means it did not land;
-    exactly one means it did, and its id and status travel as evidence; more
+    Zero exact matches on the stamped ``merchant_note`` means NOT FOUND AS OF THIS
+    READ (the provider's list may lag a refund just accepted, so the caller
+    waits a settle interval after the ambiguous send before acting on it);
+    exactly one means it was found, and its id and status travel as evidence; more
     than one is an anomaly nobody may resolve by sending again. A list that
     cannot be read, or that says there is another page, decides nothing.
     """
@@ -768,7 +794,7 @@ def _request_failure(sent: _Sent, exc: httpx.RequestError) -> OperationResult:
 
 @dataclass(frozen=True, slots=True)
 class PaystackOperations:
-    """Authenticated provider I/O for the nine outbound commands.
+    """Authenticated provider I/O for the refund and refund-lookup commands.
 
     Holds no state between calls, owns no ledger, and keeps no retry budget:
     each `run` is one attempt, classified and handed back. Whether there is
@@ -798,7 +824,12 @@ class PaystackOperations:
             if not isinstance(api_secret, str) or not api_secret:
                 raise OperationContractError("api_secret_key_unavailable")
             fields = _params(params)
-            reference = provider_reference(idempotency_key) if spec.needs_key else None
+            if spec.needs_key:
+                reference = provider_reference(idempotency_key)
+            elif spec.name == "find_refund":
+                reference = lookup_reference(fields.get("refund_reference"))
+            else:
+                reference = None
             path, body, query = _build(spec, fields, reference)
             amount = body.get("amount") if body is not None else None
             currency = body.get("currency") if body is not None else None

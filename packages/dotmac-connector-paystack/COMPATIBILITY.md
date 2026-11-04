@@ -30,14 +30,27 @@ The public Python surface is `MANIFEST`, `PLUGIN`, `PaystackConnector`,
 `OperationOutcome`, `OPERATIONS`, `ACTIONS_BY_CAPABILITY`,
 `OUTBOUND_CAPABILITY_IDS` and `__version__`.
 
-## Known limitation — a command's reply
+## Refund reference and the lookup result
 
-DELIVERY is fire-and-forget by SPI contract: `Outcome` carries a provider
-reference, an HTTP status and an error code, and there is no durable
-command-response seam through which a reply can reach the product. The result of
-`find_refund` (`matches`, `refund_id`, `refund_status`) is therefore available
-today only through the synchronous `PaystackOperations` surface, whose
-`OperationResult.reply` carries it; through DELIVERY a lookup reports only that
-it ran, and an ambiguous list reports `reconciliation_required`. This is the
-same gap `dotmac-connector-remita` records for RRR issuance, and it is stated
-rather than worked around.
+A refund's `merchant_note` is the engine idempotency key, verbatim. It must match
+`^[a-z0-9][a-z0-9-]{15,63}$` or the refund is refused before anything is sent
+(`idempotency_key_shape`); ingress emits `refund_reference` only for a note of
+the same shape. Payments' `rf1-` plus 32 hex instruction reference qualifies, so
+the Integrator enqueues a refund with `idempotency_key = provider_reference`.
+This shape is fixed once a3 is tagged.
+
+`find_refund` is its own delivery with its own key. Its `params` are
+`transaction` and a required `refund_reference` of the same shape. A SUCCEEDED
+lookup carries this `Outcome.result` (bounded strings; `refund` carries none):
+
+| field | meaning |
+|---|---|
+| `matches` | `"0"` not found as of this read, `"1"` found |
+| `refund_id` | the provider's refund id (only when `matches` is `"1"`) |
+| `refund_status` | the provider's status token, verbatim (only when `matches` is `"1"`) |
+
+More than one match, a truncated list or an unreadable list is not SUCCEEDED
+(`reconciliation_required` or retryable) and carries no result. Zero matches is
+"not found as of this read", not proof the refund never landed: the caller waits
+a settle interval since the ambiguous send before acting on it. Payments
+publishes this shape as the capability's `result_schema` in the wiring change.

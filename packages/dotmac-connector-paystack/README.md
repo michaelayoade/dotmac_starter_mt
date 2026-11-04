@@ -21,8 +21,8 @@ adoption.
 
 | command | provider call | notes |
 |---|---|---|
-| `refund` | `POST /refund` | amount optional (omitted = the transaction's own); derived reference stamped into `merchant_note` |
-| `find_refund` | `GET /refund?transaction=` | read-only; decides an ambiguous refund by exact match on `merchant_note` |
+| `refund` | `POST /refund` | amount optional (omitted = the transaction's own); engine key stamped verbatim into `merchant_note` |
+| `find_refund` | `GET /refund?transaction=` | read-only; takes `params.refund_reference`; decides an ambiguous refund by exact match on `merchant_note`; verdict in `Outcome.result` |
 
 Payment intent, saved-authorization charge, payout and customer commands are
 not part of this release and their capabilities (`payments.intent.v1`,
@@ -37,7 +37,7 @@ warranted and every ledger consequence stay with the product.
 `observation_kind` `refund` / `refund_failed`, exact `amount` and `currency`,
 `provider_status` verbatim, `merchant_reference` (the transaction reference) and
 `provider_refund_reference`. When the event carries a `merchant_note` with
-exactly the derived shape (`dmi` plus 64 lower-case hex) it is emitted as
+exactly the reference shape `^[a-z0-9][a-z0-9-]{15,63}$` (Payments' `rf1-` plus 32 hex qualifies) it is emitted as
 `refund_reference`, which is how Payments ties the outcome to its instruction;
 without it the observation is still emitted and the consumer parks it unmatched.
 `refund.pending` / `refund.processing` and every dispute event stay
@@ -64,14 +64,16 @@ may already be on its way back. It is resolved with `find_refund`
 
 Paystack publishes **no `Idempotency-Key` header**, and `/refund` accepts no
 client reference either, so nothing at the provider refuses a second refund.
-The connector derives a reference deterministically from the ENGINE's
-idempotency key (stable across attempts of one delivery) and stamps it into
-`merchant_note`. The classification never lets an ambiguous send be retried, and
+The connector stamps the ENGINE's idempotency key (stable across attempts of
+one delivery) verbatim into `merchant_note`; a key that is not a reference
+(`^[a-z0-9][a-z0-9-]{15,63}$`) is refused before anything is sent. The lookup
+is a separate delivery with its own key, so it is given the refund's reference
+as `params.refund_reference`. The classification never lets an ambiguous send be retried, and
 `find_refund` reads the provider's refund list for the transaction and matches
-the note exactly: zero matches = not landed, one = landed (id and status as
+the note exactly: zero matches = not found as of this read, one = found (id and status as
 evidence), more than one = a human decides, and a list that is unreadable or
-reports another page decides nothing. The reference is never read from the
-payload.
+reports another page decides nothing. A refund's reference is never read from
+the payload; only the lookup's subject is.
 
 ### Money
 

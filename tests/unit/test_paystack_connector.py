@@ -317,7 +317,7 @@ def test_unverified_shape_errors_carry_no_raw_material() -> None:
 
 # ── refund outcomes (a3): observed, never decided ────────────────────────────
 
-DERIVED = "dmi" + "ab" * 32
+DERIVED = "rf1-" + "ab" * 16  # Payments' instruction reference shape
 
 
 def _refund_event(event: str = "refund.processed", **overrides: object):
@@ -338,7 +338,7 @@ def _normalize(payload: object):
     return _handler().normalize(_request(payload), config={})[0][0]
 
 
-def test_refund_processed_becomes_a_refund_observation_with_the_derived_reference():
+def test_refund_processed_becomes_a_refund_observation_with_the_stamped_reference():
     event = _normalize(_refund_event())
     assert event.disposition is not InboundDisposition.RECORD_ONLY
     assert event.event_type == CAPABILITY_ID
@@ -373,7 +373,8 @@ def test_refund_identity_is_stable_and_distinct_per_outcome():
 
 
 @pytest.mark.parametrize(
-    "note", [None, "hand typed note", DERIVED + "0", DERIVED.upper()]
+    "note",
+    [None, "hand typed note", DERIVED.upper(), "x" * 65, "-" + DERIVED, "short-ref"],
 )
 def test_a_refund_without_the_derived_note_is_still_observed_but_unmatched(note):
     event = _normalize(_refund_event(merchant_note=note))
@@ -446,3 +447,11 @@ def test_refund_ingress_is_signature_gated_like_every_other_event():
     assert handler.verify(forged, config={}, secrets=_secrets()) == VerificationResult(
         accepted=False
     )
+
+
+def test_a_payments_instruction_reference_round_trips_as_refund_reference():
+    # `rf1-` plus 32 hex is what Payments stores in refund_reference (String 64).
+    reference = "rf1-" + "0123456789abcdef" * 2
+    event = _normalize(_refund_event(merchant_note=reference))
+    assert event.payload["refund_reference"] == reference
+    assert len(reference) <= 64

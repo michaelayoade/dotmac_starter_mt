@@ -36,21 +36,27 @@ against the a2 digest unidentifiable.
   declared; the public surface keeps `ACTIONS_BY_CAPABILITY`,
   `OUTBOUND_CAPABILITY_IDS`, `OPERATIONS` and `PaystackDeliveryHandler`, now
   holding refund only.
-- **Adds `payments.refund.v1`** (DELIVERY) with two commands. `refund` stamps a
-  reference derived from the engine's idempotency key into `merchant_note`
-  (Paystack publishes no `Idempotency-Key` header and `/refund` accepts no
-  client reference). **`find_refund`** is new: a read-only
-  `GET /refund?transaction=` that matches the derived reference exactly against
-  `merchant_note`. Zero matches means the refund did not land, one means it did
-  (refund id and status as evidence), more than one needs a human, and a list
-  that is unreadable or reports another page decides nothing. An AMBIGUOUS
-  refund is decided with it and is never re-sent.
+- **Adds `payments.refund.v1`** (DELIVERY) with two commands. `refund` stamps the
+  engine's idempotency key VERBATIM into `merchant_note` (Paystack publishes no
+  `Idempotency-Key` header and `/refund` accepts no client reference). The key
+  must match `^[a-z0-9][a-z0-9-]{15,63}$` and is otherwise refused before
+  anything is sent (`idempotency_key_shape`); Payments' `rf1-` plus 32 hex
+  instruction reference satisfies it, so one identity runs end to end. The shape
+  is fixed once a3 is tagged. **`find_refund`** is new: a read-only
+  `GET /refund?transaction=` that takes a required `params.refund_reference`
+  (the refund's reference; a lookup is its own delivery with its own key) and
+  matches it exactly against `merchant_note`. Zero matches means NOT FOUND AS OF
+  THIS READ, one means found (refund id and status as evidence), more than one
+  needs a human, and a list that is unreadable or reports another page decides
+  nothing. A successful lookup carries `{matches, refund_id?, refund_status?}` in
+  `Outcome.result`; `refund` carries none. An AMBIGUOUS refund is decided with
+  it and is never re-sent. The `dmi`+SHA-256 derivation is dropped.
 - **Adds refund-outcome ingress.** `refund.processed` and `refund.failed` are
   normalized to `payments.settlement.observation.v1` observations with
   `observation_kind` `refund` / `refund_failed`, exact amount and currency,
   verbatim provider status, `merchant_reference` (the transaction reference),
   `provider_refund_reference`, and `refund_reference` when `merchant_note` has
-  exactly the derived shape. This is the provider-sourced path for Payments'
+  exactly the reference shape above. This is the provider-sourced path for Payments'
   refund-completed and refund-failed outcomes; an observation with no
   `refund_reference` is still emitted and parks unmatched at the consumer.
   `refund.pending` and `refund.processing` stay record-only. Malformed refund

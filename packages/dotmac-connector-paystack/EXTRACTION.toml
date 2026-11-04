@@ -6,7 +6,7 @@ source_mode = "product-first"
 
 owner = "Paystack provider transport: exact-byte HMAC-SHA512 verification, authenticated transaction-list polling, provider-event identity, charge-success and refund-outcome normalization, acknowledgement bytes, and the refund path (the refund command and the read that decides an ambiguous one) with wire translation, exact-money conversion and outcome classification."
 
-contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paystack. Serve payments.settlement.observation.v1 in INGRESS and POLL and payments.refund.v1 in DELIVERY, each capability mapped to its own mode so an observation binding never carries command authority. Emit exact amount and provider-fee decimal strings with explicit currency, provider status verbatim, merchant reference and transport evidence; reconcile through the authenticated paged transaction list; observe refund.processed and refund.failed as refund and refund_failed observations carrying the derived refund reference. On the refund side: carry the engine's idempotency key into merchant_note (Paystack accepts no client reference on /refund), decide an ambiguous refund with find_refund (exact match on that note, zero matches not landed, one landed, more than one for a human) and never by re-sending, convert exact major-unit decimal strings to provider minor units without float and without rounding, classify each attempt as succeeded/declined/retryable/terminal/ambiguous, and report the provider reference and refund id as evidence on every outcome including the ones that received no answer. Payment intent, saved-authorization charge, payout and customer commands are not part of this contract. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, settlement admissibility, invoice targeting, refund warrant, retry/checkpoint engine, row, session or product database."
+contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paystack. Serve payments.settlement.observation.v1 in INGRESS and POLL and payments.refund.v1 in DELIVERY, each capability mapped to its own mode so an observation binding never carries command authority. Emit exact amount and provider-fee decimal strings with explicit currency, provider status verbatim, merchant reference and transport evidence; reconcile through the authenticated paged transaction list; observe refund.processed and refund.failed as refund and refund_failed observations carrying the refund reference (the stamped note, when it has the reference shape). On the refund side: carry the engine's idempotency key verbatim into merchant_note after a shape check (Paystack accepts no client reference on /refund), decide an ambiguous refund with find_refund (given the refund's reference; exact match on that note, zero matches not found as of this read, one found, more than one for a human; the verdict travels in Outcome.result) and never by re-sending, convert exact major-unit decimal strings to provider minor units without float and without rounding, classify each attempt as succeeded/declined/retryable/terminal/ambiguous, and report the provider reference and refund id as evidence on every outcome including the ones that received no answer. Payment intent, saved-authorization charge, payout and customer commands are not part of this contract. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, settlement admissibility, invoice targeting, refund warrant, retry/checkpoint engine, row, session or product database."
 
 # ── Narrowed to refunds (Michael's decision D5, 2026-11-04) ──────────────────
 #
@@ -29,18 +29,25 @@ contract = "Implement dotmac-integration SPI >=1.4,<2.0 for connector key paysta
 #
 # What the refund path now carries:
 #   * `refund`       POST /refund. Paystack accepts NO client reference, so the
-#                    reference derived from the engine's idempotency key is
-#                    stamped into `merchant_note`. An unanswered send is
-#                    AMBIGUOUS and is never retried.
-#   * `find_refund`  GET /refund?transaction=. Pure read. Matches the derived
-#                    reference exactly against `merchant_note`: zero matches =
-#                    not landed, one = landed (id and status as evidence), more
-#                    than one = needs a human; an unreadable or paged-past list
-#                    decides nothing. The reconciler calls it and NEVER re-sends.
+#                    engine's idempotency key is stamped VERBATIM into
+#                    `merchant_note`; a key not matching
+#                    ^[a-z0-9][a-z0-9-]{15,63}$ is refused before sending
+#                    (`idempotency_key_shape`). Payments' `rf1-`+32 hex qualifies,
+#                    so one identity joins instruction, provider and outcome.
+#                    FIXED once a3 is tagged. An unanswered send is AMBIGUOUS
+#                    and is never retried.
+#   * `find_refund`  GET /refund?transaction=. Pure read, its own delivery with
+#                    its own key, so it takes a required `refund_reference`
+#                    and matches it exactly against `merchant_note`: zero
+#                    matches = NOT FOUND AS OF THIS READ, one = found (id and
+#                    status as evidence), more than one = needs a human; an
+#                    unreadable or paged-past list decides nothing. A SUCCEEDED
+#                    lookup carries {matches, refund_id?, refund_status?} in
+#                    Outcome.result. The reconciler calls it and NEVER re-sends.
 #   * ingress        `refund.processed` / `refund.failed` become `refund` /
 #                    `refund_failed` observations on the settlement observation
-#                    capability, carrying the derived reference (only when the
-#                    note has exactly the derived shape) so Payments can feed
+#                    capability, carrying `refund_reference` (only when the
+#                    note has the reference shape above) so Payments can feed
 #                    ObserveCashOutcome. In-flight refund events stay record-only.
 #   * disputes       DEFERRED. Dispute events stay record-only
 #                    (`event_not_in_ingress_slice`); chargebacks enter through
@@ -128,11 +135,11 @@ shadow_and_drift = "Ingress: mirror the exact raw body and signature header into
 
 local_copy_retirement = "Retire only provider transport. Sub keeps payment_provider_events.py, payment_reconciliation.py, autopay's mandate/failure-count/suspension policy, every intent service, allocation, coverage and lifecycle decision; ERP keeps GL posting, expense-claim and payment allocation policy, its FOR UPDATE intent locking and its bounded poll sweep. This release can retire direct paged reconciliation clients and their private checkpoints after ingress shadow proof. On the command side it can retire, per capability and only after that capability's own cutover, Sub's PaymentGatewayRunner Paystack branch and ERP's paystack_client.py transport methods — never the product-side reference bookkeeping those clients feed, and never ERP's paystack_* columns, whose rename is a separate expand/contract migration. Flutterwave is a separate distribution and cutover."
 
-next_action = "REFUND-ONLY SLICE DECLARED AS 0.1.0a3, NOT YET RELEASED (D5, 2026-11-04): it changed the manifest of the already-tagged 0.1.0a2, whose exact contract is retained as SETTLEMENT_MANIFEST and whose digest is recorded in docs/inventories/released-manifest-digests.json. Publish 0.1.0a3 after dotmac-integration 0.1.0a14, exact-pin it in dotmac_integrator, reconcile the authenticated payments.settlement.observation.v1 ProductPort descriptor, wire refund.processed/refund.failed observations to Payments ObserveCashOutcome, and run the refund smoke on the Paystack TEST integration. Open: the refund webhook is not documented to carry merchant_note, so confirm on TEST whether it does; if it does not, matching falls to find_refund. DEFERRED: dispute ingress, and any payment-intent, payout or customer capability (each needs a named product owner and a durable command-response seam in dotmac-integration first)."
+next_action = "REFUND-ONLY SLICE DECLARED AS 0.1.0a3, NOT YET RELEASED (D5, 2026-11-04): it changed the manifest of the already-tagged 0.1.0a2, whose exact contract is retained as SETTLEMENT_MANIFEST and whose digest is recorded in docs/inventories/released-manifest-digests.json. Publish 0.1.0a3 after dotmac-integration 0.1.0a14, exact-pin it in dotmac_integrator, reconcile the authenticated payments.settlement.observation.v1 ProductPort descriptor, wire refund.processed/refund.failed observations to Payments ObserveCashOutcome, and run the refund smoke on the Paystack TEST integration. WIRING-PR OBLIGATIONS (Integrator/Payments): enqueue the refund with idempotency_key = the instruction's provider_reference (rf1-...); treat zero find_refund matches as conclusive only after a settle interval since the ambiguous send; route on observation_kind so a refund/refund_failed observation (which carries the original merchant_reference) never reaches capture or confirmation; publish the settlement observation schema admitting refund_failed, refund_reference, provider_refund_reference and an optional occurred_at; publish find_refund's result_schema. Open: the refund webhook is not documented to carry merchant_note, so confirm on TEST whether it does; if it does not, matching falls to find_refund. DEFERRED: dispute ingress, and any payment-intent, payout or customer capability (each needs a named product owner and a durable command-response seam in dotmac-integration first)."
 
 # ── Residual duplicate-refund risk, stated rather than implied ───────────────
 #
-# 1. REFUND has no provider-side reference field. The derived key travels in
+# 1. REFUND has no provider-side reference field. The engine key travels in
 #    `merchant_note`, and `find_refund` decides an ambiguous refund by exact
 #    match on it — but nothing at Paystack REFUSES a second refund. The product's
 #    reconciler must call `find_refund` before any replacement is issued; this

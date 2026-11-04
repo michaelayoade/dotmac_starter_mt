@@ -46,6 +46,7 @@ from dotmac_connector_paystack.delivery import (
     PaystackDeliveryHandler,
 )
 from dotmac_connector_paystack.operations import (
+    REFERENCE_RE,
     exact_amount,
 )
 from dotmac_connector_paystack.polling import PaystackPollHandler
@@ -376,7 +377,6 @@ REFUND_EVENTS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
         "refund.failed": ("failed", "refund_failed"),
     }
 )
-_DERIVED_REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"dmi[0-9a-f]{64}")
 
 
 def _wire_amount(value: object) -> int | None:
@@ -441,10 +441,10 @@ def _refund_event(
         payload["provider_refund_reference"] = provider_refund
     # The handle that ties the outcome to the instruction: the reference
     # `refund` stamped into `merchant_note`. Taken only if it has exactly the
-    # derived shape, so a hand-typed note is never mistaken for one; without it
+    # reference shape, so a hand-typed note is never mistaken for one; without it
     # the observation is still emitted and the consumer parks it unmatched.
     note = _text(data.get("merchant_note"))
-    if note is not None and _DERIVED_REFERENCE_RE.fullmatch(note) is not None:
+    if note is not None and REFERENCE_RE.fullmatch(note) is not None:
         payload["refund_reference"] = note
     return InboundEvent(
         provider_event_id=identity,
