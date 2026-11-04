@@ -1,11 +1,12 @@
 # dotmac-connector-paystack
 
-Paystack ingress, reconciliation and outbound-command plugin for the
+Paystack ingress, reconciliation and refund plugin for the
 independently deployed Dotmac Integrator. It verifies `x-paystack-signature`
-over the exact request bytes, translates `charge.success` into a
-provider-neutral `payments.settlement.observation.v1` fact, pages the
-authenticated transaction list from an engine-owned checkpoint, and performs
-the outbound commands a product tells it to perform.
+over the exact request bytes, translates `charge.success` and the refund
+outcomes `refund.processed` / `refund.failed` into provider-neutral
+`payments.settlement.observation.v1` facts, pages the authenticated
+transaction list from an engine-owned checkpoint, and performs the refund
+command a product tells it to perform.
 
 It owns no database, product identity, allocation, coverage, receivable state,
 retry policy or checkpoint. Provider metadata is retained only in the
@@ -13,23 +14,34 @@ Integrator's transport receipt; it is never copied into the product
 observation. The published a1 ingress manifest remains accepted during
 adoption.
 
-## Outbound commands
+## Refund path
 
-Nine provider-neutral operations across four separately bindable DELIVERY
-capabilities. The split is a security property: an installation bound for
-payment intents cannot be made to issue a refund or a payout by a crafted
-payload.
+0.1.0a3 is narrowed to refunds. One separately bindable DELIVERY capability,
+`payments.refund.v1`, with two commands:
 
-| capability | commands |
-|---|---|
-| `payments.intent.v1` | `initialize_payment`, `charge_authorization` |
-| `payments.refund.v1` | `refund` |
-| `payments.payout.v1` | `resolve_bank_account`, `create_transfer_recipient`, `initiate_transfer` |
-| `payments.customer.v1` | `create_customer`, `update_customer`, `read_customer` |
+| command | provider call | notes |
+|---|---|---|
+| `refund` | `POST /refund` | amount optional (omitted = the transaction's own); derived reference stamped into `merchant_note` |
+| `find_refund` | `GET /refund?transaction=` | read-only; decides an ambiguous refund by exact match on `merchant_note` |
+
+Payment intent, saved-authorization charge, payout and customer commands are
+not part of this release and their capabilities (`payments.intent.v1`,
+`payments.payout.v1`, `payments.customer.v1`) are not declared.
 
 The connector performs the call it is commanded to perform. Whether a refund is
-warranted, which invoice a payment covers, how much to allocate, and every
-ledger consequence stay with the product.
+warranted and every ledger consequence stay with the product.
+
+### Refund outcomes (ingress)
+
+`refund.processed` and `refund.failed` become observations with
+`observation_kind` `refund` / `refund_failed`, exact `amount` and `currency`,
+`provider_status` verbatim, `merchant_reference` (the transaction reference) and
+`provider_refund_reference`. When the event carries a `merchant_note` with
+exactly the derived shape (`dmi` plus 64 lower-case hex) it is emitted as
+`refund_reference`, which is how Payments ties the outcome to its instruction;
+without it the observation is still emitted and the consumer parks it unmatched.
+`refund.pending` / `refund.processing` and every dispute event stay
+record-only. Dispute ingress is deferred.
 
 ### Outcomes
 
@@ -41,40 +53,30 @@ ledger consequence stay with the product.
 | terminal | `terminal` | rejected before the provider acted |
 | ambiguous | `reconciliation_required` | it may have landed; nobody may retry |
 
-**A decline is not a retryable error.** Paystack burns the reference on a
-decline, so an identical retry is refused; a fresh attempt is a product
-decision, which is exactly how `dotmac_sub`'s autopay tracks it.
+**A decline is not a retryable error.** The provider performed the refund and
+refused it; repeating the question does not change the answer.
 
 **A timeout after the request was sent is ambiguous, never retried.** The money
-may already have moved. It is resolved against provider state —
-`GET /transaction/verify/{reference}`, `GET /transfer/verify/{reference}`, or
-`GET /refund?transaction=...` — which is what `dotmac_erp`'s
-`_recover_transfer_initiation` and `dotmac_sub`'s `_recover_charge` do in
-production today.
+may already be on its way back. It is resolved with `find_refund`
+(`GET /refund?transaction=...`) and never by sending the refund again.
 
 ### Duplicate protection
 
-Paystack publishes **no `Idempotency-Key` header**. Its mechanism is the
-client-supplied unique `reference` on `transaction/initialize`,
-`transaction/charge_authorization` and `transfer`; reusing one is refused
-server-side ("Duplicate Transaction Reference", `duplicate_transfer_reference`).
-
-The connector derives that reference deterministically from the ENGINE's
-idempotency key, which is stable across attempts of one delivery. Two
-independent protections therefore stack: the classification never lets an
-ambiguous send be retried, and if something retries anyway the provider refuses
-the duplicate. The reference is never read from the payload — a guard whose
-value arrives in a mutable command is a guard a caller defeats by accident.
-
-`/refund` accepts no client reference. The derived key is stamped into
-`merchant_note` instead, so an ambiguous refund is decidable by listing the
-provider's refunds for that transaction rather than by guessing — the mechanism
-`dotmac_sub` already runs.
+Paystack publishes **no `Idempotency-Key` header**, and `/refund` accepts no
+client reference either, so nothing at the provider refuses a second refund.
+The connector derives a reference deterministically from the ENGINE's
+idempotency key (stable across attempts of one delivery) and stamps it into
+`merchant_note`. The classification never lets an ambiguous send be retried, and
+`find_refund` reads the provider's refund list for the transaction and matches
+the note exactly: zero matches = not landed, one = landed (id and status as
+evidence), more than one = a human decides, and a list that is unreadable or
+reports another page decides nothing. The reference is never read from the
+payload.
 
 ### Money
 
 An amount crosses the boundary as an exact decimal string in the currency's
-major units with an explicit currency code (`{"amount": "5000.00", "currency":
+major units with an explicit currency code (`{"amount": "1500.00", "currency":
 "NGN"}`), which is the shape the ingress side already emits. It is converted to
 provider minor units through the single wire-scale owner both directions share,
 and refused rather than rounded if it is finer than the provider can carry.

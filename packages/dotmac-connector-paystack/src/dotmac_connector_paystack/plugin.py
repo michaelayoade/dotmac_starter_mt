@@ -1,12 +1,13 @@
-"""Stateless authenticated Paystack translation: ingress, polling, outbound.
+"""Stateless authenticated Paystack translation: ingress, polling, refunds.
 
 One distribution, three modes. INGRESS and POLL observe what the provider
-says happened; DELIVERY performs the commands a product tells it to perform.
-The outbound half lives in `dotmac_connector_paystack.operations` (wire
-translation, exact money and outcome classification) and
-`dotmac_connector_paystack.delivery` (the SPI adapter); this module owns
-webhook authentication, event normalization and the versioned manifest that
-binds all of it together.
+says happened (settlements, and the outcome of a refund); DELIVERY performs the
+refund command a product tells it to perform and the read that decides an
+ambiguous one. The outbound half lives in
+`dotmac_connector_paystack.operations` (wire translation, exact money and
+outcome classification) and `dotmac_connector_paystack.delivery` (the SPI
+adapter); this module owns webhook authentication, event normalization and the
+versioned manifest that binds all of it together.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final
 
 import httpx
@@ -52,10 +54,10 @@ CONNECTOR_KEY: Final = "paystack"
 CAPABILITY_ID: Final = "payments.settlement.observation.v1"
 VERSION: Final = "0.1.0a1"
 # 0.1.0a2 IS published (peeled tag dotmac-connector-paystack-v0.1.0a2 ->
-# 656ecebb05f24c11acda69a069d6fbe60d319f56). The outbound slice adds four
-# DELIVERY capabilities, per-capability modes and an SPI 1.4 floor — every one
-# of them inside the manifest digest an installation adopts by — so it is
-# declared as a3 rather than folded into a published contract. The exact a2
+# 656ecebb05f24c11acda69a069d6fbe60d319f56). The refund slice adds a DELIVERY
+# capability, per-capability modes and an SPI 1.4 floor — every one of them
+# inside the manifest digest an installation adopts by — so it is declared as
+# a3 rather than folded into a published contract. The exact a2
 # manifest is preserved as SETTLEMENT_MANIFEST below.
 SETTLEMENT_VERSION: Final = "0.1.0a2"
 CURRENT_VERSION: Final = "0.1.0a3"
@@ -114,8 +116,8 @@ LEGACY_MANIFEST: Final = ConnectorManifest(
 #:
 #: The a2 `API_SECRET_KEY` description differed from a3's; description text is
 #: documentation rather than policy and is deliberately outside the digest, so
-#: the current wording is used here. Nothing else may be modernised — the four
-#: outbound capability ids and the SPI floor are all inside it.
+#: the current wording is used here. Nothing else may be modernised — the outbound
+#: capability id and the SPI floor are both inside it.
 SETTLEMENT_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
     version=SETTLEMENT_VERSION,
@@ -179,8 +181,8 @@ MANIFEST: Final = ConnectorManifest(
             required=False,
             description=(
                 "Paystack server secret for authenticated reconciliation and "
-                "outbound command I/O; required when a poll or delivery "
-                "capability is bound."
+                "refund I/O; required when a poll or delivery capability is "
+                "bound."
             ),
         ),
     ),
@@ -235,7 +237,11 @@ def _identity(
     data: Mapping[str, object],
     event: Mapping[str, object],
 ) -> tuple[str, str]:
-    provider_identity = _text(data.get("id")) or _text(data.get("reference"))
+    provider_identity = (
+        _text(data.get("id"))
+        or _text(data.get("reference"))
+        or _text(data.get("refund_reference"))
+    )
     if provider_identity is not None:
         return (
             f"{event_type}:{provider_identity}",
@@ -360,6 +366,93 @@ def _settlement_event(
     )
 
 
+#: The refund webhook events this slice turns into an outcome observation, and
+#: the provider status token and observation kind each one stands for. Closed:
+#: ``refund.pending`` and ``refund.processing`` are in-flight and stay
+#: record-only, and a dispute is deliberately NOT here (see CHANGELOG).
+REFUND_EVENTS: Final[Mapping[str, tuple[str, str]]] = MappingProxyType(
+    {
+        "refund.processed": ("processed", "refund"),
+        "refund.failed": ("failed", "refund_failed"),
+    }
+)
+_DERIVED_REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"dmi[0-9a-f]{64}")
+
+
+def _wire_amount(value: object) -> int | None:
+    """A minor-unit amount: an integer, or a string of ASCII digits only."""
+    if isinstance(value, str) and value.isascii() and value.isdigit():
+        return int(value)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _refund_event(
+    *,
+    identity: str,
+    event_type: str,
+    data: Mapping[str, object],
+    identity_source: str,
+) -> InboundEvent:
+    expected_status, observation_kind = REFUND_EVENTS[event_type]
+    status = _provider_status(data)
+    currency = _currency(data.get("currency"))
+    amount = exact_amount(_wire_amount(data.get("amount")), allow_zero=False)
+    if (
+        currency is None
+        or amount is None
+        or (status is not None and status.casefold() != expected_status)
+    ):
+        return _record_only(
+            identity=identity,
+            event_type=event_type,
+            data=data,
+            identity_source=identity_source,
+            reason_code="refund_shape_invalid",
+            normalized_type="payments.provider_event.recorded.v1",
+        )
+    payload: dict[str, object] = {
+        "capability_id": CAPABILITY_ID,
+        "observation_kind": observation_kind,
+        # Verbatim when the provider sent one; otherwise the status the event
+        # name itself asserts. Never mapped into a billing lifecycle.
+        "provider_status": status if status is not None else expected_status,
+        "amount": {"amount": amount, "currency": currency},
+        "arrival_mode": "ingress",
+        "confirmation_evidence": "connector_verified",
+        "transport_evidence": _transport_evidence(
+            event_type=event_type,
+            data=data,
+            identity_source=identity_source,
+        ),
+    }
+    occurred_at = (
+        _text(data.get("refunded_at"))
+        or _text(data.get("processed_at"))
+        or _text(data.get("createdAt"))
+        or _text(data.get("created_at"))
+    )
+    if occurred_at is not None:
+        payload["occurred_at"] = occurred_at
+    transaction = _text(data.get("transaction_reference"))
+    if transaction is not None:
+        payload["merchant_reference"] = transaction
+    provider_refund = _text(data.get("refund_reference"))
+    if provider_refund is not None:
+        payload["provider_refund_reference"] = provider_refund
+    # The handle that ties the outcome to the instruction: the reference
+    # `refund` stamped into `merchant_note`. Taken only if it has exactly the
+    # derived shape, so a hand-typed note is never mistaken for one; without it
+    # the observation is still emitted and the consumer parks it unmatched.
+    note = _text(data.get("merchant_note"))
+    if note is not None and _DERIVED_REFERENCE_RE.fullmatch(note) is not None:
+        payload["refund_reference"] = note
+    return InboundEvent(
+        provider_event_id=identity,
+        event_type=CAPABILITY_ID,
+        payload=payload,
+    )
+
+
 class PaystackIngressHandler:
     """Exact-byte authentication and provider-neutral event translation."""
 
@@ -425,6 +518,13 @@ class PaystackIngressHandler:
                 data=data,
                 identity_source=identity_source,
             )
+        elif event_type in REFUND_EVENTS:
+            normalized = _refund_event(
+                identity=identity,
+                event_type=event_type,
+                data=data,
+                identity_source=identity_source,
+            )
         else:
             normalized = _record_only(
                 identity=identity,
@@ -481,8 +581,8 @@ class PaystackConnector:
         config: dict[str, object],
         secrets: dict[str, object],
     ) -> tuple[Diagnostic, ...]:
-        # `reconcile_from` marks a poll configuration and `timeout_seconds` an
-        # outbound one; both authenticate with the server secret, so an
+        # `reconcile_from` marks a poll configuration and `timeout_seconds` a
+        # refund (delivery) one; both authenticate with the server secret, so an
         # installation configured for either without it is refused before it is
         # ever enabled rather than at the first dispatch.
         needs_api_secret = "reconcile_from" in config or "timeout_seconds" in config

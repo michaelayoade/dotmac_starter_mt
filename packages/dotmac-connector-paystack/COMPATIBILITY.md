@@ -2,7 +2,8 @@
 
 `dotmac-connector-paystack 0.1.0a3` implements dotmac-integration SPI
 `>=1.4,<2.0` under connector key `paystack`, in INGRESS, POLL and DELIVERY
-modes. The floor is 1.4 rather than 1.3 because each capability declares its
+modes (DELIVERY carries refunds only; intent, payout and customer
+capabilities are not declared). The floor is 1.4 rather than 1.3 because each capability declares its
 OWN mode set; without that a settlement observer's binding would carry the
 authority to move money, and conformance would call the ingress factory for a
 delivery-only contract.
@@ -10,10 +11,7 @@ delivery-only contract.
 | capability | modes |
 |---|---|
 | `payments.settlement.observation.v1` | INGRESS, POLL |
-| `payments.intent.v1` | DELIVERY |
 | `payments.refund.v1` | DELIVERY |
-| `payments.payout.v1` | DELIVERY |
-| `payments.customer.v1` | DELIVERY |
 
 It declares required `webhook_signing_secret` and optional
 `webhook_signing_previous_secret` bindings plus optional `api_secret_key`,
@@ -23,7 +21,7 @@ exactly `api.paystack.co`; the a1 and a2 manifests stay adoptable (a2 is preserv
 The `dotmac-integration` floor is `>=0.1.0a14`, the first release carrying SPI 1.4;
 the a2 floor of `>=0.1.0a11` (SPI 1.3) cannot load this manifest.
 
-Every DELIVERY capability takes the same configuration and REQUIRES
+The DELIVERY capability takes a configuration that REQUIRES
 `timeout_seconds` (1–60). A hidden default on a money path is a deployment
 decision nobody made.
 
@@ -36,9 +34,10 @@ The public Python surface is `MANIFEST`, `PLUGIN`, `PaystackConnector`,
 
 DELIVERY is fire-and-forget by SPI contract: `Outcome` carries a provider
 reference, an HTTP status and an error code, and there is no durable
-command-response seam through which a checkout URL, a resolved account name or
-a new recipient code can reach the product. Those replies are available today
-only through the synchronous `PaystackOperations` surface, whose
-`OperationResult.reply` carries them. This is the same gap
-`dotmac-connector-remita` records for RRR issuance, and it is stated rather
-than worked around.
+command-response seam through which a reply can reach the product. The result of
+`find_refund` (`matches`, `refund_id`, `refund_status`) is therefore available
+today only through the synchronous `PaystackOperations` surface, whose
+`OperationResult.reply` carries it; through DELIVERY a lookup reports only that
+it ran, and an ambiguous list reports `reconciliation_required`. This is the
+same gap `dotmac-connector-remita` records for RRR issuance, and it is stated
+rather than worked around.
