@@ -83,7 +83,7 @@ from dotmac_inbox.service import (
 from dotmac_inbox.threading import DedupKey, InboundIdentity, dedup_key, thread_key
 from dotmac_inbox.transport import TransportMessageIdentity
 
-__version__ = "0.1.0a2+dev"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "__version__",
