@@ -628,3 +628,56 @@ def test_database_refuses_commit_of_post_seal_import_without_hold_record(scratch
         _admit(session, scope, held)
         session.commit()
         assert len(get_opening_hold_admissions(session, scope=scope)) == 1
+
+
+def _admissible_and_held_only(session, scope):
+    """The drafter's real held shape: only ``blocking``/``held:`` dispositions."""
+    admitted_id, held_id = (
+        cash._new_account(session, scope),
+        cash._new_account(session, scope),
+    )
+    first = ar._command(session, scope, admitted_id)
+    second = ar._command(session, scope, held_id)
+    held_dispositions = tuple(
+        replace(d, disposition="blocking", reason="held:fixture")
+        for d in second.manifest.dispositions
+    )
+    manifest = replace(
+        first.manifest,
+        population=first.manifest.population + second.manifest.population,
+        dispositions=first.manifest.dispositions + held_dispositions,
+        # the held partition has no lots, so its cash control is zero
+        controls=first.manifest.controls
+        + tuple(
+            replace(c, available_cash_credit_minor=0) for c in second.manifest.controls
+        ),
+        counts=replace(
+            first.manifest.counts,
+            **{
+                f.name: getattr(first.manifest.counts, f.name)
+                + getattr(second.manifest.counts, f.name)
+                for f in fields(first.manifest.counts)
+                if f.name not in {"eligible", "blocking"}
+            },
+            eligible=first.manifest.counts.eligible,
+            blocking=first.manifest.counts.blocking + len(held_dispositions),
+        ),
+    )
+    first = replace(first, manifest=manifest)
+    cash._prepare_window(session, scope, first)
+    session.commit()
+    return first, held_id
+
+
+def test_seal_is_refused_while_a_held_marked_partition_is_not_listed(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        admitted, held_id = _admissible_and_held_only(session, scope)
+        _import(session, scope, admitted)
+        session.commit()
+        for held in ([], [held_id]):
+            with pytest.raises(BillingRuleViolation) as refused:
+                _seal(session, scope, held=held)
+            assert refused.value.code == "billing.opening_hold_list_invalid"
+            session.rollback()
+            assert get_opening_window_seal(session, scope=scope) is None

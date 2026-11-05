@@ -504,6 +504,7 @@
           "dotmac_billing/opening_qualification.py",
           "dotmac_billing/opening_verification_contracts.py",
           "dotmac_billing/opening_verification.py",
+          "dotmac_billing/opening_admissibility.py",
           "dotmac_billing/migrations/versions/bi_0013_opening_hold_admission.py",
           "dotmac_billing/opening_hold_contracts.py",
           "dotmac_billing/opening_lane.py"
