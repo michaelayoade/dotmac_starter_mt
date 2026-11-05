@@ -651,8 +651,11 @@ the image pin, pulls, runs `alembic upgrade heads` in a one-off container, and
 recreates the app. A failed HTTP health gate restores the previous image when
 one was recorded. It does not undo migrations or automatically restore a
 backup, so migrations must remain compatible with the previous application.
-`/health` is liveness only: success does not prove database readiness or tenant
-workflows. Verify those separately after deployment.
+The acceptance gate uses `/health/ready`, which checks completed startup and
+the assembly's declared local dependencies. `/health` and `/health/live` remain
+liveness only. Readiness is not proof of every business workflow or the full
+database catalogue; retain the migration/isolation checks and verify tenant
+workflows after deployment.
 
 Use the default root `.env` with the supplied Compose file. Although the script
 accepts `ENV_FILE`, Compose still declares `env_file: .env`, and the script
@@ -697,7 +700,8 @@ staging, unset, blank, and unknown values hide browser documentation and protect
 - Rate limiting is process-local and LRU-bounded by `RATE_LIMIT_MAX_KEYS`.
   Keys include tenant, client IP, and route template (or a fixed hash bucket
   for unmatched paths). Separate workers/nodes do not share counters; provide
-  a shared `RateLimitStore` implementation for aggregate limits. Setting
+  a shared `RateLimitStore` through `ProductAssemblySpec.rate_limit_store`
+  for aggregate limits. Setting
   `RATE_LIMIT_REDIS_URL` alone does not install one.
 - Inbound `X-Request-ID` is ignored by default to prevent log poisoning. Set
   `TRUST_INBOUND_REQUEST_ID=true` only behind a trusted proxy that

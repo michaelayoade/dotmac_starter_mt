@@ -47,6 +47,28 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+
+@pytest.fixture(autouse=True)
+def _restore_composition_owner() -> Iterator[None]:
+    """Preserve the assembly owner across isolated tests, like active registries.
+
+    Running-assembly guards remain active and are exercised by lease canaries.
+    """
+    from dotmac_kernel import app_factory
+
+    from app.assembly import assembly
+
+    previous = app_factory._composed_assembly
+    # Collection also builds isolated test apps. Re-establish the reference
+    # graph for each test instead of inheriting whichever collector ran last.
+    # Tests may still compose another graph and exercise supersession normally.
+    app_factory._composed_assembly = assembly
+    try:
+        yield
+    finally:
+        app_factory._composed_assembly = previous
+
+
 #: What the test fleet is allowed to attribute things to. Named here rather
 #: than per-test because attribution is now a precondition of writing an audit
 #: row at all, exactly as an installed audit-action registry is, and the ~30

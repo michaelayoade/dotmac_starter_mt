@@ -9,8 +9,9 @@ feature packages one at a time, or not at all. Everything below still describes
 the shared surface both manifests present.
 
 Each package under app/features/ exports `feature: FeatureManifest` from its
-feature.py. Core features fail hard at startup; non-core features are fault-
-isolated (a broken optional feature logs and is skipped). Loading uses
+feature.py. Core features fail hard during loading; a broken optional import
+logs and is skipped. Once selected, any router mount failure aborts composition
+instead of serving a partial graph. Loading uses
 importlib so dotmac_kernel never statically imports app.features (import-linter
 enforces this).
 
@@ -199,9 +200,10 @@ def mount_features(
                 for router in manifest.web_routers:
                     app.include_router(router)
         except Exception:
-            if manifest.core:
-                raise
-            logger.exception("Optional feature %s failed to mount", manifest.name)
+            # Optional means the assembly may omit the module. Once selected,
+            # partial router inclusion must never produce a serving app.
+            logger.exception("Selected feature %s failed to mount", manifest.name)
+            raise
 
 
 __all__ = [

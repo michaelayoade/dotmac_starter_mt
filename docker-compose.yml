@@ -19,7 +19,7 @@ services:
     mem_limit: ${APP_MEM_LIMIT:-512m}
     pids_limit: ${APP_PIDS_LIMIT:-256}
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:${APP_PORT:-8000}/health')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen(urllib.request.Request('http://localhost:${APP_PORT:-8000}/health', headers={'Host': '${PLATFORM_ROOT_DOMAIN:-localhost}'}))\""]
       interval: 10s
       timeout: 3s
       retries: 5

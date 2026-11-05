@@ -34,6 +34,7 @@
 #                            e.g. ghcr.io/org/dotmac_starter_mt, for real deploys)
 #   APP_PORT                default: 8000
 #   DEPLOY_HEALTH_HOST      default: 127.0.0.1
+#   DEPLOY_HEALTH_VHOST     HTTP Host, default: PLATFORM_ROOT_DOMAIN or localhost
 #   BACKUP_DIR              default: backups (relative to DEPLOY_DIR)
 #   HEALTH_RETRIES          default: 15
 #   HEALTH_INTERVAL         default: 2 (seconds)
@@ -56,6 +57,7 @@ Config (env var, or set in ENV_FILE — default <DEPLOY_DIR>/.env):
   COMPOSE_FILE_PROD       compose file, default docker-compose.yml
   APP_PORT                default 8000
   DEPLOY_HEALTH_HOST      default 127.0.0.1
+  DEPLOY_HEALTH_VHOST     default PLATFORM_ROOT_DOMAIN or localhost
   BACKUP_DIR              default backups
   HEALTH_RETRIES          default 15
   HEALTH_INTERVAL         default 2 (seconds)
@@ -96,6 +98,7 @@ set +a
 : "${IMAGE_NAME:=dotmac_starter_mt}"
 : "${APP_PORT:=8000}"
 : "${DEPLOY_HEALTH_HOST:=127.0.0.1}"
+: "${DEPLOY_HEALTH_VHOST:=${PLATFORM_ROOT_DOMAIN:-localhost}}"
 : "${BACKUP_DIR:=backups}"
 : "${HEALTH_RETRIES:=15}"
 : "${HEALTH_INTERVAL:=2}"
@@ -116,7 +119,7 @@ PREV_IMAGE="$(grep -E '^APP_IMAGE=' "${ENV_FILE}" | cut -d= -f2- || true)"
 # .env-wins precedence above.
 APP_IMAGE="${IMAGE_NAME}:${TAG}"
 
-HEALTH_URL="http://${DEPLOY_HEALTH_HOST}:${APP_PORT}/health"
+HEALTH_URL="http://${DEPLOY_HEALTH_HOST}:${APP_PORT}/health/ready"
 COMPOSE=(docker compose -f "${COMPOSE_FILE_PROD}")
 
 log "Deploying ${APP_IMAGE} (currently pinned: ${PREV_IMAGE:-none})"
@@ -174,7 +177,7 @@ log "Recreating app service"
 log "Waiting for app health at ${HEALTH_URL} (${HEALTH_RETRIES} retries, ${HEALTH_INTERVAL}s apart)"
 healthy=0
 for ((i = 1; i <= HEALTH_RETRIES; i++)); do
-  if curl -fsS --connect-timeout "${HEALTH_CURL_TIMEOUT}" --max-time "${HEALTH_CURL_TIMEOUT}" -o /dev/null "${HEALTH_URL}" 2>/dev/null; then
+  if curl -fsS --connect-timeout "${HEALTH_CURL_TIMEOUT}" --max-time "${HEALTH_CURL_TIMEOUT}" --header "Host: ${DEPLOY_HEALTH_VHOST}" -o /dev/null "${HEALTH_URL}" 2>/dev/null; then
     healthy=1
     break
   fi

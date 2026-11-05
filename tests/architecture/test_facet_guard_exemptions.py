@@ -76,7 +76,8 @@ _MUTATING: Final[frozenset[str]] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: exemption fails, and REMOVING one fails until the number is lowered in the
 #: same change, so retirement is recorded rather than absorbed.
 _FROZEN_EXEMPTIONS: Final[dict[str, int]] = {
-    "ALLOWLIST": 3,
+    # Two infrastructure probes added alongside /health: /live and /ready.
+    "ALLOWLIST": 5,
     "MUTATING_ALLOWLIST": 6,
 }
 

@@ -11,10 +11,12 @@ from dotmac_inbox import (
     ConversationNotFound,
     Direction,
     MessagePage,
+    RecentMessagePage,
     Status,
     get_conversation,
     list_conversations,
     list_messages,
+    list_recent_messages,
 )
 from dotmac_inbox.models import Conversation, ConversationReadState, Message
 from dotmac_kernel.models import Base, Tenant
@@ -198,6 +200,98 @@ def test_message_timeline_is_ascending_with_equal_timestamp_ties(db: Session) ->
     assert [item.body for item in first.items + second.items] == ["1", "2", "3"]
 
 
+def test_recent_message_pages_start_at_the_newest_and_walk_older(db: Session) -> None:
+    tenant = _tenant(db, "recent-timeline")
+    conversation = _conversation(tenant, 1)
+    moment = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add(conversation)
+    db.add_all(
+        [
+            _message(tenant, conversation, number, moment + timedelta(seconds=number))
+            for number in (3, 5, 1, 4, 2)
+        ]
+    )
+    db.flush()
+
+    newest = list_recent_messages(
+        db, tenant_id=tenant.id, conversation_id=conversation.id, limit=2
+    )
+    older = list_recent_messages(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        before_cursor=newest.before_cursor,
+        limit=2,
+    )
+    oldest = list_recent_messages(
+        db,
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        before_cursor=older.before_cursor,
+        limit=2,
+    )
+
+    assert [item.body for item in newest.items] == ["4", "5"]
+    assert newest.has_older_messages is True
+    assert newest.before_cursor is not None
+    assert [item.body for item in older.items] == ["2", "3"]
+    assert older.has_older_messages is True
+    assert older.before_cursor is not None
+    assert len(oldest.items) == 1
+    assert oldest.before_cursor is None
+    assert oldest.has_older_messages is False
+    assert oldest.items[0].body == "1"
+
+
+def test_recent_message_cursor_is_scope_bound_and_keeps_timestamp_ties(
+    db: Session,
+) -> None:
+    one = _tenant(db, "recent-one")
+    two = _tenant(db, "recent-two")
+    conversation = _conversation(one, 1)
+    other = _conversation(one, 9)
+    moment = datetime(2026, 9, 1, tzinfo=UTC)
+    db.add_all([conversation, other])
+    db.add_all([_message(one, conversation, number, moment) for number in (1, 2, 3)])
+    db.flush()
+
+    newest = list_recent_messages(
+        db, tenant_id=one.id, conversation_id=conversation.id, limit=2
+    )
+    assert [item.id for item in newest.items] == [UUID(int=2), UUID(int=3)]
+    assert newest.before_cursor is not None
+    with pytest.raises(ValueError):
+        list_messages(
+            db,
+            tenant_id=one.id,
+            conversation_id=conversation.id,
+            cursor=newest.before_cursor,
+        )
+    older = list_recent_messages(
+        db,
+        tenant_id=one.id,
+        conversation_id=conversation.id,
+        before_cursor=newest.before_cursor,
+        limit=2,
+    )
+    assert [item.id for item in older.items] == [UUID(int=1)]
+
+    with pytest.raises(ValueError):
+        list_recent_messages(
+            db,
+            tenant_id=one.id,
+            conversation_id=other.id,
+            before_cursor=newest.before_cursor,
+        )
+    with pytest.raises(ConversationNotFound):
+        list_recent_messages(
+            db,
+            tenant_id=two.id,
+            conversation_id=conversation.id,
+            before_cursor=newest.before_cursor,
+        )
+
+
 def test_cursors_are_opaque_and_bound_to_their_read_kind(db: Session) -> None:
     tenant = _tenant(db, "cursor-kind")
     conversation = _conversation(tenant, 1)
@@ -267,6 +361,13 @@ def test_limits_and_cursors_are_validated(db: Session, limit: int) -> None:
             conversation_id=conversation.id,
             cursor="eyJ2IjoxLCJraW5kIjoibWVzc2FnZXMiLCJhdCI6bnVsbCwiaWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDAifQ",
         )
+    with pytest.raises(ValueError):
+        list_recent_messages(
+            db,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            limit=limit,
+        )
 
 
 def test_empty_pages_are_valid(db: Session) -> None:
@@ -279,3 +380,6 @@ def test_empty_pages_are_valid(db: Session) -> None:
     assert list_messages(
         db, tenant_id=tenant.id, conversation_id=conversation.id
     ) == MessagePage((), None)
+    assert list_recent_messages(
+        db, tenant_id=tenant.id, conversation_id=conversation.id
+    ) == RecentMessagePage((), None, False)

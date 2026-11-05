@@ -1,0 +1,8 @@
+{
+  "distributions": [
+    "dotmac-kernel[licensing]",
+    "dotmac-ui",
+    "dotmac-template-studio",
+    "dotmac-ticketing"
+  ]
+}

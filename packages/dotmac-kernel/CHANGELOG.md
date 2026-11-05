@@ -8,6 +8,12 @@ here.
 
 ## Unreleased — post-0.1.0a107 development
 
+- Add assembly-declared readiness checks and existing rate-store binding,
+  thread-pool scheduling for tenant lookup/store calls, and process-composition
+  lifespan guards. Selected router mount failures now abort construction.
+  These tighten startup/composition behavior; independently configured apps
+  must run in separate processes, and ASGI lifespan must remain enabled.
+
 - Add bundled third-party static-asset notices and their provenance index.
 - Mark the changed package contents as `0.1.0a107+dev` across version metadata.
   The published `0.1.0a107` tag remains immutable; this development identity
