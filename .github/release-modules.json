@@ -3522,7 +3522,8 @@
           "dotmac_learning/bank_transfer_contracts.py",
           "dotmac_learning/migrations/versions/lr_0008_prerequisite_conditions.py",
           "dotmac_learning/migrations/versions/lr_0009_composable_policies.py",
-          "dotmac_learning/migrations/versions/lr_0010_question_bank_versions.py"
+          "dotmac_learning/migrations/versions/lr_0010_question_bank_versions.py",
+          "dotmac_learning/migrations/versions/lr_0011_lab_result_capability.py"
         ],
         "forbidden_prefixes": [
           "app/",

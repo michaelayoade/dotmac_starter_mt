@@ -480,7 +480,7 @@ def _expire_lab_touched(
             db.expire(obj)
     for obj in list(db.identity_map.values()):
         if (
-            isinstance(obj, (CourseCompletion, Certificate))
+            isinstance(obj, CourseCompletion | Certificate)
             and obj.tenant_id == payload.tenant_id
             and obj.person_id == payload.person_id
             and obj.course_id == course_id
@@ -592,9 +592,7 @@ def record_lab_result(db: Session, payload: LabResultCommand) -> ResultWrite:
             (em for kind, em in emissions if kind == "certificate_earned"), None
         )
         if row["certificate_created"] and cert_event is None:
-            raise RuntimeError(
-                "created certificate has no certificate_earned emission"
-            )
+            raise RuntimeError("created certificate has no certificate_earned emission")
         certificate = CertificateIssue(
             certificate=CertificateFact(
                 id=cert.id,
