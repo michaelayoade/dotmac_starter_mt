@@ -88,6 +88,16 @@ def result_database(learning_database):
             other_person = _person(conn, other)
             root_only = _person(conn, tenant, subtype=False)
             malformed_org = _person(conn, tenant, party_type="organization")
+            # Composition grant: lr_0011 grants EXECUTE to nobody; the
+            # Python lab API caller (app_user here) must hold it.
+            conn.execute(
+                text(
+                    "GRANT EXECUTE ON FUNCTION "
+                    "mod_learning.record_lab_result_v1(uuid, uuid, uuid, uuid, "
+                    "jsonb, double precision, double precision, "
+                    "double precision, boolean, jsonb) TO app_user"
+                )
+            )
         course, activity = uuid4(), uuid4()
         with scoped(app, tenant) as db:
             create_course(
