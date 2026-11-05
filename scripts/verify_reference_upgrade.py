@@ -241,7 +241,7 @@ with platform_session() as db:
             "--network",
             self.prefix,
             "-p",
-            "127.0.0.1::8000",
+            ":".join(("127.0.0.1", "", "8000")),
         ]
         # Migration/maintenance credentials never reach the online container.
         for name in self.runtime_names():
