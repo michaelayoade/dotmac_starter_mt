@@ -150,6 +150,8 @@ def test_real_installed_kernel_learning_and_partial_assembly_replay(
                 assert applied[-1][0] == "lr_0009_composable_policies"
                 command.upgrade(cfg, "lr_0010_question_bank_versions")
                 assert applied[-1][0] == "lr_0010_question_bank_versions"
+                command.upgrade(cfg, "lr_0011_lab_result_capability")
+                assert applied[-1][0] == "lr_0011_lab_result_capability"
                 expected_applied = {
                     script.revision for script in scripts.walk_revisions()
                 } - {"a002_later"}

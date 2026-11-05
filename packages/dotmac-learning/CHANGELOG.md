@@ -1,5 +1,32 @@
 # Changelog — dotmac-learning
 
+## 0.1.0a5 — allocated source candidate, not yet published
+
+Add `lr_0011_lab_result_capability`: `mod_learning.record_lab_result_v1`, a
+SECURITY INVOKER SQL function (`search_path = pg_catalog, pg_temp`, every
+name qualified, `REVOKE ALL FROM PUBLIC`, no grants) that is the single lab
+ledger writer — submission, score, optional events, completion recompute
+and certificate issuance with the Python owner path's semantics, returning
+the ledger ids plus ordered event outcomes
+(`event_kinds`/`event_statuses`/`event_ids`). Python `record_lab_result`
+keeps its signature and `ResultWrite` shape and now delegates to the
+function on the caller's Session (flush first, targeted expire of the
+touched completion/certificate/submission/score instances, emissions
+rebuilt from the returned outcomes). The caller's role therefore needs
+EXECUTE on the capability; product composition grants it and Learning
+grants it to nobody. New export `LAB_RESULT_CAPABILITY` pins the identity
+signature (601 root exports).
+
+Completion recompute and certificate issuance are now implemented twice
+(Python for MCQ/override, lr_0011 SQL for labs); see the dated exception in
+`EXTRACTION.toml`. Storage is unchanged (28 tables, 298 fields);
+`lr_0001`–`lr_0010` bytes are unchanged and the lineage head is `lr_0011`.
+Hosted capability/parity tests are authored and unexecuted locally; hosted
+qualification, publication, installation and Academy adoption remain
+separate gates. Published 0.1.0a4 remains immutable: its publication is
+recorded by PR #948 (merge `9ee4bdb4`); the a4 section below is retained
+as its allocation-era record.
+
 ## 0.1.0a4 — allocated source candidate, not yet published
 
 Add `CohortIntakePatch` and `patch_cohort_intake` for the two existing Academy

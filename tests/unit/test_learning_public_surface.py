@@ -552,3 +552,19 @@ def test_bank_lifecycle_and_v6_have_public_owners():
         assert getattr(learning, name) is getattr(bank_transfer, name)
     for name in ("LearningSnapshotV6", "QuestionBankVersionRowV6"):
         assert getattr(learning, name) is getattr(bank_transfer_contracts, name)
+
+
+def test_lab_result_capability_constant_has_one_public_owner():
+    from dotmac_learning import result_contracts
+
+    assert learning.__all__.count("LAB_RESULT_CAPABILITY") == 1
+    assert learning.LAB_RESULT_CAPABILITY is result_contracts.LAB_RESULT_CAPABILITY
+    assert learning.LAB_RESULT_CAPABILITY == (
+        "mod_learning.record_lab_result_v1("
+        "pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, "
+        "pg_catalog.jsonb, pg_catalog.float8, pg_catalog.float8, "
+        "pg_catalog.float8, pg_catalog.bool, pg_catalog.jsonb)"
+    )
+    assert {"lr_0011_lab_result_capability.py"} <= {
+        path.name for path in learning.versions_dir().glob("*.py")
+    }

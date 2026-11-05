@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from uuid import UUID
 
 from dotmac_kernel.models import Party, PartyPerson, PartyType
 from pydantic import JsonValue, TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, SessionTransaction
 
 from . import completion, events
-from .event_contracts import EventEmission, EventWrite
-from .models import Activity, Score, Submission
-from .progress_contracts import CompletionCommand, ScoreFact
+from .event_contracts import EventEmission, EventFact, EventWrite
+from .models import (
+    Activity,
+    Certificate,
+    CourseCompletion,
+    LearningEvent,
+    Score,
+    Submission,
+)
+from .progress_contracts import (
+    CertificateFact,
+    CertificateIssue,
+    CompletionCommand,
+    CompletionFact,
+    CompletionResult,
+    ScoreFact,
+)
 from .result_contracts import (
     AdmissionContention,
     AdmissionDecision,
@@ -436,13 +451,184 @@ def submit_mcq_activity(db: Session, payload: SubmitMCQCommand) -> ResultWrite:
     )
 
 
+_LAB_CALL = text(
+    "SELECT submission_id, attempt_no, score_id, completion_id, "
+    "first_completion, certificate_id, certificate_created, course_id, "
+    "prior_pass_exists, event_kinds, event_statuses, event_ids "
+    "FROM mod_learning.record_lab_result_v1("
+    "CAST(:tenant_id AS pg_catalog.uuid), CAST(:person_id AS pg_catalog.uuid), "
+    "CAST(:activity_id AS pg_catalog.uuid), "
+    "CAST(:instance_id AS pg_catalog.uuid), "
+    "CAST(:seed AS pg_catalog.jsonb), :score, :max_score, :fraction, :passed, "
+    "CAST(:per_item AS pg_catalog.jsonb))"
+)
+
+
+def _expire_lab_touched(
+    db: Session, payload: LabResultCommand, course_id: UUID
+) -> None:
+    """Expire identity-map rows the SQL writer may have changed (D4)."""
+    submission_ids: set[UUID] = set()
+    for obj in list(db.identity_map.values()):
+        if (
+            isinstance(obj, Submission)
+            and obj.tenant_id == payload.tenant_id
+            and obj.person_id == payload.person_id
+            and obj.activity_id == payload.activity_id
+        ):
+            submission_ids.add(obj.id)
+            db.expire(obj)
+    for obj in list(db.identity_map.values()):
+        if (
+            isinstance(obj, CourseCompletion | Certificate)
+            and obj.tenant_id == payload.tenant_id
+            and obj.person_id == payload.person_id
+            and obj.course_id == course_id
+        ):
+            db.expire(obj)
+        elif (
+            isinstance(obj, Score)
+            and obj.tenant_id == payload.tenant_id
+            and obj.submission_id in submission_ids
+        ):
+            db.expire(obj)
+
+
+def _emission(db: Session, status: str, event_id: UUID | None) -> EventEmission:
+    if status == "recorded":
+        if event_id is None:
+            raise RuntimeError("recorded learning event has no event id")
+        event = db.get(LearningEvent, event_id)
+        if event is None:
+            raise RuntimeError("recorded learning event is unavailable")
+        return EventEmission(
+            "recorded",
+            EventFact(
+                id=event.id,
+                tenant_id=event.tenant_id,
+                person_id=event.person_id,
+                kind=event.kind,
+                course_id=event.course_id,
+                subject_id=event.subject_id,
+                detail=deepcopy(_JSON.validate_python(event.detail)),
+                occurred_at=event.occurred_at,
+                created_at=event.created_at,
+                updated_at=event.updated_at,
+            ),
+        )
+    if status == "suppressed":
+        return EventEmission("suppressed")
+    return EventEmission("failed")
+
+
 def record_lab_result(db: Session, payload: LabResultCommand) -> ResultWrite:
-    """Append a product-authorized live lab result without learner admission locks."""
+    """Append a product-authorized live lab result without learner admission locks.
+
+    The lr_0011 SQL capability is the single lab ledger writer; this
+    delegates to it on the caller's Session (flush first, then targeted
+    expire) and rebuilds the same ``ResultWrite`` the Python writer
+    returned. The caller's role needs EXECUTE on the capability, which
+    product composition grants; Learning grants it to nobody.
+
+    A capability refusal (SQLSTATE 22004/22023) is mapped to
+    ``ResultBadRequest``, but the underlying database error has already
+    aborted the caller's transaction: the caller MUST roll back its
+    root transaction (or its savepoint, where it opened one around
+    this call) before issuing any further SQL. Catching
+    ``ResultBadRequest`` and continuing in the same transaction will
+    only surface PostgreSQL's aborted-transaction error.
+    """
     _transaction(db)
     activity = _activity(db, payload.tenant_id, payload.activity_id)
     if activity.type != "lab":
         raise ResultBadRequest("Lab results require a lab activity.")
-    return _append(db, payload, activity, lab=True)
+    grade = payload.grading
+    db.flush()
+    try:
+        row = (
+            db.execute(
+                _LAB_CALL,
+                {
+                    "tenant_id": payload.tenant_id,
+                    "person_id": payload.person_id,
+                    "activity_id": payload.activity_id,
+                    "instance_id": payload.instance_id,
+                    "seed": json.dumps(payload.seed),
+                    "score": grade.score,
+                    "max_score": grade.max_score,
+                    "fraction": grade.fraction,
+                    "passed": grade.passed,
+                    "per_item": json.dumps(grade.per_item),
+                },
+            )
+            .mappings()
+            .one()
+        )
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) in ("22004", "22023"):
+            raise ResultBadRequest(
+                "lab result refused by the learning ledger capability"
+            ) from exc
+        raise
+    course_id = row["course_id"]
+    _expire_lab_touched(db, payload, course_id)
+    sub = db.get(Submission, row["submission_id"])
+    score = db.get(Score, row["score_id"])
+    comp = db.get(CourseCompletion, row["completion_id"])
+    if sub is None or score is None or comp is None:
+        raise RuntimeError("lab result rows are unavailable after delegation")
+    emissions: list[tuple[str, EventEmission]] = [
+        (kind, _emission(db, status, event_id))
+        for kind, status, event_id in zip(
+            row["event_kinds"], row["event_statuses"], row["event_ids"], strict=True
+        )
+    ]
+    certificate = None
+    if row["certificate_id"] is not None:
+        cert = db.get(Certificate, row["certificate_id"])
+        if cert is None:
+            raise RuntimeError("certificate row is unavailable after delegation")
+        cert_event = next(
+            (em for kind, em in emissions if kind == "certificate_earned"), None
+        )
+        if row["certificate_created"] and cert_event is None:
+            raise RuntimeError("created certificate has no certificate_earned emission")
+        certificate = CertificateIssue(
+            certificate=CertificateFact(
+                id=cert.id,
+                tenant_id=cert.tenant_id,
+                person_id=cert.person_id,
+                course_id=cert.course_id,
+                serial=cert.serial,
+                issued_at=cert.issued_at,
+                created_at=cert.created_at,
+                updated_at=cert.updated_at,
+                expires_at=cert.expires_at,
+            ),
+            created=bool(row["certificate_created"]),
+            event=cert_event if row["certificate_created"] else None,
+        )
+    consequence = CompletionResult(
+        completion=CompletionFact(
+            id=comp.id,
+            tenant_id=comp.tenant_id,
+            person_id=comp.person_id,
+            course_id=comp.course_id,
+            status=comp.status,
+            pct=comp.pct,
+            completed_at=comp.completed_at,
+            created_at=comp.created_at,
+            updated_at=comp.updated_at,
+        ),
+        first_completion=bool(row["first_completion"]),
+        certificate=certificate,
+    )
+    return ResultWrite(
+        _submission_fact(sub),
+        _score_fact(score),
+        consequence,
+        tuple(em for kind, em in emissions if kind != "certificate_earned"),
+    )
 
 
 def override_score(db: Session, payload: OverrideScoreCommand) -> ResultWrite:

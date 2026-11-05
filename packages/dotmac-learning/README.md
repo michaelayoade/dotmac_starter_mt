@@ -9,15 +9,14 @@ the versioned lifecycle described below). The participation
 slice adds enrolment/audience, tracks and course access, alongside the existing
 pure exam-engine/grader port. The prepared continuation adds attempt policy and
 persistence, scheduling, pacing, announcements, support queues and learning
-read projections. The current allocated `0.1.0a4` source successor adds the
-typed cohort intake patch to the published a3 contract: 28 tables, 298 persisted
-fields and 600 root exports. Academy is the candidate consumer; no a4 adoption
+read projections. The current allocated `0.1.0a5` source successor adds the lr_0011 lab-result
+SQL capability to the published a4 contract: 28 tables, 298 persisted
+fields and 601 root exports. Academy is the candidate consumer; no a5 adoption
 is claimed.
 
 Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.
-The a4 successor is not yet published. See the
-[intake successor dossier](../../docs/inventories/learning-cohort-intake-successor-2026-10-28.md) for source evidence,
-compatibility and release/adoption gates.
+The a5 successor is not yet published. Published 0.1.0a4 remains immutable
+(publication recorded by PR #948).
 
 This successor is prepared source, pending hosted qualification and publication.
 Academy has not adopted this successor. See `EXTRACTION.toml` for source provenance,
@@ -28,9 +27,9 @@ source staging/flush behavior; the application boundary commits or rolls back. C
 and `versions_dir()` lineage, bind the four declared Kernel prerequisites, and
 use genuine Kernel tenant, Party and PartyPerson records. The prepared manifest owns 28 tables in `mod_learning` and the independent
 `learning` Alembic branch, from `lr_0001_learning` through
-`lr_0010_question_bank_versions`. `lr_0005_tenant_audit` verifies the existing Kernel
+`lr_0011_lab_result_capability`. `lr_0005_tenant_audit` verifies the existing Kernel
 audit catalog without copying its provider or writer. The declared Kernel floor remains `>=0.1.0a106`; published Kernel a107
-satisfies it. The a4 intake patch consumes no new Kernel API. The
+satisfies it. The a5 lab capability consumes no new Kernel API. The
 package creates no runtime engine or session.
 
 The main command paths are `record_mcq_result`, `record_lab_result`,
@@ -41,6 +40,14 @@ activity, including labs and chapterless activities; a course with no activities
 is incomplete. Regression clears completion time and retains an issued
 certificate. Certificate lookup returns an existing issuance before checking
 current eligibility.
+
+Lab results have one ledger writer: the SECURITY INVOKER function
+`mod_learning.record_lab_result_v1` added by `lr_0011` (identity pinned by
+`LAB_RESULT_CAPABILITY`). Python `record_lab_result` delegates to it on the
+caller's Session and rebuilds the same facts and event emissions. Learning
+grants EXECUTE on the function to nobody; product composition grants it to
+the roles that call the Python lab API, and an adopting product's definer
+may reach it as the function owner without any Learning table grant.
 
 Curriculum commands preserve authoring saves that always advance course version,
 manual-import change detection, retained missing chapters and requested bank

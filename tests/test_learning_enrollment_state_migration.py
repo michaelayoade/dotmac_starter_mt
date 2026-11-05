@@ -144,9 +144,9 @@ def test_schema_only_retirement_preserves_historical_rows_and_catalog(
             assert columns["status"]["default"] is None
             heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
             # Composed DB: alembic_version also carries the kernel
-            # head; lr_0007 is proven applied by the lr_0010 head
+            # head; lr_0007 is proven applied by the lr_0011 head
             # descending from it (and by the retired defaults above).
-            assert "lr_0010_question_bank_versions" in heads
+            assert "lr_0011_lab_result_capability" in heads
             assert "lr_0006_delivery_support" not in heads
         with app.begin() as conn:
             _scope(conn, tenant)

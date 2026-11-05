@@ -375,6 +375,7 @@ from dotmac_learning.references import (
     update_course,
 )
 from dotmac_learning.result_contracts import (
+    LAB_RESULT_CAPABILITY,
     AdmissionContention,
     AdmissionDecision,
     AdmissionObservation,
@@ -447,7 +448,7 @@ from dotmac_learning.transfer_contracts import (
     VerificationObservation,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 
 from dotmac_learning.account_contracts import (
@@ -957,6 +958,7 @@ __all__ = [
     "GradedResult",
     "ImportObservation",
     "JsonbText",
+    "LAB_RESULT_CAPABILITY",
     "LabResultCommand",
     "LearningEventRowV1",
     "LearningSnapshotV1",
