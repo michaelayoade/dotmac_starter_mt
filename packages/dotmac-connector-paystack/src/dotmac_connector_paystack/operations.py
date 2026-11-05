@@ -1,10 +1,14 @@
 """Outbound Paystack operations — provider I/O, and nothing that decides money.
 
-Nine provider-neutral operations, each one command the connector is TOLD to
-perform. It authenticates, translates the wire format, performs the call and
-classifies what came back. It never reads a product database, never decides
-whether a refund is warranted, which invoice a payment covers, whether a
-customer may be charged, or when to try again — those are the product's, and
+Two provider-neutral operations, both on the refund path: ``refund``, the one
+command the connector is TOLD to perform, and ``find_refund``, the read that
+decides an ambiguous one. (Payment intent, saved-authorization charge, payout
+and customer operations are NOT part of this release; they were removed rather
+than disabled, because the capability allocation guard in ``delivery`` forbids
+an operation no capability can reach.) The connector authenticates, translates
+the wire format, performs the call and classifies what came back. It never
+reads a product database, never decides whether a refund is warranted, and
+never decides when to try again — those are the product's, and
 retry/checkpoint/dead-letter is the engine's.
 
 ## Five outcomes, because four of them are not enough
@@ -20,57 +24,42 @@ outcome       what it means
 ============= ==================================================================
 
 A DECLINE IS NOT A RETRYABLE ERROR. It is the provider's answer, and repeating
-the question does not change it — worse, `dotmac_sub`'s autopay records why
-repeating it is actively harmful: *a decline burns the reference at Paystack*,
-so the identical retry is refused while a fresh attempt (a product decision,
-tracked by the mandate's failure count) is not. So `DECLINED` maps to the
-engine's `TERMINAL` and never to `RETRYABLE`; the mapping is a total table with
-an import-time totality guard, not a chain of ``if``\\ s a later member can slip
-past.
+the question does not change it. So `DECLINED` maps to the engine's `TERMINAL`
+and never to `RETRYABLE`; the mapping is a total table with an import-time
+totality guard, not a chain of ``if``\\ s a later member can slip past.
 
 `AMBIGUOUS` is the one people leave out, and leaving it out is the
-duplicate-charge bug. A read timeout on a charge or a transfer means the bytes
-were sent and the answer was lost — the money may already have moved. Retrying
-captures the card twice; dead-lettering hides a live transaction. It maps to
-`RECONCILIATION_REQUIRED`, which stops the engine attempting anything and hands
-the question to a reconciler that resolves it against provider state
-(`GET /transaction/verify/{reference}`, `GET /transfer/verify/{reference}`,
-`GET /refund?transaction=...`). That is exactly what `dotmac_erp`'s
-`payment_service._recover_transfer_initiation` does after a timeout or a
-duplicate-reference refusal, and what `dotmac_sub`'s `autopay._recover_charge`
-does after any charge exception.
+duplicate-refund bug. A read timeout on a refund means the bytes were sent and
+the answer was lost — the money may already be on its way back. Retrying
+refunds twice. It maps to `RECONCILIATION_REQUIRED`, which stops the engine
+attempting anything and hands the question to a reconciler that resolves it
+against provider state with ``find_refund`` (``GET /refund?transaction=...``)
+and NEVER by sending the refund again.
 
-## Paystack has no idempotency header. It has something better and narrower
+## Paystack's `/refund` has no idempotency key
 
-Checked against the provider's own contract and against both production
-integrations: **Paystack publishes no ``Idempotency-Key`` header**, and neither
-ERP's 1,164-line client nor Sub's connector runtime ever sends one. What it
-publishes instead is a client-supplied unique ``reference`` on
-``/transaction/initialize``, ``/transaction/charge_authorization`` and
-``/transfer``. Reusing one is REFUSED server-side — "Duplicate Transaction
-Reference" on a transaction, ``duplicate_transfer_reference`` on a transfer —
-so the reference is a real, provider-enforced, at-most-once key for the three
-operations that move money into the merchant's balance or out of it.
+Checked against the provider's own contract: **Paystack publishes no
+``Idempotency-Key`` header**, and ``/refund`` accepts no client-supplied
+reference either — the one money-moving endpoint here with no provider-side
+at-most-once key. Nothing at the provider refuses a second refund, so the
+protection is ours: the classification above never lets an ambiguous send be
+retried, and every refund carries the ENGINE's idempotency key (stable across
+attempts of one delivery), verbatim, in ``merchant_note``, where ``find_refund``
+matches it exactly. The lookup is its own delivery with its own key, so it is
+given the refund's reference as ``params.refund_reference``. Sub solved it the
+same way in production.
 
-This module derives that reference from the ENGINE's idempotency key, which is
-stable across attempts of one delivery (`dotmac_integration.dispatch` takes it
-from the delivery row, never from the attempt number). Two independent
-protections therefore stack, and neither relies on the other:
+``find_refund`` reads the list of refunds for a transaction and compares the
+caller's ``refund_reference`` with each record's ``merchant_note``: zero matches
+means the refund was not found as of this read, one means it was found (its id
+and status travel as evidence), more than one is an anomaly for a human. A
+list that is unreadable or reports another page decides nothing and is
+AMBIGUOUS.
 
-1. the classification above never lets an ambiguous send be retried at all;
-2. if something retries anyway, Paystack refuses the duplicate reference.
-
-The reference is derived from the key and never read from the payload. A guard
-whose value arrives in a mutable command payload is a guard a caller defeats by
-accident, and the product's own identifiers travel in ``metadata`` where they
-are evidence rather than a lock.
-
-``/refund`` accepts no client reference — the one money-moving endpoint here
-with no provider-side key. Sub solved that in production by writing its request
-key into ``merchant_note`` and matching on it when listing refunds for a
-transaction, and that is ported verbatim: every refund carries the derived
-reference in ``merchant_note``, so an ambiguous refund is decidable by reading
-the provider's own refund list rather than guessing.
+A refund's reference is the engine's key and is never read from the payload: a
+guard whose value arrives in a mutable command payload is a guard a caller
+defeats by accident. Only the lookup's SUBJECT is read from the payload, because
+it names a refund sent by another delivery.
 
 ## Money is exact, and it is never a `float`
 
@@ -92,8 +81,6 @@ outbound translation cannot drift into disagreeing about what a kobo is.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -101,7 +88,6 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import Enum
 from types import MappingProxyType
 from typing import Final
-from urllib.parse import quote
 
 import httpx
 from dotmac_integration.retry import Outcome, OutcomeStatus
@@ -130,10 +116,13 @@ API_HOST: Final = "api.paystack.co"
 # both the inbound and the outbound conversion below, so the two cannot drift.
 PAYSTACK_WIRE_SCALE: Final = 2
 
-#: The engine's own idempotency key, hashed, is what becomes a provider
-#: reference. The prefix is a fixed marker so an operator reading a Paystack
-#: dashboard can tell a Dotmac-issued reference from a hand-made one.
-REFERENCE_PREFIX: Final = "dmi"
+#: The shape of a refund reference: the engine's idempotency key, stamped
+#: VERBATIM into ``merchant_note`` and matched verbatim by ``find_refund`` and
+#: by ingress. Payments' instruction reference (``rf1-`` plus 32 hex) satisfies
+#: it, so one identity runs from instruction to provider and back. FIXED once
+#: a3 is tagged: a refund stamped under one shape could not be found under
+#: another.
+REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9][a-z0-9-]{15,63}")
 
 #: An exact amount in MAJOR units. Anchored, digits plus an explicit decimal
 #: point and at most six fraction digits — wide enough for any minor-unit scale,
@@ -146,14 +135,8 @@ _EXACT_AMOUNT_RE: Final[re.Pattern[str]] = re.compile(
 _CURRENCY_RE: Final[re.Pattern[str]] = re.compile(r"[A-Z]{3}")
 #: What may appear in a URL path segment or a provider identifier we echo back.
 _IDENTIFIER_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9@._+:=-]{1,120}")
-_ACCOUNT_NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"[0-9]{5,20}")
-_BANK_CODE_RE: Final[re.Pattern[str]] = re.compile(r"[0-9A-Za-z-]{2,20}")
 #: Paystack's own recipient types. A closed set: an unknown one is a contract
 #: error here rather than a 400 discovered at the provider.
-_RECIPIENT_TYPES: Final[frozenset[str]] = frozenset(
-    {"nuban", "ghipss", "mobile_money", "basa"}
-)
-
 #: The longest provider identifier accepted as success EVIDENCE. Ported from
 #: Sub's `payment_gateway_adapter`, which refuses an over-long external id
 #: rather than storing it and discovering the truncation during a dispute.
@@ -299,25 +282,35 @@ def _currency(value: object) -> str:
     return value.strip().upper()
 
 
-# ── the provider reference, derived from the engine's key ────────────────────
+# ── the refund reference: the engine's key, verbatim ──────────────────────────
 
 
 def provider_reference(idempotency_key: object) -> str:
-    """The provider-side at-most-once key for one command.
+    """The reference a refund is stamped with: the engine's key, verbatim.
 
-    Lower-case hexadecimal with a fixed prefix, so ONE derivation satisfies both
-    of Paystack's charset rules at once — transactions allow ``- . =`` and
-    alphanumerics, transfers allow ``- _`` and alphanumerics and want lower
-    case. Deterministic in the engine's key, so every attempt of one delivery
-    presents the identical reference and the provider refuses the second.
+    Stable across attempts of one delivery, so every attempt presents the same
+    ``merchant_note``. Refused, never repaired, when it does not have the
+    reference shape: a normalised or generated value would not equal the one
+    the product holds, and the lookup that decides an ambiguous refund would
+    then report "not found" about a refund that landed.
     """
-    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
-        # Refused rather than substituted. A generated key would be unique per
-        # attempt, which is precisely the duplicate-charge machine this exists
-        # to prevent — an absent key must stop the send, not weaken it.
-        raise OperationContractError("idempotency_key_required")
-    digest = hashlib.sha256(idempotency_key.strip().encode()).hexdigest()
-    return f"{REFERENCE_PREFIX}{digest}"
+    if (
+        not isinstance(idempotency_key, str)
+        or REFERENCE_RE.fullmatch(idempotency_key) is None
+    ):
+        raise OperationContractError("idempotency_key_shape")
+    return idempotency_key
+
+
+def lookup_reference(value: object) -> str:
+    """The reference ``find_refund`` searches for, supplied by the caller.
+
+    A lookup is a different delivery from the refund it asks about, so it has a
+    different idempotency key; the subject must come from the payload.
+    """
+    if not isinstance(value, str) or REFERENCE_RE.fullmatch(value) is None:
+        raise OperationContractError("refund_reference_invalid")
+    return value
 
 
 # ── the operation table ──────────────────────────────────────────────────────
@@ -331,16 +324,12 @@ class _Operation:
     method: str
     #: What an INCONCLUSIVE send means for this operation: the answer never
     #: arrived, so the question is whether the effect could have landed.
-    #: `AMBIGUOUS` wherever a duplicate would cost real money or the provider's
-    #: duplicate semantics are undocumented; `RETRYABLE` only where the
-    #: operation is a pure read or the provider documents that repeating it
-    #: returns the existing record.
+    #: `AMBIGUOUS` wherever a duplicate would cost real money; `RETRYABLE` only
+    #: where the operation is a pure read.
     indeterminate: OperationOutcome
-    #: Whether the command carries the derived reference in the provider's own
-    #: ``reference`` field, which is what makes a duplicate refusable.
-    carries_reference: bool = False
-    #: Whether the command needs the engine's key at all (a refund does, to
-    #: stamp ``merchant_note``, even though it has no ``reference`` field).
+    #: Whether the command stamps the engine's key (a refund does, into
+    #: ``merchant_note``). A refund lookup does NOT: it is a separate delivery
+    #: with its own key and searches for the ``refund_reference`` it is given.
     needs_key: bool = False
 
 
@@ -348,111 +337,31 @@ OPERATIONS: Final[Mapping[str, _Operation]] = MappingProxyType(
     {
         operation.name: operation
         for operation in (
-            # Money in. A duplicate is a second charge on a customer's card.
-            _Operation(
-                "initialize_payment",
-                "POST",
-                OperationOutcome.AMBIGUOUS,
-                carries_reference=True,
-                needs_key=True,
-            ),
-            _Operation(
-                "charge_authorization",
-                "POST",
-                OperationOutcome.AMBIGUOUS,
-                carries_reference=True,
-                needs_key=True,
-            ),
             # Money back out. No provider-side reference field exists, so the
             # derived key is stamped into `merchant_note` instead and an
-            # ambiguous refund is resolved by reading the provider's refund
-            # list for that transaction (Sub's production mechanism).
+            # ambiguous refund is resolved by `find_refund`, which reads the
+            # provider's refund list for that transaction (Sub's production
+            # mechanism).
             _Operation("refund", "POST", OperationOutcome.AMBIGUOUS, needs_key=True),
-            # A pure read. Repeating it changes nothing at the provider.
-            _Operation("resolve_bank_account", "GET", OperationOutcome.RETRYABLE),
-            # Paystack documents that a duplicate account number RETRIEVES the
-            # existing recipient rather than creating a second one, so this is
-            # safe to repeat. That is a documented provider guarantee, not an
-            # assumption about POST.
-            _Operation("create_transfer_recipient", "POST", OperationOutcome.RETRYABLE),
-            # Money out. The one operation where a duplicate pays a stranger
-            # twice, and the reason `verify_transfer(reference)` exists.
-            _Operation(
-                "initiate_transfer",
-                "POST",
-                OperationOutcome.AMBIGUOUS,
-                carries_reference=True,
-                needs_key=True,
-            ),
-            # Paystack does NOT document what a repeated create does with an
-            # email it already holds. An undocumented duplicate semantic is
-            # ambiguous by the rule this module is built on, even though no
-            # money moves — a reconciler reads `GET /customer/{email}` and the
-            # question is answered in one call.
-            _Operation("create_customer", "POST", OperationOutcome.AMBIGUOUS),
-            # Idempotent by construction: the same fields written to the same
-            # customer code produce the same customer.
-            _Operation("update_customer", "PUT", OperationOutcome.RETRYABLE),
-            _Operation("read_customer", "GET", OperationOutcome.RETRYABLE),
+            # A pure read. Repeating it changes nothing at the provider. It is
+            # how an AMBIGUOUS refund is decided without ever re-sending it.
+            _Operation("find_refund", "GET", OperationOutcome.RETRYABLE),
         )
     }
 )
 
 
-# ── the provider's own status vocabularies, closed on purpose ────────────────
-#
-# Ported from Sub's `PaymentGatewayProviderStatus` allowlist. Closed, and
-# checked in this order: SUCCEEDED, then DECLINED, then in-flight, then
-# anything else. A token outside every set is AMBIGUOUS rather than a guess,
-# because "we did not recognise the provider's answer" and "the provider said
-# it worked" must never be the same branch. Sub proves the point in the
-# opposite direction: a Paystack transaction reporting ``successful`` — a word
-# a SIBLING provider uses for success — is deliberately not a success there
-# either. This connector names no sibling provider at all; the sets below are
-# Paystack's own vocabulary and nobody else's.
-
-_CHARGE_SUCCEEDED: Final[frozenset[str]] = frozenset({"success"})
-_CHARGE_DECLINED: Final[frozenset[str]] = frozenset({"failed", "reversed", "abandoned"})
-_CHARGE_IN_FLIGHT: Final[frozenset[str]] = frozenset(
-    {
-        "ongoing",
-        "open_url",
-        "otp",
-        "pay_offline",
-        "pending",
-        "processing",
-        "queued",
-        "send_birthday",
-        "send_otp",
-        "send_phone",
-        "send_pin",
-    }
-)
-
-_TRANSFER_SUCCEEDED: Final[frozenset[str]] = frozenset({"success"})
-_TRANSFER_DECLINED: Final[frozenset[str]] = frozenset(
-    {"abandoned", "failed", "reversed"}
-)
-_TRANSFER_IN_FLIGHT: Final[frozenset[str]] = frozenset(
-    {"otp", "pending", "processing", "queued", "received"}
-)
+# ── the provider's own refund status vocabulary ─────────────────────────────
 
 #: A refund COMMAND has landed the moment the provider holds a refund record;
 #: `pending`/`processing`/`processed` are that record's own lifecycle and
 #: travel back as evidence rather than as a verdict.
 _REFUND_DECLINED: Final[frozenset[str]] = frozenset({"failed"})
 
-#: Provider messages that mean "this exact reference was already used". A used
-#: reference is PROOF the earlier attempt reached the provider, so it is
-#: ambiguous — never a fresh failure, and never grounds to send again.
-#: The two Paystack phrasings are the ones ERP's
-#: `_recover_transfer_initiation` matches in production.
-_REFERENCE_USED_MARKERS: Final[tuple[str, ...]] = (
-    "duplicate transaction reference",
-    "duplicate_transfer_reference",
-    "reference already exists",
-    "transaction reference has been used",
-)
+#: Paystack lists refunds in pages. One transaction has a handful; a page this
+#: wide that still reports another page is treated as unresolved, never as a
+#: complete list.
+_REFUND_PAGE: Final = 100
 
 
 # ── results ──────────────────────────────────────────────────────────────────
@@ -498,12 +407,22 @@ class OperationResult:
         carry a customer's details and was produced by a call made with
         materialized credentials. The machine code is enough to act on.
         """
+        # The verdict of a refund lookup is the one reply the engine must keep:
+        # without it "not found" and "found" reach the product as the same
+        # SUCCEEDED. Bounded strings from `_find_refund_result` only.
+        result: dict[str, object] | None = (
+            dict(self.reply)
+            if self.operation == "find_refund"
+            and self.outcome is OperationOutcome.SUCCEEDED
+            else None
+        )
         return Outcome(
             status=ENGINE_STATUS[self.outcome],
             error_code=self.error_code,
             retry_after_seconds=self.retry_after_seconds,
             provider_reference=self.provider_reference,
             provider_status_code=self.http_status,
+            result=result,
         )
 
 
@@ -536,33 +455,6 @@ def _identifier(params: Mapping[str, object], key: str, code: str) -> str:
     return value
 
 
-def _matching(
-    params: Mapping[str, object], key: str, pattern: re.Pattern[str], code: str
-) -> str:
-    value = _text(params, key, code)
-    if value is None or pattern.fullmatch(value) is None:
-        raise OperationContractError(code)
-    return value
-
-
-def _optional_mapping(
-    params: Mapping[str, object], key: str, code: str
-) -> object | None:
-    value = params.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise OperationContractError(code)
-    try:
-        # Fail at translation time rather than half-way through an httpx
-        # serialization, where the exception would escape classification
-        # entirely and the engine would have to guess whether it sent.
-        json.dumps(value)
-    except (TypeError, ValueError):
-        raise OperationContractError(code) from None
-    return value
-
-
 def _money_body(params: Mapping[str, object]) -> tuple[int, str]:
     currency = _currency(params.get("currency"))
     return minor_units(params.get("amount"), currency=currency), currency
@@ -578,42 +470,8 @@ def _build(
 ) -> tuple[str, dict[str, object] | None, dict[str, str] | None]:
     """`(path, json_body, query)` for one command, or raise a contract error."""
     name = operation.name
-    if name == "initialize_payment":
-        amount, currency = _money_body(params)
-        body: dict[str, object] = {
-            "email": _text(params, "email", "email_required"),
-            "amount": amount,
-            "currency": currency,
-            "reference": reference,
-        }
-        _put(
-            body,
-            "callback_url",
-            _text(params, "callback_url", "callback_url_invalid", required=False),
-        )
-        _put(
-            body, "metadata", _optional_mapping(params, "metadata", "metadata_invalid")
-        )
-        return "/transaction/initialize", body, None
-
-    if name == "charge_authorization":
-        amount, currency = _money_body(params)
-        body = {
-            "email": _text(params, "email", "email_required"),
-            "amount": amount,
-            "currency": currency,
-            "authorization_code": _identifier(
-                params, "authorization_code", "authorization_code_invalid"
-            ),
-            "reference": reference,
-        }
-        _put(
-            body, "metadata", _optional_mapping(params, "metadata", "metadata_invalid")
-        )
-        return "/transaction/charge_authorization", body, None
-
     if name == "refund":
-        body = {
+        body: dict[str, object] = {
             "transaction": _identifier(params, "transaction", "transaction_required")
         }
         if params.get("amount") is not None:
@@ -625,93 +483,25 @@ def _build(
             "customer_note",
             _text(params, "customer_note", "customer_note_invalid", required=False),
         )
-        # Paystack accepts no client reference on a refund, so the derived key
+        # Paystack accepts no client reference on a refund, so the engine key
         # is stamped here — the durable handle Sub matches on when it has to
         # decide whether an ambiguous refund already exists.
         body["merchant_note"] = reference
         return "/refund", body, None
 
-    if name == "resolve_bank_account":
+    if name == "find_refund":
+        # The list is filtered by transaction only; matching on the given
+        # reference in `merchant_note` is done on the answer, exactly.
         return (
-            "/bank/resolve",
+            "/refund",
             None,
             {
-                "account_number": _matching(
-                    params,
-                    "account_number",
-                    _ACCOUNT_NUMBER_RE,
-                    "account_number_invalid",
+                "transaction": _identifier(
+                    params, "transaction", "transaction_required"
                 ),
-                "bank_code": _matching(
-                    params, "bank_code", _BANK_CODE_RE, "bank_code_invalid"
-                ),
+                "perPage": str(_REFUND_PAGE),
             },
         )
-
-    if name == "create_transfer_recipient":
-        recipient_type = _text(params, "type", "recipient_type_invalid")
-        if recipient_type not in _RECIPIENT_TYPES:
-            raise OperationContractError("recipient_type_invalid")
-        body = {
-            "type": recipient_type,
-            "name": _text(params, "name", "name_required"),
-            "account_number": _matching(
-                params, "account_number", _ACCOUNT_NUMBER_RE, "account_number_invalid"
-            ),
-            "bank_code": _matching(
-                params, "bank_code", _BANK_CODE_RE, "bank_code_invalid"
-            ),
-            "currency": _currency(params.get("currency")),
-        }
-        _put(
-            body,
-            "description",
-            _text(params, "description", "description_invalid", required=False),
-        )
-        _put(
-            body, "metadata", _optional_mapping(params, "metadata", "metadata_invalid")
-        )
-        return "/transferrecipient", body, None
-
-    if name == "initiate_transfer":
-        amount, currency = _money_body(params)
-        body = {
-            # Paystack's only supported funding source today. Declared rather
-            # than accepted from the payload: which pot a payout leaves from is
-            # not something a command may choose per request.
-            "source": "balance",
-            "amount": amount,
-            "currency": currency,
-            "recipient": _identifier(params, "recipient", "recipient_required"),
-            "reference": reference,
-        }
-        _put(body, "reason", _text(params, "reason", "reason_invalid", required=False))
-        return "/transfer", body, None
-
-    if name == "create_customer":
-        body = {"email": _text(params, "email", "email_required")}
-        for key in ("first_name", "last_name", "phone"):
-            _put(body, key, _text(params, key, f"{key}_invalid", required=False))
-        _put(
-            body, "metadata", _optional_mapping(params, "metadata", "metadata_invalid")
-        )
-        return "/customer", body, None
-
-    if name == "update_customer":
-        code = _identifier(params, "customer", "customer_required")
-        body = {}
-        for key in ("first_name", "last_name", "phone"):
-            _put(body, key, _text(params, key, f"{key}_invalid", required=False))
-        _put(
-            body, "metadata", _optional_mapping(params, "metadata", "metadata_invalid")
-        )
-        if not body:
-            raise OperationContractError("update_has_no_fields")
-        return f"/customer/{quote(code, safe='')}", body, None
-
-    if name == "read_customer":
-        code = _identifier(params, "customer", "customer_required")
-        return f"/customer/{quote(code, safe='')}", None, None
 
     raise OperationContractError("operation_unsupported")  # pragma: no cover
 
@@ -735,16 +525,18 @@ def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+#: The longest provider status token kept. The token is stored (it travels in
+#: `Outcome.result` for a lookup), so an over-long one is dropped, not truncated:
+#: a truncated token could read as a different status.
+_MAX_STATUS_LENGTH: Final = 32
+
+
 def _status_token(data: Mapping[str, object]) -> str | None:
     value = data.get("status")
-    return value.strip().lower() if isinstance(value, str) and value.strip() else None
-
-
-def _references_a_used_reference(body: Mapping[str, object]) -> bool:
-    haystack = " ".join(
-        str(body.get(key) or "") for key in ("message", "code")
-    ).casefold()
-    return any(marker in haystack for marker in _REFERENCE_USED_MARKERS)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    token = value.strip().lower()
+    return token if len(token) <= _MAX_STATUS_LENGTH else None
 
 
 def _retry_after(response: httpx.Response) -> int | None:
@@ -811,89 +603,6 @@ def _money_evidence_holds(sent: _Sent, data: Mapping[str, object]) -> bool:
     return isinstance(currency, str) and currency.strip().upper() == sent.currency
 
 
-def _charge_result(
-    sent: _Sent, data: Mapping[str, object], http_status: int
-) -> OperationResult:
-    token = _status_token(data)
-    transaction_id = _evidence(data.get("id"))
-    reply = {
-        key: value
-        for key, value in (
-            ("authorization_url", _evidence(data.get("authorization_url"))),
-            ("access_code", _evidence(data.get("access_code"))),
-            ("gateway_response", _evidence(data.get("gateway_response"))),
-        )
-        if value is not None
-    }
-
-    def answer(
-        outcome: OperationOutcome, error_code: str | None = None
-    ) -> OperationResult:
-        return _result(
-            sent,
-            outcome,
-            error_code=error_code,
-            http_status=http_status,
-            provider_transaction_id=transaction_id,
-            provider_status=token,
-            reply=reply,
-        )
-
-    if sent.operation.name == "initialize_payment":
-        # An initialization has no lifecycle token; it has a checkout handle.
-        # Without one the command achieved nothing usable, and whether it
-        # created a transaction at the provider is exactly unknown.
-        if "authorization_url" not in reply or "access_code" not in reply:
-            return answer(sent.operation.indeterminate, "provider_receipt_missing")
-        return answer(OperationOutcome.SUCCEEDED)
-
-    if token in _CHARGE_DECLINED:
-        return answer(OperationOutcome.DECLINED, "provider_declined")
-    if token in _CHARGE_IN_FLIGHT:
-        return answer(OperationOutcome.AMBIGUOUS, "provider_status_not_conclusive")
-    if token not in _CHARGE_SUCCEEDED:
-        return answer(OperationOutcome.AMBIGUOUS, "provider_status_unknown")
-    if transaction_id is None or not _money_evidence_holds(sent, data):
-        # A success whose money does not add up is not a success. Ported from
-        # Sub's evidence gate, tightened from "within a kobo" to "exactly".
-        return answer(OperationOutcome.AMBIGUOUS, "provider_evidence_incomplete")
-    return answer(OperationOutcome.SUCCEEDED)
-
-
-def _transfer_result(
-    sent: _Sent, data: Mapping[str, object], http_status: int
-) -> OperationResult:
-    token = _status_token(data)
-    transfer_code = _evidence(data.get("transfer_code"))
-    reply = {"transfer_code": transfer_code} if transfer_code is not None else {}
-
-    def answer(
-        outcome: OperationOutcome, error_code: str | None = None
-    ) -> OperationResult:
-        return _result(
-            sent,
-            outcome,
-            error_code=error_code,
-            http_status=http_status,
-            provider_transaction_id=_evidence(data.get("id")),
-            provider_status=token,
-            reply=reply,
-        )
-
-    if token in _TRANSFER_DECLINED:
-        return answer(OperationOutcome.DECLINED, "provider_declined")
-    if token in _TRANSFER_IN_FLIGHT:
-        # The money is moving and nobody may send it again. `verify_transfer`
-        # on the SAME reference is how this resolves — ERP looks it up by the
-        # merchant reference, never by the `TRF_` code.
-        return answer(OperationOutcome.AMBIGUOUS, "provider_status_not_conclusive")
-    if token not in _TRANSFER_SUCCEEDED:
-        return answer(OperationOutcome.AMBIGUOUS, "provider_status_unknown")
-    if transfer_code is None or not _money_evidence_holds(sent, data):
-        return answer(OperationOutcome.AMBIGUOUS, "provider_evidence_incomplete")
-    return answer(OperationOutcome.SUCCEEDED)
-
-
 def _refund_result(
     sent: _Sent, data: Mapping[str, object], http_status: int
 ) -> OperationResult:
@@ -927,70 +636,77 @@ def _refund_result(
     return answer(OperationOutcome.SUCCEEDED)
 
 
-#: Which reply field proves a non-money operation actually answered.
-_REPLY_EVIDENCE: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType(
-    {
-        "resolve_bank_account": ("account_name", "account_number"),
-        "create_transfer_recipient": ("recipient_code",),
-        "create_customer": ("customer_code",),
-        "update_customer": ("customer_code",),
-        "read_customer": ("customer_code",),
-    }
-)
-
-
-def _record_result(
-    sent: _Sent, data: Mapping[str, object], http_status: int
+def _find_refund_result(
+    sent: _Sent, envelope: Mapping[str, object], http_status: int
 ) -> OperationResult:
-    fields = _REPLY_EVIDENCE[sent.operation.name]
-    reply = {
-        key: value for key in fields if (value := _evidence(data.get(key))) is not None
-    }
-    identity = reply.get(fields[0])
-    outcome = (
-        sent.operation.indeterminate if identity is None else OperationOutcome.SUCCEEDED
-    )
-    return _result(
-        sent,
-        outcome,
-        error_code=None if identity is not None else "provider_receipt_missing",
-        http_status=http_status,
-        provider_transaction_id=identity,
-        provider_status=_status_token(data),
-        reply=reply,
-    )
+    """Decide, from the provider's own refund list, whether a refund landed.
 
-
-def _succeeded(
-    sent: _Sent, data: Mapping[str, object], http_status: int
-) -> OperationResult:
-    name = sent.operation.name
-    if name in ("initialize_payment", "charge_authorization"):
-        return _charge_result(sent, data, http_status)
-    if name == "initiate_transfer":
-        return _transfer_result(sent, data, http_status)
-    if name == "refund":
-        return _refund_result(sent, data, http_status)
-    return _record_result(sent, data, http_status)
-
-
-def _reused_reference(
-    sent: _Sent, envelope: Mapping[str, object], status: int
-) -> OperationResult | None:
-    """PROOF that an earlier attempt reached the provider, if that is what it is.
-
-    Not a failure and not grounds to send again: verify the reference and find
-    out what it did. Checked on BOTH refusal paths — an HTTP 4xx and a 200
-    carrying ``status: false`` — because Paystack uses each for it depending on
-    the endpoint (400 on a transaction, 404 on a transfer).
+    Zero exact matches on the stamped ``merchant_note`` means NOT FOUND AS OF THIS
+    READ (the provider's list may lag a refund just accepted, so the caller
+    waits a settle interval after the ambiguous send before acting on it);
+    exactly one means it was found, and its id and status travel as evidence; more
+    than one is an anomaly nobody may resolve by sending again. A list that
+    cannot be read, or that says there is another page, decides nothing.
     """
-    if not _references_a_used_reference(envelope):
-        return None
-    return _result(
-        sent,
-        OperationOutcome.AMBIGUOUS,
-        error_code="provider_reference_already_used",
-        http_status=status,
+    data = envelope.get("data")
+
+    def answer(
+        outcome: OperationOutcome,
+        error_code: str | None = None,
+        *,
+        refund_id: str | None = None,
+        token: str | None = None,
+        matches: str | None = None,
+    ) -> OperationResult:
+        reply = {
+            key: value
+            for key, value in (
+                ("matches", matches),
+                ("refund_id", refund_id),
+                ("refund_status", token),
+            )
+            if value is not None
+        }
+        return _result(
+            sent,
+            outcome,
+            error_code=error_code,
+            http_status=http_status,
+            provider_transaction_id=refund_id,
+            provider_status=token,
+            reply=reply,
+        )
+
+    if not isinstance(data, list):
+        return answer(sent.operation.indeterminate, "provider_receipt_missing")
+    page_count = _mapping(envelope.get("meta")).get("pageCount")
+    if isinstance(page_count, int) and not isinstance(page_count, bool):
+        if page_count > 1:
+            return answer(OperationOutcome.AMBIGUOUS, "refund_list_truncated")
+    elif len(data) >= _REFUND_PAGE:
+        return answer(OperationOutcome.AMBIGUOUS, "refund_list_truncated")
+    found = [
+        record
+        for record in data
+        if isinstance(record, Mapping) and record.get("merchant_note") == sent.reference
+    ]
+    if not found:
+        return answer(OperationOutcome.SUCCEEDED, matches="0")
+    if len(found) > 1:
+        return answer(
+            OperationOutcome.AMBIGUOUS, "refund_match_not_unique", matches="many"
+        )
+    record = found[0]
+    refund_id = _evidence(record.get("id"))
+    if refund_id is None:
+        return answer(
+            OperationOutcome.AMBIGUOUS, "provider_receipt_missing", matches="1"
+        )
+    return answer(
+        OperationOutcome.SUCCEEDED,
+        refund_id=refund_id,
+        token=_status_token(record),
+        matches="1",
     )
 
 
@@ -1030,18 +746,6 @@ def _classify(sent: _Sent, response: httpx.Response) -> OperationResult:
             http_status=status,
         )
     if status >= 400:
-        reused = _reused_reference(sent, envelope, status)
-        if reused is not None:
-            return reused
-        if status == 404 and sent.operation.name == "read_customer":
-            # A definite answer — the record is absent. ERP returns `None`
-            # here rather than raising, for the same reason.
-            return _result(
-                sent,
-                OperationOutcome.TERMINAL,
-                error_code="provider_record_not_found",
-                http_status=status,
-            )
         # An HTTP 4xx is the provider rejecting the request before acting on
         # it: nothing to reconcile, and nothing a retry would fix.
         return _result(
@@ -1063,9 +767,6 @@ def _classify(sent: _Sent, response: httpx.Response) -> OperationResult:
             http_status=status,
         )
     if envelope.get("status") is not True:
-        reused = _reused_reference(sent, envelope, status)
-        if reused is not None:
-            return reused
         # The provider answered 200 and said it did not do it. An explicit
         # refusal is terminal; it never acted, so there is nothing to reconcile.
         return _result(
@@ -1074,7 +775,9 @@ def _classify(sent: _Sent, response: httpx.Response) -> OperationResult:
             error_code="provider_refused_request",
             http_status=status,
         )
-    return _succeeded(sent, _mapping(envelope.get("data")), status)
+    if sent.operation.name == "find_refund":
+        return _find_refund_result(sent, envelope, status)
+    return _refund_result(sent, _mapping(envelope.get("data")), status)
 
 
 def _request_failure(sent: _Sent, exc: httpx.RequestError) -> OperationResult:
@@ -1100,7 +803,7 @@ def _request_failure(sent: _Sent, exc: httpx.RequestError) -> OperationResult:
 
 @dataclass(frozen=True, slots=True)
 class PaystackOperations:
-    """Authenticated provider I/O for the nine outbound commands.
+    """Authenticated provider I/O for the refund and refund-lookup commands.
 
     Holds no state between calls, owns no ledger, and keeps no retry budget:
     each `run` is one attempt, classified and handed back. Whether there is
@@ -1130,7 +833,12 @@ class PaystackOperations:
             if not isinstance(api_secret, str) or not api_secret:
                 raise OperationContractError("api_secret_key_unavailable")
             fields = _params(params)
-            reference = provider_reference(idempotency_key) if spec.needs_key else None
+            if spec.needs_key:
+                reference = provider_reference(idempotency_key)
+            elif spec.name == "find_refund":
+                reference = lookup_reference(fields.get("refund_reference"))
+            else:
+                reference = None
             path, body, query = _build(spec, fields, reference)
             amount = body.get("amount") if body is not None else None
             currency = body.get("currency") if body is not None else None

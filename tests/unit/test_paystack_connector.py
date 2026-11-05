@@ -313,3 +313,145 @@ def test_unverified_shape_errors_carry_no_raw_material() -> None:
 
     assert secret_marker not in str(captured.value)
     assert secret_marker not in repr(captured.value)
+
+
+# ── refund outcomes (a3): observed, never decided ────────────────────────────
+
+DERIVED = "rf1-" + "ab" * 16  # Payments' instruction reference shape
+
+
+def _refund_event(event: str = "refund.processed", **overrides: object):
+    data: dict[str, object] = {
+        "status": "processed" if event == "refund.processed" else "failed",
+        "transaction_reference": "merchant-ref-1",
+        "refund_reference": "1234567890",
+        "amount": 150_000,
+        "currency": "NGN",
+        "merchant_note": DERIVED,
+        "customer": {"email": "payer@example.test"},
+    }
+    data.update(overrides)
+    return {"event": event, "data": data}
+
+
+def _normalize(payload: object):
+    return _handler().normalize(_request(payload), config={})[0][0]
+
+
+def test_refund_processed_becomes_a_refund_observation_with_the_stamped_reference():
+    event = _normalize(_refund_event())
+    assert event.disposition is not InboundDisposition.RECORD_ONLY
+    assert event.event_type == CAPABILITY_ID
+    payload = event.payload
+    assert payload["observation_kind"] == "refund"
+    assert payload["provider_status"] == "processed"
+    assert payload["amount"] == {"amount": "1500.00", "currency": "NGN"}
+    assert payload["refund_reference"] == DERIVED
+    assert payload["merchant_reference"] == "merchant-ref-1"
+    assert payload["provider_refund_reference"] == "1234567890"
+    assert payload["arrival_mode"] == "ingress"
+    assert payload["confirmation_evidence"] == "connector_verified"
+    # A refund moves no fee and the customer's details are not carried.
+    assert "provider_fee" not in payload
+    assert "payer@example.test" not in json.dumps(payload)
+
+
+def test_refund_failed_is_its_own_observation_kind():
+    event = _normalize(_refund_event("refund.failed"))
+    assert event.payload["observation_kind"] == "refund_failed"
+    assert event.payload["provider_status"] == "failed"
+    assert event.payload["refund_reference"] == DERIVED
+
+
+def test_refund_identity_is_stable_and_distinct_per_outcome():
+    first = _normalize(_refund_event())
+    again = _normalize(_refund_event())
+    failed = _normalize(_refund_event("refund.failed"))
+    assert first.provider_event_id == again.provider_event_id
+    assert first.provider_event_id.startswith("refund.processed:")
+    assert first.provider_event_id != failed.provider_event_id
+
+
+@pytest.mark.parametrize(
+    "note",
+    [None, "hand typed note", DERIVED.upper(), "x" * 65, "-" + DERIVED, "short-ref"],
+)
+def test_a_refund_without_the_derived_note_is_still_observed_but_unmatched(note):
+    event = _normalize(_refund_event(merchant_note=note))
+    assert event.payload["observation_kind"] == "refund"
+    assert "refund_reference" not in event.payload
+
+
+def test_refund_amount_may_arrive_as_a_digit_string():
+    event = _normalize(_refund_event(amount="150000"))
+    assert event.payload["amount"] == {"amount": "1500.00", "currency": "NGN"}
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        {"amount": 0},
+        {"amount": -5},
+        {"amount": 1.5},
+        {"amount": "15.00"},
+        {"amount": None},
+        {"currency": ""},
+        {"status": "failed"},  # contradicts refund.processed
+    ],
+)
+def test_a_malformed_refund_event_is_evidence_not_a_money_fact(replacement):
+    event = _normalize(_refund_event(**replacement))
+    assert event.disposition is InboundDisposition.RECORD_ONLY
+    assert event.event_type == "payments.provider_event.recorded.v1"
+    assert event.payload["reason_code"] == "refund_shape_invalid"
+
+
+@pytest.mark.parametrize("name", ["refund.pending", "refund.processing"])
+def test_an_in_flight_refund_event_is_recorded_only(name):
+    event = _normalize(_refund_event(name, status="pending"))
+    assert event.disposition is InboundDisposition.RECORD_ONLY
+    assert event.payload["reason_code"] == "event_not_in_ingress_slice"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "charge.dispute.create",
+        "charge.dispute.remind",
+        "charge.dispute.resolve",
+    ],
+)
+def test_dispute_ingress_is_deferred_and_stays_record_only(name):
+    event = _normalize(
+        {"event": name, "data": {"id": 9, "status": "awaiting-merchant-feedback"}}
+    )
+    assert event.disposition is InboundDisposition.RECORD_ONLY
+    assert event.payload["reason_code"] == "event_not_in_ingress_slice"
+
+
+def test_a_refund_observation_carries_no_product_vocabulary():
+    event = _normalize(_refund_event())
+    forbidden = {"invoice_id", "account_id", "tenant_id", "net_amount", "allocation"}
+
+    def keys(value):
+        if isinstance(value, dict):
+            return set(value) | {k for v in value.values() for k in keys(v)}
+        return set()
+
+    assert keys(event.payload).isdisjoint(forbidden)
+
+
+def test_refund_ingress_is_signature_gated_like_every_other_event():
+    handler = _handler()
+    forged = _request(_refund_event(), secret="not-the-signing-secret")
+    assert handler.verify(forged, config={}, secrets=_secrets()) == VerificationResult(
+        accepted=False
+    )
+
+
+def test_a_payments_instruction_reference_round_trips_as_refund_reference():
+    # `rf1-` plus 32 hex is what Payments stores in refund_reference (String 64).
+    reference = "rf1-" + "0123456789abcdef" * 2
+    event = _normalize(_refund_event(merchant_note=reference))
+    assert event.payload["refund_reference"] == reference
+    assert len(reference) <= 64

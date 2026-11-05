@@ -376,11 +376,12 @@
     },
     "dotmac-connector-paystack": {
       "$comment": [
-        "Paystack authentication, settlement ingress, paged transaction",
-        "reconciliation and OUTBOUND command I/O. It implements",
-        "payments.settlement.observation.v1 in INGRESS and POLL, and",
-        "payments.intent.v1, payments.refund.v1, payments.payout.v1 and",
-        "payments.customer.v1 in DELIVERY, through SPI 1.4. It owns no rows",
+        "Paystack authentication, settlement and refund-outcome ingress,",
+        "paged transaction reconciliation and REFUND command I/O. It",
+        "implements payments.settlement.observation.v1 in INGRESS and POLL,",
+        "and payments.refund.v1 (refund, find_refund) in DELIVERY, through",
+        "SPI 1.4 (0.1.0a3 is narrowed to refunds; intent, payout and customer",
+        "are not declared). It owns no rows",
         "and imports no product. Sub is the first shadow/cutover target;",
         "publication alone does not make it a contract consumer or move",
         "financial authority.",
