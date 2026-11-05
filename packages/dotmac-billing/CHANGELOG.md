@@ -39,6 +39,52 @@ All notable changes follow Semantic Versioning.
   (`credit_exceeds_receivable`). Excess is composed above Billing (unapply prior
   discharges, then issue the full credit note); Billing gains no excess path.
 - Source preparation only; hosted CI and publication remain required.
+- ST-3 (recorded widening D-5; includes unreleased `bi_0013`): the opening seal
+  records a hold list (`SealOpeningWindowV1.held_account_ids`); one held partition
+  per command may later be admitted by `admit_held_opening_account_v2` with a
+  reviewed disposition digest and an Approvals maker-checker decision (port only;
+  tenant-plane hold awaits approvals 0.1.0a9). A deferred constraint trigger makes
+  its `opening_hold_admissions` audit row mandatory. `seal_opening_window` accepts
+  an `authority_switch` participant inside the seal savepoint; its
+  `OpeningAuthoritySwitchReceiptV1` is stored append-only. `opening_lane` is the
+  import-specific assembly authority port.
+- ST-4: opening admissibility as data (`opening_admissibility`): a reviewed rules
+  document (digest-identified, closed schema) plus the A10 account classes
+  decide account-level admissibility (A10 `opening_exact` and post-cutover
+  `match`; D-2). Every census blocking code is blocking: no rule relaxes,
+  drops or carries a finding, and an unlisted code is blocking. Every held
+  partition has exactly one reason from a closed, rules-ordered set. Every
+  member account of a reseller partition must pass A10. A held partition that
+  did not fail structurally stays in the frozen manifest with a digest-bound
+  `held:<reason>` disposition marker (validators refuse its import with
+  `partition_held`, never block the others); structural failures stay out
+  (governed correction). `admissibility.json` records the route and the exact
+  archived totals. A manifest with held-marked partitions cannot be sealed
+  until the variance ledger (ST-4c): the seal refuses a hold list that omits a
+  held-marked partition or repeats one (`opening_hold_list_invalid`). Drafts
+  are excluded and archived (X1; accounts whose A10 cause is a draft allocation
+  are held), V1 gates only status-open documents, D-3 needs a supplied original
+  for each, and reseller option A re-keys a managed subscriber's invoices and
+  wallet lanes to the reseller account with one `service_ref` per document.
+- ST-4: import cost: the command digest binds the manifest by its fingerprint (not its
+  body) and the fingerprint/analysis are cached per manifest object, so
+  `import_opening_account_v2` validation no longer scales with manifest size
+  (15,293 commands: 28 s). The a11 command digest therefore differs from a10's.
+- ST-4: scale (F2): the complete-manifest validators run once per run
+  (`preview_opening_account_import_batch_v2`, `opening_validation_scope`), the
+  rehearsal reporter indexes instead of rescanning, and a manifest-wide
+  finding is reported once, not once per partition. Single-command validators
+  keep their results and ordering.
+- ST-4: land Gap A: a supplied, bound original satisfies the M8-minimal documentary
+  check (commit c15afa28).
+- ST-4: D-8 Starter-native verifier production profile: `OpeningVerifierProfileV1`
+  pins scope, installation, audience, both public-key fingerprints and
+  validity/revocation ceilings; `ProfileBoundAuthorityReaderV1` refuses any
+  policy outside the pin (unavailable, never verified);
+  `build_starter_native_opening_import_verifier_v2` composes the signed a10
+  providers. Rehearsal and production audiences are disjoint namespaces.
+  Import reversal is never granted. Provision/seal verifiers and Gap C
+  (cash lots) are not part of this change.
 
 ## 0.1.0a10 — released
 

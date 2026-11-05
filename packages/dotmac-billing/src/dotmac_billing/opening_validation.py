@@ -18,11 +18,17 @@ from dotmac_billing.opening_contracts import (
     OpeningPartitionV1,
     OpeningPreviewRequestV1,
     OpeningSourceIdentityV1,
+    OpeningTargetV1,
     OpeningVerificationUnavailable,
     OpeningVerificationV1,
 )
 
 _OPERATION = "billing.opening.preview.v1"
+
+#: A blocking disposition whose reason starts with this prefix marks a held
+#: partition (reviewed, digest-bound with the manifest). It is not a manifest-wide
+#: blocker; the partition just cannot be imported before the seal.
+HELD_REASON_PREFIX = "held:"
 
 
 def _payload(value: object) -> object:
@@ -57,10 +63,284 @@ def opening_manifest_fingerprint(manifest: OpeningManifestV1) -> str:
     )
 
 
+class _CashManifestAnalysis:
+    """Everything about a manifest that does not depend on the selected partition.
+
+    Built once per manifest. The per-partition checks consult its indexes in
+    O(1) instead of rescanning the whole manifest, so a run over P partitions
+    costs O(N + P) rather than O(P x N). Selected-independent findings keep the
+    order the single-pass preview always produced.
+    """
+
+    __slots__ = (
+        "manifest",
+        "failures",
+        "attributed",
+        "held_partitions",
+        "partitions",
+        "eligible",
+        "lot_identities",
+        "cash_totals",
+        "controls_by_partition",
+        "eligible_by_partition",
+        "_fingerprint",
+    )
+
+    def __init__(self, manifest: OpeningManifestV1) -> None:
+        self.manifest = manifest
+        self._fingerprint: str | None = None
+        self.failures: dict[str, list[str]] = {}
+        self.attributed: dict[OpeningPartitionV1 | None, dict[str, list[str]]] = {}
+        self._analyze()
+
+    @property
+    def fingerprint(self) -> str:
+        if self._fingerprint is None:
+            self._fingerprint = opening_manifest_fingerprint(self.manifest)
+        return self._fingerprint
+
+    def _analyze(self) -> None:
+        manifest = self.manifest
+        capture = manifest.capture
+        failures = self.failures
+
+        ctx: list[OpeningPartitionV1 | None] = [None]
+
+        def block(code: str, reference: str) -> None:
+            failures.setdefault(code, []).append(reference)
+            self.attributed.setdefault(ctx[0], {}).setdefault(code, []).append(
+                reference
+            )
+
+        if (
+            not capture.schema_heads
+            or capture.isolation not in {"repeatable_read", "serializable"}
+            or capture.economic_cutoff > capture.captured_at
+            or capture.recorded_cutoff > capture.captured_at
+        ):
+            block("capture_incomplete", capture.snapshot_id)
+
+        population = Counter(manifest.population)
+        dispositions = Counter(item.identity for item in manifest.dispositions)
+        if population != dispositions:
+            block("population_disposition_mismatch", "population")
+        for identity, count in population.items():
+            if count != 1:
+                block("source_identity_duplicate", f"{identity.kind}:{identity.key}")
+        observed = Counter(item.disposition for item in manifest.dispositions)
+        counts = manifest.counts
+        if (
+            counts.population != len(manifest.population)
+            or counts.eligible != observed["eligible"]
+            or counts.excluded != observed["excluded"]
+            or counts.blocking != observed["blocking"]
+            or counts.population != counts.eligible + counts.excluded + counts.blocking
+            or min(counts.population, counts.eligible, counts.excluded, counts.blocking)
+            < 0
+        ):
+            block("population_counts_mismatch", "counts")
+
+        partitions = Counter(item.partition for item in manifest.controls)
+        self.partitions = partitions
+        target_coordinates = Counter(
+            (item.partition.account_id, item.partition.currency)
+            for item in manifest.controls
+        )
+        for coordinate, count in target_coordinates.items():
+            if count != 1:
+                block("account_mapping_ambiguous", str(coordinate))
+        target_mappings: dict[tuple[UUID, str], set[str]] = {}
+        source_mappings: dict[tuple[str, str], set[UUID]] = {}
+        controls_by_partition: dict[OpeningPartitionV1, list[object]] = {}
+        for control in manifest.controls:
+            part = control.partition
+            ctx[0] = part
+            controls_by_partition.setdefault(part, []).append(control)
+            if partitions[part] != 1:
+                block("partition_duplicate", part.source_account_key)
+            if (
+                not 0 <= part.precision <= 18
+                or len(part.currency) != 3
+                or not part.currency.isascii()
+                or not part.currency.isalpha()
+                or not part.currency.isupper()
+            ):
+                block("currency_precision_invalid", part.source_account_key)
+            target_mappings.setdefault((part.account_id, part.currency), set()).add(
+                part.source_account_key
+            )
+            source_mappings.setdefault(
+                (part.source_account_key, part.currency), set()
+            ).add(part.account_id)
+        ctx[0] = None
+        self.controls_by_partition = controls_by_partition
+        for target_coordinate, target_values in target_mappings.items():
+            if len(target_values) != 1:
+                block("account_mapping_ambiguous", str(target_coordinate))
+        for source_coordinate, source_values in source_mappings.items():
+            if len(source_values) != 1:
+                block("account_mapping_ambiguous", str(source_coordinate))
+        ctx[0] = None
+        held_partitions: set[OpeningPartitionV1] = set()
+        self.held_partitions = held_partitions
+        for item in manifest.dispositions:
+            ctx[0] = item.partition
+            if item.partition not in partitions:
+                block("partition_membership_missing", item.identity.key)
+            if item.disposition not in {"eligible", "excluded", "blocking"}:
+                block("disposition_unsupported", item.identity.key)
+            if item.disposition == "excluded" and item.residual_minor != 0:
+                block("excluded_nonzero_residue", item.identity.key)
+            if item.disposition == "blocking":
+                if item.reason.startswith(HELD_REASON_PREFIX):
+                    # A digest-bound hold marker: the partition stays in the
+                    # frozen manifest but cannot be imported before the seal.
+                    held_partitions.add(item.partition)
+                else:
+                    block("source_blocking_disposition", item.identity.key)
+
+        source_keys: Counter[tuple[str, str, str]] = Counter()
+        lot_ids: Counter[str] = Counter()
+        lot_identities: Counter[OpeningSourceIdentityV1] = Counter()
+        cash_totals: Counter[OpeningPartitionV1] = Counter()
+        eligible = {
+            item.identity: item.partition
+            for item in manifest.dispositions
+            if item.disposition == "eligible"
+        }
+        eligible_by_partition: dict[OpeningPartitionV1, list[OpeningSourceIdentityV1]]
+        eligible_by_partition = {}
+        for identity, part in eligible.items():
+            eligible_by_partition.setdefault(part, []).append(identity)
+        self.eligible = eligible
+        self.eligible_by_partition = eligible_by_partition
+        source_residuals = {
+            item.identity: item.residual_minor for item in manifest.dispositions
+        }
+        consumption_refs: Counter[str] = Counter()
+        ctx[0] = None
+        for lot in manifest.cash_lots:
+            ctx[0] = lot.partition
+            source_keys[
+                (capture.installation_id, lot.source_system, lot.source_settlement_key)
+            ] += 1
+            lot_ids[lot.lot_id] += 1
+            lot_identities[lot.source_identity] += 1
+            cash_totals[lot.partition] += lot.residual_minor
+            if (
+                lot.partition not in partitions
+                or eligible.get(lot.source_identity) != lot.partition
+            ):
+                block("cash_source_membership_mismatch", lot.lot_id)
+            if source_residuals.get(lot.source_identity) != lot.residual_minor:
+                block("source_residual_mismatch", lot.lot_id)
+            confirmation = lot.confirmation
+            if confirmation is None:
+                block("cash_confirmation_incomplete", lot.lot_id)
+            else:
+                if (
+                    confirmation.cash_amount_minor != lot.gross_minor
+                    or confirmation.currency != lot.partition.currency
+                    or confirmation.precision != lot.partition.precision
+                ):
+                    block("cash_confirmation_binding_mismatch", lot.lot_id)
+                if (
+                    confirmation.economic_at > capture.economic_cutoff
+                    or confirmation.recorded_at > capture.recorded_cutoff
+                ):
+                    block("source_after_cutoff", lot.lot_id)
+            if min(lot.gross_minor, lot.residual_minor) < 0:
+                block("cash_negative", lot.lot_id)
+            consumed = 0
+            for effect in lot.consumptions:
+                consumption_refs[effect.reference] += 1
+                consumed += effect.amount_minor
+                if (
+                    effect.kind not in {"allocation", "refund", "reservation"}
+                    or effect.ledger_ref is None
+                    or effect.target_ref is None
+                    or (effect.kind == "reversal" and effect.reverses_ref is None)
+                ):
+                    block("cash_consumption_unresolved", effect.reference)
+                if effect.kind == "reversal" or effect.reverses_ref is not None:
+                    block("cash_reversal_unsupported", effect.reference)
+                if effect.amount_minor < 0:
+                    block("cash_negative", effect.reference)
+                if (
+                    effect.economic_at > capture.economic_cutoff
+                    or effect.recorded_at > capture.recorded_cutoff
+                ):
+                    block("source_after_cutoff", effect.reference)
+            if lot.gross_minor - consumed != lot.residual_minor:
+                block("cash_equation_mismatch", lot.lot_id)
+        ctx[0] = None
+        for source_key, source_count in source_keys.items():
+            if source_count != 1:
+                block("cash_source_duplicate", str(source_key))
+        for lot_id, lot_count in lot_ids.items():
+            if lot_count != 1:
+                block("cash_lot_duplicate", lot_id)
+        for source_identity, identity_count in lot_identities.items():
+            if identity_count != 1:
+                block("cash_identity_duplicate", str(source_identity))
+        for consumption_ref, reference_count in consumption_refs.items():
+            if reference_count != 1:
+                block("cash_consumption_duplicate", consumption_ref)
+        for control in manifest.controls:
+            ctx[0] = control.partition
+            if control.available_cash_credit_minor != cash_totals[control.partition]:
+                block("cash_control_mismatch", control.partition.source_account_key)
+        self.lot_identities = lot_identities
+        self.cash_totals = cash_totals
+
+    def selected_failures(
+        self, selected: OpeningPartitionV1, target: OpeningTargetV1
+    ) -> dict[str, list[str]]:
+        """Checks that depend on the selected partition and target only."""
+        manifest = self.manifest
+        failures: dict[str, list[str]] = {}
+
+        def block(code: str, reference: str) -> None:
+            failures.setdefault(code, []).append(reference)
+
+        if (
+            target.scope != manifest.scope
+            or target.account_id != selected.account_id
+            or target.currency != selected.currency
+            or target.precision != selected.precision
+        ):
+            block("target_binding_mismatch", "target")
+        if self.partitions[selected] != 1:
+            block("partition_missing", selected.source_account_key)
+        if selected in self.held_partitions:
+            block("partition_held", selected.source_account_key)
+        for control in self.controls_by_partition.get(selected, ()):
+            for field in fields(control):  # type: ignore[arg-type]
+                if field.name not in {"partition", "available_cash_credit_minor"}:
+                    if getattr(control, field.name) != 0:
+                        block("unsupported_lane", field.name)
+        for identity in self.eligible_by_partition.get(selected, ()):
+            if self.lot_identities[identity] != 1:
+                block("eligible_source_unrepresented", identity.key)
+        return failures
+
+
+def _merge(
+    *stages: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Concatenate per-code references stage by stage (single-pass order)."""
+    merged: dict[str, list[str]] = {}
+    for stage in stages:
+        for code, refs in stage.items():
+            merged.setdefault(code, []).extend(refs)
+    return merged
+
+
 def preview_opening_account_import(
     request: OpeningPreviewRequestV1,
     *,
     verifier: OpeningEvidenceVerifier | None = None,
+    _analysis: _CashManifestAnalysis | None = None,
 ) -> OpeningImportPreviewV1:
     """Refuse unsupported evidence without mutating or creating financial facts.
 
@@ -74,181 +354,14 @@ def preview_opening_account_import(
     manifest = request.manifest
     capture = manifest.capture
     selected = request.partition
-    fingerprint = opening_manifest_fingerprint(manifest)
-    failures: dict[str, list[str]] = {}
+    analysis = _analysis if _analysis is not None else _CashManifestAnalysis(manifest)
+    fingerprint = analysis.fingerprint
+    failures = _merge(
+        analysis.failures, analysis.selected_failures(selected, request.target)
+    )
 
     def block(code: str, reference: str) -> None:
         failures.setdefault(code, []).append(reference)
-
-    if (
-        request.target.scope != manifest.scope
-        or request.target.account_id != selected.account_id
-        or request.target.currency != selected.currency
-        or request.target.precision != selected.precision
-    ):
-        block("target_binding_mismatch", "target")
-    if (
-        not capture.schema_heads
-        or capture.isolation not in {"repeatable_read", "serializable"}
-        or capture.economic_cutoff > capture.captured_at
-        or capture.recorded_cutoff > capture.captured_at
-    ):
-        block("capture_incomplete", capture.snapshot_id)
-
-    population = Counter(manifest.population)
-    dispositions = Counter(item.identity for item in manifest.dispositions)
-    if population != dispositions:
-        block("population_disposition_mismatch", "population")
-    for identity, count in population.items():
-        if count != 1:
-            block("source_identity_duplicate", f"{identity.kind}:{identity.key}")
-    observed = Counter(item.disposition for item in manifest.dispositions)
-    counts = manifest.counts
-    if (
-        counts.population != len(manifest.population)
-        or counts.eligible != observed["eligible"]
-        or counts.excluded != observed["excluded"]
-        or counts.blocking != observed["blocking"]
-        or counts.population != counts.eligible + counts.excluded + counts.blocking
-        or min(counts.population, counts.eligible, counts.excluded, counts.blocking) < 0
-    ):
-        block("population_counts_mismatch", "counts")
-
-    partitions = Counter(item.partition for item in manifest.controls)
-    if partitions[selected] != 1:
-        block("partition_missing", selected.source_account_key)
-    target_coordinates = Counter(
-        (item.partition.account_id, item.partition.currency)
-        for item in manifest.controls
-    )
-    for coordinate, count in target_coordinates.items():
-        if count != 1:
-            block("account_mapping_ambiguous", str(coordinate))
-    target_mappings: dict[tuple[UUID, str], set[str]] = {}
-    source_mappings: dict[tuple[str, str], set[UUID]] = {}
-    for control in manifest.controls:
-        part = control.partition
-        if partitions[part] != 1:
-            block("partition_duplicate", part.source_account_key)
-        if (
-            not 0 <= part.precision <= 18
-            or len(part.currency) != 3
-            or not part.currency.isascii()
-            or not part.currency.isalpha()
-            or not part.currency.isupper()
-        ):
-            block("currency_precision_invalid", part.source_account_key)
-        target_mappings.setdefault((part.account_id, part.currency), set()).add(
-            part.source_account_key
-        )
-        source_mappings.setdefault((part.source_account_key, part.currency), set()).add(
-            part.account_id
-        )
-    for target_coordinate, target_values in target_mappings.items():
-        if len(target_values) != 1:
-            block("account_mapping_ambiguous", str(target_coordinate))
-    for source_coordinate, source_values in source_mappings.items():
-        if len(source_values) != 1:
-            block("account_mapping_ambiguous", str(source_coordinate))
-    for item in manifest.dispositions:
-        if item.partition not in partitions:
-            block("partition_membership_missing", item.identity.key)
-        if item.disposition not in {"eligible", "excluded", "blocking"}:
-            block("disposition_unsupported", item.identity.key)
-        if item.disposition == "excluded" and item.residual_minor != 0:
-            block("excluded_nonzero_residue", item.identity.key)
-        if item.disposition == "blocking":
-            block("source_blocking_disposition", item.identity.key)
-
-    source_keys: Counter[tuple[str, str, str]] = Counter()
-    lot_ids: Counter[str] = Counter()
-    lot_identities: Counter[OpeningSourceIdentityV1] = Counter()
-    cash_totals: Counter[OpeningPartitionV1] = Counter()
-    eligible = {
-        item.identity: item.partition
-        for item in manifest.dispositions
-        if item.disposition == "eligible"
-    }
-    source_residuals = {
-        item.identity: item.residual_minor for item in manifest.dispositions
-    }
-    consumption_refs: Counter[str] = Counter()
-    for lot in manifest.cash_lots:
-        source_keys[
-            (capture.installation_id, lot.source_system, lot.source_settlement_key)
-        ] += 1
-        lot_ids[lot.lot_id] += 1
-        lot_identities[lot.source_identity] += 1
-        cash_totals[lot.partition] += lot.residual_minor
-        if (
-            lot.partition not in partitions
-            or eligible.get(lot.source_identity) != lot.partition
-        ):
-            block("cash_source_membership_mismatch", lot.lot_id)
-        if source_residuals.get(lot.source_identity) != lot.residual_minor:
-            block("source_residual_mismatch", lot.lot_id)
-        confirmation = lot.confirmation
-        if confirmation is None:
-            block("cash_confirmation_incomplete", lot.lot_id)
-        else:
-            if (
-                confirmation.cash_amount_minor != lot.gross_minor
-                or confirmation.currency != lot.partition.currency
-                or confirmation.precision != lot.partition.precision
-            ):
-                block("cash_confirmation_binding_mismatch", lot.lot_id)
-            if (
-                confirmation.economic_at > capture.economic_cutoff
-                or confirmation.recorded_at > capture.recorded_cutoff
-            ):
-                block("source_after_cutoff", lot.lot_id)
-        if min(lot.gross_minor, lot.residual_minor) < 0:
-            block("cash_negative", lot.lot_id)
-        consumed = 0
-        for effect in lot.consumptions:
-            consumption_refs[effect.reference] += 1
-            consumed += effect.amount_minor
-            if (
-                effect.kind not in {"allocation", "refund", "reservation"}
-                or effect.ledger_ref is None
-                or effect.target_ref is None
-                or (effect.kind == "reversal" and effect.reverses_ref is None)
-            ):
-                block("cash_consumption_unresolved", effect.reference)
-            if effect.kind == "reversal" or effect.reverses_ref is not None:
-                block("cash_reversal_unsupported", effect.reference)
-            if effect.amount_minor < 0:
-                block("cash_negative", effect.reference)
-            if (
-                effect.economic_at > capture.economic_cutoff
-                or effect.recorded_at > capture.recorded_cutoff
-            ):
-                block("source_after_cutoff", effect.reference)
-        if lot.gross_minor - consumed != lot.residual_minor:
-            block("cash_equation_mismatch", lot.lot_id)
-    for source_key, source_count in source_keys.items():
-        if source_count != 1:
-            block("cash_source_duplicate", str(source_key))
-    for lot_id, lot_count in lot_ids.items():
-        if lot_count != 1:
-            block("cash_lot_duplicate", lot_id)
-    for source_identity, identity_count in lot_identities.items():
-        if identity_count != 1:
-            block("cash_identity_duplicate", str(source_identity))
-    for consumption_ref, reference_count in consumption_refs.items():
-        if reference_count != 1:
-            block("cash_consumption_duplicate", consumption_ref)
-    for control in manifest.controls:
-        if control.available_cash_credit_minor != cash_totals[control.partition]:
-            block("cash_control_mismatch", control.partition.source_account_key)
-        if control.partition == selected:
-            for field in fields(control):
-                if field.name not in {"partition", "available_cash_credit_minor"}:
-                    if getattr(control, field.name) != 0:
-                        block("unsupported_lane", field.name)
-    for identity, part in eligible.items():
-        if part == selected and lot_identities[identity] != 1:
-            block("eligible_source_unrepresented", identity.key)
 
     if verifier is None:
         block("verifier_unavailable", "assembly-owned verifier")
@@ -280,6 +393,6 @@ def preview_opening_account_import(
         selected,
         request.target,
         not blockers,
-        cash_totals[selected],
+        analysis.cash_totals[selected],
         blockers,
     )

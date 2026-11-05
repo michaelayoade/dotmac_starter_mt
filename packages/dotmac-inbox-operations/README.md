@@ -78,6 +78,16 @@ Escalation's separation from transfer is structural: the record has no
 target-agent column, so an escalation that quietly reassigns is not
 expressible.
 
+Session-specific liveness and an agent preference that disables freshness-based
+automatic unavailability are not part of the a5 contract. Authentication
+sessions belong to the composing product, so this package will not add a
+foreign key to a product session table. Before Sub adopts this owner, its
+multi-session and `auto_offline` behavior needs a separate provider-neutral
+decision: either the assembly supplies an opaque liveness verdict to an
+extended command, or the behavior remains explicit product policy. Until that
+decision, the existing state-free heartbeat and `end_agent_session` contracts
+remain unchanged.
+
 **The escalation itself belongs to `dotmac-operational-escalations`**, which
 owns whether one should exist, under which immutable policy version, at what
 level and who answered it — for tickets, outages and staffed inboxes alike. So
