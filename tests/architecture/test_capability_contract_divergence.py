@@ -67,7 +67,6 @@ CONNECTOR_PACKAGES: Final[tuple[str, ...]] = (
 SHARED_UNGATED_CAPABILITIES: Final[dict[str, frozenset[str]]] = {
     "messaging.receive.v1": frozenset({"meta_social", "meta_whatsapp"}),
     "messaging.send.v1": frozenset({"meta_social", "meta_whatsapp"}),
-    "payments.intent.v1": frozenset({"flutterwave", "paystack"}),
     "payments.refund.v1": frozenset({"flutterwave", "paystack"}),
     "payments.settlement.observation.v1": frozenset({"flutterwave", "paystack"}),
 }

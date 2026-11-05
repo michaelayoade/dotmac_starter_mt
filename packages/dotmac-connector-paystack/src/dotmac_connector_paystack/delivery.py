@@ -7,14 +7,14 @@ for this command, and translates the result into the engine's `Outcome`.
 
 ## One binding is one blast radius
 
-Four capabilities rather than one, and the split is a security property, not
-taxonomy. `ACTIONS_BY_CAPABILITY` is ported from Sub's
+A single outbound capability, ``payments.refund.v1``, whose allow-list is data
+rather than a clause: ``refund`` and the read ``find_refund`` that decides an
+ambiguous one. ``ACTIONS_BY_CAPABILITY`` is ported from Sub's
 `PaymentGatewayRunner`, which refuses an action outside the bound capability
-with `operation_not_allowed` — so an installation bound only for payment
-intents cannot be made to issue a refund or a payout by a crafted payload. The
-table is checked for TOTALITY at import: an operation that belongs to no
-capability would be unreachable, and one that belongs to two would widen every
-binding that names either.
+with `operation_not_allowed`. The table is checked for TOTALITY at import: an
+operation that belongs to no capability would be unreachable, and one that
+belongs to two would widen every binding that names either. (Intent, payout
+and customer capabilities are not part of this release.)
 
 ## What this handler never does
 
@@ -53,25 +53,13 @@ __all__ = [
 
 API_SECRET_KEY: Final = "api_secret_key"
 
-PAYMENT_INTENT_CAPABILITY: Final = "payments.intent.v1"
 PAYMENT_REFUND_CAPABILITY: Final = "payments.refund.v1"
-PAYMENT_PAYOUT_CAPABILITY: Final = "payments.payout.v1"
-PAYMENT_CUSTOMER_CAPABILITY: Final = "payments.customer.v1"
 
 #: Which commands each bound capability may issue. Sub's allow-list, kept as
 #: data so widening one is a reviewable diff rather than a new ``or`` clause.
 ACTIONS_BY_CAPABILITY: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
-        PAYMENT_INTENT_CAPABILITY: frozenset(
-            {"initialize_payment", "charge_authorization"}
-        ),
-        PAYMENT_REFUND_CAPABILITY: frozenset({"refund"}),
-        PAYMENT_PAYOUT_CAPABILITY: frozenset(
-            {"resolve_bank_account", "create_transfer_recipient", "initiate_transfer"}
-        ),
-        PAYMENT_CUSTOMER_CAPABILITY: frozenset(
-            {"create_customer", "update_customer", "read_customer"}
-        ),
+        PAYMENT_REFUND_CAPABILITY: frozenset({"refund", "find_refund"}),
     }
 )
 
@@ -101,7 +89,7 @@ if _MISALLOCATED:  # pragma: no cover - an import-time guard, proved by test
         "through more than one capability binding"
     )
 
-#: Every outbound capability takes the same configuration, and `timeout_seconds`
+#: The outbound capability takes the same configuration, and `timeout_seconds`
 #: is REQUIRED rather than defaulted. A hidden default on a money path is a
 #: deployment decision nobody made; a stated one is reviewable.
 OUTBOUND_CONFIG_SCHEMA: Final[dict[str, object]] = {
@@ -139,8 +127,8 @@ def _action(capability_id: str, payload: Mapping[str, object]) -> str:
     if not isinstance(value, str) or _ACTION_RE.fullmatch(value) is None:
         raise OperationContractError("action_required")
     if value not in ACTIONS_BY_CAPABILITY.get(capability_id, frozenset()):
-        # Sub's refusal, kept: a binding that was granted payment intents may
-        # not be talked into issuing a refund by the shape of a payload.
+        # Sub's refusal, kept: a binding is held to the commands its own
+        # capability names, whatever the shape of a payload.
         raise OperationContractError("operation_not_allowed")
     return value
 

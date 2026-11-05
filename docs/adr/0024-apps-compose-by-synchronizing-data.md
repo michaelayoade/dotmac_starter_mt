@@ -8,9 +8,10 @@ canonical schema belongs to the domain contract, a published version is
 succeeded rather than redefined, and a capability exposes product meaning
 rather than provider workflow), and 2026-08-26 (§ 13 below, caller-path parity:
 an independently released caller binds to a pinned published contract, with a
-non-vacuous binding). Every amendment is a dated addition; no earlier
-text is rewritten, and where a later section supersedes an earlier framing it
-says so by name.
+non-vacuous binding), and 2026-11-03 (§ 14 below, a bounded exception to § 2
+for two named composition packages; approved by Michael). Every amendment
+is a dated addition; no earlier text is rewritten, and where a later section
+supersedes an earlier framing it says so by name.
 **Date:** 2026-08-13
 **Decision owner:** Michael
 **Scope:** FLEET-WIDE. Applies to every Dotmac application and installable
@@ -738,3 +739,147 @@ table, migration, product route or assembly authentication decision.
 
 The qualifying-source and greenfield findings are recorded in
 `docs/inventories/integration-request-sources.md`.
+
+## Decision amendment — 2026-11-03 (§ 2 bounded ruling: composition packages)
+
+**Status of this amendment:** Accepted 2026-11-03. Michael approved this text
+on 2026-11-03, with the S15 posting package consuming Billing's facts as a
+message schema (14.6).
+
+**Scope — this is the ruling, not a summary of it.** § 2 says a module "never
+imports the consuming assembly or another business module". This amendment
+creates **one bounded exception** to that sentence, for a new and narrow kind of
+package, the **composition package**, and names the only two that exist. It
+does not loosen § 2 for any other module. Every other module stays in the
+*Modules are independent of each other* import-linter contract unchanged.
+
+**WIDENING (explicit).** Until this amendment, only an assembly could compose
+two business modules. After it, a composition package may import a **named
+owner list** of other modules' public surfaces. This is a widening of § 2 and of
+the import-linter independence contract named under *Enforcement and evidence*.
+It is recorded here, not implied by an implementation.
+
+### 14. A composition package composes named owners and owns nothing but instance state
+
+**Why.** Money lifecycles in a thin-client deployment span several owners
+(Billing, Payments, Approvals, Collections, Service Access Policy, durable
+timers, fulfillment, imports). Each lifecycle is an explicit owner-coded state
+machine. Two ways to place them were rejected. Placing them in the assembly
+repeats them in every adopter and keeps the client thick. A port-only package
+with no imports would redeclare every owner's contract types and need a
+translator per adopter, which duplicates published contracts (§§ 10–11). A
+general workflow engine is not the answer either: ADR-0040 keeps every domain
+state machine out of `dotmac-workflow-runtime`.
+
+**14.1 What a composition package may import.** Only:
+
+1. the kernel, as any module may; and
+2. the **public surface** of each owner on its named owner list (14.6). The
+   public surface is the names exported by the owner package's top-level
+   `__all__`, meaning its published contracts and service functions. It never
+   includes the owner's `models`, `migrations`, `manifest` internals, an
+   underscore-prefixed module, or any name not in `__all__`.
+
+It never imports an assembly, a product, a connector plugin, another
+composition package, or a module not on its list. No module, connector or
+other composition package imports a composition package. Only an assembly
+does.
+
+**14.2 What a composition package may own.** Lifecycle **instance state only**:
+one row per lifecycle instance, carrying its state, a deadline value, a reason,
+the policy version and the definition version it runs under, and opaque
+references to the owners' records. A deadline value is a column, not a clock:
+the deadline is scheduled and fired through `dotmac-durable-timers`.
+
+**14.3 What a composition package must never own.**
+
+- **No engine mechanics.** No lease, claim, retry, scanner, attempt, timer or
+  dead-letter table, and no wall-clock reaper. Retry and dead-letter come from
+  the kernel outbox relay. Deadlines come from `dotmac-durable-timers`. A
+  multi-step external leg with compensation is a `dotmac-fulfillment` run.
+  Approval decisions come from `dotmac-approvals`.
+- **No money facts or balances.** No posted amount, balance, allocation,
+  settlement, available credit or accounting fact is stored by a composition
+  package. Those are written only by their owner (Billing, Payments,
+  Accounting) through that owner's command. A requested amount carried on a
+  pending instance is an un-applied command parameter inside a fingerprint, not
+  a fact; reads of a position go to the owner.
+- **No product or provider literals.** No product name, provider name, plan
+  name, deployment mode or `is_<product>` switch (§ 4). Policy (for example an
+  allocation order or a waiting deadline) is a versioned policy value entered
+  in the UI, not a constant.
+- **No transaction ownership.** Every command takes the caller's `Session`,
+  calls owner services that flush only, and never commits or rolls back. The
+  assembly owns the single caller transaction (ADR-0020, 2026-10-15
+  amendment).
+
+**14.4 One package per deployment boundary.** A deployment installs at most one
+composition package. It is installed by that deployment's assembly, in that
+deployment's own database and lineage, like any module (§ 2). Two applications
+never share one composition package's rows (§ 1).
+
+**14.5 Enforcement (required in the package's first code slice).** The
+exception has an enforceable premise (ADR-0018) only when all of these land
+with the package and each is shown to fail against a planted violation:
+
+- an import-linter contract, or a companion architecture test, that refuses any
+  import outside 14.1, including a private or non-`__all__` name of a listed
+  owner;
+- the package's manifest declares a **table allowlist**, and an architecture
+  test refuses any owned table or column outside 14.2, including any lease,
+  claim, retry, scanner, attempt, timer or dead-letter table and any amount or
+  balance column. The model is `tests/architecture/test_workflow_runtime_module.py`
+  ("cannot execute product effects or own transactions");
+- an architecture test refuses product and provider literals (§ 4);
+- an architecture test refuses `commit`/`rollback` on the caller session; and
+- the composition package is added to a contract that forbids every other
+  module, connector and composition package from importing it.
+
+Until those checks exist in the tree, a composition package is not
+installable, and the exception is not claimed for it.
+
+**14.6 The named composition packages and their owner lists.** These two, and
+only these two. A third composition package, or an addition to either owner
+list, needs a new dated amendment to this ADR.
+
+| Composition package | Deployment boundary | Named owner list (public surface only) |
+|---|---|---|
+| **Flows package** (proposed name `dotmac-money-flows`) | The Sub deployment | `dotmac-billing`, `dotmac-payments`, `dotmac-approvals`, `dotmac-collections` (contracts only), `dotmac-service-access-policy` (contracts only), `dotmac-durable-timers`, `dotmac-fulfillment`, `dotmac-imports` |
+| **S15 posting package** (name not yet allocated) | The ERP deployment | `dotmac-accounting`. **No `dotmac-billing` import.** Billing's facts are consumed only as Billing's published accounting-fact **message schema**, pinned by capability id and contract digest (below) |
+
+For the flows package, "contracts only" means the package may use that owner's
+published contract types but not call its services. Collections remains the
+dunning owner and receives observations; only the access owner changes service
+access (Service Access Policy signals, Sub enforcement).
+
+For the S15 posting package, Billing is **not** on the import list, and ERP
+never installs the `dotmac-billing` distribution, as code or as a composed
+module. ADR-0020 A6 ("ERP installs none of the three") stands. Billing's facts
+cross to ERP as a message, as § 3 requires:
+
+- **Owner of the schema.** Billing owns the meaning of an accounting fact, so
+  Billing authors the schema (§ 10.1). It is published as the
+  `observation_schema` of a domain-owned `CapabilityContract` with a canonical
+  contract digest (§ 10.2). The application where Billing is installed declares
+  that contract to the Integrator through its product port. A connector claims
+  the digest and never defines the schema (§ 10.3).
+- **Versioning.** The capability id carries the version (`.vN`). A published
+  version is never redefined; a schema change is a new `.vN` id, succeeded
+  under § 11.
+- **Transport.** A connector on the `dotmac-integration` SPI polls Billing's
+  public ordered fact query (§§ 6–7). The Integrator validates every
+  observation against the schema before recording it (§ 10.4, item 4), and
+  delivers it to ERP's ProductObservation receiver. There is no second
+  envelope.
+- **ERP side.** The posting package pins the exact capability id and contract
+  digest it was built against (§ 13). It validates each received observation
+  against that pinned schema before its own state machine accepts it. It holds
+  the pinned schema as data, never as a Billing Python type. A parity test
+  compares the pinned schema and digest with Billing's published contract and
+  fails on any difference (§ 13, non-vacuous binding).
+
+**14.7 What this amendment does not do.** It creates no package, namespace,
+lineage, release, pin or adoption. It changes no owner's authority. It does not
+make `dotmac-workflow-runtime` a money engine, and does not move any state
+machine into it (ADR-0040). Each composition package still needs its own
+dossier, manifest, release and the 14.5 checks before it is installable.

@@ -8178,7 +8178,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "ao_0003_ack_attribution.py",
         }
     ),
-    "dotmac-payments": frozenset(),
+    # `pm_0007` adds append-only refund instructions and cash outcomes; still
+    # editable until `dotmac-payments` 0.1.0a4 is tagged.
+    "dotmac-payments": frozenset({"pm_0007_refund_outcomes.py"}),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
@@ -8186,7 +8188,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
-    "dotmac-billing": frozenset(),
+    # `bi_0013` adds the sealed hold list guards and post-seal hold admission
+    # audit table; still editable until billing 0.1.0a11 is tagged.
+    "dotmac-billing": frozenset({"bi_0013_opening_hold_admission.py"}),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8196,7 +8200,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-qualification": frozenset(),
     "dotmac-response-obligations": frozenset(),
     "dotmac-sales": frozenset(),
-    "dotmac-service-access-policy": frozenset(),
+    # `sap_0002` adds the source/policy version columns; still editable until
+    # `dotmac-service-access-policy` 0.1.0a2 is tagged.
+    "dotmac-service-access-policy": frozenset({"sap_0002_input_versions.py"}),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),

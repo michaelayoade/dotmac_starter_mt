@@ -34,10 +34,10 @@ contract_consumers = []
 candidate_consumers = ["dotmac_sub"]
 composition_boundary = "FUP, prepaid, collections and admin adapters record typed observations; the resolver writes desired state. Network Access consumes that state through a typed port and is the only enforcer. No sibling module import is permitted."
 inventory_evidence = ["docs/inventories/isp-essential-domain-sources.md"]
-first_cutover = "Sub remains access-policy owner until input backfill and per-service desired-state shadow comparison complete before Network Access switches its reader."
-shadow_and_drift = "Compare each service's active signals, precedence, desired access, reason and decision time; device/AAA state remains an external enforcement projection."
+first_cutover = "Sub remains access-policy owner until input backfill and a saved-test and backtest comparison of per-service desired state complete before Network Access switches its reader."
+shadow_and_drift = "Saved tests plus backtest, no side-by-side run: compare each service's active signals, precedence, desired access, reason and decision time; device/AAA state remains an external enforcement projection."
 local_copy_retirement = "After cutover, reduce Sub parallel desired-access resolvers and direct policy-to-device writers to zero; Network Access remains the reconciler."
-next_action = "Compose in Sub and shadow per-service decisions before switching Network Access to the typed desired-state reader."
+next_action = "Compose in Sub (a2 adds RecordAccessInputV2 with stale refusal and the pure ordering helper for the Sub enforcement consumer) and backtest per-service decisions before switching Network Access to the typed desired-state reader."
 [[product_writers]]
 product = "dotmac_erp"
 writer_state = "inventory_only"

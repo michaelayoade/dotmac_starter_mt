@@ -73,6 +73,9 @@ class RealNumbering:
 
     def allocate(self, db, **kwargs):
         self.calls += 1
+        # The adapter owns forwarding: these series are not enrolled, and
+        # Numbering refuses a claim argument for a series without a domain.
+        assert kwargs.pop("document_reference")
         result = allocate(db, **kwargs)
         if self.fail:
             raise ValueError("injected failure after number allocation")

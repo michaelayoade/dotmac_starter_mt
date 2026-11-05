@@ -65,11 +65,11 @@ def policy(release, monkeypatch, tmp_path):
 
 def test_real_fulfillment_closure_and_shared_root_are_deduplicated(release):
     closure = release._module_closure(
-        ["dotmac-fulfillment==0.1.0a2", "dotmac-durable-timers==0.1.0a1"]
+        ["dotmac-fulfillment==0.1.0a2", "dotmac-durable-timers==0.1.0a2"]
     )
     assert [entry["code"] for entry in closure] == ["durable_timers", "fulfillment"]
     assert closure[1]["dependencies"] == ("durable_timers",)
-    assert closure[0]["version"] == "0.1.0a1"
+    assert closure[0]["version"] == "0.1.0a2"
     assert (
         "dotmac-durable-timers" not in closure[1]["wheel_contents"]["allowed_requires"]
     )

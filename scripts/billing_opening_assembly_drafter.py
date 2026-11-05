@@ -38,6 +38,15 @@ from pathlib import Path
 from typing import Final
 from uuid import UUID, uuid5
 
+from dotmac_billing.opening_admissibility import (
+    AdmissibilityError,
+    AdmissibilityProjection,
+    parse_a10_classes,
+    parse_admissibility_rules,
+    parse_reseller_map,
+    project_census,
+    render_admissibility_decisions,
+)
 from dotmac_billing.opening_contracts import (
     OpeningEvidenceError,
 )
@@ -48,7 +57,15 @@ from dotmac_billing.opening_rehearsal import (
     parse_opening_rehearsal_json,
 )
 
-__all__ = ["Draft", "DraftError", "draft_assembly", "main", "render_outputs"]
+__all__ = [
+    "Draft",
+    "DraftError",
+    "draft_assembly",
+    "main",
+    "project_admissibility",
+    "render_admissibility",
+    "render_outputs",
+]
 
 TARGET_STATE_SCHEMA: Final = "billing.opening.rehearsal.target-state.v1"
 _POPULATION_VERSIONS = frozenset(
@@ -124,6 +141,7 @@ class Draft:
     census_sha256: str = ""
     target_state_sha256: str = ""
     census_facts: dict[str, str] = field(default_factory=dict)
+    admissibility: AdmissibilityProjection | None = None
 
 
 def _bad(code: str = "malformed_input") -> DraftError:
@@ -253,8 +271,16 @@ def draft_assembly(
     *,
     census_sha256: str = "",
     target_state_sha256: str = "",
+    admissibility: AdmissibilityProjection | None = None,
 ) -> Draft:
-    """Draft one candidate assembly. Pure: no I/O, no clock, no randomness."""
+    """Draft one candidate assembly. Pure: no I/O, no clock, no randomness.
+
+    With ``admissibility`` the eligible population is the rules' projection of
+    the census (D-2), not the census's own all-or-nothing list; the drafter
+    still invents no value and only maps identities.
+    """
+    if admissibility is not None:
+        census = admissibility.census
     target = _target_state(target)
     capture = _obj(census.get("capture"))
     declared = _obj(capture.get("declared_source"))
@@ -483,6 +509,7 @@ def draft_assembly(
         ],
         census_sha256=census_sha256,
         target_state_sha256=target_state_sha256,
+        admissibility=admissibility,
         census_facts={
             "population_version": version,
             "content_fingerprint": str(census.get("content_fingerprint")),
@@ -509,6 +536,21 @@ def render_outputs(draft: Draft) -> tuple[str, str]:
         ("output", "assembly_digest", draft.digest),
     ]
     rows.extend(("count", key, str(value)) for key, value in draft.counts.items())
+    if draft.admissibility is not None:
+        proj = draft.admissibility
+        rows.extend(
+            ("admissibility_digest", name, digest)
+            for name, digest in sorted(proj.digests.items())
+        )
+        rows.extend(
+            ("admissibility_count", key, str(value))
+            for key, value in proj.counts().items()
+        )
+        rows.extend(
+            ("hold", f"{d.account_id}:{d.currency}", d.reason or "")
+            for d in proj.decisions
+            if not d.admitted
+        )
     rows.extend(
         ("partition", f"{source}:{currency}", target)
         for source, currency, target in draft.partitions
@@ -527,8 +569,39 @@ def render_outputs(draft: Draft) -> tuple[str, str]:
     return assembly_text, buffer.getvalue()
 
 
-def _write_pair(targets: tuple[Path, Path], texts: tuple[str, str]) -> None:
-    """Write both files to private temps, then rename both; else leave nothing."""
+def render_admissibility(draft: Draft) -> str | None:
+    """The deterministic per-partition decision record, when rules were applied."""
+    if draft.admissibility is None:
+        return None
+    return render_admissibility_decisions(draft.admissibility)
+
+
+def project_admissibility(
+    census: Mapping[str, object],
+    *,
+    rules_payload: object,
+    a10_payload: object,
+    reseller_payload: object | None = None,
+) -> AdmissibilityProjection:
+    """Evaluate the reviewed rules; D-3 is left to the adapter (no originals yet)."""
+    try:
+        return project_census(
+            census,
+            rules=parse_admissibility_rules(rules_payload),
+            a10=parse_a10_classes(a10_payload),
+            reseller=(
+                None
+                if reseller_payload is None
+                else parse_reseller_map(reseller_payload)
+            ),
+            original_invoice_ids=None,
+        )
+    except AdmissibilityError as exc:
+        raise _bad(exc.code) from None
+
+
+def _write_pair(targets: Sequence[Path], texts: Sequence[str]) -> None:
+    """Write all files to private temps, then rename all; else leave nothing."""
     temps: list[Path] = []
     renamed: list[Path] = []
     try:
@@ -554,6 +627,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--census", required=True, help="Sub v2/v3 census wire JSON")
     parser.add_argument("--target-state", required=True, help="Target-state JSON")
     parser.add_argument("--out-dir", required=True, help="Existing directory")
+    parser.add_argument(
+        "--rules", help="Reviewed admissibility rules JSON (D-2 digest); needs --a10"
+    )
+    parser.add_argument("--a10", help="A10 per-account classes JSON; needs --rules")
+    parser.add_argument("--reseller-map", help="Reseller option A map JSON")
     args = parser.parse_args(argv)
     out_dir = Path(args.out_dir)
     try:
@@ -561,19 +639,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         target_raw, target = _read_json(
             Path(args.target_state), "malformed_target_state"
         )
+        if bool(args.rules) != bool(args.a10) or (args.reseller_map and not args.rules):
+            raise _bad("rules_and_a10_required_together")
+        projection = None
+        if args.rules:
+            _raw, rules_payload = _read_json(Path(args.rules), "malformed_rules")
+            _raw, a10_payload = _read_json(Path(args.a10), "malformed_a10_classes")
+            reseller_payload = None
+            if args.reseller_map:
+                _raw, reseller_payload = _read_json(
+                    Path(args.reseller_map), "malformed_reseller_map"
+                )
+            projection = project_admissibility(
+                census,
+                rules_payload=rules_payload,
+                a10_payload=a10_payload,
+                reseller_payload=reseller_payload,
+            )
         draft = draft_assembly(
             census,
             target,
             census_sha256=hashlib.sha256(census_raw).hexdigest(),
             target_state_sha256=hashlib.sha256(target_raw).hexdigest(),
+            admissibility=projection,
         )
         assembly_text, summary_text = render_outputs(draft)
+        decisions_text = render_admissibility(draft)
         if not out_dir.is_dir():
             raise _bad("output_directory_missing")
-        targets = (out_dir / "assembly.json", out_dir / "summary.csv")
+        names = ["assembly.json", "summary.csv"]
+        texts = [assembly_text, summary_text]
+        if decisions_text is not None:
+            names.append("admissibility.json")
+            texts.append(decisions_text)
+        targets = tuple(out_dir / name for name in names)
         if any(path.exists() for path in targets):
             raise _bad("output_exists")
-        _write_pair(targets, (assembly_text, summary_text))
+        _write_pair(targets, texts)
     except (DraftError, OpeningEvidenceError, OSError) as exc:
         code = exc.code if isinstance(exc, DraftError) else "malformed_input"
         print(_canonical_json({"drafted": False, "refused": code}))
@@ -588,6 +690,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "assembly_digest": draft.digest,
                 "summary_csv_sha256": hashlib.sha256(summary_text.encode()).hexdigest(),
                 "blockers": len(draft.blockers),
+                **(
+                    {
+                        "admissibility_json_sha256": hashlib.sha256(
+                            decisions_text.encode()
+                        ).hexdigest(),
+                        "rules_digest": projection.digests["rules"],
+                    }
+                    if decisions_text is not None and projection is not None
+                    else {}
+                ),
             }
         )
     )

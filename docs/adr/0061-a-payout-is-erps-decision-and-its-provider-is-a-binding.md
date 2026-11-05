@@ -155,6 +155,12 @@ is actionable, and so nobody cites it as evidence of compliance.
 else) and withholds transfers deliberately. Interchangeability with one
 implementation is a claim, not a property.
 
+> **Note 2026-11-04 (Michael's decision D5).** `dotmac-connector-paystack`
+> 0.1.0a3 declares NO `payments.payout.v1` and no `payments.customer.v1`: the
+> release is narrowed to refunds (`payments.refund.v1` plus refund-outcome
+> ingress). Payout re-enters behind `submit_payout` in a later release. Until
+> then no connector in the fleet declares `payments.payout.v1`.
+
 **D2 — the withheld Flutterwave capability was named per provider, not per
 contract.** `packages/dotmac-connector-flutterwave/EXTRACTION.toml` withheld
 `payments.transfer.v1` and `payments.payout.batch.v1`. Both are § 2 breaches
@@ -479,6 +485,12 @@ names the section it corrects, nothing above is rewritten, and the superseded
 spot carries a short pointer.
 
 ### A5. `payments.customer.v1` is REMOVED from the public capability manifest
+
+> **Note 2026-11-04 (D5).** The removal is now done in code for
+> `dotmac-connector-paystack` 0.1.0a3 (not yet tagged): the capability, its three
+> operations and the `ACTIONS_BY_CAPABILITY`/`OPERATIONS` rows left in one
+> change, as the ordering constraint below requires. The same release also
+> drops the payout and payment-intent surfaces (see D1).
 
 A3 left this on notice — *"it either earns an argued independent lifecycle or
 it collapses into the intent contract's normalized result"*. It does not earn

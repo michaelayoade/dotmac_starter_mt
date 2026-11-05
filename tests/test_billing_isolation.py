@@ -111,6 +111,8 @@ def _expected_online_privileges(table_name: str) -> frozenset[str]:
         "opening_windows",
         "opening_window_admissions",
         "opening_window_seals",
+        "opening_hold_admissions",
+        "opening_authority_switch_receipts",
         "opening_cash_lots",
         "opening_receivable_bases",
         "opening_historical_discharge_claims",
@@ -200,7 +202,9 @@ class _Numbering:
         series_code: str,
         reference_date: date,
         idempotency_key: str,
+        document_reference: str,
     ) -> str:
+        assert document_reference
         scope_code = "tenant" if isinstance(scope, TenantScope) else "platform"
         scope_identity = (
             f"tenant:{scope.tenant_id}"

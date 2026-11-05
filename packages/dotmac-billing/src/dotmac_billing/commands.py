@@ -32,7 +32,17 @@ from dotmac_billing.contracts import (
 
 
 class NumberingProvider(Protocol):
-    """Assembly adapter over the independently owned numbering capability."""
+    """Assembly adapter over the independently owned numbering capability.
+
+    ``document_reference`` is the stable identity of the document being numbered
+    and is identical on every replay of the same command (an invoice uses its
+    document id; a credit note uses its command-stable correlation identity,
+    never a per-execution random value). A locked or enrolled series requires it
+    to bind the claim to the document; the adapter decides whether to forward it
+    for a series that does not accept it. Billing always supplies it. A number
+    collision should be raised by the adapter as
+    ``BillingRuleViolation("document_number_collision")`` and must not be retried.
+    """
 
     def allocate(
         self,
@@ -42,6 +52,7 @@ class NumberingProvider(Protocol):
         series_code: str,
         reference_date: date,
         idempotency_key: str,
+        document_reference: str,
     ) -> str: ...
 
 
