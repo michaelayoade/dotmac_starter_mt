@@ -1,0 +1,86 @@
+name: Publish Starter 0.9.0 RC1
+
+on:
+  push:
+    branches: [codex/publish-starter-rc1]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RC_SOURCE: 5406b7381118be73f05ac818db0a2e5e5b10b9ba
+      REGISTRY_IMAGE: ghcr.io/michaelayoade/dotmac_starter_mt
+      LOCAL_IMAGE: starter:rc1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RC_SOURCE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build and check the final Starter image
+        run: |
+          test "$(git rev-parse HEAD)" = "$RC_SOURCE"
+          docker build --build-arg APP_PORT=8000 -t "$LOCAL_IMAGE" .
+          docker run --rm "$LOCAL_IMAGE" alembic --version
+          docker run --rm -i "$LOCAL_IMAGE" python - <<'PY'
+          import importlib.metadata as metadata
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          expected = {"dotmac-kernel", "dotmac-ui", "dotmac-template-studio", "dotmac-ticketing"}
+          root = Path("/srv/app")
+          inventory = json.loads((root / "runtime-inventory.json").read_text())
+          installed = {
+              dist.metadata["Name"].lower().replace("_", "-")
+              for dist in metadata.distributions()
+              if dist.metadata["Name"].lower().startswith("dotmac")
+          }
+          packaged = {path.name for path in (root / "packages").iterdir()}
+          assert installed == set(inventory["local"]) == packaged == expected
+          for name in ("dotmac_sub", "dotmac_erp"):
+              assert importlib.util.find_spec(name) is None, name
+          print("Verified Starter runtime packages:", ", ".join(sorted(installed)))
+          PY
+      - name: Qualify fresh install and source-baseline upgrade
+        run: |
+          GITHUB_SHA="$RC_SOURCE" python scripts/verify_reference_upgrade.py \
+            --candidate-image "$LOCAL_IMAGE" --output reference-upgrade-evidence.json
+      - name: Push the tested image and verify its registry digest
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          tested_id=$(jq -er 'select(.status == "passed" and .cleanup == "passed") | .candidate_image_id' reference-upgrade-evidence.json)
+          test "$(docker image inspect --format '{{.Id}}' "$LOCAL_IMAGE")" = "$tested_id"
+          fingerprint='{{json .RootFS}} {{json .Config}}'
+          tested_content=$(docker image inspect --format "$fingerprint" "$LOCAL_IMAGE")
+          tag="$REGISTRY_IMAGE:0.9.0-rc1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag "$tested_id" "$tag"
+          docker push "$tag"
+          digest=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))')
+          reference="$REGISTRY_IMAGE@$digest"
+          docker pull "$reference"
+          test "$(docker image inspect --format "$fingerprint" "$reference")" = "$tested_content"
+          jq -n --arg tag "$tag" --arg reference "$reference" --arg digest "$digest" \
+            --arg tested_id "$tested_id" --arg source "$RC_SOURCE" \
+            '{tag: $tag, reference: $reference, registry_digest: $digest, tested_image_id: $tested_id, source: $source}' \
+            | tee starter-rc1-publication.json
+          printf 'Published and verified `%s`\n' "$reference" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain qualification and publication evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: starter-rc1-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            reference-upgrade-evidence.json
+            starter-rc1-publication.json
+          if-no-files-found: error
