@@ -25,6 +25,41 @@ rm -r app/features/custom_fields \
   packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields
 rm alembic/versions/a001_adopt_custom_field_definitions.py
 
+# Machine credential storage remains part of the kernel migration lineage.
+# The evaluation archive omits the authentication and rotation implementation.
+kernel=packages/dotmac-kernel/src/dotmac_kernel
+python3 - "$kernel" <<'PY'
+import ast
+import json
+import sys
+from pathlib import Path
+
+kernel = Path(sys.argv[1])
+modules = {"dotmac_kernel.machine_auth", "dotmac_kernel.machine_rotation"}
+init = kernel / "__init__.py"
+source = init.read_text()
+imports = [
+    node for node in ast.parse(source).body
+    if isinstance(node, ast.ImportFrom) and node.module in modules
+]
+assert {node.module for node in imports} == modules
+symbols = {alias.asname or alias.name for node in imports for alias in node.names}
+removed_lines = {
+    line for node in imports for line in range(node.lineno, node.end_lineno + 1)
+}
+init.write_text("".join(
+    line for number, line in enumerate(source.splitlines(keepends=True), 1)
+    if number not in removed_lines
+    and line.strip().rstrip(",").strip('"') not in symbols | modules
+))
+exports = kernel / "public_exports.json"
+contract = json.loads(exports.read_text())
+for module in modules:
+    del contract["modules"][module]
+    (kernel / (module.rsplit(".", 1)[1] + ".py")).unlink()
+exports.write_text(json.dumps(contract, indent=2) + "\n")
+PY
+
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$destination.tar" .
 tar -tf "$destination.tar" | LC_ALL=C sort > "$destination.files"
 sha256sum "$destination.tar"
