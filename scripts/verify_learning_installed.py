@@ -456,6 +456,10 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
         Submission,
     )
     from dotmac_learning.participation_models import Cohort, Enrollment
+    from dotmac_learning.progress_contracts import (
+        CERTIFICATE_CAPABILITY,
+        COMPLETION_CAPABILITY,
+    )
     from dotmac_learning.projections import best_scores_for
     from dotmac_learning.result_contracts import LAB_RESULT_CAPABILITY
     from sqlalchemy.orm import Session
@@ -463,12 +467,17 @@ def vertical(admin_url, user_url, receipt: dict) -> None:
     install_audit_actions(AuditActionRegistry.from_manifests((module,)))
     admin = sa.create_engine(admin_url, hide_parameters=True)
     user = sa.create_engine(user_url, hide_parameters=True)
-    # Composition grant: lr_0011 EXECUTE is owner-only at migration time;
-    # the composing application grants it to the role that calls the
-    # Python lab API. The probe composes that grant for app_user here.
+    # Composition grant: lr_0011/lr_0012 EXECUTE is owner-only at
+    # migration time; the composing application grants it to the roles
+    # that call the Python result/completion/certificate/lab APIs.
+    # The probe composes those grants for app_user here.
     with admin.begin() as conn:
         conn.execute(
-            sa.text(f"GRANT EXECUTE ON FUNCTION {LAB_RESULT_CAPABILITY} TO app_user")
+            sa.text(
+                "GRANT EXECUTE ON FUNCTION "
+                f"{LAB_RESULT_CAPABILITY}, {COMPLETION_CAPABILITY}, "
+                f"{CERTIFICATE_CAPABILITY} TO app_user"
+            )
         )
     tenant, other, person, course, mcq, lab = (uuid4() for _ in range(6))
     now = datetime.now(UTC)
