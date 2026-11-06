@@ -62,7 +62,7 @@ def expectation(checkout: Path, destination: Path) -> None:
                 if isinstance(target, ast.Name) and target.id == "__version__":
                     version = ast.literal_eval(node.value)
     require(
-        exports is not None and len(exports) == len(set(exports)) == 601,
+        exports is not None and len(exports) == len(set(exports)) == 603,
         "Source Learning export extent differs",
     )
     require(
@@ -224,7 +224,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
         wheels[distribution] = {"sha256": wheel_digest, "version": version}
     receipt.update(
         wheels=wheels,
-        learning_exports=601,
+        learning_exports=603,
         kernel_exports=281,
         owner_binding_sha256=hashlib.sha256(
             json.dumps(expected["bindings"], sort_keys=True).encode()
@@ -327,7 +327,7 @@ def migrate(admin, receipt: dict) -> None:
             scripts = ScriptDirectory.from_config(cfg)
             require(
                 set(scripts.get_heads())
-                == {"0030_credential_tenant_key", "lr_0011_lab_result_capability"},
+                == {"0030_credential_tenant_key", "lr_0012_completion_capability"},
                 "Installed pair graph head differs",
             )
 
@@ -365,7 +365,7 @@ def migrate(admin, receipt: dict) -> None:
                 )
                 cfg.attributes["connection"] = connection
                 command.upgrade(cfg, "0030_credential_tenant_key")
-                command.upgrade(cfg, "lr_0011_lab_result_capability")
+                command.upgrade(cfg, "lr_0012_completion_capability")
                 require_prerequisites(connection, module.requires)
                 require(
                     set(
@@ -373,7 +373,7 @@ def migrate(admin, receipt: dict) -> None:
                             sa.text("SELECT version_num FROM public.alembic_version")
                         )
                     )
-                    == {"lr_0011_lab_result_capability"},
+                    == {"lr_0012_completion_capability"},
                     "Live installed head differs",
                 )
                 require(

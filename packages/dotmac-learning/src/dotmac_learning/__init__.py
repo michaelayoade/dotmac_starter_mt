@@ -309,6 +309,8 @@ from dotmac_learning.participation_transfer_contracts import (
     VerificationObservationV3,
 )
 from dotmac_learning.progress_contracts import (
+    CERTIFICATE_CAPABILITY,
+    COMPLETION_CAPABILITY,
     CertificateCommand,
     CertificateFact,
     CertificateIssue,
@@ -938,6 +940,8 @@ __all__ = [
     "AdmissionObservation",
     "AdmissionRefused",
     "AttemptAdmissionPolicy",
+    "CERTIFICATE_CAPABILITY",
+    "COMPLETION_CAPABILITY",
     "CertificateCommand",
     "CertificateFact",
     "CertificateIssue",

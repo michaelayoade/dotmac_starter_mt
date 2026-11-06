@@ -149,7 +149,7 @@ def test_lr_0010_backfill_publishes_v1_and_pins_open_sittings(learning_database)
         command.upgrade(cfg, "learning@head")
         with admin.connect() as conn:
             heads = set(conn.scalars(text("SELECT version_num FROM alembic_version")))
-            assert "lr_0011_lab_result_capability" in heads
+            assert "lr_0012_completion_capability" in heads
         with app.begin() as conn:
             _scope(conn, tenant)
             version = conn.execute(

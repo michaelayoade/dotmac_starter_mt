@@ -1,5 +1,34 @@
 # Changelog — dotmac-learning
 
+## 0.1.0a6 — allocated source candidate, not yet published
+
+Add `lr_0012_completion_capability`: `mod_learning.recompute_completion_v1`
+and `mod_learning.issue_certificate_v1`, SECURITY INVOKER SQL functions
+(`search_path = pg_catalog, pg_temp`, every name qualified,
+`REVOKE ALL FROM PUBLIC`, no grants) that are the single completion
+recompute and certificate issuance writers for every result path (MCQ,
+override, labs), with the Python owner paths' semantics. This retires the
+dated dual-implementation exception named for this release: the Python
+mirror in `completion`/`certificates` is deleted, and
+`mod_learning.record_lab_result_v1` is replaced with a body that delegates
+its recompute/certificate tail to `recompute_completion_v1` (signature,
+grants and returned shape unchanged). Python `recompute_completion` and
+`issue_certificate` keep their signatures and fact shapes and now delegate
+to the functions on the caller's Session (flush first, targeted expire,
+emissions rebuilt from the returned outcomes); certificate ineligibility
+returns as an outcome so `CertificateNotEligible` raises without a SQL
+transaction abort. Every role that calls these Python APIs (or the lab
+API, whose invoker chain now reaches them) needs EXECUTE on both
+functions; product composition grants it and Learning grants it to
+nobody. New exports `COMPLETION_CAPABILITY` and `CERTIFICATE_CAPABILITY`
+pin the identity signatures (603 root exports).
+
+Storage is unchanged (28 tables, 298 fields); `lr_0001`–`lr_0011` bytes
+are unchanged and the lineage head is `lr_0012`. Published 0.1.0a5
+remains immutable: its publication is recorded by PR #980 (merge
+`4369ea93`), tag `dotmac-learning-v0.1.0a5`; the a5 section below is
+retained as its allocation-era record.
+
 ## 0.1.0a5 — allocated source candidate, not yet published
 
 Add `lr_0011_lab_result_capability`: `mod_learning.record_lab_result_v1`, a

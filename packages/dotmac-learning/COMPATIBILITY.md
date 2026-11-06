@@ -1,5 +1,34 @@
 # Compatibility — dotmac-learning
 
+## Current source correction — 2026-11-06 (allocated a6 source candidate)
+
+Published 0.1.0a5 remains immutable (publication recorded by PR #980, tag
+`dotmac-learning-v0.1.0a5`). The older sections below are historical; their
+a5-unpublished statements do not describe current publication.
+
+The a6 candidate is additive in storage and API: one new migration
+`lr_0012_completion_capability` (`lr_0001`–`lr_0011` bytes unchanged,
+single head `lr_0012`), two new root exports `COMPLETION_CAPABILITY` and
+`CERTIFICATE_CAPABILITY` (603 root exports), 28 tables / 298 fields and
+Kernel floor unchanged. The behavioural contract change is again at the
+database-privilege layer: Python `recompute_completion` and
+`issue_certificate` now delegate to the SECURITY INVOKER functions
+`mod_learning.recompute_completion_v1` / `mod_learning.issue_certificate_v1`,
+and `record_lab_result_v1` delegates its recompute/certificate tail to
+`recompute_completion_v1`, so every role that calls the Python completion,
+certificate, result or lab APIs needs EXECUTE on both new functions (in
+addition to the lr_0011 grant for lab callers). Learning grants EXECUTE to
+nobody (`REVOKE ALL FROM PUBLIC`, no grants); product composition must
+grant it to its Python caller roles. The Python recompute/certificate
+mirror is retired: SQL is the sole writer, retiring the dated
+dual-implementation exception. Certificate ineligibility is returned as
+an outcome, so `CertificateNotEligible` still raises as a plain Python
+error without aborting the caller's transaction; a capability refusal for
+null arguments (SQLSTATE 22004) remains a database error that requires
+caller rollback, as in lr_0011. Signatures, fact shapes, event detail
+shapes, completion and certificate semantics are unchanged. This source
+allocation is not a published, installable or adopted a6.
+
 ## Current source correction — 2026-11-04 (allocated a5 source candidate)
 
 Published 0.1.0a4 remains immutable (publication recorded by PR #948). The
