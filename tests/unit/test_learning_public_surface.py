@@ -568,3 +568,28 @@ def test_lab_result_capability_constant_has_one_public_owner():
     assert {"lr_0011_lab_result_capability.py"} <= {
         path.name for path in learning.versions_dir().glob("*.py")
     }
+
+
+def test_completion_capability_constants_have_one_public_owner():
+    from dotmac_learning import progress_contracts
+
+    for name, signature in (
+        (
+            "COMPLETION_CAPABILITY",
+            "mod_learning.recompute_completion_v1("
+            "pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, "
+            "pg_catalog.timestamptz)",
+        ),
+        (
+            "CERTIFICATE_CAPABILITY",
+            "mod_learning.issue_certificate_v1("
+            "pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, "
+            "pg_catalog.timestamptz)",
+        ),
+    ):
+        assert learning.__all__.count(name) == 1
+        assert getattr(learning, name) is getattr(progress_contracts, name)
+        assert getattr(learning, name) == signature
+    assert {"lr_0012_completion_capability.py"} <= {
+        path.name for path in learning.versions_dir().glob("*.py")
+    }

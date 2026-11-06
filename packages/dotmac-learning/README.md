@@ -9,14 +9,15 @@ the versioned lifecycle described below). The participation
 slice adds enrolment/audience, tracks and course access, alongside the existing
 pure exam-engine/grader port. The prepared continuation adds attempt policy and
 persistence, scheduling, pacing, announcements, support queues and learning
-read projections. The current allocated `0.1.0a5` source successor adds the lr_0011 lab-result
-SQL capability to the published a4 contract: 28 tables, 298 persisted
-fields and 601 root exports. Academy is the candidate consumer; no a5 adoption
+read projections. The current allocated `0.1.0a6` source successor adds the lr_0012 completion/certificate
+SQL capabilities to the published a5 contract and retires the Python mirror
+(SQL is the sole recompute/certificate writer): 28 tables, 298 persisted
+fields and 603 root exports. Academy is the candidate consumer; no a6 adoption
 is claimed.
 
 Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.
-The a5 successor is not yet published. Published 0.1.0a4 remains immutable
-(publication recorded by PR #948).
+The a6 successor is not yet published. Published 0.1.0a4 and 0.1.0a5 remain
+immutable (publications recorded by PR #948 and PR #980).
 
 This successor is prepared source, pending hosted qualification and publication.
 Academy has not adopted this successor. See `EXTRACTION.toml` for source provenance,

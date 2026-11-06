@@ -1,27 +1,25 @@
-"""Certificate record issuance; presentation and delivery stay with products."""
+"""Certificate record issuance; presentation and delivery stay with products.
+
+Since lr_0012 the SQL capability ``mod_learning.issue_certificate_v1``
+is the sole certificate writer; ``issue_certificate`` delegates to it
+and rebuilds the detached result.
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
-from .completion import lock_existing_completion
-from .event_contracts import EventWrite
-from .events import emit
-from .models import Certificate, Course
+from . import events
+from .models import Certificate
 from .progress_contracts import CertificateCommand, CertificateFact, CertificateIssue
 
 
 class CertificateNotEligible(ValueError):
     """The course has no completed aggregate and no issued certificate."""
-
-
-def _serial() -> str:
-    return f"CERT-{uuid4().hex[:12].upper()}"
 
 
 def _fact(cert: Certificate) -> CertificateFact:
@@ -61,64 +59,69 @@ def get_certificate(
     return _fact(cert)
 
 
+_ISSUE_CALL = text(
+    "SELECT outcome, certificate_id, certificate_created, event_status, event_id "
+    "FROM mod_learning.issue_certificate_v1("
+    "CAST(:tenant_id AS pg_catalog.uuid), CAST(:person_id AS pg_catalog.uuid), "
+    "CAST(:course_id AS pg_catalog.uuid), "
+    "CAST(:now AS pg_catalog.timestamptz))"
+)
+
+
 def issue_certificate(db: Session, payload: CertificateCommand) -> CertificateIssue:
+    """Issue (or return the existing) certificate through the SQL writer.
+
+    The capability rechecks for an existing row after locking the
+    completion aggregate (a lock wait may have allowed the first
+    issuer to commit), reads validity from the Course row (RD-2;
+    existing rows keep their stored expiry), and never hides the
+    certificate insertion failure: only the ``certificate_earned``
+    event append is isolated as an outcome.
+
+    Ineligibility comes back as an outcome rather than a SQL error, so
+    ``CertificateNotEligible`` is raised here without aborting the
+    caller's transaction. The caller's role needs EXECUTE on the
+    capability, which product composition grants; Learning grants it
+    to nobody.
+    """
     if not db.in_transaction():
         raise ValueError("certificate issuance requires a caller transaction")
-    query = select(Certificate).where(
-        Certificate.tenant_id == payload.tenant_id,
-        Certificate.person_id == payload.person_id,
-        Certificate.course_id == payload.course_id,
+    db.flush()
+    row = (
+        db.execute(
+            _ISSUE_CALL,
+            {
+                "tenant_id": payload.tenant_id,
+                "person_id": payload.person_id,
+                "course_id": payload.course_id,
+                "now": payload.now,
+            },
+        )
+        .mappings()
+        .one()
     )
-    existing = db.scalars(query).first()
-    if existing is not None:
-        return CertificateIssue(certificate=_fact(existing), created=False)
-    completion = lock_existing_completion(
-        db,
-        tenant_id=payload.tenant_id,
-        person_id=payload.person_id,
-        course_id=payload.course_id,
-    )
-    # Lock wait may have allowed the first issuer to commit its certificate.
-    existing = db.scalars(query).first()
-    if existing is not None:
-        return CertificateIssue(certificate=_fact(existing), created=False)
-    if completion is None or completion.status != "completed":
+    if row["outcome"] == "not_eligible":
         raise CertificateNotEligible(
             "course not completed; certificate cannot be issued"
         )
-    issued_at = payload.now or datetime.now(UTC)
-    # Validity is read from the Course row inside the handler (RD-2) and
-    # applies only to certificates issued now; existing rows keep their
-    # stored expiry (the early return above never rewrites it).
-    validity_days = db.scalar(
-        select(Course.certificate_validity_days).where(
-            Course.tenant_id == payload.tenant_id, Course.id == payload.course_id
-        )
-    )
-    cert = Certificate(
-        tenant_id=payload.tenant_id,
-        person_id=payload.person_id,
-        course_id=payload.course_id,
-        serial=_serial(),
-        issued_at=issued_at,
-        expires_at=(
-            issued_at + timedelta(days=validity_days)
-            if validity_days is not None
+    for obj in list(db.identity_map.values()):
+        if (
+            isinstance(obj, Certificate)
+            and obj.tenant_id == payload.tenant_id
+            and obj.person_id == payload.person_id
+            and obj.course_id == payload.course_id
+        ):
+            db.expire(obj)
+    cert = db.get(Certificate, row["certificate_id"])
+    if cert is None:
+        raise RuntimeError("certificate row is unavailable after delegation")
+    created = bool(row["certificate_created"])
+    return CertificateIssue(
+        certificate=_fact(cert),
+        created=created,
+        event=(
+            events.emission_for(db, row["event_status"], row["event_id"])
+            if created
             else None
         ),
     )
-    db.add(cert)
-    # Required consequence: never hide insertion/flush failure in a savepoint.
-    db.flush()
-    event = emit(
-        db,
-        EventWrite(
-            tenant_id=payload.tenant_id,
-            person_id=payload.person_id,
-            kind="certificate_earned",
-            course_id=payload.course_id,
-            subject_id=payload.course_id,
-            detail={"serial": cert.serial},
-        ),
-    )
-    return CertificateIssue(certificate=_fact(cert), created=True, event=event)

@@ -1,22 +1,28 @@
-"""Completion recomputation serialized on its source aggregate row."""
+"""Completion recomputation serialized on its source aggregate row.
+
+Since lr_0012 the SQL capability ``mod_learning.recompute_completion_v1``
+is the sole recompute (and auto-issue) writer; this module delegates to
+it and rebuilds the detached result. The lock helpers below remain for
+callers that serialize on the aggregate row themselves.
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from .models import Activity, Course, CourseCompletion
+from . import events
+from .models import Certificate, CourseCompletion
 from .progress_contracts import (
-    CertificateCommand,
+    CertificateFact,
+    CertificateIssue,
     CompletionCommand,
     CompletionFact,
     CompletionResult,
 )
-from .projections import best_scores_for
 
 
 def _locked_query(
@@ -68,70 +74,85 @@ def ensure_locked_completion(
     ).one()
 
 
+_RECOMPUTE_CALL = text(
+    "SELECT completion_id, first_completion, certificate_id, "
+    "certificate_created, cert_event_status, cert_event_id "
+    "FROM mod_learning.recompute_completion_v1("
+    "CAST(:tenant_id AS pg_catalog.uuid), CAST(:person_id AS pg_catalog.uuid), "
+    "CAST(:course_id AS pg_catalog.uuid), "
+    "CAST(:now AS pg_catalog.timestamptz))"
+)
+
+
+def _expire_touched(db: Session, payload: CompletionCommand) -> None:
+    """Expire identity-map rows the SQL writer may have changed."""
+    for obj in list(db.identity_map.values()):
+        if (
+            isinstance(obj, CourseCompletion | Certificate)
+            and obj.tenant_id == payload.tenant_id
+            and obj.person_id == payload.person_id
+            and obj.course_id == payload.course_id
+        ):
+            db.expire(obj)
+
+
 def recompute_completion(db: Session, payload: CompletionCommand) -> CompletionResult:
     """Flush required progress/certificate writes in the supplied transaction.
+
+    Delegates to the lr_0012 SQL capability, the sole recompute writer
+    (flush first, then targeted expire, as in the lab delegation). The
+    caller's role needs EXECUTE on both lr_0012 capabilities, which
+    product composition grants; Learning grants them to nobody.
+    Course policy columns are read inside the capability (RD-2): the
+    command shape is unchanged, and a missing Course row keeps the
+    historical rules (fraction 1.0, auto-issue on).
 
     Supported concurrency uses READ COMMITTED, as in the source service.
     A lock wait does not refresh a preexisting REPEATABLE READ snapshot.
     """
     if not db.in_transaction():
         raise ValueError("completion requires a caller transaction")
-    rec = ensure_locked_completion(
-        db,
-        tenant_id=payload.tenant_id,
-        person_id=payload.person_id,
-        course_id=payload.course_id,
-    )
-    total = (
-        db.scalar(
-            select(func.count())
-            .select_from(Activity)
-            .where(
-                Activity.tenant_id == payload.tenant_id,
-                Activity.course_id == payload.course_id,
-            )
-        )
-        or 0
-    )
-    best = best_scores_for(
-        db,
-        tenant_id=payload.tenant_id,
-        person_id=payload.person_id,
-        course_id=payload.course_id,
-    )
-    passed = sum(1 for score in best.values() if score.passed)
-    # Course policy columns are read inside the handler (RD-2): the command
-    # shape is unchanged. A missing Course row keeps the historical rules
-    # (fraction 1.0, auto-issue on), matching pre-column behavior exactly.
-    course = db.scalars(
-        select(Course).where(
-            Course.tenant_id == payload.tenant_id, Course.id == payload.course_id
-        )
-    ).first()
-    completion_fraction = course.completion_fraction if course is not None else 1.0
-    is_complete = total > 0 and passed / total >= completion_fraction
-    first_completion = is_complete and rec.completed_at is None
-    rec.pct = passed / total if total else 0.0
-    if is_complete:
-        rec.status = "completed"
-        if rec.completed_at is None:
-            rec.completed_at = payload.now or datetime.now(UTC)
-    else:
-        rec.status = "in_progress"
-        rec.completed_at = None
     db.flush()
+    row = (
+        db.execute(
+            _RECOMPUTE_CALL,
+            {
+                "tenant_id": payload.tenant_id,
+                "person_id": payload.person_id,
+                "course_id": payload.course_id,
+                "now": payload.now,
+            },
+        )
+        .mappings()
+        .one()
+    )
+    _expire_touched(db, payload)
+    rec = db.get(CourseCompletion, row["completion_id"])
+    if rec is None:
+        raise RuntimeError("completion row is unavailable after delegation")
     certificate = None
-    auto_issue = course.certificate_auto_issue if course is not None else True
-    if first_completion and auto_issue:
-        from .certificates import issue_certificate
-
-        certificate = issue_certificate(
-            db,
-            CertificateCommand(
-                tenant_id=payload.tenant_id,
-                person_id=payload.person_id,
-                course_id=payload.course_id,
-                now=payload.now,
+    if row["certificate_id"] is not None:
+        cert = db.get(Certificate, row["certificate_id"])
+        if cert is None:
+            raise RuntimeError("certificate row is unavailable after delegation")
+        created = bool(row["certificate_created"])
+        certificate = CertificateIssue(
+            certificate=CertificateFact(
+                id=cert.id,
+                tenant_id=cert.tenant_id,
+                person_id=cert.person_id,
+                course_id=cert.course_id,
+                serial=cert.serial,
+                issued_at=cert.issued_at,
+                created_at=cert.created_at,
+                updated_at=cert.updated_at,
+                expires_at=cert.expires_at,
+            ),
+            created=created,
+            event=(
+                events.emission_for(db, row["cert_event_status"], row["cert_event_id"])
+                if created
+                else None
             ),
         )
     return CompletionResult(
@@ -146,7 +167,7 @@ def recompute_completion(db: Session, payload: CompletionCommand) -> CompletionR
             created_at=rec.created_at,
             updated_at=rec.updated_at,
         ),
-        first_completion=first_completion,
+        first_completion=bool(row["first_completion"]),
         certificate=certificate,
     )
 
