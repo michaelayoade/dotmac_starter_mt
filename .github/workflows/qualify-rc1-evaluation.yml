@@ -1,0 +1,76 @@
+name: Qualify RC1 evaluation archive
+on:
+  push:
+    branches: [codex/qualify-rc1-evaluation]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  clean-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Prepare only the delivered files
+        run: |
+          bash scripts/stage_rc1_evaluation.sh "$RUNNER_TEMP/evaluation"
+          mkdir "$RUNNER_TEMP/extracted"
+          tar -xf "$RUNNER_TEMP/evaluation.tar" -C "$RUNNER_TEMP/extracted"
+          docker build -t starter-evaluation:ci "$RUNNER_TEMP/extracted"
+          cp -a "$RUNNER_TEMP/extracted/deploy/rc1-handoff" "$RUNNER_TEMP/handoff"
+      - name: Install and verify first login
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          COMPOSE_PROJECT_NAME: starter-rc1
+        run: |
+          cd "$RUNNER_TEMP/handoff"
+          db=starter-rc1-postgres
+          trap 'docker rm -f "$db" >/dev/null 2>&1 || true; docker compose down' EXIT
+          admin=$(openssl rand -hex 24)
+          tenant=$(openssl rand -hex 24)
+          platform=$(openssl rand -hex 24)
+          postgres=$(openssl rand -hex 24)
+          password=$(openssl rand -hex 24)
+          root=starter.example.test
+          cp .env.example .env
+          sed -i 's|^APP_IMAGE=.*|APP_IMAGE=starter-evaluation:ci|' .env
+          sed -i \
+            -e "s|^DATABASE_URL=.*|DATABASE_URL=postgresql+psycopg://app_user:$tenant@$db:5432/starter|" \
+            -e "s|^PLATFORM_DATABASE_URL=.*|PLATFORM_DATABASE_URL=postgresql+psycopg://platform_api:$platform@$db:5432/starter|" \
+            -e "s|^PLATFORM_ROOT_DOMAIN=.*|PLATFORM_ROOT_DOMAIN=$root|" \
+            -e "s|^TRUSTED_HOSTS=.*|TRUSTED_HOSTS=$root|" \
+            -e "s|^ENVIRONMENT=.*|ENVIRONMENT=prod|" .env
+          for secret in JWT_SECRET SESSION_HASH_SECRET CSRF_SECRET; do
+            sed -i "s|^$secret=.*|$secret=$(openssl rand -hex 32)|" .env
+          done
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker compose create
+          docker run -d --name "$db" --network starter-rc1_default \
+            -e POSTGRES_PASSWORD="$postgres" postgres:16
+          for attempt in $(seq 1 60); do
+            if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres; then break; fi
+            sleep 1
+          done
+          docker exec -i "$db" psql -U postgres -d postgres \
+            -v admin_password="$admin" -v app_password="$tenant" \
+            -v platform_password="$platform" < database-roles.sql
+          export MIGRATION_DATABASE_URL="postgresql+psycopg://app_admin:$admin@$db:5432/starter"
+          docker compose run --rm -e MIGRATION_DATABASE_URL app alembic upgrade heads
+          printf '%s\n%s\n' "$password" "$password" | docker compose run --rm -T \
+            -e MIGRATION_DATABASE_URL \
+            -v "$PWD/scripts/create_platform_admin.py:/srv/app/scripts/create_platform_admin.py:ro" \
+            app python scripts/create_platform_admin.py admin@example.com
+          unset MIGRATION_DATABASE_URL
+          docker compose up -d
+          curl --retry 30 --retry-all-errors --retry-delay 1 -fsS \
+            -H "Host: $root" http://127.0.0.1:8000/health/ready
+          jq -nc --arg password "$password" '{email:"admin@example.com",password:$password}' |
+            curl -fsS -H "Host: $root" -H 'Content-Type: application/json' \
+              --data-binary @- http://127.0.0.1:8000/platform/auth/login |
+            jq -e '.access_token | strings | length > 0' >/dev/null
+          echo 'RC1 clean install and first platform login passed.'
