@@ -245,6 +245,126 @@ def test_execution_is_unavailable_until_q1_is_answered(
         producer.execute_authorized_plan(subject.plan, subject.grant)
 
 
+def test_plan_acquisition_refuses_without_any_bindings() -> None:
+    with pytest.raises(producer.AuthorityUnavailable) as caught:
+        producer.acquire_execution_plan(object(), entries=[])
+    assert all(m.startswith("trusted_cp") for m in caught.value.missing)
+
+
+def test_plan_acquisition_delegates_to_the_mirror_with_discovered_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_plan_v3
+
+    sentinel = object()
+    bindings = type("B", (), {"authorization_v3_provider": object()})()
+    seen: dict[str, object] = {}
+
+    def _render(base_plan: object, *, bindings: object) -> object:
+        seen.update(base_plan=base_plan, bindings=bindings)
+        return sentinel
+
+    monkeypatch.setattr(lane3_plan_v3, "render_local_execution_plan_v3", _render)
+    base = object()
+    assert producer.acquire_execution_plan(base, bindings=bindings) is sentinel
+    assert seen == {"base_plan": base, "bindings": bindings}
+
+
+def test_execute_wires_executor_with_discovered_admission_and_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    subject: Subject,  # noqa: F811
+) -> None:
+    import dotmac_deployment_foundation.engine.lock as lock_module
+    import dotmac_deployment_foundation.engine.run as run_module
+
+    constructed: dict[str, object] = {}
+    held = object()
+    outcome = object()
+
+    class _Lock:
+        def __enter__(self) -> object:
+            return held
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    class _Executor:
+        def __init__(self, spec: object, effects: object, grant: object, **kw: object):
+            constructed.update(spec=spec, effects=effects, grant=grant, **kw)
+
+        def run(self, plan: object, *, lock: object) -> object:
+            constructed.update(ran_plan=plan, ran_lock=lock)
+            return outcome
+
+    monkeypatch.setattr(run_module, "Executor", _Executor)
+    monkeypatch.setattr(lock_module, "deployment_lock", lambda *a, **k: _Lock())
+    admission = object()
+    bindings = type(
+        "B",
+        (),
+        {
+            "deployment_admission_provider": admission,
+            "evidence_policy": None,
+            "evidence_verifier": None,
+            "recovery_verifier": None,
+        },
+    )()
+    spec = type("S", (), {"product": "lane3_exposure"})()
+    deployment_plan = type("P", (), {"image_digest": "sha256:x"})()
+    result = producer.execute_authorized_plan(
+        subject.plan,
+        subject.grant,
+        spec=spec,
+        deployment_plan=deployment_plan,
+        effects=object(),
+        bindings=bindings,
+    )
+    assert result is outcome
+    assert constructed["admission_provider"] is admission
+    assert constructed["execution_plan"] is subject.plan
+    assert constructed["ran_plan"] is deployment_plan
+    assert constructed["ran_lock"] is held
+
+
+def test_execute_falls_back_to_the_lane3_refusing_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    subject: Subject,  # noqa: F811
+) -> None:
+    import dotmac_deployment_foundation.engine.lock as lock_module
+    import dotmac_deployment_foundation.engine.run as run_module
+    from lane3_host_source_admission import Lane3HostSourceAdmissionProvider
+
+    constructed: dict[str, object] = {}
+
+    class _Lock:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    class _Executor:
+        def __init__(self, *a: object, **kw: object):
+            constructed.update(kw)
+
+        def run(self, plan: object, *, lock: object) -> object:
+            return object()
+
+    monkeypatch.setattr(run_module, "Executor", _Executor)
+    monkeypatch.setattr(lock_module, "deployment_lock", lambda *a, **k: _Lock())
+    producer.execute_authorized_plan(
+        subject.plan,
+        subject.grant,
+        spec=type("S", (), {"product": "lane3_exposure"})(),
+        deployment_plan=type("P", (), {"image_digest": "sha256:x"})(),
+        effects=object(),
+        bindings=None,
+    )
+    assert isinstance(
+        constructed["admission_provider"], Lane3HostSourceAdmissionProvider
+    )
+
+
 # ── the CLI's three exits ───────────────────────────────────────────────────
 
 
