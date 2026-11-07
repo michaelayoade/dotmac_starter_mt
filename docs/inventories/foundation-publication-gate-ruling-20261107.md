@@ -91,12 +91,21 @@ readback before tag). The successor must retain these properties.
 `require_rehearsal.py` selects and reads one run; the new oracle must not
 split selection and artifact retrieval across independently chosen runs.
 
-## Pre-freeze certification worksheet — none certified by this document
+## Source certification and later proof obligations — none certified here
+
+The pre-freeze gate certifies source completeness and candidate-independent
+readiness only. Hosted source conformance may establish that the proposed
+composition is implementable and refuses unsafe inputs; it does not establish
+installed-candidate admission or adoption. After the one candidate is built,
+Gate 3 installs those exact recorded bytes and proves the real provider,
+executor and recovery paths. CP's production dependency pin/activation follows
+publication. No published successor pin or candidate-bound proof is demanded
+before allocation; later proof obligations below remain held until their phase.
 
 | Question / Rule 49 gap | Source observation | Still required |
 | --- | --- | --- |
 | Q1: public Executor sufficient for apply and provocation? | `scripts/lane3_provocation.py:10-17` identifies compensation behind authorized V3 Executor; runner's apply and provocation rows explicitly remain blocked (`exposure_rehearsal_runner.py:1688-1729,1934-1967`) | Michael's source-backed answer plus executable positive path/refusal proof; any missing Foundation API lands before freeze |
-| Q2: CP constructs both executors with its provider? | CP V3 pair/finalizer exists (`src/vendor_cp/deployment/host_admission_adapter.py:490-588,676-704`); no app/runner installation observed at this snapshot | Declared installed-artifact entrypoint, real composition into both executor bindings, accepted published Foundation dependency and positive admission evidence |
+| Q2: CP constructs both executors with its provider? | CP V3 pair/finalizer exists (`src/vendor_cp/deployment/host_admission_adapter.py:490-588,676-704`); no app/runner installation observed at this snapshot | Before freeze: declared entrypoint and source composition into both executor bindings, with hosted source conformance/refusals. After build: exact-candidate installed-artifact rehearsal and positive admission. After publication: accepted published Foundation pin and production activation |
 | Exposure ceases to be second execution authority | Dossier still lists it in `packages/dotmac-deployment-foundation/EXTRACTION.toml:154` | Enumerate all mutating entrypoints; prove effects flow only through authorized Executor and plant a bypass refusal |
 | Dispatcher retains exact pre-observation and authorized plan | Required by dossier and canonical plan contract; no integrated execution proof supplied | Retain/hash exact held documents across approval and execution; changed bytes must refuse |
 | One caller-held lock covers every mutation | Requirement exists; blocked runner cannot demonstrate it | Real executor composition/provocation with lock held throughout; contention and bypass tests |
@@ -119,7 +128,9 @@ unit doubles or on a pin alone. Open rows may require Foundation changes;
 1. Michael records the gate direction and accepted packet revision. Add the
    corresponding dated CP contract amendment where ownership changes; Starter
    prose cannot amend CP's authority or invent missing deployment evidence.
-2. Close the source worksheet with bounded CP/Control/Foundation changes.
+2. Close the pre-freeze source portions of the worksheet with bounded
+   CP/Control/Foundation changes; retain later live/installed-byte obligations
+   for Gate 3 and production adoption, respectively.
    First CP slice: the owned execution approval subject and actual installed
    executor bindings. Retain exact plan/pre-observation and ambiguity recovery;
    do not introduce an unconditional approving provider. Keep source readiness
@@ -129,10 +140,11 @@ unit doubles or on a pin alone. Open rows may require Foundation changes;
    provisioning values privately; host/credential changes have separate scope.
    Migrate all old topology dependencies together, including guards and owning
    rules. The current gate stays closed until replacement admission is proved.
-4. Run hosted tests over the merge result, with positive admission and separate
-   planted refusals for each row. Do not run tests/dependency installs locally
+4. Run hosted source conformance over the merge result, with a positive source
+   composition case and separate planted refusals for each applicable source
+   property. This is not positive installed-candidate or production admission. Do not run tests/dependency installs locally
    or on fleet test hosts; Starter AGENTS.md requires Git-hosted CI.
-5. Certify source and candidate-independent readiness. Only then freeze every
+5. Certify the source portions and candidate-independent readiness. Only then freeze every
    candidate input, allocate 0.4.0a2 and build once, commit the artifact record,
    then sign/record provenance in the accepted non-circular order. Preserve the
    spent a1 identity and dispositions; no receipt is rewritten.
