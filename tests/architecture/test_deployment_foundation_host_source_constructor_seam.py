@@ -192,9 +192,7 @@ def _is_safe_refusing_provider_call(node: ast.expr) -> bool:
 #: or the refusing provider; this guard proves no other expression can
 #: reach the keyword, and `RecoveryExecutor` — which has no grant or
 #: consumption contract yet — keeps the literal refusing provider.
-def _is_safe_deployment_admission_selection(
-    node: ast.Call, value: ast.expr
-) -> bool:
+def _is_safe_deployment_admission_selection(node: ast.Call, value: ast.expr) -> bool:
     return (
         isinstance(node.func, ast.Name)
         and node.func.id == "Executor"
@@ -263,7 +261,10 @@ def _unsafe_provider_name_bindings(tree: ast.Module) -> list[tuple[str, int]]:
                     # imported object under its name would read as the
                     # guarded selection while admitting anything.
                     unsafe.append(
-                        (f"helper bound from {node.module!r}:{alias.name!r}", node.lineno)
+                        (
+                            f"helper bound from {node.module!r}:{alias.name!r}",
+                            node.lineno,
+                        )
                     )
                     continue
                 if effective != _PROVIDER_NAME:
@@ -774,8 +775,10 @@ def test_cli_executor_guard_admits_the_real_safe_literal() -> None:
     to accept everything, which would defeat the three refusal tests above
     for the wrong reason (a guard that never fires proves nothing)."""
     source = """
-Executor(spec, effects, grant, admission_provider=_deployment_admission_provider(bindings))
-RecoveryExecutor(spec, manifest, effects, admission_provider=RefusingHostSourceAdmissionProvider())
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(bindings))
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=RefusingHostSourceAdmissionProvider())
 Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
 """
     tree = ast.parse(source, filename="<the real, safe CLI shape>")
@@ -829,8 +832,10 @@ def test_cli_executor_guard_refuses_helper_at_recovery_site() -> None:
     Recovery has no grant/consumption contract yet, so its site keeps the
     literal refusing provider; the helper shape there must still refuse."""
     source = """
-Executor(spec, effects, grant, admission_provider=_deployment_admission_provider(bindings))
-RecoveryExecutor(spec, manifest, effects, admission_provider=_deployment_admission_provider(bindings))
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(bindings))
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=_deployment_admission_provider(bindings))
 Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
 """
     tree = ast.parse(source, filename="<plant: helper at recovery site>")
@@ -843,7 +848,8 @@ def test_cli_executor_guard_refuses_helper_over_a_request_value() -> None:
     `bindings` name — any other argument shape is a request-selected
     provider wearing the helper's name."""
     source = """
-Executor(spec, effects, grant, admission_provider=_deployment_admission_provider(args.bindings))
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(args.bindings))
 RecoveryExecutor(spec, manifest, effects)
 Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
 """

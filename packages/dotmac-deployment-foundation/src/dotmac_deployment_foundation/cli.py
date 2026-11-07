@@ -559,7 +559,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
-    from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     bindings = _load_bindings(args)
     effects = _build_effects(spec, args, bindings=bindings)
@@ -1216,7 +1215,6 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
-    from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
