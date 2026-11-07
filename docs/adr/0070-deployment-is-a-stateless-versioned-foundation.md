@@ -1089,3 +1089,20 @@ implementation order and proposed acceptance wording. Michael is the sole
 developer and approver. Accepting the direction alone closes no evidence row.
 Until the corresponding implementation and hosted refusal proofs are accepted,
 the current gate must keep refusing; no successor allocation is authorized.
+
+
+### Ratification — 2026-11-07: adopted-path direction approved
+
+Michael approved the direction proposed above at PR #985 revision
+`3010599da0b06d8700908493b55d16f589fe1ab8`. This ratifies the direction
+only and supersedes the proposed status of that direction. The
+[ruling packet](../inventories/foundation-publication-gate-ruling-20261107.md)
+records the decision coordinate, guarantees and remaining evidence gates.
+
+No technical certification, signature/claim policy, provisioning, first-deploy
+recovery acceptance, allocation, freeze, candidate build, publication or
+production deployment is approved by this direction decision. The existing
+publication oracle continues refusing until the equivalent adopted-path
+implementation and admission evidence are accepted. Source readiness remains
+candidate-independent; exact-candidate rehearsal follows the one recorded
+build, and production activation follows publication.

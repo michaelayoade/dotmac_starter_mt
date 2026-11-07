@@ -1,14 +1,18 @@
-# Foundation publication gate — proposed ruling and evidence packet
+# Foundation publication gate — approved direction and evidence packet
 
-Date: 2026-11-07. Status: PROPOSED; Michael has not ratified this ruling.
+Date: 2026-11-07. Status: DIRECTION APPROVED by Michael; evidence gates remain held.
+Accepted proposal revision: `3010599da0b06d8700908493b55d16f589fe1ab8`
+([PR #985](https://github.com/michaelayoade/dotmac_starter_mt/pull/985)).
+Michael replied "approved" to the explicit direction-only approval request.
+Repository landing and hosted CI acceptance are tracked separately.
 Michael is the sole developer and approver and holds the release-captain,
 architect and Platform CP roles. Agent analysis supplies evidence, not approval.
-This proposal authorizes no allocation, freeze, candidate build, publication,
+This direction approval authorizes no allocation, freeze, candidate build, publication,
 provisioning, deployment, credential access or production operation.
 
-## Decision presented to Michael
+## Direction approved by Michael
 
-Approve replacing the retired Gate-0/Lane-3 broker/coordinator topology with
+Replace the retired Gate-0/Lane-3 broker/coordinator topology with
 an adopted-path publication rehearsal. Preserve the existing build-once,
 authorization, executor, recovery, exposure and receipt guarantees below.
 OpenBao JWT establishes authenticated workflow identity using measured issuer
@@ -20,11 +24,11 @@ producer satisfy the equivalent checks and their hosted sensitivity tests pass.
 Do not delete the old gate first, admit null evidence, add an override, or
 publish on a statement that the replacement will be implemented later.
 
-Michael's acceptance of this proposal would settle the direction, not certify
-the open evidence rows or authorize the release/deployment. A written ruling
-must be recorded with its exact accepted revision before it is treated as
-ratified. Alternate decision: retain the old topology, explicitly reconciling
-that reversal with the October strategy decision. Neither option is assumed.
+Michael's approval settles the adopted-path direction. It does not certify
+the open evidence rows or authorize release/deployment. The accepted proposal
+revision above is the decision coordinate; this update records that approval
+without changing its guarantees. Retaining the retired topology was the
+rejected alternative; it is not a parallel implementation track.
 
 ## Basis and corrections
 
@@ -125,7 +129,7 @@ unit doubles or on a pin alone. Open rows may require Foundation changes;
 
 ## Ordered implementation after direction is accepted
 
-1. Michael records the gate direction and accepted packet revision. Add the
+1. Direction and accepted packet revision are recorded above. Add the
    corresponding dated CP contract amendment where ownership changes; Starter
    prose cannot amend CP's authority or invent missing deployment evidence.
 2. Close the pre-freeze source portions of the worksheet with bounded
@@ -166,16 +170,19 @@ Hosted validation targets for the implementation include
 owned by each changed component. Merely rerunning current tests cannot prove
 new claim/signature/runner semantics; add sensitivity cases with the change.
 
-## Requested ruling and remaining dates
+## Direction decision and remaining dates
 
-Ruling: 2026-11-13. Certifications: 2026-11-18. Escalation/reminder to Michael:
+Direction approved 2026-11-07, ahead of the 2026-11-13 target.
+Certifications: 2026-11-18. Escalation/reminder to Michael:
 2026-11-20. These dates do not schedule notifications or permit early allocation.
 
-Recommended wording for Michael's explicit decision:
+The decision proposed at the accepted revision was:
 
 > Approve the adopted-path direction in this packet, preserving its guarantees.
 > Retire the old broker/coordinator topology as a publication prerequisite once
 > its equivalent oracle is implemented and admitted. Keep all allocation,
 > publication and deployment holds until their own evidence gates pass.
 
-This wording is a proposed decision for review, not a recorded approval.
+Michael approved this direction in the conversation on 2026-11-07. No
+GitHub review, Environment approval, technical certification or operational
+authority is inferred or impersonated by recording that decision.
