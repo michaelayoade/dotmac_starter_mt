@@ -84,6 +84,7 @@ from lane3_execution import Lane3ExecutionTopology, TopologyRefused, load_topolo
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from dotmac_deployment_foundation.authorization import ExecutionGrant
     from dotmac_deployment_foundation.engine.run import DeploymentOutcome
+    from dotmac_deployment_foundation.execution_plan import FoundationExecutionPlanV1
     from dotmac_deployment_foundation.execution_plan_v3 import (
         FoundationExecutionPlanV3,
     )
@@ -310,6 +311,102 @@ def write_receipt(receipt: RehearsalReceiptV2, path: pathlib.Path) -> str:
 
 def _missing(*prefixes: str) -> list[str]:
     return [p for p in PRECONDITIONS if p.startswith(prefixes)]
+
+
+def _application_profile_digest() -> str:
+    """The installed application profile's digest, or ``""`` when undeclared.
+
+    This mirrors the CLI's report-only use: carry the digest into the rendered
+    plan for read-back comparison, without composing profile completeness into
+    Lane 3's authority decision.
+    """
+    from dotmac_deployment_foundation.application_profile import (
+        discover_profile,
+        profile_digest,
+    )
+
+    found = discover_profile()
+    if found is None:
+        return ""
+    return profile_digest(found.as_document())
+
+
+def _build_deployment_effects(
+    spec: Any, deploy_dir: Any, *, bindings: Any = None
+) -> Any:
+    """Construct the deployment effects the base plan observes through.
+
+    A bindings-declared factory wins. Otherwise this lane's compose-host
+    fixture uses Foundation's production ``ComposeHostEffects`` with the same
+    filesystem-backed tool pinning as the deployment CLI.
+    """
+    build_effects = getattr(bindings, "build_effects", None)
+    deploy_path = pathlib.Path(deploy_dir)
+    if callable(build_effects):
+        return build_effects(spec, deploy_path)
+
+    from dotmac_deployment_foundation.providers.compose_host import ComposeHostEffects
+    from dotmac_deployment_foundation.toolchain import DEFAULT_TOOLS, resolve_tool
+
+    tools = {
+        name: resolve_tool(default, what=f"{name}_bin")
+        for name, default in DEFAULT_TOOLS.items()
+    }
+    return ComposeHostEffects(
+        spec,
+        deploy_path,
+        docker_bin=tools["docker"],
+        git_bin=tools["git"],
+    )
+
+
+def build_base_plan(
+    spec: Any = None,
+    *,
+    target: str | None = None,
+    deploy_dir: Any = None,
+    effects: Any = None,
+    bindings: Any = None,
+    previous_image: str = "",
+    skip_backup: bool = False,
+    skip_backup_reason: str = "",
+) -> tuple[FoundationExecutionPlanV1, Any]:
+    """Render the V1 base plan and return it with the effects that observed it.
+
+    This is deliberately only the prestate-building block. It does not move
+    Lane 3's phase ordering or call the runner: the returned effects are the
+    same instance whose ``observe_roles`` supplied the prestate, so a later
+    runner restructure can execute through that instance rather than silently
+    swapping observers between authorization and mutation.
+    """
+    if spec is None or not target or deploy_dir is None:
+        raise AuthorityUnavailable(_missing("trusted_cp"))
+
+    from dotmac_deployment_foundation.engine.plan import build_plan
+    from dotmac_deployment_foundation.execution_plan import (
+        HostPrestateV1,
+        render_execution_plan,
+    )
+
+    if effects is None:
+        effects = _build_deployment_effects(spec, deploy_dir, bindings=bindings)
+
+    deployment_plan = build_plan(
+        spec,
+        previous_image=previous_image,
+        skip_backup=skip_backup,
+        skip_backup_reason=skip_backup_reason,
+    )
+    base_plan = render_execution_plan(
+        spec,
+        deployment_plan,
+        target=target,
+        operation="deploy",
+        descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+        prestate=HostPrestateV1.from_observations(effects.observe_roles()),
+        application_profile_digest=_application_profile_digest(),
+    )
+    return base_plan, effects
 
 
 def acquire_execution_plan(
