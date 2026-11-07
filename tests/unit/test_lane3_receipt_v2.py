@@ -270,6 +270,189 @@ def test_plan_acquisition_delegates_to_the_mirror_with_discovered_bindings(
     assert seen == {"base_plan": base, "bindings": bindings}
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"spec": object()},
+        {"spec": object(), "target": "lane3-target"},
+        {"target": "lane3-target", "deploy_dir": "unused"},
+    ],
+)
+def test_base_plan_refuses_without_spec_target_or_deploy_dir(
+    kwargs: dict[str, Any],
+) -> None:
+    with pytest.raises(producer.AuthorityUnavailable) as caught:
+        producer.build_base_plan(**kwargs)
+    assert all(m.startswith("trusted_cp") for m in caught.value.missing)
+
+
+class _BasePlanSpec:
+    def to_canonical_document(self) -> Any:
+        return type(
+            "Canonical",
+            (),
+            {"sha256_digest": lambda _self: "sha256:descriptor"},
+        )()
+
+
+class _BasePlanEffects:
+    def __init__(self, observations: object) -> None:
+        self.observations = observations
+        self.observe_calls = 0
+
+    def observe_roles(self) -> object:
+        self.observe_calls += 1
+        return self.observations
+
+
+def _patch_base_plan_modules(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    import dotmac_deployment_foundation.application_profile as profile_module
+    import dotmac_deployment_foundation.engine.plan as plan_module
+    import dotmac_deployment_foundation.execution_plan as execution_plan_module
+
+    seen: dict[str, Any] = {
+        "deployment_plan": object(),
+        "base_plan": object(),
+        "observations": object(),
+        "prestate": object(),
+    }
+
+    class _Prestate:
+        @classmethod
+        def from_observations(cls, observations: object) -> object:
+            seen["prestate_observations"] = observations
+            return seen["prestate"]
+
+    def _build_plan(spec: object, **kwargs: Any) -> object:
+        seen.update(build_spec=spec, build_kwargs=kwargs)
+        return seen["deployment_plan"]
+
+    def _render(spec: object, plan: object, **kwargs: Any) -> object:
+        seen.update(render_spec=spec, render_plan=plan, render_kwargs=kwargs)
+        return seen["base_plan"]
+
+    found = type("Profile", (), {"as_document": lambda _self: {"schema": "x"}})()
+    monkeypatch.setattr(plan_module, "build_plan", _build_plan)
+    monkeypatch.setattr(execution_plan_module, "render_execution_plan", _render)
+    monkeypatch.setattr(execution_plan_module, "HostPrestateV1", _Prestate)
+    monkeypatch.setattr(profile_module, "discover_profile", lambda: found)
+    monkeypatch.setattr(
+        profile_module,
+        "profile_digest",
+        lambda document: seen.update(profile_document=document) or "sha256:profile",
+    )
+    return seen
+
+
+def test_base_plan_uses_supplied_effects_for_prestate_and_returns_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    seen = _patch_base_plan_modules(monkeypatch)
+    effects = _BasePlanEffects(seen["observations"])
+    spec = _BasePlanSpec()
+
+    base_plan, used_effects = producer.build_base_plan(
+        spec,
+        target="lane3-target",
+        deploy_dir=tmp_path,
+        effects=effects,
+        previous_image="sha256:previous",
+        skip_backup=True,
+        skip_backup_reason="rehearsal fixture is rebuildable",
+    )
+
+    assert base_plan is seen["base_plan"]
+    assert used_effects is effects
+    assert effects.observe_calls == 1
+    assert seen["build_spec"] is spec
+    assert seen["build_kwargs"] == {
+        "previous_image": "sha256:previous",
+        "skip_backup": True,
+        "skip_backup_reason": "rehearsal fixture is rebuildable",
+    }
+    assert seen["render_spec"] is spec
+    assert seen["render_plan"] is seen["deployment_plan"]
+    assert seen["render_kwargs"] == {
+        "target": "lane3-target",
+        "operation": "deploy",
+        "descriptor_digest": "sha256:descriptor",
+        "prestate": seen["prestate"],
+        "application_profile_digest": "sha256:profile",
+    }
+    assert seen["prestate_observations"] is seen["observations"]
+    assert seen["profile_document"] == {"schema": "x"}
+
+
+def test_base_plan_prefers_the_bindings_effects_factory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    seen = _patch_base_plan_modules(monkeypatch)
+    effects = _BasePlanEffects(seen["observations"])
+    factory_seen: dict[str, Any] = {}
+
+    def _factory(spec: object, deploy_dir: pathlib.Path) -> _BasePlanEffects:
+        factory_seen.update(spec=spec, deploy_dir=deploy_dir)
+        return effects
+
+    bindings = type("B", (), {"build_effects": staticmethod(_factory)})()
+    spec = _BasePlanSpec()
+
+    _base_plan, used_effects = producer.build_base_plan(
+        spec,
+        target="lane3-target",
+        deploy_dir=str(tmp_path),
+        bindings=bindings,
+    )
+
+    assert used_effects is effects
+    assert factory_seen == {"spec": spec, "deploy_dir": tmp_path}
+
+
+def test_base_plan_defaults_to_pinned_compose_host_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    import dotmac_deployment_foundation.providers.compose_host as compose_module
+    import dotmac_deployment_foundation.toolchain as toolchain_module
+
+    seen = _patch_base_plan_modules(monkeypatch)
+    constructed: dict[str, Any] = {}
+
+    class _ComposeEffects(_BasePlanEffects):
+        def __init__(self, spec: object, deploy_dir: pathlib.Path, **kwargs: Any):
+            super().__init__(seen["observations"])
+            constructed.update(spec=spec, deploy_dir=deploy_dir, kwargs=kwargs)
+
+    monkeypatch.setattr(compose_module, "ComposeHostEffects", _ComposeEffects)
+    monkeypatch.setattr(
+        toolchain_module,
+        "DEFAULT_TOOLS",
+        {"docker": "/tools/docker", "git": "/tools/git"},
+    )
+    monkeypatch.setattr(
+        toolchain_module,
+        "resolve_tool",
+        lambda configured, *, what: f"resolved:{what}:{configured}",
+    )
+    spec = _BasePlanSpec()
+
+    _base_plan, used_effects = producer.build_base_plan(
+        spec,
+        target="lane3-target",
+        deploy_dir=str(tmp_path),
+    )
+
+    assert isinstance(used_effects, _ComposeEffects)
+    assert constructed == {
+        "spec": spec,
+        "deploy_dir": tmp_path,
+        "kwargs": {
+            "docker_bin": "resolved:docker_bin:/tools/docker",
+            "git_bin": "resolved:git_bin:/tools/git",
+        },
+    }
+
+
 def test_execute_wires_executor_with_discovered_admission_and_lock(
     monkeypatch: pytest.MonkeyPatch,
     subject: Subject,  # noqa: F811
