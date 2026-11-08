@@ -32,6 +32,7 @@ from collections.abc import Callable
 from typing import Final
 
 from dotmac_billing.opening_contracts import (
+    OpeningDispositionV1,
     OpeningPartitionV1,
     OpeningSourceIdentityV1,
 )
@@ -252,6 +253,15 @@ def check_variances(
         if (c.currency, c.lane, c.basis) not in batch_sums and c.source_minor != 0:
             mw("batch_control_unclosed", f"{c.currency}:{c.lane}:{c.basis}")
 
+    # one pass each, so the per-partition work below is a dictionary read
+    memo_sums: dict[tuple[OpeningPartitionV1, str], int] = defaultdict(int)
+    for (sum_part, _lane, sum_basis), amount in sums.items():
+        if sum_basis != LEDGER_BASIS:
+            memo_sums[(sum_part, sum_basis)] += amount
+    rows_of: dict[OpeningPartitionV1, list[OpeningDispositionV1]] = defaultdict(list)
+    for disposition_row in manifest.dispositions:
+        rows_of[disposition_row.partition].append(disposition_row)
+
     # ---- E1 per lane; history is not an equation ----------------------------
     for part, control in controls.items():
         key = part.source_account_key
@@ -276,7 +286,7 @@ def check_variances(
         t = ar_totals[part]
         t_net = t - lots_residual[part]
         memo = {
-            b: sum(v for (p, _l, bb), v in sums.items() if p == part and bb == b)
+            b: memo_sums.get((part, b), 0)
             for b in ("document_residual", "stored_balance", "rebuild")
         }
         if m.document_residual_minor != t + memo["document_residual"]:
@@ -284,14 +294,14 @@ def check_variances(
         if m.stored_balance_minor != t + memo["stored_balance"]:
             mw("stored_balance_control_unclosed", key)
         if m.rebuild_minor is None:
-            if any(p == part and bb == "rebuild" for (p, _l, bb) in sums):
+            if (part, "rebuild") in memo_sums:
                 mw("variance_rebuild_gap", key)
         elif m.rebuild_minor != t_net + memo["rebuild"]:
             mw("rebuild_control_unclosed", key)
 
         # ---- count control: derived buckets must equal the stated ones -----
         cited = set(by_partition.get(part, ()))
-        rows = [d for d in manifest.dispositions if d.partition == part]
+        rows = rows_of.get(part, [])
         derived: Counter[str] = Counter()
         for d in rows:
             if d.disposition == "eligible":
