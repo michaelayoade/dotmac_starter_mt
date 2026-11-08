@@ -915,11 +915,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             else ()
         )
         first = dependencies[0] if dependencies else None
+        first_dependencies: object = getattr(first, "dependencies", ())
         if (
             first is None
             or getattr(getattr(first, "call", None), "_dotmac_document_lifecycle", None)
             is not binding
-            or getattr(first, "dependencies", ())
+            or first_dependencies
             or getattr(first, "scope", None) != "request"
         ):
             raise ValueError(

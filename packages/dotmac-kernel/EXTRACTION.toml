@@ -8,9 +8,11 @@ owner = "Dotmac platform foundation"
 contract = "Universal assembly facilities and versioned cross-product contracts"
 source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub", "dotmac_academy_app", "dotmac_academy_v2"]
 
+# Package-level writer audit pins remain unchanged for ERP and Sub. The bounded
+# 2026-11-08 CSP observations are pinned separately in source_mode_note and
+# docs/inventories/console-csp-source-observations.json; they do not revalidate
+# the settings/authentication writers inventoried at the older revisions below.
 source_revisions = [
-  "dotmac_erp:74fa788ae562905e4c8a1fcd46616585e4bf7694",
-  "dotmac_sub:c7707880232c9298ef89c24a1aea66d35bd3a1e6",
   "dotmac_academy_v2:124155959c755cbb142099dd5517acc259f56fa8",
   "dotmac_academy_app:a5ffe6316e97bf33e17ef9c1f00788796f5e5a5a",
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
@@ -312,6 +314,16 @@ writer_state = "legacy_writer"
 retirement_required = true
 revision = "a5ffe6316e97bf33e17ef9c1f00788796f5e5a5a"
 evidence_paths = ["app/services/accounts.py", "app/web/accounts.py", "app/services/bootstrap.py", "app/cli.py", "scripts/seed_academy_demo.py", "app/services/lifecycle.py", "app/services/web_auth.py", "app/web/account.py"]
+
+# Bounded console-document policy inventory, 2026-11-08. No reusable route-scoped
+# HTTP CSP/hash writer was found. Academy retains its global tightening, console
+# authorization and proxy ownership; this claims no broader writer retirement.
+[[product_writers]]
+product = "dotmac_academy_v2"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "124155959c755cbb142099dd5517acc259f56fa8"
+evidence_paths = ["app/config.py", "app/assembly.py", "app/web/labs.py", "legacy_probe/web/test_console_ws.py"]
 
 # Purpose-bound invitation claim amendment, 2026-10-18, source only:
 # CredentialCreateAbsentFromProofV1 adds a distinct role-free create-absent
