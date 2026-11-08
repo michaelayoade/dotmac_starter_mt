@@ -907,6 +907,28 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-durable-timers",
+      "version": "0.1.0a2",
+      "tag": "dotmac-durable-timers-v0.1.0a2",
+      "tag_object": "0de240e82a0cb29ca65c1b73c59e50c9e3cebfac",
+      "peeled_commit": "e223bd7e3b35e9fe9f89658d6534dbf3d998260f",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_durable_timers-0.1.0a2-py3-none-any.whl": "b8f1e2762be67e0d4ef1bf5d941e6d1d5162c604641910b6080c26d919744e22"
+      },
+      "verification_run_id": "42478929012",
+      "source_run_id": "42478929012",
+      "release_authority_digest": "sha256:dbf6545c01a2e716b0daa7dd41bb0f463a589a301fbe4c8a1b78596082e88882",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
