@@ -72,12 +72,13 @@ the Executor boundary. Executor re-observes the host to refuse drift from the
 frozen prestate. The controller lock serializes its product deployments;
 exclusion against independent remote writers still requires admission proof.
 
-The current renderer supplies no exposure reconciliation, so the runner
-refuses before taking a lease for an incomplete rehearsal. Exposure apply and
-provoked rollback remain blocked; no receipt, version allocation, publication
-or operational acceptance follows from source coverage. Installed attester
-materials, signed-pair delivery, Control observers and the remaining exposure
-plan composition still need evidence.
+The runner supplies the same immutable descriptor used for its V1 base plan,
+and the trusted plan carries that descriptor's derived exposure families. If
+no family is derived, the runner still refuses before taking a lease for an
+incomplete rehearsal. Exposure apply and provoked rollback remain blocked; no
+receipt, version allocation, publication or operational acceptance follows
+from source coverage. Installed attester materials, signed-pair delivery and
+material-backed Control observers still need evidence.
 
 ## Historical result — superseded by the generated status document
 
