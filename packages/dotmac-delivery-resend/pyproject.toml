@@ -11,10 +11,11 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# Kernel floor is set by the transactions conflict-savepoint API this
-# package consumes; the first adopter (Academy) already pins a107
-# exactly, so adoption raises nothing. Not floor-probe proven below a107.
-dotmac-kernel = ">=0.1.0a107"
+# Kernel floor is the first published tag shipping every transactions
+# conflict-savepoint symbol this package consumes (a105, derived by
+# tests/architecture/test_kernel_version_sync.py). The first adopter
+# (Academy) pins a107 exactly, which satisfies the floor.
+dotmac-kernel = ">=0.1.0a105"
 # EXACT on purpose (house deviation, documented in COMPATIBILITY.md):
 # the fence depends on SQLAlchemy 2.0.51 private call sites and refuses
 # any other version at runtime. A new qualified version is a reviewed

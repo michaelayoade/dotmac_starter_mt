@@ -1,15 +1,19 @@
 schema_version = 1
 package = "dotmac-delivery-resend"
 classification = "optional-module"
-status = "scaffolded-source-only"
+status = "audit-complete"
 source_mode = "product-first"
 owner = "Caller-transaction classification and refusal, SQL authority admission, native flush/rollback abort handling, swallowed-commit latching, write-phase admission, receipt pinning and helper-rollback inventory verification for a human-triggered delivery resend"
 contract = "Given a product-declared ResendFence (consequence tables each exposing id+tenant_id, authority models, and a write-phase map), a product command running inside an arbitrary caller transaction is fenced: pending authority mutations are refused before command reads, participant writes outside the declared phase tables are refused pre-dispatch, raw transaction-control SQL is refused at admission, and the command's receipts are pinned against pre-command inventories and verified under fresh authority re-reads. The package owns no tables, no lineage, no engine, no enqueue and no audit write; the product command performs its own effects inside the fence. Runtime refuses anything but SQLAlchemy 2.0.51 on postgresql+psycopg in a non-autocommit, non-twophase caller."
 source_repositories = [
   "dotmac_academy_v2",
+  "dotmac_erp",
+  "dotmac_sub",
 ]
 source_revisions = [
   "dotmac_academy_v2:61c072f5ca5fcc34b7fadc211c8272add4519af4",
+  "dotmac_erp:74fa788ae562905e4c8a1fcd46616585e4bf7694",
+  "dotmac_sub:c7707880232c9298ef89c24a1aea66d35bd3a1e6",
 ]
 source_paths = [
   "dotmac_academy_v2:app/services/reminder_resend_unit.py",
@@ -24,9 +28,7 @@ contract_consumers = []
 candidate_consumers = ["dotmac_academy_v2"]
 composition_boundary = "The adopter pins the package exactly, declares one ResendFence over its own consequence/authority models, and runs its own command inside prepare/enter/finish. The fence reads and fences the caller's session only; it never opens an engine, commits, or issues business policy. Kernel durable-timers owns scheduling and the kernel outbox relay owns claim/lease/retry; this package fences one human-triggered resend inside a caller transaction and nothing else."
 inventory_evidence = [
-  "Academy unit has exactly 3 product imports (EmailOutbox, ReminderLog, AcademyAccountProfile) plus kernel AuditEvent/models; all become ResendFence injections",
-  "Kernel has no resend/fence equivalent (durable-timers and outbox relay verified adjacent but distinct)",
-  "SQLAlchemy 2.1.8 requalification of the source unit produced 54 native-flush failures; 2.0.51 exact pin is the contract",
+  "docs/inventories/delivery-resend-sources.md",
 ]
 first_cutover = "Academy adopts after a Forgejo release: add exact pin, construct the fence in app/services/reminder_resend.py, re-point the four suites with import-line changes only, delete app/services/reminder_resend_unit.py in the same change (no shim: dual import would double-register process-global Session listeners), full Academy CI green."
 shadow_and_drift = "Behavior proof is the unmodified Academy suites (64 test functions, 670+ cases) against the packaged fence; any assertion change required is an extraction defect, not a test edit."
@@ -39,3 +41,17 @@ writer_state = "legacy_writer"
 retirement_required = true
 revision = "61c072f5ca5fcc34b7fadc211c8272add4519af4"
 evidence_paths = ["app/services/reminder_resend_unit.py", "app/services/reminder_resend.py"]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "74fa788ae562905e4c8a1fcd46616585e4bf7694"
+evidence_paths = ["app/services/sync/sub/expenses.py"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "c7707880232c9298ef89c24a1aea66d35bd3a1e6"
+evidence_paths = ["app/api/auth_flow.py"]

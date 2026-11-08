@@ -21,4 +21,4 @@ Source only: not released, not published, not adopted.
     back to the active unit's fence or the configured default fence.
   - `ReminderUnit.__init__` takes the fence; a second fence against an
     active session is refused.
-- Pins: `sqlalchemy ==2.0.51` exact, `dotmac-kernel >=0.1.0a107`.
+- Pins: `sqlalchemy ==2.0.51` exact, `dotmac-kernel >=0.1.0a105`.

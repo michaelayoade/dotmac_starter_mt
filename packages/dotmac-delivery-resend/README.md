@@ -23,7 +23,7 @@ inside the fence.
 
 Hard constraints (see COMPATIBILITY.md): SQLAlchemy ==2.0.51 exactly,
 postgresql+psycopg only — refused at runtime otherwise; kernel
->=0.1.0a107 for the conflict-savepoint transaction API. No tables, no
+>=0.1.0a105 for the conflict-savepoint transaction API. No tables, no
 lineage, no engine.
 
 Behaviour proof is Academy's ported resend suites

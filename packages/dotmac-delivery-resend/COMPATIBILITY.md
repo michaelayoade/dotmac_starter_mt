@@ -10,12 +10,12 @@
 - **Dialect postgresql+psycopg only**, non-autocommit, non-twophase,
   no `schema_translate_map` — refused at runtime. `psycopg` itself is
   the adopter's driver dependency, not this package's.
-- **dotmac-kernel >=0.1.0a107.** Floor set by the
+- **dotmac-kernel >=0.1.0a105.** Floor set by the
   `dotmac_kernel.transactions` conflict-savepoint API consumed
   (`ConflictSavepointPhase`, `claim_conflict_savepoint_commit`,
-  `conflict_savepoint_requires_rollback`, `current_conflict_savepoint`).
-  Not floor-probe proven below a107; Academy pins a107 exactly, so
-  adoption raises nothing.
+  `conflict_savepoint_requires_rollback`, `current_conflict_savepoint`),
+  first published together in a105. Academy pins a107 exactly, which
+  satisfies the floor.
 - **Consequence tables must be tenant-shaped** (`id` + `tenant_id`
   columns). Platform-plane (tenant-less) consequences are out of the
   0.1 contract.
