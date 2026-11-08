@@ -251,6 +251,12 @@ def test_plan_acquisition_refuses_without_any_bindings() -> None:
     assert all(m.startswith("trusted_cp") for m in caught.value.missing)
 
 
+def test_authority_bindings_refuse_without_any_bindings() -> None:
+    with pytest.raises(producer.AuthorityUnavailable) as caught:
+        producer.acquire_authority_bindings(entries=[])
+    assert all(m.startswith("trusted_cp") for m in caught.value.missing)
+
+
 def test_plan_acquisition_delegates_to_the_mirror_with_discovered_bindings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -352,7 +358,7 @@ def test_base_plan_uses_supplied_effects_for_prestate_and_returns_them(
     effects = _BasePlanEffects(seen["observations"])
     spec = _BasePlanSpec()
 
-    base_plan, used_effects = producer.build_base_plan(
+    built = producer.build_base_plan(
         spec,
         target="lane3-target",
         deploy_dir=tmp_path,
@@ -362,8 +368,10 @@ def test_base_plan_uses_supplied_effects_for_prestate_and_returns_them(
         skip_backup_reason="rehearsal fixture is rebuildable",
     )
 
-    assert base_plan is seen["base_plan"]
-    assert used_effects is effects
+    assert built.base_plan is seen["base_plan"]
+    assert built.deployment_plan is seen["deployment_plan"]
+    assert built.effects is effects
+    assert built == (seen["base_plan"], seen["deployment_plan"], effects)
     assert effects.observe_calls == 1
     assert seen["build_spec"] is spec
     assert seen["build_kwargs"] == {
@@ -398,7 +406,7 @@ def test_base_plan_prefers_the_bindings_effects_factory(
     bindings = type("B", (), {"build_effects": staticmethod(_factory)})()
     spec = _BasePlanSpec()
 
-    _base_plan, used_effects = producer.build_base_plan(
+    _base_plan, _deployment_plan, used_effects = producer.build_base_plan(
         spec,
         target="lane3-target",
         deploy_dir=str(tmp_path),
@@ -436,7 +444,7 @@ def test_base_plan_defaults_to_pinned_compose_host_effects(
     )
     spec = _BasePlanSpec()
 
-    _base_plan, used_effects = producer.build_base_plan(
+    _base_plan, _deployment_plan, used_effects = producer.build_base_plan(
         spec,
         target="lane3-target",
         deploy_dir=str(tmp_path),
@@ -451,6 +459,50 @@ def test_base_plan_defaults_to_pinned_compose_host_effects(
             "git_bin": "resolved:git_bin:/tools/git",
         },
     }
+
+
+def test_base_plan_refuses_when_role_observation_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    _patch_base_plan_modules(monkeypatch)
+
+    class _FailingEffects:
+        def observe_roles(self) -> object:
+            raise RuntimeError("incumbent roles cannot be observed")
+
+    with pytest.raises(
+        producer.ReceiptRefused, match="observed host prestate"
+    ) as caught:
+        producer.build_base_plan(
+            _BasePlanSpec(),
+            target="lane3-target",
+            deploy_dir=tmp_path,
+            effects=_FailingEffects(),
+        )
+    assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+def test_base_plan_refuses_when_rendering_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    import dotmac_deployment_foundation.execution_plan as execution_plan_module
+
+    seen = _patch_base_plan_modules(monkeypatch)
+
+    def _refuse_render(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("base plan cannot be rendered")
+
+    monkeypatch.setattr(execution_plan_module, "render_execution_plan", _refuse_render)
+    with pytest.raises(
+        producer.ReceiptRefused, match="observed host prestate"
+    ) as caught:
+        producer.build_base_plan(
+            _BasePlanSpec(),
+            target="lane3-target",
+            deploy_dir=tmp_path,
+            effects=_BasePlanEffects(seen["observations"]),
+        )
+    assert isinstance(caught.value.__cause__, RuntimeError)
 
 
 def test_execute_wires_executor_with_discovered_admission_and_lock(
