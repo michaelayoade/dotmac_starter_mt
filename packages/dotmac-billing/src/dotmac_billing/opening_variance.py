@@ -807,6 +807,62 @@ def get_accounting_fact_v6(
         and fact.occurred_at == row["occurred_at"]
         and fact.reverses_fact_id == row["reverses_fact_id"]
     )
+    # the event that references the fact agrees with it: id, variance, kind, amount
+    events = _table(scope, "opening_variance_events")
+    variances = _table(scope, "opening_variances")
+    with db.no_autoflush:
+        found = (
+            db.execute(
+                _scoped(
+                    select(events).where(
+                        events.c.fact_posting_group_id == posting_group_id
+                    ),
+                    scope,
+                    events,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        variance = (
+            db.execute(
+                _scoped(
+                    select(variances).where(
+                        variances.c.id == fact.variance.variance_id
+                    ),
+                    scope,
+                    variances,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    if len(found) != 1 or variance is None:
+        _require(False)
+        raise AssertionError  # unreachable: _require raised
+    event = found[0]
+    kind = (
+        "opening_variance_recorded"
+        if event["kind"] == "recorded"
+        else "opening_variance_voided"
+        if event["kind"] == "voided_by_import_reversal"
+        else f"opening_variance_{event['resolution_kind']}"
+    )
+    minor = int(
+        fact.variance.amount.amount.scaleb(fact.variance.amount.currency.minor_units)
+    )
+    expected = (
+        int(event["amount_minor"])
+        if event["kind"] in ("resolved", "partially_resolved")
+        else int(variance["amount_minor"])
+    )
+    _require(
+        event["id"] == fact.variance.event_id
+        and event["variance_id"] == fact.variance.variance_id
+        and int(event["seq"]) == fact.variance.event_seq
+        and kind == fact.effect_kind
+        and minor == expected
+    )
     return fact
 
 

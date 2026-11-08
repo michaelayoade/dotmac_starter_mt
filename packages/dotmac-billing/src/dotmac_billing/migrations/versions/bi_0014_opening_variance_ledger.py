@@ -479,15 +479,135 @@ def _guards(platform: bool) -> None:
         WHEN NEW.resolution_kind = 'recognised' THEN 'opening_variance_recognised'
         WHEN NEW.resolution_kind = 'position_corrected' THEN 'opening_variance_position_corrected'
         ELSE NULL END;
-      IF g.id IS NULL OR want IS NULL OR g.group_kind <> want
-        OR g.billing_account_id <> v.billing_account_id OR g.currency <> v.currency
-        OR g.minor_units <> v.minor_units OR g.reverses_group_id IS NOT NULL
-        OR EXISTS (SELECT 1 FROM mod_billing.{p}posting_effects e WHERE e.posting_group_id = g.id{"" if platform else " AND e.tenant_id = NEW.tenant_id"})
-      THEN RAISE EXCEPTION 'variance event requires its effect-free fact posting group of the matching kind, account and currency' USING ERRCODE = '23514'; END IF;
+      IF g.id IS NULL OR want IS NULL
+      THEN RAISE EXCEPTION 'variance event has no fact posting group' USING ERRCODE = '23514'; END IF;
+      IF g.group_kind <> want
+      THEN RAISE EXCEPTION 'variance fact group kind differs from its event' USING ERRCODE = '23514'; END IF;
+      IF g.billing_account_id <> v.billing_account_id
+      THEN RAISE EXCEPTION 'variance fact group account differs from its variance' USING ERRCODE = '23514'; END IF;
+      IF g.currency <> v.currency OR g.minor_units <> v.minor_units
+      THEN RAISE EXCEPTION 'variance fact group currency differs from its variance' USING ERRCODE = '23514'; END IF;
+      IF g.reverses_group_id IS NOT NULL OR EXISTS (SELECT 1 FROM mod_billing.{p}posting_effects e WHERE e.posting_group_id = g.id{"" if platform else " AND e.tenant_id = NEW.tenant_id"})
+      THEN RAISE EXCEPTION 'variance fact group must be effect-free and reverse nothing' USING ERRCODE = '23514'; END IF;
+      IF (SELECT count(*) FROM mod_billing.{p}accounting_facts f
+            WHERE f.posting_group_id = g.id AND f.fact_version = 6 AND f.effect_kind = want{"" if platform else " AND f.tenant_id = NEW.tenant_id"}) <> 1
+      THEN RAISE EXCEPTION 'variance event requires exactly one V6 fact on its group' USING ERRCODE = '23514'; END IF;
       RETURN NEW;
     END $$;
     CREATE CONSTRAINT TRIGGER variance_event_fact_group AFTER INSERT ON mod_billing.{p}opening_variance_events
       DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mod_billing.check_{p}variance_fact_group();
+
+    -- Group side: a variance-kind posting group is complete only with exactly
+    -- one matching event and exactly one V6 fact of its own kind (checked at
+    -- commit), and it can never carry or gain a posting effect.
+    CREATE FUNCTION mod_billing.check_{p}variance_group_complete() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    BEGIN
+      IF (SELECT count(*) FROM mod_billing.{p}opening_variance_events x
+            WHERE x.fact_posting_group_id = NEW.id{new_scope}
+              AND NEW.group_kind = CASE WHEN x.kind = 'recorded' THEN 'opening_variance_recorded'
+                WHEN x.kind = 'voided_by_import_reversal' THEN 'opening_variance_voided'
+                WHEN x.resolution_kind = 'recognised' THEN 'opening_variance_recognised'
+                WHEN x.resolution_kind = 'position_corrected' THEN 'opening_variance_position_corrected'
+                ELSE NULL END) <> 1
+      THEN RAISE EXCEPTION 'a variance posting group needs exactly one matching event' USING ERRCODE = '23514'; END IF;
+      IF (SELECT count(*) FROM mod_billing.{p}accounting_facts f
+            WHERE f.posting_group_id = NEW.id AND f.fact_version = 6
+              AND f.effect_kind = NEW.group_kind{"" if platform else " AND f.tenant_id = NEW.tenant_id"}) <> 1
+      THEN RAISE EXCEPTION 'a variance posting group needs exactly one V6 fact of its kind' USING ERRCODE = '23514'; END IF;
+      IF EXISTS (SELECT 1 FROM mod_billing.{p}posting_effects e WHERE e.posting_group_id = NEW.id{"" if platform else " AND e.tenant_id = NEW.tenant_id"})
+      THEN RAISE EXCEPTION 'a variance posting group carries no posting effects' USING ERRCODE = '23514'; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE CONSTRAINT TRIGGER variance_group_complete AFTER INSERT ON mod_billing.{p}posting_groups
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+      WHEN (NEW.group_kind IN ('opening_variance_recorded','opening_variance_voided',
+        'opening_variance_recognised','opening_variance_position_corrected'))
+      EXECUTE FUNCTION mod_billing.check_{p}variance_group_complete();
+
+    CREATE FUNCTION mod_billing.guard_{p}variance_group_effect() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM mod_billing.{p}posting_groups x WHERE x.id = NEW.posting_group_id{new_scope}
+            AND x.group_kind IN ('opening_variance_recorded','opening_variance_voided',
+              'opening_variance_recognised','opening_variance_position_corrected'))
+      THEN RAISE EXCEPTION 'a variance fact group carries no posting effects' USING ERRCODE = '23514'; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER variance_group_no_effects BEFORE INSERT ON mod_billing.{p}posting_effects
+      FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}variance_group_effect();
+
+    -- Fact side: a V6 fact exists only for a variance group, and its payload
+    -- must be exactly what the referencing event and variance say.
+    CREATE FUNCTION mod_billing.guard_{p}variance_fact() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    DECLARE g record; e record; v record; payload jsonb; want_minor numeric; rec_fact uuid;
+      is_resolution boolean;
+    BEGIN
+      SELECT * INTO g FROM mod_billing.{p}posting_groups x WHERE x.id = NEW.posting_group_id{new_scope};
+      IF g.id IS NULL OR g.group_kind NOT IN ('opening_variance_recorded','opening_variance_voided',
+          'opening_variance_recognised','opening_variance_position_corrected') THEN
+        IF NEW.fact_version = 6 OR NEW.effect_kind LIKE 'opening_variance_%' THEN
+          RAISE EXCEPTION 'a V6 variance fact needs a variance posting group' USING ERRCODE = '23514'; END IF;
+        RETURN NEW;
+      END IF;
+      SELECT * INTO e FROM mod_billing.{p}opening_variance_events x WHERE x.fact_posting_group_id = g.id{new_scope};
+      SELECT * INTO v FROM mod_billing.{p}opening_variances x WHERE x.id = e.variance_id{new_scope};
+      IF e.id IS NULL OR v.id IS NULL OR NEW.fact_version <> 6 OR NEW.effect_kind <> g.group_kind
+        OR NEW.source_system <> 'dotmac-billing' OR NEW.source_authority <> 'internal'
+      THEN RAISE EXCEPTION 'a variance fact needs its event and the V6 contract' USING ERRCODE = '23514'; END IF;
+      payload := NEW.fact_payload::jsonb;
+      is_resolution := e.kind IN ('resolved','partially_resolved');
+      want_minor := CASE WHEN is_resolution THEN e.amount_minor ELSE v.amount_minor END;
+      IF payload->>'fact_id' IS DISTINCT FROM NEW.id::text
+        OR payload->>'posting_group_id' IS DISTINCT FROM g.id::text
+        OR payload->>'billing_account_id' IS DISTINCT FROM g.billing_account_id::text
+        OR payload->>'effect_kind' IS DISTINCT FROM g.group_kind
+        OR payload->>'source_ref' IS DISTINCT FROM 'opening-variance-event:' || e.id::text
+        OR payload->'variance'->>'event_id' IS DISTINCT FROM e.id::text
+        OR payload->'variance'->>'event_seq' IS DISTINCT FROM e.seq::text
+        OR payload->'variance'->>'variance_id' IS DISTINCT FROM v.id::text
+        OR payload->'variance'->>'window_id' IS DISTINCT FROM v.window_id::text
+        OR payload->'variance'->>'lane' IS DISTINCT FROM v.lane
+        OR payload->'variance'->>'basis' IS DISTINCT FROM v.basis
+        OR payload->'variance'->>'reason_code' IS DISTINCT FROM v.reason_code
+        OR payload->'variance'->>'source_kind' IS DISTINCT FROM v.source_kind
+        OR payload->'variance'->>'source_ref' IS DISTINCT FROM v.source_ref
+        OR payload->'variance'->>'import_receipt_id' IS DISTINCT FROM v.import_receipt_id::text
+        OR payload->'variance'->>'evidence_digest' IS DISTINCT FROM v.evidence_digest
+        OR payload->'variance'->>'rules_digest' IS DISTINCT FROM v.rules_digest
+        OR (payload->'variance'->'amount'->>'minor_units')::int IS DISTINCT FROM v.minor_units
+        OR payload->'variance'->'amount'->>'currency' IS DISTINCT FROM v.currency
+        OR (payload->'variance'->'amount'->>'amount')::numeric * power(10::numeric, (payload->'variance'->'amount'->>'minor_units')::int)
+           IS DISTINCT FROM want_minor
+      THEN RAISE EXCEPTION 'variance fact payload differs from its event and variance' USING ERRCODE = '23514'; END IF;
+      IF is_resolution THEN
+        IF payload->'resolution'->>'resolution_kind' IS DISTINCT FROM e.resolution_kind
+          OR payload->'resolution'->>'resolved_state' IS DISTINCT FROM e.kind
+          OR payload->'resolution'->>'approval_request_id' IS DISTINCT FROM e.approval_request_id::text
+          OR payload->'resolution'->>'maker_ref' IS DISTINCT FROM e.maker_ref
+          OR payload->'resolution'->'approver_refs' IS DISTINCT FROM e.approver_refs
+          OR payload->'resolution'->>'gl_target_class' IS DISTINCT FROM e.gl_target_class
+          OR payload->'resolution'->>'corrected_by_posting_group_id' IS DISTINCT FROM
+             (CASE WHEN e.resolution_kind = 'position_corrected' THEN e.posting_group_id::text END)
+        THEN RAISE EXCEPTION 'variance fact resolution differs from its approved event' USING ERRCODE = '23514'; END IF;
+      ELSIF jsonb_typeof(payload->'resolution') IS DISTINCT FROM 'null' THEN
+        RAISE EXCEPTION 'only a resolution fact carries a resolution block' USING ERRCODE = '23514';
+      END IF;
+      IF e.kind = 'voided_by_import_reversal' THEN
+        SELECT f.id INTO rec_fact FROM mod_billing.{p}opening_variance_events r
+          JOIN mod_billing.{p}accounting_facts f ON f.posting_group_id = r.fact_posting_group_id
+          WHERE r.variance_id = e.variance_id AND r.kind = 'recorded'{"" if platform else " AND r.tenant_id = NEW.tenant_id AND f.tenant_id = NEW.tenant_id"};
+        IF rec_fact IS NULL OR NEW.reverses_fact_id IS DISTINCT FROM rec_fact
+          OR payload->>'reverses_fact_id' IS DISTINCT FROM rec_fact::text
+        THEN RAISE EXCEPTION 'a voided fact must reverse the recorded fact of its variance' USING ERRCODE = '23514'; END IF;
+      ELSIF NEW.reverses_fact_id IS NOT NULL OR payload->>'reverses_fact_id' IS NOT NULL THEN
+        RAISE EXCEPTION 'only a voided fact reverses a fact' USING ERRCODE = '23514';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER variance_fact_guard BEFORE INSERT ON mod_billing.{p}accounting_facts
+      FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}variance_fact();
 
     CREATE FUNCTION mod_billing.guard_{p}opening_gap_event() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$

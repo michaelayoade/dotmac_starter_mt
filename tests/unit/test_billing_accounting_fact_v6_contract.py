@@ -228,3 +228,33 @@ def test_a_recognised_fact_is_never_customer_adverse() -> None:
 def test_the_frozen_replace_keeps_the_closed_checks() -> None:
     with pytest.raises(OpeningEvidenceError):
         replace(_fact(), effect_kind="invoice_issued")
+
+
+def test_a_real_v5_fact_keeps_its_exact_bytes() -> None:
+    """The a10 'bytes unchanged' guarantee: a V5 fact written by the importer is
+    decoded and re-serialised to the identical payload and pinned digest."""
+    import json
+    from pathlib import Path
+
+    from dotmac_billing.opening_queries import _decode_row
+    from dotmac_billing.service import _jsonable
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "billing"
+        / "accounting_fact_v5_pinned.json"
+    )
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["digest"] == (
+        "4f52df7b0392148349c9140d1e03ce605c0e38ff2dbdf7fa88eb771e451c4c44"
+    )
+    fact = _decode_row(
+        {"fact_payload": stored["payload"], "fact_digest": stored["digest"]},
+        AccountingFactV5,
+        payload="fact_payload",
+        digest="fact_digest",
+    )
+    payload = _jsonable(fact)
+    assert json.loads(json.dumps(payload)) == stored["payload"]
+    assert fingerprint_of(payload) == stored["digest"]

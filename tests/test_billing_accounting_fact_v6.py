@@ -356,3 +356,441 @@ def test_a_replay_adds_no_facts(scratch):
         assert again == receipt
         assert (len(_v6_groups(session)), sum(_outbox(session).values())) == before
         assert before[0] == 2
+
+
+# -- Security findings 1-2: no orphan group, fact-less event or forged fact ----------
+
+
+def _variance_row(session, amount: int):
+    return (
+        session.execute(
+            text("SELECT * FROM mod_billing.opening_variances WHERE amount_minor = :a"),
+            {"a": amount},
+        )
+        .mappings()
+        .one()
+    )
+
+
+def _next_version(session, account) -> int:
+    return (
+        session.scalar(
+            text(
+                "SELECT coalesce(max(source_version), 0) FROM "
+                "mod_billing.posting_groups WHERE billing_account_id = :a"
+            ),
+            {"a": account},
+        )
+        + 1
+    )
+
+
+def _raw_group(session, tenant, group, account, kind, currency="NGN"):
+    session.execute(
+        text(
+            "INSERT INTO mod_billing.posting_groups (id, tenant_id, "
+            "billing_account_id, group_kind, currency, minor_units, source_ref, "
+            "source_version, occurred_at) VALUES (:id, :t, :a, :k, :c, 2, 'forged', "
+            ":v, now())"
+        ),
+        {
+            "id": group,
+            "t": tenant,
+            "a": account,
+            "k": kind,
+            "c": currency,
+            "v": _next_version(session, account),
+        },
+    )
+
+
+def _raw_fact(session, scope, variance, group, account, event_id, seq, **edits):
+    """A contract-valid V6 recognised fact, with optional payload edits."""
+    from decimal import Decimal
+
+    from dotmac_billing.opening_variance_contracts import (
+        OpeningVarianceFactBlockV1,
+        OpeningVarianceResolutionFactV1,
+    )
+    from dotmac_billing.service import _jsonable
+    from dotmac_kernel.fingerprints import fingerprint_of
+    from dotmac_kernel.money import Currency, Money
+
+    fact = AccountingFactV6(
+        scope,
+        "dotmac-billing",
+        edits.pop("fact_id", uuid4()),
+        6,
+        account,
+        group,
+        f"opening-variance-event:{event_id}",
+        "internal",
+        "opening_variance_recognised",
+        _NOW,
+        _NOW,
+        OpeningVarianceFactBlockV1(
+            variance["id"],
+            variance["window_id"],
+            event_id,
+            seq,
+            variance["lane"],
+            "ledger_lane",
+            variance["reason_code"],
+            variance["source_kind"],
+            variance["source_ref"],
+            Money(Decimal(edits.pop("minor", 300)) / 100, Currency("NGN", 2)),
+            False,
+            variance["import_receipt_id"],
+            variance["evidence_digest"],
+            variance["rules_digest"],
+        ),
+        OpeningVarianceResolutionFactV1(
+            "recognised",
+            "resolved",
+            "bad_debt",
+            None,
+            edits.pop("approval", None) or edits["req"],
+            "maker:v",
+            edits.pop("approvers", ("checker:v",)),
+        ),
+        None,
+    )
+    edits.pop("req", None)
+    payload = _jsonable(fact)
+    session.execute(
+        text(
+            "INSERT INTO mod_billing.accounting_facts (id, tenant_id, "
+            "posting_group_id, fact_version, source_system, source_authority, "
+            "effect_kind, fact_digest, fact_payload, occurred_at) VALUES (:id, :t, "
+            ":g, 6, 'dotmac-billing', 'internal', 'opening_variance_recognised', "
+            ":d, CAST(:p AS json), :o)"
+        ),
+        {
+            "id": fact.fact_id,
+            "t": variance["tenant_id"],
+            "g": group,
+            "d": fingerprint_of(payload),
+            "p": __import__("json").dumps(payload),
+            "o": _NOW,
+        },
+    )
+
+
+def _forge(session, scope, *, event=True, fact=True, kind=None, account=None, **kw):
+    """Forge a recognised event, group and fact as the online role.
+
+    Returns after the inserts; the caller commits (or not) and asserts."""
+    variance = _variance_row(session, 300)
+    group, req = uuid4(), uuid4()
+    acct = account or variance["billing_account_id"]
+    event_id, seq = uuid4(), 1
+    if event:
+        led._event(session, variance["window_id"], _row_of(variance), req=req)
+        event_id, seq = led._event(
+            session,
+            variance["window_id"],
+            _row_of(variance),
+            kind="resolved",
+            rk="recognised",
+            amount=300,
+            gl="bad_debt",
+            req=req,
+            fact=group,
+        )
+    _raw_group(
+        session,
+        variance["tenant_id"],
+        group,
+        acct,
+        kind or "opening_variance_recognised",
+        kw.pop("currency", "NGN"),
+    )
+    if fact:
+        _raw_fact(session, scope, variance, group, acct, event_id, seq, req=req, **kw)
+    return group
+
+
+def _row_of(variance):
+    return {
+        "id": variance["id"],
+        "tenant_id": variance["tenant_id"],
+        "billing_account_id": variance["billing_account_id"],
+        "window_id": variance["window_id"],
+    }
+
+
+def _commit_refused(session) -> str:
+    with pytest.raises(DBAPIError) as refused:
+        session.commit()
+    assert refused.value.orig.sqlstate == "23514"
+    message = str(refused.value.orig)
+    session.rollback()
+    return message
+
+
+def _immediate(session, name: str) -> None:
+    session.execute(text(f"SET CONSTRAINTS mod_billing.{name} IMMEDIATE"))
+
+
+def _refused_now(session, work) -> str:
+    with pytest.raises(DBAPIError) as refused:
+        work()
+    assert refused.value.orig.sqlstate == "23514"
+    message = str(refused.value.orig)
+    session.rollback()
+    return message
+
+
+def test_an_orphan_group_without_event_or_fact_is_refused(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        led._imported(session, scope)
+        # the group-side check in isolation (other commit-time guards also refuse)
+        _immediate(session, "variance_group_complete")
+        message = _refused_now(
+            session, lambda: _forge(session, scope, event=False, fact=False)
+        )
+        assert "exactly one matching event" in message
+        # and at commit, whatever guard fires first
+        _forge(session, scope, event=False, fact=False)
+        assert _commit_refused(session)
+
+
+def test_an_orphan_group_with_a_fact_but_no_event_is_refused(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        led._imported(session, scope)
+        message = _refused_now(
+            session, lambda: _forge(session, scope, event=False, fact=True)
+        )
+        assert "needs its event" in message
+
+
+def test_an_event_and_group_without_a_fact_is_refused(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        led._imported(session, scope)
+        _forge(session, scope, fact=False)  # event first, then the group, no fact
+        message = _refused_now(
+            session, lambda: _immediate(session, "variance_event_fact_group")
+        )
+        assert "exactly one V6 fact on its group" in message
+        _forge(session, scope, fact=False)
+        assert _commit_refused(session)  # and at commit
+        _immediate(session, "variance_group_complete")  # group side, in isolation
+        assert "exactly one V6 fact of its kind" in _refused_now(
+            session, lambda: _forge(session, scope, fact=False)
+        )
+
+
+def test_an_effect_on_a_variance_group_is_refused_now_and_later(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        cmd, receipt = led._imported(session, scope)
+        _resolve_all(session, scope, receipt)
+        recognised = next(
+            g for g, k in _v6_groups(session).items() if k.endswith("recognised")
+        )
+        tenant = session.scalar(
+            text("SELECT tenant_id FROM mod_billing.opening_windows")
+        )
+
+        def effect(group):
+            session.execute(
+                text(
+                    "INSERT INTO mod_billing.posting_effects (id, tenant_id, "
+                    "posting_group_id, billing_account_id, lane, amount_delta, "
+                    "currency, minor_units) VALUES (:id, :t, :g, :a, 'receivable', "
+                    "1, 'NGN', 2)"
+                ),
+                {
+                    "id": uuid4(),
+                    "t": tenant,
+                    "g": group,
+                    "a": cmd.partition.account_id,
+                },
+            )
+
+        # later: the committed group, a fresh transaction
+        assert "carries no posting effects" in _refused_now(
+            session, lambda: effect(recognised)
+        )
+        # same transaction: a group created and given an effect before commit
+        forged = _forge(session, scope, event=False, fact=False)
+        assert "carries no posting effects" in _refused_now(
+            session, lambda: effect(forged)
+        )
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {},  # the fact names another event
+        {"minor": 301},
+        {"approvers": ("checker:other",)},
+        {"approval": "random"},
+    ],
+    ids=["event_id", "amount", "approvers", "approval_request"],
+)
+def test_a_fact_whose_payload_differs_from_its_event_is_refused(scratch, edit):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        led._imported(session, scope)
+        edit = dict(edit)
+        if edit.get("approval") == "random":
+            edit["approval"] = uuid4()
+        if not edit:
+            variance = _variance_row(session, 300)
+            group, req = uuid4(), uuid4()
+            led._event(session, variance["window_id"], _row_of(variance), req=req)
+            led._event(
+                session,
+                variance["window_id"],
+                _row_of(variance),
+                kind="resolved",
+                rk="recognised",
+                amount=300,
+                gl="bad_debt",
+                req=req,
+                fact=group,
+            )
+            _raw_group(
+                session,
+                variance["tenant_id"],
+                group,
+                variance["billing_account_id"],
+                "opening_variance_recognised",
+            )
+
+            def work():
+                _raw_fact(
+                    session,
+                    scope,
+                    variance,
+                    group,
+                    variance["billing_account_id"],
+                    uuid4(),
+                    1,
+                    req=req,
+                )
+        else:
+
+            def work():
+                _forge(session, scope, **edit)
+
+        assert "differs from its" in _refused_now(session, work)
+
+
+def test_binding_mismatches_are_each_refused_by_their_own_check(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        led._imported(session, scope)
+        other = cash._new_account(session, scope)
+        session.commit()
+
+        def forged_then_checked(**kw):
+            _forge(session, scope, fact=False, **kw)
+            _immediate(session, "variance_event_fact_group")
+
+        assert "kind differs" in _refused_now(
+            session,
+            lambda: forged_then_checked(kind="opening_variance_position_corrected"),
+        )
+        assert "account differs" in _refused_now(
+            session, lambda: forged_then_checked(account=other)
+        )
+        assert "currency differs" in _refused_now(
+            session, lambda: forged_then_checked(currency="USD")
+        )
+
+
+def test_the_service_path_is_refused_under_set_constraints_all_immediate(scratch):
+    """Documents the ordering: event, group, fact, then the commit-time check."""
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        cmd = led._carrying_command(session, scope)
+        cash._prepare_window(session, scope, cmd)
+        session.commit()
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        with pytest.raises(DBAPIError) as refused:
+            cash._import_command(
+                session,
+                scope=scope,
+                command=cmd,
+                verifier=evidence.TrustedVerifier(),
+                version=2,
+            )
+        assert refused.value.orig.sqlstate == "23514"
+        session.rollback()
+
+
+def test_partial_resolution_and_void_keep_the_pass4_sums(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _cmd, _receipt = led._imported(session, scope)
+        _records, by_amount = led._ids(session, scope)
+        approvals = led.VarianceApprovals()
+        state = s.recognise_opening_variance(
+            session,
+            scope=scope,
+            command=RecogniseOpeningVarianceV1(
+                scope,
+                by_amount[300].variance_id,
+                100,
+                "bad_debt",
+                uuid4(),
+                "maker:v",
+                f"recognise:{uuid4()}",
+                _NOW,
+            ),
+            approvals=approvals,
+        )
+        session.commit()
+        assert state == "partially_resolved"
+        recorded = resolved = 0
+        for group, kind in _v6_groups(session).items():
+            fact = get_accounting_fact_v6(session, scope=scope, posting_group_id=group)
+            minor = int(fact.variance.amount.amount * 100)
+            if kind == "opening_variance_recorded":
+                recorded += minor
+            else:
+                assert kind == "opening_variance_recognised" and minor == 100
+                resolved += minor
+        done = session.scalar(
+            text(
+                "SELECT coalesce(sum(amount_minor), 0) FROM "
+                "mod_billing.opening_variance_events WHERE kind IN "
+                "('resolved','partially_resolved')"
+            )
+        )
+        total = session.scalar(
+            text(
+                "SELECT sum(amount_minor) FROM mod_billing.opening_variances "
+                "WHERE basis = 'ledger_lane'"
+            )
+        )
+        # sum(recorded) - sum(resolutions) is exactly what the variances still hold
+        assert recorded - resolved == total - done == -500
+
+
+def test_after_a_void_recorded_minus_voided_is_zero(scratch):
+    scope, url = led._scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _cmd, receipt = led._imported(session, scope, seal=False)
+        with cash._as_opening_principal(session):
+            s.reverse_opening_account_import_v2(
+                session,
+                scope=scope,
+                command=ReverseOpeningAccountImportV1(
+                    scope, receipt.receipt_id, "fresh", str(uuid4()), _NOW
+                ),
+                verifier=evidence.TrustedVerifier(),
+            )
+        session.commit()
+        sums = Counter()
+        for group, kind in _v6_groups(session).items():
+            fact = get_accounting_fact_v6(session, scope=scope, posting_group_id=group)
+            sums[kind] += int(fact.variance.amount.amount * 100)
+        assert sums["opening_variance_recorded"] == -400
+        assert sums["opening_variance_voided"] == -400
+        assert sums["opening_variance_recorded"] - sums["opening_variance_voided"] == 0

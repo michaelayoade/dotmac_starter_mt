@@ -303,17 +303,18 @@ def _event(session, window_id, variance, **values):
         "fact": None,
     }
     base.update(values)
-    session.execute(
+    seq = session.execute(
         text(
             "INSERT INTO mod_billing.opening_variance_events (id, tenant_id, "
             "window_id, variance_id, billing_account_id, kind, resolution_kind, "
             "amount_minor, gl_target_class, evidence_ref, maker_ref, approver_refs, "
             "approval_request_id, fact_posting_group_id, actor, occurred_at) VALUES ("
             ":id, :t, :w, :v, :a, :kind, :rk, :amount, :gl, :ev, :maker, "
-            "CAST(:refs AS jsonb), :req, :fact, :actor, now())"
+            "CAST(:refs AS jsonb), :req, :fact, :actor, now()) RETURNING seq"
         ),
         base,
-    )
+    ).scalar_one()
+    return base["id"], int(seq)
 
 
 def _row(session, amount: int):
