@@ -122,11 +122,13 @@ def test_a_spec_with_no_derived_rules_yields_no_exposure_acts() -> None:
 
 def test_single_family_descriptor_derives_only_that_family(base: Any) -> None:
     spec, _base_plan = base
-    ipv4_only = SimpleNamespace(
-        publications=tuple(
-            item for item in spec.publications if item[1].address_family == "ipv4"
-        )
+    code, private = next(
+        item for item in spec.publications if item[1].exposure == "private"
     )
+    ipv4_only = SimpleNamespace(
+        publications=((code, dataclasses.replace(private, address_family="ipv4")),)
+    )
+    assert {rule.family for rule in build_firewall_plan(ipv4_only)} == {"ipv4"}
 
     assert lane3_plan_v3.exposure_reconciliations_for_spec(ipv4_only) == (
         ExposureReconciliationV1(family="ipv4", chain="DOCKER-USER"),
