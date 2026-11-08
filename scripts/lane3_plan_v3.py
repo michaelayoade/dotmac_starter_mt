@@ -38,6 +38,11 @@ from dotmac_deployment_foundation.execution_plan_v3 import (
 )
 from dotmac_deployment_foundation.ingress import FAMILIES, FILTER_CHAIN
 from dotmac_deployment_foundation.policy import build_firewall_plan
+from dotmac_deployment_foundation.provenance import normalize_digest
+
+
+class ExposureCompositionRefused(PreconditionFailed):
+    """The supplied descriptor cannot compose exposure acts for this plan."""
 
 
 def exposure_reconciliations_for_spec(
@@ -49,23 +54,34 @@ def exposure_reconciliations_for_spec(
     acts carry only the concrete family and its one legal filter chain. The
     Executor later re-derives the individual rules from the same descriptor.
     """
-    families = {rule.family for rule in build_firewall_plan(spec)}
-    return tuple(
-        ExposureReconciliationV1(family=family, chain=FILTER_CHAIN[family])
-        for family in FAMILIES
-        if family in families
-    )
+    try:
+        families = {rule.family for rule in build_firewall_plan(spec)}
+        return tuple(
+            ExposureReconciliationV1(family=family, chain=FILTER_CHAIN[family])
+            for family in FAMILIES
+            if family in families
+        )
+    except Exception as exc:
+        raise ExposureCompositionRefused(
+            "the supplied descriptor cannot compose its exposure reconciliations"
+        ) from exc
 
 
 def _require_spec_matches_base_plan(spec: Any, base_plan: Any) -> None:
     try:
-        descriptor_digest = str(spec.to_canonical_document().sha256_digest())
+        descriptor_digest = normalize_digest(
+            str(spec.to_canonical_document().sha256_digest()),
+            where="supplied descriptor",
+        )
+        base_descriptor_digest = normalize_digest(
+            base_plan.descriptor_digest, where="base plan descriptor"
+        )
     except Exception as exc:
-        raise PreconditionFailed(
+        raise ExposureCompositionRefused(
             "the supplied descriptor cannot identify the base plan descriptor"
         ) from exc
-    if descriptor_digest != base_plan.descriptor_digest:
-        raise PreconditionFailed(
+    if descriptor_digest != base_descriptor_digest:
+        raise ExposureCompositionRefused(
             "the supplied descriptor does not describe the base plan descriptor"
         )
 

@@ -282,6 +282,21 @@ def test_plan_acquisition_delegates_to_the_mirror_with_discovered_bindings(
     assert seen == {"base_plan": base, "bindings": bindings, "spec": spec}
 
 
+def test_plan_acquisition_translates_descriptor_composition_refusals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_plan_v3
+
+    bindings = type("B", (), {"authorization_v3_provider": object()})()
+
+    def _render(base_plan: object, *, bindings: object, spec: object) -> object:
+        raise lane3_plan_v3.ExposureCompositionRefused("descriptor mismatch")
+
+    monkeypatch.setattr(lane3_plan_v3, "render_local_execution_plan_v3", _render)
+    with pytest.raises(producer.ReceiptRefused, match="descriptor mismatch"):
+        producer.acquire_execution_plan(object(), bindings=bindings, spec=object())
+
+
 def test_authority_acquisition_passes_the_same_spec_to_plan_acquisition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

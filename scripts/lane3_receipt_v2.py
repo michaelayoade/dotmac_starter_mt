@@ -503,6 +503,8 @@ def acquire_execution_plan(
         return lane3_plan_v3.render_local_execution_plan_v3(
             base_plan, bindings=bindings, spec=spec
         )
+    except lane3_plan_v3.ExposureCompositionRefused as exc:
+        raise ReceiptRefused(str(exc)) from exc
     except Exception as exc:
         raise AuthorityUnavailable(_missing("trusted_cp")) from exc
 

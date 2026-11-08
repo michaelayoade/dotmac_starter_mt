@@ -120,6 +120,19 @@ def test_a_spec_with_no_derived_rules_yields_no_exposure_acts() -> None:
     )
 
 
+def test_single_family_descriptor_derives_only_that_family(base: Any) -> None:
+    spec, _base_plan = base
+    ipv4_only = SimpleNamespace(
+        publications=tuple(
+            item for item in spec.publications if item[1].address_family == "ipv4"
+        )
+    )
+
+    assert lane3_plan_v3.exposure_reconciliations_for_spec(ipv4_only) == (
+        ExposureReconciliationV1(family="ipv4", chain="DOCKER-USER"),
+    )
+
+
 def test_populated_lane3_plan_declares_exposure_and_changes_the_digest(
     base: Any,
 ) -> None:
@@ -155,9 +168,36 @@ def test_populated_render_refuses_a_spec_that_is_not_the_base_descriptor(
     bindings = SimpleNamespace(
         authorization_v3_provider=SimpleNamespace(observe=_observe)
     )
-    with pytest.raises(PreconditionFailed, match="base plan descriptor"):
+    with pytest.raises(
+        lane3_plan_v3.ExposureCompositionRefused, match="base plan descriptor"
+    ):
         lane3_plan_v3.render_local_execution_plan_v3(
             base_plan, bindings=bindings, spec=other
+        )
+
+
+def test_populated_render_refuses_an_unidentifiable_descriptor_before_observe(
+    base: Any,
+) -> None:
+    _spec, base_plan = base
+
+    def _canonical_document() -> Any:
+        raise RuntimeError("synthetic canonicalization failure")
+
+    def _observe() -> None:
+        raise AssertionError("provider facts observed for an unknown descriptor")
+
+    bindings = SimpleNamespace(
+        authorization_v3_provider=SimpleNamespace(observe=_observe)
+    )
+    with pytest.raises(
+        lane3_plan_v3.ExposureCompositionRefused,
+        match="cannot identify the base plan descriptor",
+    ):
+        lane3_plan_v3.render_local_execution_plan_v3(
+            base_plan,
+            bindings=bindings,
+            spec=SimpleNamespace(to_canonical_document=_canonical_document),
         )
 
 
