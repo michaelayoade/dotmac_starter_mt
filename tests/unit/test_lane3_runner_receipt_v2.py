@@ -484,6 +484,7 @@ def test_runner_phase_failures_and_exact_object_handoff(
 
     def render(got_base: object, **kwargs: object) -> object:
         assert got_base is base and kwargs["bindings"] is bindings
+        assert kwargs["spec"] is captured["spec"]
         events.append("render")
         if failure == "render":
             raise producer.ReceiptRefused("prelease renderer contradiction")

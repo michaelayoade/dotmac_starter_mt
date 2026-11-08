@@ -1610,7 +1610,9 @@ def run(
             deploy_dir=args.deploy_dir,
             bindings=bindings,
         )
-        execution_plan = receipt_v2.acquire_execution_plan(base_plan, bindings=bindings)
+        execution_plan = receipt_v2.acquire_execution_plan(
+            base_plan, bindings=bindings, spec=spec
+        )
         with vantage_topology_refusals(refused_as=PreconditionUnfit):
             if execution_plan.host_id != bound.host_id:
                 raise topology_source.TopologyBindingRefused("host_id")
@@ -1623,9 +1625,10 @@ def run(
         )
         if execution_plan.controller_ssh_fingerprint != str(controller_identity):
             raise PreconditionUnfit("the authorized plan does not name the controller")
-        # The current V2 renderer supplies no exposure reconciliation. Refuse
-        # before taking a lease or deploying a partial rehearsal. No exposure
-        # success can be inferred from ordinary deployment; no rules are seeded.
+        # The plan carries the descriptor-derived exposure families. If the
+        # descriptor derives none, refuse before taking a lease or deploying a
+        # partial rehearsal. No exposure success can be inferred from ordinary
+        # deployment; no rules are seeded.
         if not execution_plan.exposure_reconciliations:
             raise PreconditionUnfit(
                 "Lane 3 exposure rehearsal is blocked: the trusted plan has "

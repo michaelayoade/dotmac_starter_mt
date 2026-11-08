@@ -471,6 +471,7 @@ def acquire_execution_plan(
     *,
     bindings: Any = None,
     entries: Any = None,
+    spec: Any = None,
 ) -> FoundationExecutionPlanV3:
     """The trusted CP-rendered plan, and nothing else.
 
@@ -479,11 +480,16 @@ def acquire_execution_plan(
     and the receipt name the same plan by construction rather than by a
     comparison someone could forget.
 
-    Rendering delegates to `lane3_plan_v3`'s public-call mirror over the
-    DISCOVERED bindings: the plan's host facts come from the CP provider's
-    own observation, never from receipt or dispatch fields. With no base
-    plan, no bindings, or no V3 provider installed, this refuses exactly
-    as before — the wiring makes authority representable, never weaker.
+    ``spec`` is the same immutable descriptor used to render ``base_plan``.
+    When supplied, its descriptor-derived exposure families are composed into
+    the plan; the changed digest is what the grant must authorize. When it is
+    omitted, the render remains the installed CLI's default mirror.
+
+    Rendering delegates to `lane3_plan_v3` over the DISCOVERED bindings: the
+    plan's host facts come from the CP provider's own observation, never from
+    receipt or dispatch fields. With no base plan, no bindings, or no V3
+    provider installed, this refuses exactly as before — the wiring makes
+    authority representable, never weaker.
     """
     if base_plan is None:
         raise AuthorityUnavailable(_missing("trusted_cp"))
@@ -495,7 +501,7 @@ def acquire_execution_plan(
 
     try:
         return lane3_plan_v3.render_local_execution_plan_v3(
-            base_plan, bindings=bindings
+            base_plan, bindings=bindings, spec=spec
         )
     except Exception as exc:
         raise AuthorityUnavailable(_missing("trusted_cp")) from exc
@@ -509,6 +515,7 @@ def acquire_authority(
     base_plan: Any = None,
     bindings: Any = None,
     entries: Any = None,
+    spec: Any = None,
 ) -> tuple[FoundationExecutionPlanV3, ExecutionGrant]:
     """The trusted plan and its grant, through the lane's ONLY grant route.
 
@@ -527,7 +534,9 @@ def acquire_authority(
         or base_plan is None
     ):
         raise AuthorityUnavailable(_missing("trusted_cp", "control_v2"))
-    plan = acquire_execution_plan(base_plan, bindings=bindings, entries=entries)
+    plan = acquire_execution_plan(
+        base_plan, bindings=bindings, entries=entries, spec=spec
+    )
     import lane3_authorization
 
     try:

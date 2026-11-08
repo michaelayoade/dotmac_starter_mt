@@ -266,14 +266,67 @@ def test_plan_acquisition_delegates_to_the_mirror_with_discovered_bindings(
     bindings = type("B", (), {"authorization_v3_provider": object()})()
     seen: dict[str, object] = {}
 
-    def _render(base_plan: object, *, bindings: object) -> object:
-        seen.update(base_plan=base_plan, bindings=bindings)
+    def _render(base_plan: object, *, bindings: object, spec: object) -> object:
+        seen.update(base_plan=base_plan, bindings=bindings, spec=spec)
         return sentinel
 
     monkeypatch.setattr(lane3_plan_v3, "render_local_execution_plan_v3", _render)
     base = object()
     assert producer.acquire_execution_plan(base, bindings=bindings) is sentinel
-    assert seen == {"base_plan": base, "bindings": bindings}
+    assert seen == {"base_plan": base, "bindings": bindings, "spec": None}
+
+    spec = object()
+    assert (
+        producer.acquire_execution_plan(base, bindings=bindings, spec=spec) is sentinel
+    )
+    assert seen == {"base_plan": base, "bindings": bindings, "spec": spec}
+
+
+def test_authority_acquisition_passes_the_same_spec_to_plan_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_authorization
+
+    plan, grant = object(), object()
+    base, bindings, entries, spec = object(), object(), object(), object()
+    document = object()
+    seen: dict[str, object] = {}
+
+    def acquire(got_base: object, **kwargs: object) -> object:
+        seen.update(acquire_base=got_base, acquire_kwargs=kwargs)
+        return plan
+
+    def establish(**kwargs: object) -> object:
+        seen.update(establish_kwargs=kwargs)
+        return grant
+
+    monkeypatch.setattr(producer, "acquire_execution_plan", acquire)
+    monkeypatch.setattr(lane3_authorization, "establish_authorization", establish)
+
+    assert producer.acquire_authority(
+        descriptor_digest="sha256:descriptor",
+        target="lane3-target",
+        authorization_document=document,  # type: ignore[arg-type]
+        base_plan=base,
+        bindings=bindings,
+        entries=entries,
+        spec=spec,
+    ) == (plan, grant)
+    assert seen == {
+        "acquire_base": base,
+        "acquire_kwargs": {
+            "bindings": bindings,
+            "entries": entries,
+            "spec": spec,
+        },
+        "establish_kwargs": {
+            "descriptor_digest": "sha256:descriptor",
+            "target": "lane3-target",
+            "authorization_document": document,
+            "execution_plan": plan,
+            "entries": entries,
+        },
+    }
 
 
 @pytest.mark.parametrize(
