@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Scoped console document scripts — release inventory
+## 0.1.0a108 — Release inventory
 
 Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`
 declarations to the existing browser composition/security owner. This inventory
