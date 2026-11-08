@@ -43,8 +43,8 @@ from dotmac_billing.opening_receivable_validation import (
 )
 from dotmac_kernel.money import Currency, Money
 
-from tests.unit import test_billing_opening_manifest as cash
 from tests import billing_opening_variance_fixtures as variance_fixture
+from tests.unit import test_billing_opening_manifest as cash
 
 NOW = cash.NOW
 

@@ -33,6 +33,9 @@ from dotmac_billing.opening_variance_contracts import (
     LEDGER_BASIS,
     OpeningControlReportV1,
     OpeningControlRowV1,
+    OpeningHistoryRowV1,
+    OpeningHoldRowV1,
+    OpeningReasonTotalV1,
     OpeningVarianceRecordV1,
     OpeningVarianceV1,
     is_customer_adverse,
@@ -421,6 +424,33 @@ def void_partition_variances(
             )
     db.flush()
     return voided
+
+
+def require_recognisable(db: Session, *, scope: Scope, variance_id: UUID) -> None:
+    """Q6: ``recognised`` never resolves a customer-adverse variance.
+
+    Otherwise the customer stays over-collected, the DV-3 pause lifts and
+    Collections pursues money the authoritative lane says is not owed. Adverse
+    variances resolve only by ``position_corrected``. The database refuses it too.
+    """
+    table = _table(scope, "opening_variances")
+    row = (
+        db.execute(
+            _scoped(select(table).where(table.c.id == variance_id), scope, table)
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        raise BillingRuleViolation("variance_not_found", "opening variance not found")
+    if row["basis"] != LEDGER_BASIS or is_customer_adverse(
+        row["lane"], int(row["amount_minor"])
+    ):
+        raise BillingRuleViolation(
+            "variance_recognise_adverse",
+            "only a non-adverse ledger-lane variance is recognised; a "
+            "customer-adverse one is resolved by position_corrected",
+        )
 
 
 def require_group_not_variance_resolution(
@@ -855,16 +885,17 @@ def opening_control_report(db: Session, *, scope: Scope) -> OpeningControlReport
         ()
         if seal is None
         else tuple(
-            (str(h.account_id), h.reason_code) for h in seal.command.operational_holds
+            OpeningHoldRowV1(str(h.account_id), h.reason_code)
+            for h in seal.command.operational_holds
         )
     )
-    totals = tuple(sorted((k, c, s) for k, (c, s) in reasons.items()))
+    totals = tuple(
+        OpeningReasonTotalV1(k, c, total) for k, (c, total) in sorted(reasons.items())
+    )
     closed = all(r.difference_minor == 0 for r in rows)
     history_rows = tuple(
-        sorted(
-            (name, ccy, total, nonzero)
-            for (name, ccy), (total, nonzero) in history.items()
-        )
+        OpeningHistoryRowV1(name, ccy, total, nonzero)
+        for (name, ccy), (total, nonzero) in sorted(history.items())
     )
     del currency_of
     payload: dict[str, Any] = {
@@ -882,10 +913,13 @@ def opening_control_report(db: Session, *, scope: Scope) -> OpeningControlReport
             ]
             for r in rows
         ],
-        "reasons": [list(t) for t in totals],
+        "reasons": [[t.reason_code, t.count, t.total_minor] for t in totals],
         "adverse": [adverse_count, adverse_minor],
-        "history": [list(h) for h in history_rows],
-        "operational_holds": [list(h) for h in operational],
+        "history": [
+            [h.field, h.currency, h.total_minor, h.nonzero_accounts]
+            for h in history_rows
+        ],
+        "operational_holds": [[h.account_id, h.reason_code] for h in operational],
     }
     return OpeningControlReportV1(
         rows,
@@ -906,6 +940,7 @@ __all__ = [
     "opening_control_report",
     "record_batch_variances",
     "require_group_not_variance_resolution",
+    "require_recognisable",
     "require_resolution_primitive",
     "record_partition_variances",
     "resolve_variance",

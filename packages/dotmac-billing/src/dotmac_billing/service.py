@@ -208,6 +208,7 @@ from dotmac_billing.opening_variance import (
     record_batch_variances,
     record_partition_variances,
     require_group_not_variance_resolution,
+    require_recognisable,
     require_resolution_primitive,
     resolve_variance,
     void_partition_variances,
@@ -6668,6 +6669,7 @@ def recognise_opening_variance(
     )
 
     def operation(session: Session) -> dict[str, object]:
+        require_recognisable(session, scope=scope, variance_id=command.variance_id)
         held = _require_variance_approval(
             session,
             scope=scope,

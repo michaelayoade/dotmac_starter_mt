@@ -278,24 +278,20 @@ def test_an_unlisted_code_and_an_unresolvable_source_stay_blocking():
     assert only(run(ghost)).reason == "census_blocking_exception"
 
 
-def test_a_held_partition_stays_in_the_manifest_marked_held_with_one_reason():
-    held = run(classes=a10(("a", "opening_gap_other", "match")))
-    decision = only(held)
+def test_a_non_admitted_partition_is_routed_out_and_listed_with_one_reason():
+    """Q1: no manifest-marked hold exists; the partition leaves the manifest and
+    the decision record lists its rows, stated lane figures and census codes."""
+    routed = run(classes=a10(("a", "opening_gap_other", "match")))
+    decision = only(routed)
     assert (decision.admitted, decision.reason) == (False, "a10_opening_not_exact")
-    assert decision.route == "post_seal_admission"
-    assert held.census["eligible_invoice_ids"] == []
-    assert held.held_invoice_reasons == {
-        UUID(uid("i-open")): "held:a10_opening_not_exact"
-    }
-    # still in the population, with its census exceptions out of the blockers
-    assert {x["invoice_id"] for x in held.census["invoices"]} == {
-        uid("i-open"),
-        uid("i-closed"),
-    }
-    assert held.census["blocking_exceptions"] == []
-    ctl = held.census["controls"][0]
-    assert (ctl["eligible_count"], ctl["eligible_residual"]) == (0, "0.00")
-    assert held.counts()["route:post_seal_admission"] == 1
+    assert decision.route == "governed_correction"
+    assert routed.census["eligible_invoice_ids"] == []
+    assert routed.census["invoices"] == []
+    assert routed.census["controls"] == []
+    assert decision.rows == 2  # i-open and i-closed are listed, never dropped
+    assert dict(decision.lane_figures)["collectible_receivable"]
+    assert routed.counts()["route:governed_correction"] == 1
+    assert not hasattr(routed, "held_invoice_reasons")
 
 
 def test_a_structural_hold_stays_out_with_a_governed_correction_route():

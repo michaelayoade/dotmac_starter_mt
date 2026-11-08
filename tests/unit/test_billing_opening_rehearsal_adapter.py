@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from dotmac_billing.opening_admissibility import census_measure_figures
 from dotmac_billing.opening_rehearsal import (
     render_opening_rehearsal_census,
     report_opening_rehearsal,
@@ -43,8 +44,21 @@ def _assembly(name="assembly.json"):
     return adapter.load_assembly(_fixture(name))
 
 
+def _ledger(payload, assembly):
+    """The CLI's own derivation: census figures, no variance, a typed rebuild gap."""
+    obs, _sidecar = adapter.load_sub_observation(payload)
+    return adapter.census_measures_ledger(
+        census_measure_figures(payload),
+        {m.partition: m.source_account_id for m in assembly.partitions},
+        {r.currency: r.precision for r in obs.currency_precisions},
+    )
+
+
 def _typed_census(payload, assembly=None):
-    return adapter.rehearsal_census(payload, assembly=assembly or _assembly())
+    assembly = assembly or _assembly()
+    return adapter.rehearsal_census(
+        payload, assembly=assembly, ledger_for=_ledger(payload, assembly)
+    )
 
 
 def _census(payload, assembly=None):
@@ -54,8 +68,9 @@ def _census(payload, assembly=None):
 
 def _run(payload, assembly=None):
     obs, sidecar = adapter.load_sub_observation(payload)
+    assembly = assembly or _assembly()
     return adapter.assemble_rehearsal_run(
-        obs, assembly=assembly or _assembly(), sidecar=sidecar
+        obs, assembly=assembly, sidecar=sidecar, ledger_for=_ledger(payload, assembly)
     )
 
 
@@ -869,11 +884,18 @@ def test_explicit_original_mapping_refuses_misbinding(attack, entrypoint):
     ):
         if entrypoint == "census":
             adapter.rehearsal_census(
-                payload, assembly=assembly, original_documents=documents
+                payload,
+                assembly=assembly,
+                original_documents=documents,
+                ledger_for=_ledger(payload, assembly),
             )
         else:
             adapter.assemble_rehearsal_run(
-                obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+                obs,
+                assembly=assembly,
+                sidecar=sidecar,
+                original_documents=documents,
+                ledger_for=_ledger(payload, assembly),
             )
 
 
@@ -893,11 +915,20 @@ def test_census_preserves_explicit_original_and_qualifies_documentary_side(fixtu
     documents = ((UUID(INVOICE_1), original),)
     obs, sidecar = adapter.load_sub_observation(payload)
     expected_run = adapter.assemble_rehearsal_run(
-        obs, assembly=assembly, sidecar=sidecar, original_documents=documents
+        obs,
+        assembly=assembly,
+        sidecar=sidecar,
+        original_documents=documents,
+        ledger_for=_ledger(payload, assembly),
     )
-    without = adapter.rehearsal_census(payload, assembly=assembly)
+    without = adapter.rehearsal_census(
+        payload, assembly=assembly, ledger_for=_ledger(payload, assembly)
+    )
     artifact = adapter.rehearsal_census(
-        payload, assembly=assembly, original_documents=documents
+        payload,
+        assembly=assembly,
+        original_documents=documents,
+        ledger_for=_ledger(payload, assembly),
     )
     assert artifact.provenance.manifest_fingerprint == (
         opening_manifest_fingerprint_v2(expected_run.manifest)

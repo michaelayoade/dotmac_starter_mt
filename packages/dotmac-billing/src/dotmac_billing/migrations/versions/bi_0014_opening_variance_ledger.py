@@ -721,10 +721,13 @@ def _replace_guards(platform: bool) -> None:
       -- with T = 0 where nothing was imported; none can leave silently.
       SELECT coalesce(array_agg(DISTINCT c->'partition'->>'account_id'), ARRAY[]::text[]) INTO admitted
         FROM jsonb_array_elements(manifest->'controls') c WHERE NOT (held ? (c->'partition'->>'account_id'));
-      IF NOT mod_billing.opening_variance_set_matches({new_args}identity, manifest, admitted, true)
-      THEN RAISE EXCEPTION 'seal refused: recorded variance set differs from the manifest variance set' USING ERRCODE = '23514'; END IF;
-      IF mod_billing.opening_closure_defects({new_args}identity, manifest, admitted, true) <> 0
-      THEN RAISE EXCEPTION 'seal refused: an opening control row does not close to zero' USING ERRCODE = '23514'; END IF;
+      -- A V1 (cash-only) manifest carries no variance ledger: nothing to close.
+      IF bound.manifest_version = 2 THEN
+        IF NOT mod_billing.opening_variance_set_matches({new_args}identity, manifest, admitted, true)
+        THEN RAISE EXCEPTION 'seal refused: recorded variance set differs from the manifest variance set' USING ERRCODE = '23514'; END IF;
+        IF mod_billing.opening_closure_defects({new_args}identity, manifest, admitted, true) <> 0
+        THEN RAISE EXCEPTION 'seal refused: an opening control row does not close to zero' USING ERRCODE = '23514'; END IF;
+      END IF;
       RETURN NEW;
     END $$;
     """)

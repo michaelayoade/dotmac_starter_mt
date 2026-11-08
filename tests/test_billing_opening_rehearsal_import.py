@@ -23,6 +23,7 @@ from dotmac_billing.opening_rehearsal import (
     report_opening_rehearsal,
 )
 
+from tests import billing_opening_variance_fixtures as variance_fixture
 from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
 from tests import test_billing_opening_receivable_import as receivables
@@ -64,6 +65,11 @@ class ExactFixtureVerifier:
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
+def _exact_ledger(manifest):
+    """No variance: every memo basis equals what the import transfers."""
+    return fixture.adapter.LedgerInputsV1(variance_fixture.measures_for(manifest))
+
+
 def test_nonempty_adapter_fixture_import_replay_report_reconciliation_and_seal(
     scratch, plane
 ):
@@ -104,6 +110,7 @@ def test_nonempty_adapter_fixture_import_replay_report_reconciliation_and_seal(
                 assembly=assembly,
                 sidecar=sidecar,
                 original_documents=((source_invoice_id, original),),
+                ledger_for=_exact_ledger,
             )
             command = run.commands[0]
             verifier = ExactFixtureVerifier(command, original)

@@ -517,17 +517,38 @@ class OpeningControlRowV1(_ClosedEvidence):
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningReasonTotalV1(_ClosedEvidence):
+    reason_code: str
+    count: int
+    total_minor: int
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningHistoryRowV1(_ClosedEvidence):
+    """A cumulative flow field: history, never an equation or a blocker."""
+
+    field: str
+    currency: str
+    total_minor: int
+    nonzero_accounts: int
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningHoldRowV1(_ClosedEvidence):
+    account_id: str
+    reason_code: str
+
+
+@dataclass(frozen=True, slots=True)
 class OpeningControlReportV1(_ClosedEvidence):
     """Window-level closure. The seal refuses unless every row is zero."""
 
     rows: tuple[OpeningControlRowV1, ...]
-    reason_totals: tuple[tuple[str, int, int], ...]  # (reason, count, sum)
+    reason_totals: tuple[OpeningReasonTotalV1, ...]
     customer_adverse_count: int
     customer_adverse_minor: int
-    operational_holds: tuple[tuple[str, str], ...]  # (account, reason)
-    #: Cumulative flow fields are history, not balances: no equation, no blocker.
-    #: (field, currency, sum, accounts with a non-zero value)
-    history: tuple[tuple[str, str, int, int], ...]
+    operational_holds: tuple[OpeningHoldRowV1, ...]
+    history: tuple[OpeningHistoryRowV1, ...]
     closed: bool
     digest: str
 
@@ -590,8 +611,11 @@ __all__ = [
     "OpeningBatchControlV1",
     "OpeningControlReportV1",
     "OpeningControlRowV1",
+    "OpeningHistoryRowV1",
+    "OpeningHoldRowV1",
     "OpeningOperationalHoldV1",
     "OpeningPartitionMeasuresV1",
+    "OpeningReasonTotalV1",
     "OpeningVarianceApprovalPort",
     "OpeningVarianceApprovalV1",
     "OpeningVarianceRecordV1",

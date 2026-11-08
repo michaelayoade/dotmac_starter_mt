@@ -49,6 +49,7 @@ __all__ = [
     "PartitionDecision",
     "ResellerMapV1",
     "a10_classes_digest",
+    "census_measure_figures",
     "admissibility_rules_digest",
     "parse_a10_classes",
     "parse_admissibility_rules",
@@ -80,15 +81,11 @@ HOLD_REASONS: Final = frozenset(
     }
 )
 _POLICIES: Final = frozenset({"blocking"})
-# A held partition stays in the frozen manifest (route: post_seal_admission)
-# unless it fails structurally; those have only a governed correction route.
-STRUCTURAL_HOLDS: Final = frozenset(
-    {
-        "reseller_mapping_unavailable",
-        "status_residual_conflict",
-        "lane_control_mismatch",
-    }
-)
+# Q1 (ruling 2026-11-08): a partition that is not admitted leaves the manifest
+# and is routed to governed correction. There is no manifest-marked hold; the
+# decision record lists every routed-out partition with its reason, row count
+# and stated lane figures, so the window reconciliation (census = manifest +
+# batch + routed-out) can be checked.
 _LANE_MONEY: Final = (
     "collectible_receivable",
     "unapplied_customer_credit",
@@ -472,8 +469,10 @@ class PartitionDecision:
     detail: tuple[str, ...]
     eligible_invoices: int
     member_accounts: tuple[str, ...]  # reseller-managed subscribers folded in
-    route: str = "import"  # import | post_seal_admission | governed_correction
-    held_evidence: tuple[tuple[str, int], ...] = ()  # census codes of a held one
+    route: str = "import"  # import | governed_correction
+    rows: int = 0  # census invoice rows of the partition (routed-out only)
+    lane_figures: tuple[tuple[str, str], ...] = ()  # stated lane money, routed-out
+    census_codes: tuple[tuple[str, int], ...] = ()  # census exception codes
 
 
 @dataclass(slots=True)
@@ -481,7 +480,7 @@ class AdmissibilityProjection:
     census: dict[str, object]
     decisions: tuple[PartitionDecision, ...]
     service_refs: dict[UUID, str]
-    held_invoice_reasons: dict[UUID, str]
+    figures: dict[tuple[str, str], tuple[str, str | None]]
     archived_drafts: tuple[str, ...]
     archived_draft_total: str
     unattributed_controls: int
@@ -502,9 +501,6 @@ class AdmissibilityProjection:
             "eligible_invoices": len(self.eligible_invoice_ids),
             "archived_drafts": len(self.archived_drafts),
             "unattributed_controls": self.unattributed_controls,
-            "route:post_seal_admission": sum(
-                1 for d in self.decisions if d.route == "post_seal_admission"
-            ),
             "route:governed_correction": sum(
                 1 for d in self.decisions if d.route == "governed_correction"
             ),
@@ -526,6 +522,35 @@ def _fmt(value: Decimal, like: object = None) -> str:
 
 def _zero_like(rows: Iterable[Decimal]) -> Decimal:
     return sum(rows, Decimal(0))
+
+
+def census_measure_figures(
+    census: Mapping[str, object], *, draft_status: str = "draft"
+) -> dict[tuple[str, str], tuple[str, str | None]]:
+    """Per (account, currency) document residual and stored balance, as exact text.
+
+    Document residual sums the canonical residual over all non-draft documents
+    (closed ones included); the stored balance sums the stored column, and is
+    ``None`` when any row carries none (fail closed: no measures row follows).
+    """
+    docs: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    for item in _list(census.get("invoices")):
+        row = _obj(item)
+        if row.get("status") == draft_status:
+            continue
+        key = (str(_uuid(row.get("account_id"))), _str(row.get("currency")))
+        docs.setdefault(key, []).append(row)
+    figures: dict[tuple[str, str], tuple[str, str | None]] = {}
+    for key, rows in docs.items():
+        doc_total = sum((_dec(r.get("residual")) for r in rows), Decimal(0))
+        stored: Decimal | None = Decimal(0)
+        for r in rows:
+            if r.get("stored_residual") is None:
+                stored = None
+                break
+            stored = (stored or Decimal(0)) + _dec(r["stored_residual"])
+        figures[key] = (_fmt(doc_total), None if stored is None else _fmt(stored))
+    return figures
 
 
 def project_census(
@@ -694,7 +719,6 @@ def project_census(
     decisions: list[PartitionDecision] = []
     admitted_candidates: set[UUID] = set()
     admitted: set[PKey] = set()
-    held_in: set[PKey] = set()
     for pkey in sorted(members, key=lambda k: (str(k[0]), k[1])):
         account, currency = pkey
         triggered: dict[str, tuple[str, ...]] = {}
@@ -757,11 +781,28 @@ def project_census(
             admitted.add(pkey)
             admitted_candidates.update(cands)
             route = "import"
-        elif reason in STRUCTURAL_HOLDS or pkey not in lane_present:
-            route = "governed_correction"  # outside the manifest (D-5)
         else:
-            route = "post_seal_admission"  # in the frozen manifest, marked held
-            held_in.add(pkey)
+            route = "governed_correction"  # outside the manifest (Q1)
+        routed_rows = 0
+        figures_text: tuple[tuple[str, str], ...] = ()
+        if reason is not None:
+            routed_rows = sum(1 for p in invoice_partition.values() if p == pkey)
+            figures_text = tuple(
+                (
+                    name,
+                    _fmt(
+                        sum(
+                            (
+                                _dec(lane_rows[(m, pkey[1])].get(name))
+                                for m in sorted(member_accounts, key=str)
+                                if (m, pkey[1]) in lane_rows
+                            ),
+                            Decimal(0),
+                        )
+                    ),
+                )
+                for name in _LANE_MONEY
+            )
         decisions.append(
             PartitionDecision(
                 str(account),
@@ -772,24 +813,19 @@ def project_census(
                 len(cands) if reason is None else 0,
                 tuple(sorted(str(m) for m in member_accounts if m != account)),
                 route,
+                routed_rows,
+                figures_text,
                 tuple(sorted(census_codes.get(pkey, Counter()).items()))
-                if route == "post_seal_admission"
+                if reason is not None
                 else (),
             )
         )
     # --- projected census --------------------------------------------------
-    # Held partitions that did not fail structurally stay in the frozen
-    # manifest, marked ``held:<reason>`` on their open dispositions (digest-bound
-    # with the manifest), so the post-seal admission route can admit them later.
-    # Their census exceptions are carried as evidence in the decision record, not
-    # as manifest blockers; the validators refuse their import before the seal.
-    # Structural failures stay out (governed correction). Drafts are removed and
-    # archived (X1); controls are reduced by exactly what was removed, so the
-    # source's own control totals stay an independent check.
-    kept = admitted | held_in
-    hold_reason = {
-        (UUID(d.account_id), d.currency): d.reason for d in decisions if not d.admitted
-    }
+    # Only admitted partitions stay in the projected census; every other one is
+    # routed out (listed in the decision record, never dropped). Drafts are
+    # removed and archived (X1); controls are reduced by exactly what was
+    # removed, so the source's own control totals stay an independent check.
+    kept = admitted
     out: dict[str, object] = dict(census)
     kept_ids: set[UUID] = set()
     new_invoices: list[dict[str, object]] = []
@@ -851,6 +887,28 @@ def project_census(
     removed = {
         pkey: [by_id[i] for i in ids] for pkey, ids in draft_by_partition.items()
     }
+    # Measure figures (census-derived, exact): document residual over all
+    # non-draft documents (closed ones included) and the stored balance column.
+    # ``None`` stored balance: the census row carries no stored figure (fail
+    # closed, no measures row is produced for it).
+    figures: dict[tuple[str, str], tuple[str, str | None]] = {}
+    for pkey in admitted:
+        docs = [
+            by_id[i]
+            for i, p in invoice_partition.items()
+            if p == pkey and by_id[i].get("status") != rules.draft_status
+        ]
+        doc_total = sum((_dec(d.get("residual")) for d in docs), Decimal(0))
+        stored_total: Decimal | None = Decimal(0)
+        for d in docs:
+            if d.get("stored_residual") is None:
+                stored_total = None
+                break
+            stored_total = (stored_total or Decimal(0)) + _dec(d["stored_residual"])
+        figures[(str(pkey[0]), pkey[1])] = (
+            _fmt(doc_total),
+            None if stored_total is None else _fmt(stored_total),
+        )
 
     folded_controls: dict[PKey, dict[str, object]] = {}
     other_controls: list[dict[str, object]] = []
@@ -938,11 +996,7 @@ def project_census(
         service_refs={
             i: r for i, r in service_refs.items() if i in admitted_candidates
         },
-        held_invoice_reasons={
-            i: f"held:{hold_reason[invoice_partition[i]]}"
-            for i in kept_ids
-            if invoice_partition[i] in held_in and i in candidate_ids
-        },
+        figures=figures,
         archived_draft_total=_fmt(
             sum((_dec(by_id[UUID(d)].get("total")) for d in drafts), Decimal(0))
         ),
@@ -975,7 +1029,9 @@ def render_admissibility_decisions(projection: AdmissibilityProjection) -> str:
                 "eligible_invoices": d.eligible_invoices,
                 "member_accounts": list(d.member_accounts),
                 "route": d.route,
-                "held_evidence": dict(d.held_evidence),
+                "rows": d.rows,
+                "lane_figures": dict(d.lane_figures),
+                "census_codes": dict(d.census_codes),
             }
             for d in projection.decisions
         ],

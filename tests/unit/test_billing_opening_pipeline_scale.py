@@ -94,9 +94,16 @@ def test_the_census_rule_admits_nothing_but_the_rules_admit_the_account_set(tmp_
     counts = decisions["counts"]
     assert counts["eligible_invoices"] == expected["eligible_invoices"]
     assert counts["admitted"] + counts["held"] == counts["partitions"] == 400
-    # exactly one reason per held partition, none for an admitted one
+    # exactly one reason per routed-out partition, none for an admitted one;
+    # every routed-out partition is listed with its rows and stated lane figures
     for row in decisions["decisions"]:
         assert (row["reason"] is None) == row["admitted"]
+        assert row["route"] == ("import" if row["admitted"] else "governed_correction")
+        if not row["admitted"]:
+            assert row["rows"] >= 0 and set(row["lane_figures"]) >= {
+                "collectible_receivable",
+                "unapplied_customer_credit",
+            }
     assert decisions["archived_drafts"] and counts["archived_drafts"] > 0
     summary = (tmp_path / "ruled" / "summary.csv").read_text()
     assert "admissibility_digest,rules," in summary and "\nhold," in summary
@@ -124,11 +131,9 @@ def test_drafter_and_adapter_are_byte_identical_across_runs(tmp_path):
     assert receivable, "admitted accounts with status-open documents are imported"
     held = json.loads((tmp_path / "one" / "admissibility.json").read_text())
     counts = held["counts"]
-    # admitted plus held-but-in-the-frozen-manifest (post-seal route)
-    assert (
-        len(first["partitions"])
-        == counts["admitted"] + counts["route:post_seal_admission"]
-    )
+    # only admitted partitions are in the manifest: every other one is routed out
+    assert len(first["partitions"]) == counts["admitted"]
+    assert counts["route:governed_correction"] == counts["held"]
 
 
 def test_manifest_wide_findings_are_not_replayed_per_partition(tmp_path):
@@ -319,45 +324,47 @@ def _run_for(partitions: int, invoices: int, tmp_path: Path):
         data["census"], data["target_state"], admissibility=projection
     )
     obs, sidecar = adapter.load_sub_observation(projection.census)
+    assembly = adapter.load_assembly(draft.assembly)
     run = adapter.assemble_rehearsal_run(
         obs,
-        assembly=adapter.load_assembly(draft.assembly),
+        assembly=assembly,
         sidecar=sidecar,
-        held_reasons=projection.held_invoice_reasons,
+        ledger_for=adapter.census_measures_ledger(
+            projection.figures,
+            {m.partition: m.source_account_id for m in assembly.partitions},
+            {r.currency: r.precision for r in obs.currency_precisions},
+        ),
     )
     return projection, run
 
 
-def test_held_partitions_stay_in_the_manifest_without_blocking_the_others(tmp_path):
+def test_routed_out_partitions_stay_out_of_the_manifest_without_blocking_the_others(
+    tmp_path,
+):
     projection, run = _run_for(200, 1578, tmp_path)
-    held = {
-        (d.account_id) for d in projection.decisions if d.route == "post_seal_admission"
-    }
-    assert held, "the fixture must hold some non-structural partitions"
+    routed = {d.account_id for d in projection.decisions if not d.admitted}
+    assert routed, "the fixture must route some partitions to governed correction"
+    # the manifest holds exactly the admitted partitions' controls
+    assert len({c.partition for c in run.manifest.controls}) == sum(
+        1 for d in projection.decisions if d.admitted
+    )
+    # no marked hold and no blocking disposition survives in the manifest
+    assert not [
+        d
+        for d in run.manifest.dispositions
+        if d.disposition == "blocking" or d.reason.startswith("held:")
+    ]
     batch = preview_opening_account_import_batch_v2(list(run.commands))
     codes = {b.code for b in batch.manifest_blockers}
-    assert "source_blocking_disposition" not in codes
-    refused = {
-        item.preview.partition.source_account_key
-        for item in batch.items
-        if any(b.code == "partition_held" for b in item.partition_blockers)
+    assert not codes & {
+        "source_blocking_disposition",
+        "manifest_noncarryable_row",
+        "partition_held",
     }
-    # a held partition with open residual is marked; one with nothing to
-    # admit later has no marker and simply recognizes no backing
-    expected = {
-        d.partition.source_account_key
-        for d in run.manifest.dispositions
-        if d.disposition == "blocking" and d.reason.startswith("held:")
-    }
-    assert expected and refused == expected
-    # held open invoices carry the digest-bound marker as their disposition
-    marked = {
-        d.reason
-        for d in run.manifest.dispositions
-        if d.disposition == "blocking" and d.reason.startswith("held:")
-    }
-    assert marked and all(
-        r in {f"held:{x.reason}" for x in projection.decisions} for r in marked
+    assert all(
+        d.route == "governed_correction" and d.rows >= 0 and d.lane_figures
+        for d in projection.decisions
+        if not d.admitted
     )
 
 
@@ -408,30 +415,35 @@ def test_full_scale_import_validation_pass_is_linear(tmp_path):
     assert elapsed <= 300, elapsed  # the quadratic path needs hours
 
 
-def _held_command(tmp_path):
-    projection, run = _run_for(200, 1578, tmp_path)
-    marked = validation.opening_manifest_held_residuals(run.manifest)
-    command = next(c for c in run.commands if c.partition.account_id in marked)
-    return run, command, marked
+def test_the_seal_hold_list_must_equal_the_typed_operational_holds(tmp_path):
+    """Finding 9: listed without a reason, a reason not listed, a duplicate, a
+    non-carryable partition listed, and one operational reason left off."""
+    from uuid import uuid4
 
-
-def test_the_seal_hold_list_must_cover_the_manifests_held_set(tmp_path):
     from dotmac_billing.opening_contracts import OpeningEvidenceError
+    from dotmac_billing.opening_variance_contracts import OpeningOperationalHoldV1
 
-    run, command, marked = _held_command(tmp_path)
+    _projection, run = _run_for(200, 1578, tmp_path)
     require = validation.require_hold_list_covers_manifest
-    require(run.manifest, sorted(marked, key=str))  # exactly the marked set
-    unmarked = next(
-        c.partition.account_id
-        for c in run.commands
-        if c.partition.account_id not in marked
+    carryable = sorted(
+        {c.partition.account_id for c in run.commands if c.manifest.receivables},
+        key=str,
     )
-    # an unmarked positive partition is a legitimate operational hold
-    require(run.manifest, [*marked, unmarked])
+    first, second = carryable[0], carryable[1]
+
+    def hold(*ids):
+        return [OpeningOperationalHoldV1(i, "target_not_pristine") for i in ids]
+
+    require(run.manifest, [], [])  # nothing listed: nothing held
+    require(run.manifest, [first, second], hold(first, second))
     with pytest.raises(OpeningEvidenceError):
-        require(run.manifest, [])  # a held partition left off
+        require(run.manifest, [first], [])  # listed without a reason
     with pytest.raises(OpeningEvidenceError):
-        require(run.manifest, [unmarked])  # marked-minus-one
+        require(run.manifest, [], hold(first))  # a reason for an unlisted partition
     with pytest.raises(OpeningEvidenceError):
-        require(run.manifest, [*marked, next(iter(marked))])  # duplicate
-    assert command.partition.account_id in marked
+        require(run.manifest, [first, first], hold(first))  # duplicate listing
+    with pytest.raises(OpeningEvidenceError):
+        require(run.manifest, [first, second], hold(first))  # one reason left off
+    stranger = uuid4()
+    with pytest.raises(OpeningEvidenceError):
+        require(run.manifest, [stranger], hold(stranger))  # not carryable

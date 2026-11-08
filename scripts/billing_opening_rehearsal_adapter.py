@@ -27,8 +27,8 @@ import argparse
 import hashlib
 import sys
 from collections import Counter
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -42,6 +42,7 @@ from dotmac_billing.contracts import (
 )
 from dotmac_billing.opening_admissibility import (
     AdmissibilityError,
+    census_measure_figures,
     parse_a10_classes,
     parse_admissibility_rules,
     parse_reseller_map,
@@ -107,6 +108,11 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningRehearsalOriginalEvidenceV1,
     OpeningRehearsalRunV1,
     OpeningSubObservationV2,
+)
+from dotmac_billing.opening_variance_contracts import (
+    OpeningBatchControlV1,
+    OpeningPartitionMeasuresV1,
+    OpeningVarianceV1,
 )
 from dotmac_kernel.cache import Scope
 
@@ -413,6 +419,72 @@ def _sequence(value: object, code: str = "malformed_input") -> Sequence[object]:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class LedgerInputsV1:
+    """The variance ledger half of a V2 manifest: measures, variances, batch."""
+
+    measures: tuple[OpeningPartitionMeasuresV1, ...] = ()
+    variances: tuple[OpeningVarianceV1, ...] = ()
+    batch_controls: tuple[OpeningBatchControlV1, ...] = ()
+
+
+#: Derives the ledger half from the manifest it joins (counts come from the
+#: dispositions; figures come from the census, never from this script).
+LedgerFor = Callable[[OpeningManifestV2], LedgerInputsV1]
+
+
+def census_measures_ledger(
+    figures: Mapping[tuple[str, str], tuple[str, str | None]],
+    source_account_of: Mapping[OpeningPartitionV1, UUID],
+    precisions: Mapping[str, int],
+) -> LedgerFor:
+    """Measures from the projection's census figures, with no variance.
+
+    ``rebuild_minor`` stays ``None`` with a typed gap reason: the A10 input
+    deliberately carries no amounts, so E4 cannot be formed (design 2.3(3)). A
+    partition whose figures are missing or inexact gets no measures row, which
+    the validator counts (``partition_measures_missing``).
+    """
+
+    def build(manifest: OpeningManifestV2) -> LedgerInputsV1:
+        rows = []
+        for control in manifest.controls:
+            part = control.partition
+            source = source_account_of.get(part)
+            figure = (
+                None if source is None else figures.get((str(source), part.currency))
+            )
+            if figure is None or figure[1] is None:
+                continue
+            doc = _minor_units(Decimal(figure[0]), precisions.get(part.currency))
+            stored = _minor_units(Decimal(figure[1]), precisions.get(part.currency))
+            if doc is None or stored is None:
+                continue
+            disp = [d for d in manifest.dispositions if d.partition == part]
+            eligible = sum(1 for d in disp if d.disposition == "eligible")
+            blocking = sum(1 for d in disp if d.disposition == "blocking")
+            rows.append(
+                OpeningPartitionMeasuresV1(
+                    part,
+                    doc,
+                    stored,
+                    None,
+                    "a10_currency_unsupported"
+                    if part.currency != "NGN"
+                    else "a10_amount_not_supplied",
+                    len(disp),
+                    eligible,
+                    0,
+                    len(disp) - eligible - blocking,
+                    0,
+                    blocking,
+                )
+            )
+        return LedgerInputsV1(tuple(rows))
+
+    return build
+
+
 def _minor_units(amount: Decimal, precision: int | None) -> int | None:
     """Exact Decimal -> minor scaling; ``None`` when it would need rounding."""
     if precision is None or not 0 <= precision <= 6 or not amount.is_finite():
@@ -661,7 +733,7 @@ def _assemble(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> _AssemblyOutcome:
     # F2: the shared manifest is qualified once; the per-partition commands and
     # the run built around it must not re-walk it (O(N), not O(P x N)).
@@ -673,7 +745,7 @@ def _assemble(
             original_documents,
             historical_discharges,
             service_refs,
-            held_reasons,
+            ledger_for,
         )
 
 
@@ -686,7 +758,7 @@ def _assemble_run(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> _AssemblyOutcome:
     precisions = {row.currency: row.precision for row in obs.currency_precisions}
     partition_by_source = {
@@ -823,12 +895,7 @@ def _assemble_run(
     try:
         for invoice in obs.invoices:
             # Precedence: blocking > excluded > eligible > blocking(unclassified).
-            if held_reasons and invoice.invoice_id in held_reasons:
-                # Held by the admissibility rules: kept in the manifest with a
-                # digest-bound marker, importable only after the seal.
-                disposition = "blocking"
-                reason = held_reasons[invoice.invoice_id]
-            elif invoice.invoice_id in blocking_codes:
+            if invoice.invoice_id in blocking_codes:
                 disposition = "blocking"
                 reason = sorted(blocking_codes[invoice.invoice_id])[0]
             elif invoice.invoice_id in exclusion_reasons:
@@ -1010,6 +1077,17 @@ def _assemble_run(
         )
     except OpeningEvidenceError:
         raise _malformed("malformed_assembly") from None
+    if ledger_for is not None:
+        ledger = ledger_for(manifest)
+        try:
+            manifest = replace(
+                manifest,
+                measures=ledger.measures,
+                variances=ledger.variances,
+                batch_controls=ledger.batch_controls,
+            )
+        except OpeningEvidenceError:
+            raise _malformed("malformed_assembly") from None
     commands: list[ImportOpeningAccountV2] = []
     raw_blockers: list[tuple[OpeningPartitionV1, tuple[OpeningBlockerV1, ...]]] = []
     for partition in distinct_partitions:
@@ -1094,7 +1172,7 @@ def assemble_rehearsal_run(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> OpeningRehearsalRunV1:
     """Build a candidate run, preserving only explicitly supplied typed originals.
 
@@ -1114,7 +1192,7 @@ def assemble_rehearsal_run(
         original_documents,
         historical_discharges,
         service_refs,
-        held_reasons,
+        ledger_for,
     ).run
 
 
@@ -1195,7 +1273,7 @@ def rehearsal_census(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> OpeningRehearsalCensusV1:
     """Run the census, preserving independently supplied typed originals.
 
@@ -1211,7 +1289,7 @@ def rehearsal_census(
         original_documents,
         historical_discharges,
         service_refs,
-        held_reasons,
+        ledger_for,
     )
     run = outcome.run
     report = report_opening_rehearsal(run)
@@ -1439,13 +1517,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise _malformed(exc.code) from None
             payload = projection.census
             service_refs = projection.service_refs
+        observed, _sidecar = load_sub_observation(payload)
+        ledger_for: LedgerFor | None = census_measures_ledger(
+            projection.figures
+            if projection is not None
+            else census_measure_figures(payload),
+            {m.partition: m.source_account_id for m in assembly.partitions},
+            {r.currency: r.precision for r in observed.currency_precisions},
+        )
         artifact = rehearsal_census(
             payload,
             assembly=assembly,
             original_documents=originals,
             historical_discharges=histories,
             service_refs=service_refs,
-            held_reasons=projection.held_invoice_reasons if projection else None,
+            ledger_for=ledger_for,
         )
         if projection is not None and args.decisions_out:
             Path(args.decisions_out).write_text(
