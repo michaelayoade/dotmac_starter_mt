@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
 from dotmac_billing.errors import BillingRuleViolation
@@ -459,6 +459,10 @@ def require_group_not_variance_resolution(
     """Finding 8 (v1, fail closed): a posting group a variance resolution
     references is never reversed; a reopen path is a named deferral."""
     events = _table(scope, "opening_variance_events")
+    # Historical-revision canaries run current code against older schemas.
+    qualified = f"{events.schema}.{events.name}"
+    if db.scalar(select(func.to_regclass(qualified))) is None:
+        return
     found = db.execute(
         _scoped(
             select(events.c.id).where(events.c.posting_group_id == group_id).limit(1),

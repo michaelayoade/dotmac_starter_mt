@@ -64,12 +64,12 @@ class ExactFixtureVerifier:
         )
 
 
-@pytest.mark.parametrize("plane", ["tenant", "platform"])
 def _exact_ledger(manifest):
     """No variance: every memo basis equals what the import transfers."""
     return fixture.adapter.LedgerInputsV1(variance_fixture.measures_for(manifest))
 
 
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_nonempty_adapter_fixture_import_replay_report_reconciliation_and_seal(
     scratch, plane
 ):
