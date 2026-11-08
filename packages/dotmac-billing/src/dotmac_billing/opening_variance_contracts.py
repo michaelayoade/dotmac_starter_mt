@@ -723,6 +723,13 @@ def variance_set_digest(variances: tuple[OpeningVarianceV1, ...]) -> str:
     )
 
 
+def variance_evidence_digest(value: object) -> str:
+    """Package-owned digest of the census evidence one variance cites."""
+    return fingerprint_of(
+        {"domain": "billing.opening.variance.evidence.v1", "value": value}
+    )
+
+
 def sum_by_basis(
     variances: tuple[OpeningVarianceV1, ...],
 ) -> dict[tuple[object, str, str], int]:
@@ -774,6 +781,7 @@ __all__ = [
     "reason_policy",
     "sum_by_basis",
     "variance_approval_subject_id",
+    "variance_evidence_digest",
     "variance_resolution_content_digest",
     "variance_set_digest",
 ]

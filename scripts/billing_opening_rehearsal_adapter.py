@@ -115,9 +115,9 @@ from dotmac_billing.opening_variance_contracts import (
     OpeningBatchControlV1,
     OpeningPartitionMeasuresV1,
     OpeningVarianceV1,
+    variance_evidence_digest,
 )
 from dotmac_kernel.cache import Scope
-from dotmac_kernel.fingerprints import fingerprint_of
 
 __all__ = [
     "AdapterInputError",
@@ -561,7 +561,7 @@ def census_variance_ledger(
                         reason,
                         OpeningSourceIdentityV1(kind, key),
                         amount,
-                        fingerprint_of(
+                        variance_evidence_digest(
                             {"evidence": evidence, "reason": reason, "amount": amount}
                         ),
                         rules_digest,
@@ -737,7 +737,9 @@ def census_variance_ledger(
                         "control_row", f"{entry.currency}:{entry.lane}:{entry.basis}"
                     ),
                     amount,
-                    fingerprint_of({"batch": entry.currency, "amount": amount}),
+                    variance_evidence_digest(
+                        {"batch": entry.currency, "amount": amount}
+                    ),
                     rules_digest,
                 )
             )
