@@ -37,6 +37,7 @@ from dotmac_kernel.session_runtime import DatabaseRuntime
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
     BrowserCapabilityProvision,
+    BrowserDocumentPolicyV1,
     WebFacetMount,
 )
 
@@ -227,11 +228,14 @@ class ProductAssemblySpec:
     # assembly chooses one exact design-system generation without importing it
     # from the kernel, declares audience facets, binds authentication providers,
     # and supplies versioned browser capabilities.  API-only assemblies leave
-    # all four empty/None.
+    # all browser declarations empty/None.
     ui_contract_version: int | None = None
     web_facets: Sequence[WebFacetMount] = ()
     authentication_profiles: Sequence[AuthenticationProfileBinding] = ()
     browser_capabilities: Sequence[BrowserCapabilityProvision] = ()
+    # Reviewed hashes are bound to individual authenticated document routes;
+    # they never expand the product-wide capability/source union.
+    browser_document_policies: Sequence[BrowserDocumentPolicyV1] = ()
     # Product-specific configuration checks. Each returns human-readable
     # errors and follows the kernel's existing environment policy: warnings in
     # development, fatal startup errors in production.
@@ -314,6 +318,9 @@ class ProductAssemblySpec:
         object.__setattr__(self, "startup_checks", tuple(self.startup_checks))
         object.__setattr__(self, "startup_hooks", tuple(self.startup_hooks))
         object.__setattr__(self, "web_facets", tuple(self.web_facets))
+        object.__setattr__(
+            self, "browser_document_policies", tuple(self.browser_document_policies)
+        )
         object.__setattr__(
             self, "authentication_profiles", tuple(self.authentication_profiles)
         )

@@ -8,10 +8,16 @@ here.
 
 ## Development — scoped console document scripts (unallocated)
 
-Prepare a route-bound, reviewed SHA-256 inline-script declaration in the existing
-browser composition/security owner. This development source does not allocate a
+Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`
+declarations to the existing browser composition/security owner. This development source does not allocate a
 successor or authorize release or adoption. Preserve global CSP tightening and
 all unrelated response policy; no unsafe-inline/eval or path-prefix exceptions.
+The initial source gate targets FastAPI 0.140.13 and Starlette 1.10.0;
+other runtime pairs fail construction. Hosted qualification remains pending.
+Refusal canaries cover route/authentication boundaries, teardown errors, replay,
+concurrent policy isolation, downstream CSP intersection and API-only assembly.
+Hosted qualification, protected release authorization and consumer admission are
+still pending.
 
 ## 0.1.0a107 — Release inventory
 

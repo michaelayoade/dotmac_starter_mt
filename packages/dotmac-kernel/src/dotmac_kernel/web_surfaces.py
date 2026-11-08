@@ -12,6 +12,8 @@ usable by packaging/inspection tools without constructing an application.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -21,6 +23,12 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
+from starlette.convertors import (
+    FloatConvertor,
+    IntegerConvertor,
+    StringConvertor,
+    UUIDConvertor,
+)
 
 from dotmac_kernel.route_metadata import CAPABILITY_CODE_ATTR, PERMISSION_CODE_ATTR
 
@@ -362,6 +370,59 @@ class WebRouteRef:
         _validate_code(self.module, field_name="route module")
         _validate_code(self.surface, field_name="route surface")
         _validate_code(self.route_name, field_name="local route name")
+
+
+@dataclass(frozen=True, slots=True)
+class InlineScriptHashV1:
+    """Reviewed SHA-256 of exact inline script bytes, in canonical base64."""
+
+    sha256: str
+
+    def __post_init__(self) -> None:
+        try:
+            decoded = base64.b64decode(self.sha256, validate=True)
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise WebSurfaceError(
+                "inline script hash must be canonical SHA-256 base64"
+            ) from exc
+        if (
+            len(decoded) != 32
+            or base64.b64encode(decoded).decode("ascii") != self.sha256
+        ):
+            raise WebSurfaceError("inline script hash must be canonical SHA-256 base64")
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserDocumentPolicyV1:
+    """An assembly's reviewed script hashes for one authenticated GET route."""
+
+    facet: str
+    route: WebRouteRef
+    inline_scripts: Sequence[InlineScriptHashV1]
+
+    def __post_init__(self) -> None:
+        _validate_code(self.facet, field_name="browser document facet")
+        if not isinstance(self.route, WebRouteRef):
+            raise WebSurfaceError("browser document policy requires a WebRouteRef")
+        scripts = tuple(self.inline_scripts)
+        if not scripts or any(
+            not isinstance(value, InlineScriptHashV1) for value in scripts
+        ):
+            raise WebSurfaceError(
+                "browser document policy requires reviewed script hashes"
+            )
+        if len(set(scripts)) != len(scripts):
+            raise WebSurfaceError("browser document policy repeats a script hash")
+        object.__setattr__(self, "inline_scripts", scripts)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _ResolvedBrowserDocumentPolicy:
+    qualified_route: str
+    declaration: BrowserDocumentPolicyV1
+
+
+_BROWSER_DOCUMENT_CONTEXT = "_dotmac_browser_document_context"
 
 
 @dataclass(frozen=True, slots=True)
@@ -728,6 +789,7 @@ class WebSurfaceRegistry:
         facets: Sequence[WebFacetMount] = (),
         authentication_profiles: Sequence[AuthenticationProfileBinding] = (),
         browser_capabilities: Sequence[BrowserCapabilityProvision] = (),
+        browser_document_policies: Sequence[BrowserDocumentPolicyV1] = (),
         ui_contract_version: int | None = None,
         built_in_surfaces: Sequence[tuple[str, WebSurfaceContribution]] = (),
     ) -> None:
@@ -828,6 +890,61 @@ class WebSurfaceRegistry:
             for requirement in self._browser_capabilities[code].security_requirements
         )
         self._validate_entry_routes()
+        self.browser_document_policies = self._resolve_document_policies(
+            browser_document_policies
+        )
+
+    def _resolve_document_policies(
+        self, policies: Sequence[BrowserDocumentPolicyV1]
+    ) -> tuple[_ResolvedBrowserDocumentPolicy, ...]:
+        result: list[_ResolvedBrowserDocumentPolicy] = []
+        seen: set[str] = set()
+        for policy in policies:
+            if not isinstance(policy, BrowserDocumentPolicyV1):
+                raise WebSurfaceError(
+                    "browser document policy requires a typed declaration"
+                )
+            facet = self.facet(policy.facet)
+            route = self._referenced_route(
+                facet, policy.route, purpose="browser document"
+            )
+            profile = self._profiles.get(facet.authentication_profile or "")
+            if profile is None or profile.provider is None:
+                raise WebSurfaceError(
+                    "browser document policy requires authenticated profile"
+                )
+            if policy.route in (
+                *facet.entry_routes,
+                facet.login_route,
+                facet.logout_route,
+            ):
+                raise WebSurfaceError(
+                    "browser document policy cannot bind entry, login or logout routes"
+                )
+            if route.methods != {"GET"} or any(
+                type(convertor)
+                not in (
+                    StringConvertor,
+                    IntegerConvertor,
+                    FloatConvertor,
+                    UUIDConvertor,
+                )
+                for convertor in route.param_convertors.values()
+            ):
+                raise WebSurfaceError(
+                    "browser document policy requires a bounded GET route"
+                )
+            name = qualified_route_name(
+                facet.code,
+                policy.route.module,
+                policy.route.surface,
+                policy.route.route_name,
+            )
+            if name in seen:
+                raise WebSurfaceError("browser document policy repeats a route binding")
+            seen.add(name)
+            result.append(_ResolvedBrowserDocumentPolicy(name, policy))
+        return tuple(result)
 
     @staticmethod
     def _unique_facets(facets: Iterable[WebFacetMount]) -> dict[str, WebFacetMount]:
@@ -1153,6 +1270,7 @@ __all__ = [
     "BrowserAuthenticationProvider",
     "BrowserCapabilityProvision",
     "BrowserCapabilityRequirement",
+    "BrowserDocumentPolicyV1",
     "BrowserCredentialTransport",
     "BrowserSecurityPlane",
     "BrowserSecurityRequirement",
@@ -1160,6 +1278,7 @@ __all__ = [
     "DuplicateFacetError",
     "DuplicateNavigationItemError",
     "DuplicateSurfaceError",
+    "InlineScriptHashV1",
     "LocalizedText",
     "NamespaceCollisionError",
     "NavigationRegion",

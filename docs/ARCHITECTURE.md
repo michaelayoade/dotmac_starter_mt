@@ -1963,12 +1963,16 @@ CSP build and therefore grants neither `script-src 'unsafe-inline'` nor
 
 Unreleased console-document script policy preparation remains in the same Kernel
 browser-composition and response-security owners (`web_surfaces`, `web_runtime`,
-`app_factory`, `middleware/security_headers`). Its bounded contract will select
+`app_factory`, `middleware/security_headers`). Its bounded contract selects
 reviewed static script hashes only for a resolved authenticated GET HTML document
 route. Academy keeps console authorization, proxying, provider assets and worker
 execution. The negative ERP/Sub/Academy source inventory is recorded in
 `docs/inventories/console-csp-source-observations.json` and the Kernel extraction
-dossier; it is not a production extraction or installed-adoption claim.
+dossier; it is not a production extraction or installed-adoption claim. Active
+document declarations currently require exact FastAPI 0.140.13 and Starlette
+1.10.0 response-start lifecycle semantics; other runtime pairs fail closed for
+this opt-in only.
+Ordinary policy and any stricter downstream CSP restrictions remain intact.
 
 Template security governance consumes the same composition declaration: the
 architecture sweep derives roots from `ProductAssemblySpec`, its installed

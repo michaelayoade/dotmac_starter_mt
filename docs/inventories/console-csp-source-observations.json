@@ -20,7 +20,8 @@
           "sha256": "486c10848f91e96b8d2bed4ccc025fc4181090c5fa8662f7c5d29e0b88f3a65d",
           "worktree_matches_commit": true
         }
-      ]
+      ],
+      "source_url": "https://github.com/michaelayoade/dotmac_erp/tree/74fa788ae562905e4c8a1fcd46616585e4bf7694"
     },
     {
       "repository": "dotmac_sub",
@@ -46,10 +47,11 @@
           "sha256": "1e70e771280ab2763501c8c257b1d19706832a2d52c3944e27d5cd6231184a21",
           "worktree_matches_commit": true
         }
-      ]
+      ],
+      "source_url": "https://github.com/michaelayoade/dotmac_sub/tree/c7707880232c9298ef89c24a1aea66d35bd3a1e6"
     },
     {
-      "repository": "dotmac_academy_v2-browser-csrf-20261108",
+      "repository": "dotmac_academy_v2",
       "revision": "124155959c755cbb142099dd5517acc259f56fa8",
       "files": [
         {
@@ -72,7 +74,9 @@
           "sha256": "ff31fcc1eeebfcc5d5922191e07e7718b4c698e9624568c98a3ecb94c024e960",
           "worktree_matches_commit": true
         }
-      ]
+      ],
+      "worktree": "dotmac_academy_v2-browser-csrf-20261108",
+      "source_url": "https://github.com/michaelayoade/dotmac_academy_v2/tree/124155959c755cbb142099dd5517acc259f56fa8"
     }
   ]
 }

@@ -437,6 +437,74 @@ jobs:
             identity-unit-collection.json
 
 
+  # The reference unit lane keeps its locked older framework. This disjoint
+  # suite qualifies the document opt-in on Academy's actual framework pair.
+  console-document-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pypoetry/artifacts
+          key: poetry-artifacts-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      - run: python -m venv .venv
+      - run: poetry install --no-root
+      - name: Install hash-locked framework overlay in a fresh job-local target
+        run: |
+          overlay="${RUNNER_TEMP}/console-framework"
+          test ! -e "$overlay"
+          .venv/bin/python -m pip install --no-deps --require-hashes --only-binary=:all: \
+            --target "$overlay" -r .github/compatibility/console-framework.txt
+          echo "CONSOLE_FRAMEWORK_OVERLAY=$overlay" >> "$GITHUB_ENV"
+      - name: Qualify actual document-policy runtime and lifecycle
+        id: compatibility
+        run: |
+          export PYTHONPATH="${CONSOLE_FRAMEWORK_OVERLAY}${PYTHONPATH:+:$PYTHONPATH}"
+          .venv/bin/python - <<'PYFRAME'
+          import os
+          from pathlib import Path
+          import fastapi, starlette
+          assert (fastapi.__version__, starlette.__version__) == ("0.140.13", "1.10.0")
+          overlay = Path(os.environ["CONSOLE_FRAMEWORK_OVERLAY"]).resolve()
+          assert Path(fastapi.__file__).resolve().is_relative_to(overlay)
+          assert Path(starlette.__file__).resolve().is_relative_to(overlay)
+          PYFRAME
+          .venv/bin/python -m pytest tests/compatibility/test_browser_document_policy.py \
+            -q --junitxml=console-document-policy.xml
+      - name: Require complete passing document-policy execution evidence
+        if: always()
+        env:
+          COMPATIBILITY_OUTCOME: ${{ steps.compatibility.outcome }}
+        run: |
+          python - <<'PYEVIDENCE'
+          import ast, os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          source = Path("tests/compatibility/test_browser_document_policy.py")
+          required = {node.name for node in ast.parse(source.read_text()).body
+                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and node.name.startswith("test_")}
+          report = Path("console-document-policy.xml")
+          cases = list(ET.parse(report).iter("testcase")) if report.exists() else []
+          collected = {case.get("name", "").split("[", 1)[0] for case in cases}
+          refused = [case.get("name", "") for case in cases
+                     if any(case.find(kind) is not None for kind in ("skipped", "failure", "error"))]
+          assert os.environ["COMPATIBILITY_OUTCOME"] == "success", "compatibility workload did not succeed"
+          assert required and required <= collected, "document-policy tests were not all executed"
+          assert cases and not refused, "document-policy execution has refusals or empty collection"
+          PYEVIDENCE
+      - name: Preserve document-policy execution evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-document-policy-${{ github.sha }}
+          path: console-document-policy.xml
+          if-no-files-found: error
+
   integration:
     runs-on: ubuntu-latest
     # Single source of truth for the disposable CI Postgres. `make test-db-up`
@@ -815,7 +883,7 @@ jobs:
     # composition before an image exists at all — an image whose lineages
     # collide is an image that corrupts a database on deploy. `quality` carries
     # the `migration-gate` matrix entry, so gating on it is the enforcement.
-    needs: [quality, native-compute]
+    needs: [quality, native-compute, console-document-policy]
     # Builds the prod image and health-gates it before merge. Port/tag are
     # job-local env, not magic numbers, so they can be bumped in one place.
     env:

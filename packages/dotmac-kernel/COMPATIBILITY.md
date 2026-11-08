@@ -233,7 +233,7 @@ Two rules travel with it:
 | `dotmac_kernel.testing.licensing` | `FakeLicenceSigner` (ephemeral in-memory Ed25519 test signer — the ONLY signer in the kernel; needs the `cryptography` dependency at instantiation) |
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
 | `dotmac_kernel.web_deps` | `require_web_party`, `require_web_auth`, `require_web_permission`, `TENANT_COOKIE_AUTHENTICATION`, `TenantCookieAuthenticationProvider`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
-| `dotmac_kernel.web_surfaces` | The interactive-browser composition contract: `WebFacetMount`, `WebSurfaceContribution`, `WebSurfaceRegistry`, `AuthenticationProfileBinding`, `BrowserAuthenticationProvider`, `BrowserCredentialTransport`, `BrowserSecurityPlane`, `BrowserSessionPolicy`, browser-capability, template/static namespace, navigation, route-reference and request `SurfaceContext` types, their validation errors, plus `qualified_route_name`, `surface_route_name` and `surface_path` |
+| `dotmac_kernel.web_surfaces` | The interactive-browser composition contract: `WebFacetMount`, `WebSurfaceContribution`, `WebSurfaceRegistry`, `AuthenticationProfileBinding`, `BrowserAuthenticationProvider`, `BrowserCredentialTransport`, `BrowserSecurityPlane`, `BrowserSessionPolicy`, `InlineScriptHashV1`, `BrowserDocumentPolicyV1`, browser-capability, template/static namespace, navigation, route-reference and request `SurfaceContext` types, their validation errors, plus `qualified_route_name`, `surface_route_name` and `surface_path` |
 
 ### Module manifest and registry (`dotmac_kernel.modules`)
 
@@ -767,7 +767,7 @@ A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAs
 (`name`, `modules`, `module_planes`, `setting_defaults`, `branding`, `providers`, `tenancy`,
 `platform_surface_enabled`, `web_enabled`, `startup_checks`, `startup_hooks`,
 `ui_contract_version`, `web_facets`, `authentication_profiles`,
-`browser_capabilities`, `security_policy`, `disabled_modules`, `assembly_template_dir`,
+`browser_capabilities`, `browser_document_policies`, `security_policy`, `disabled_modules`, `assembly_template_dir`,
 `assembly_static_dir`, `packaged_static_dirs`, `packaged_template_dirs`,
 `stylesheets`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
@@ -802,6 +802,55 @@ application construction. The raw seam is refused entirely if an enabled
 surface uses a browser capability with typed `BrowserSecurityRequirement`s.
 Only active capability providers contribute those requirements; unused
 providers cannot widen CSP, and modules cannot contribute directives or origins.
+
+**Unreleased: reviewed document scripts.** `browser_document_policies` is an
+assembly-owned tuple of `BrowserDocumentPolicyV1(facet, route, inline_scripts)`.
+Its `WebRouteRef` must resolve to one authenticated, bounded GET document route;
+entry, login/logout, public, unknown, duplicate and path/custom-converter
+bindings are refused. Each `InlineScriptHashV1(sha256)` contains the canonical
+base64 encoding of exactly 32 SHA-256 digest bytes. The adopter pins reviewed
+script bytes in source; this API neither downloads assets nor hashes arbitrary
+upstream responses. Empty declarations preserve the existing behavior, and
+API-only composition ignores the declarations.
+
+The source gate admits only **FastAPI 0.140.13 and Starlette 1.10.0**, the
+actual Academy framework pair. Hosted qualification is pending. Active
+declarations under another or malformed runtime pair refuse construction. The
+Kernel's broader dependency range remains supported without this opt-in. Expanding the
+feature's qualified runtime requires hosted lifecycle evidence; version-mocked
+refusal canaries do not establish that evidence.
+
+The security owner first computes the existing validated global policy `B`.
+An opted-in policy requires its `script-src` to be exactly `'self'`; it cannot
+reopen an operator's `'none'` decision. Only the bound, authenticated GET's
+successful `text/html` response receives a policy with that directive replaced
+by the reviewed hashes. Every other directive, including stricter product image
+sources, remains unchanged. There are no raw per-route policies, path-prefix
+selection, nonce injection, `unsafe-inline`, `unsafe-eval`, wildcard origins,
+or changes to frame, worker or WebSocket policy. Authorization and provider
+asset ownership remain with the existing owners.
+
+Selection uses the composition's private binding and the exact request scope
+after authentication/admission. An independent first request-scope dependency
+encloses the covered request/response boundary; missing or misplaced guards refuse
+construction. Missing, spoofed or replayed context, pre-start dependency/endpoint
+errors, redirects, other status codes and other response types retain `B`. Existing
+downstream CSP fields are preserved and intersected with `B` on a conflict;
+they are never stripped to enable a grant. Only byte-identical copies of the
+selected policy may be collapsed. Unhandled errors produced outside the
+middleware retain their existing framework behavior; this feature does not
+claim to add headers after a response has started.
+
+Authentication and admission decisions must be complete before the provider
+returns or yields its principal. Cleanup failures after response start cannot
+retract already-sent headers and must not produce another response start. This
+contract does not assert that all request-scope commits or cleanup completed
+before delivery. The hosted compatibility lane captures actual ASGI messages
+on the installed target pair; mocked version refusals are separate unit tests.
+
+This is development source (`a107+dev`), not an allocated or published successor.
+Consumer asset pinning, installed-artifact admission and genuine terminal
+rendering/WebSocket/input acceptance remain separate gates.
 
 **Presentation-package composition (0.1.0a13).** `packaged_static_dirs` and
 `stylesheets` are the two slots an assembly fills to adopt an installed
