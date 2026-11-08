@@ -2289,6 +2289,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-service-access-policy ──
+    "dotmac-service-access-policy-v0.1.0a2": (
+        "dotmac-service-access-policy",
+        "8e39eedbdf8608f2fbd3af40e98608ed7d32d8f0",
+        {
+            "sap_0001_access_policy.py": (
+                "7dc2cb8f39891bc2b963a77771cf33f8ce3f5c5d5010007a445af4ed7dccec54"
+            ),
+            "sap_0002_input_versions.py": (
+                "24e4c6ff07d25ef3bee1a23f0fe9fc9c056fa4a01a53f2c3369eba27c616b15e"
+            ),
+        },
+    ),
     "dotmac-service-access-policy-v0.1.0a1": (
         "dotmac-service-access-policy",
         "1029354b0619fa356cc43651c7f26a4ebaf0ac60",
@@ -8301,7 +8313,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-sales": frozenset(),
     # `sap_0002` adds the source/policy version columns; still editable until
     # `dotmac-service-access-policy` 0.1.0a2 is tagged.
-    "dotmac-service-access-policy": frozenset({"sap_0002_input_versions.py"}),
+    "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),
