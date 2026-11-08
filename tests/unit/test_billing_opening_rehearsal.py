@@ -34,6 +34,7 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningSubObservationV2,
 )
 
+from tests import billing_opening_variance_fixtures as variance_fixture
 from tests.unit import test_billing_opening_receivable_contracts as ar
 
 CASH_TABLES = (
@@ -88,22 +89,24 @@ def _run(index=0, *, verifier=True):
         recorded_cutoff=ar.NOW + timedelta(days=index),
         captured_at=ar.NOW + timedelta(days=index),
     )
-    manifest = replace(
-        command.manifest,
-        capture=capture,
-        receivables=items,
-        cash_lots=(),
-        population=identities,
-        dispositions=dispositions,
-        counts=OpeningPopulationCountsV1(2, 2, 0, 0),
-        controls=(
-            replace(
-                command.manifest.controls[0],
-                available_cash_credit_minor=0,
-                collectible_receivable_minor=total,
-                open_ar_minor=total,
+    manifest = variance_fixture.with_exact_measures(
+        replace(
+            command.manifest,
+            capture=capture,
+            receivables=items,
+            cash_lots=(),
+            population=identities,
+            dispositions=dispositions,
+            counts=OpeningPopulationCountsV1(2, 2, 0, 0),
+            controls=(
+                replace(
+                    command.manifest.controls[0],
+                    available_cash_credit_minor=0,
+                    collectible_receivable_minor=total,
+                    open_ar_minor=total,
+                ),
             ),
-        ),
+        )
     )
     command = replace(command, manifest=manifest)
     preview = preview_opening_account_import_v2(
