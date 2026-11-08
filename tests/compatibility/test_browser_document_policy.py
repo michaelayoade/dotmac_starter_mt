@@ -659,3 +659,56 @@ def test_active_document_policy_refuses_disabled_kernel_header_writer(monkeypatc
         match="browser document policies require the Kernel security-header writer",
     ):
         create_app(spec())
+
+
+@pytest.mark.parametrize(
+    "failure", ["none", "missing_id", "wrong_facet", "wrong_plane"]
+)
+def test_document_requires_existing_matching_facet_principal(monkeypatch, failure):
+    from dotmac_kernel import web_runtime
+    from dotmac_kernel.facet_principal import FacetPrincipalError
+    from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+
+    authentication_calls = []
+
+    class ProjectionProvider:
+        transport = BrowserCredentialTransport.COOKIE_SESSION
+
+        @staticmethod
+        def dependency():
+            authentication_calls.append("authenticated")
+            if failure == "none":
+                return None
+            if failure == "missing_id":
+                return SimpleNamespace()
+            return SimpleNamespace(id=uuid.uuid4())
+
+    original_record = web_runtime.record_facet_principal
+
+    def record_wrong_projection(request, principal):
+        if failure == "wrong_facet":
+            principal = replace(principal, facet="other_facet")
+        elif failure == "wrong_plane":
+            principal = replace(
+                principal,
+                security_plane=BrowserSecurityPlane.TENANT,
+                tenant_id=uuid.uuid4(),
+            )
+        original_record(request, principal)
+
+    monkeypatch.setattr(web_runtime, "record_facet_principal", record_wrong_projection)
+    tenant = SimpleNamespace(id=uuid.uuid4(), slug="document-policy")
+    monkeypatch.setattr(TenantResolverMiddleware, "_resolve", lambda self, host: tenant)
+    monkeypatch.setattr(TenantResolverMiddleware, "_allow", lambda self, value: value)
+    app = create_app(spec(provider=ProjectionProvider()))
+
+    @app.exception_handler(FacetPrincipalError)
+    async def handled(request, exc):
+        return HTMLResponse("principal projection refused", status_code=200)
+
+    with TestClient(app) as client:
+        response = client.get("/learner/document")
+    assert response.status_code == 200
+    assert response.text == "principal projection refused"
+    assert response.headers.get_list("content-security-policy") == [BASELINE]
+    assert authentication_calls == ["authenticated"]

@@ -833,7 +833,8 @@ or changes to frame, worker or WebSocket policy. Authorization and provider
 asset ownership remain with the existing owners.
 
 Selection uses the composition's private binding and the exact request scope
-after authentication/admission. An independent first request-scope dependency
+after authentication/admission, with the existing facet principal checked against
+the bound facet and security plane. An independent first request-scope dependency
 encloses the covered request/response boundary; missing or misplaced guards refuse
 construction. Missing, spoofed or replayed context, pre-start dependency/endpoint
 errors, redirects, other status codes and other response types retain `B`. Existing

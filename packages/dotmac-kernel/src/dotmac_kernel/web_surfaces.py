@@ -420,6 +420,7 @@ class BrowserDocumentPolicyV1:
 class _ResolvedBrowserDocumentPolicy:
     qualified_route: str
     declaration: BrowserDocumentPolicyV1
+    security_plane: BrowserSecurityPlane
 
 
 _BROWSER_DOCUMENT_CONTEXT = "_dotmac_browser_document_context"
@@ -943,7 +944,9 @@ class WebSurfaceRegistry:
             if name in seen:
                 raise WebSurfaceError("browser document policy repeats a route binding")
             seen.add(name)
-            result.append(_ResolvedBrowserDocumentPolicy(name, policy))
+            result.append(
+                _ResolvedBrowserDocumentPolicy(name, policy, profile.security_plane)
+            )
         return tuple(result)
 
     @staticmethod

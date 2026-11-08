@@ -20,7 +20,12 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.deps import authorize_party, get_db, require_tenant
 from dotmac_kernel.entitlements import is_entitled
-from dotmac_kernel.facet_principal import FacetPrincipal, record_facet_principal
+from dotmac_kernel.facet_principal import (
+    FacetPrincipal,
+    FacetPrincipalError,
+    record_facet_principal,
+    require_facet_principal,
+)
 from dotmac_kernel.middleware.csrf import require_csrf
 from dotmac_kernel.models import Party
 from dotmac_kernel.web_surfaces import (
@@ -314,6 +319,11 @@ def _document_context_dependency(
     context: Callable[..., object],
 ):
     def dependency(request: Request, authenticated: Any = Depends(context)):
+        principal = require_facet_principal(request, plane=binding.security_plane)
+        if principal.facet != binding.declaration.facet:
+            raise FacetPrincipalError(
+                "browser document requires the principal from its declared facet"
+            )
         request.scope[_BROWSER_DOCUMENT_CONTEXT] = (binding, request.scope)
         return authenticated
 
