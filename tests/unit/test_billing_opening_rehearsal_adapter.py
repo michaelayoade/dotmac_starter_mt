@@ -809,6 +809,7 @@ def test_explicit_typed_original_is_preserved_without_qualifying_preview():
         assembly=_assembly(),
         sidecar=sidecar,
         original_documents=((UUID(INVOICE_1), original),),
+        ledger_for=_ledger(payload, _assembly()),
     )
     assert run.manifest.receivables[0].original is original
     assert run.manifest.receivables[0].historical_discharges == ()

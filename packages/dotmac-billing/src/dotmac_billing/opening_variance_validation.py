@@ -114,35 +114,37 @@ def check_variances(
 
     # ---- measures are one row per control partition -----------------------
     measures: dict[OpeningPartitionV1, OpeningPartitionMeasuresV1] = {}
-    for m in manifest.measures:
-        if m.partition not in partitions:
-            mw("measures_partition_unknown", m.partition.source_account_key)
-        elif m.partition in measures:
-            mw("measures_duplicate", m.partition.source_account_key)
-        measures[m.partition] = m
-    for part in sorted(partitions, key=lambda p: p.source_account_key):
-        if part not in measures:
-            mw("partition_measures_missing", part.source_account_key)
+    for row_m in manifest.measures:
+        if row_m.partition not in partitions:
+            mw("measures_partition_unknown", row_m.partition.source_account_key)
+        elif row_m.partition in measures:
+            mw("measures_duplicate", row_m.partition.source_account_key)
+        measures[row_m.partition] = row_m
+    for unmeasured in sorted(partitions, key=lambda p: p.source_account_key):
+        if unmeasured not in measures:
+            mw("partition_measures_missing", unmeasured.source_account_key)
     for d in manifest.dispositions:
         if d.disposition == "blocking" or d.reason.startswith("held:"):
             mw("manifest_noncarryable_row", d.identity.key)
-    for part, m in measures.items():
-        if m.non_carryable_rows != 0:
-            mw("manifest_noncarryable_row", part.source_account_key)
+    for mpart, mrow in measures.items():
+        if mrow.non_carryable_rows != 0:
+            mw("manifest_noncarryable_row", mpart.source_account_key)
 
     # ---- cash lots: the cash control governs a lot partition's credit -------
     # (ST-4b replaces this rule with its credit/funding transfer equation.)
-    for part in sorted(lot_partitions, key=lambda p: p.source_account_key):
-        control = controls.get(part)
-        if control is None:
+    for lot_part in sorted(lot_partitions, key=lambda p: p.source_account_key):
+        lot_control = controls.get(lot_part)
+        if lot_control is None:
             continue
-        key = part.source_account_key
         for field_name in (
             "unapplied_customer_credit_minor",
             "prepaid_funding_reserved_minor",
         ):
-            if getattr(control, field_name) != 0:
-                mw("credit_transfer_unsupported", f"{key}:{field_name}")
+            if getattr(lot_control, field_name) != 0:
+                mw(
+                    "credit_transfer_unsupported",
+                    f"{lot_part.source_account_key}:{field_name}",
+                )
     for v in manifest.variances:
         if v.partition in lot_partitions and v.lane in (
             "customer_credit",
@@ -160,15 +162,15 @@ def check_variances(
     payment_controls: dict[OpeningSourceIdentityV1, list[tuple[str, str, str]]] = (
         defaultdict(list)
     )
-    for control in manifest.batch_controls:
-        ckey = (control.currency, control.lane, control.basis)
-        batch_keys[ckey] += 1
-        for row in control.rows:
-            payment_controls[row].append(ckey)
-        if (control.basis != LEDGER_BASIS and control.lane != "receivable") or any(
-            r not in population for r in control.rows
+    for bc in manifest.batch_controls:
+        bkey = (bc.currency, bc.lane, bc.basis)
+        batch_keys[bkey] += 1
+        for batch_row in bc.rows:
+            payment_controls[batch_row].append(bkey)
+        if (bc.basis != LEDGER_BASIS and bc.lane != "receivable") or any(
+            r not in population for r in bc.rows
         ):
-            mw("batch_control_invalid", f"{control.lane}:{control.basis}")
+            mw("batch_control_invalid", f"{bc.lane}:{bc.basis}")
     for ckey, count in batch_keys.items():
         if count != 1:
             mw("batch_control_duplicate", ":".join(ckey))
@@ -318,8 +320,10 @@ def check_variances(
 def carryable_accounts(manifest: OpeningManifestV2) -> frozenset[object]:
     """The one carryable definition: ``T != 0`` or any variance on the partition."""
     totals: Counter[object] = Counter()
-    for item in (*manifest.cash_lots, *manifest.receivables):
-        totals[item.partition.account_id] += item.residual_minor
+    for lot in manifest.cash_lots:
+        totals[lot.partition.account_id] += lot.residual_minor
+    for receivable in manifest.receivables:
+        totals[receivable.partition.account_id] += receivable.residual_minor
     accounts = {a for a, total in totals.items() if total != 0}
     accounts.update(
         v.partition.account_id for v in manifest.variances if v.partition is not None
