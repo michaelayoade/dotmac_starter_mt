@@ -13,7 +13,7 @@ from dotmac_billing.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="billing",
-    version="0.1.0a10",
+    version="0.1.0a11",
     core=False,
     short_code="billing",
     migration_prefix="bi",

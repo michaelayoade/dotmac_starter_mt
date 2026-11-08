@@ -71,6 +71,7 @@ from dotmac_billing.contracts import (
     AppliedFxSnapshotV1,
     AppliedTaxSnapshotV1,
     CollectionTiming,
+    DiscountSnapshotV1,
     DueDateBasisStatus,
     DueDateBasisV1,
     FinancialState,
@@ -146,9 +147,20 @@ from dotmac_billing.opening_commands import (
     ReverseOpeningAccountImportV1,
 )
 from dotmac_billing.opening_contracts import (
+    OpeningEvidenceError,
     OpeningManifestV1,
     OpeningPreviewRequestV1,
     OpeningVerificationUnavailable,
+)
+from dotmac_billing.opening_hold_contracts import (
+    HOLD_APPROVAL_SUBJECT_TYPE,
+    AdmitHeldOpeningAccountV2,
+    HeldOpeningHoldApprovalV1,
+    OpeningHoldAdmissionV1,
+    OpeningHoldApprovalPort,
+    opening_hold_content_digest,
+    opening_hold_subject_id,
+    require_hold_maker_checker,
 )
 from dotmac_billing.opening_queries import (
     _scoped,
@@ -167,6 +179,7 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningImportReceiptV2,
     OpeningImportReversalVerificationRequestV2,
     OpeningImportReversalVerificationV2,
+    OpeningImportVerificationV2,
     OpeningManifestV2,
     OpeningReceivableBasisV1,
     ReceivableExposureV2,
@@ -182,6 +195,7 @@ from dotmac_billing.opening_receivable_validation import (
     opening_account_import_blockers_v2,
     opening_manifest_fingerprint_v2,
     opening_withholding_component_identity,
+    require_hold_list_covers_manifest,
     verify_opening_account_import_v2,
 )
 from dotmac_billing.opening_validation import (
@@ -189,6 +203,9 @@ from dotmac_billing.opening_validation import (
     preview_opening_account_import,
 )
 from dotmac_billing.opening_window_contracts import (
+    OpeningAuthoritySwitchContextV1,
+    OpeningAuthoritySwitchParticipant,
+    OpeningAuthoritySwitchReceiptV1,
     OpeningWindowProvisionVerificationRequestV1,
     OpeningWindowProvisionVerificationV1,
     OpeningWindowProvisionVerifier,
@@ -199,10 +216,12 @@ from dotmac_billing.opening_window_contracts import (
     OpeningWindowV1,
     ProvisionOpeningWindowV1,
     SealOpeningWindowV1,
+    StoredOpeningAuthoritySwitchReceiptV1,
     StoredOpeningWindowV1,
     opening_admission_population_digest,
 )
 from dotmac_billing.opening_window_queries import (
+    get_opening_hold_admissions,
     get_opening_window,
     get_opening_window_admissions,
     get_opening_window_seal,
@@ -590,6 +609,123 @@ def _rated_obligation_natural_key(command: AcceptRatedObligationV1) -> str:
     return fingerprint_of(natural_payload)
 
 
+def _rated_fingerprint_payload(
+    command: AcceptRatedObligationV1 | IssueRatedInvoiceV1,
+) -> dict[str, object]:
+    """Request payload for idempotency, byte-stable for commands without discounts.
+
+    ``discounts`` joined the V3 intake after a10 published. An empty tuple is
+    omitted so an a10 request (which had no such field) keeps its fingerprint and
+    still replays; a non-empty tuple is always part of the identity.
+    """
+    payload = cast(dict[str, object], asdict(command))
+    holders: list[dict[str, object]] = [payload]
+    nested = payload.get("obligation")
+    if isinstance(nested, dict):
+        holders.append(cast(dict[str, object], nested))
+    for holder in holders:
+        if "discounts" in holder and not holder["discounts"]:
+            del holder["discounts"]
+    return payload
+
+
+def _discount_total(discounts: tuple[DiscountSnapshotV1, ...], like: Money) -> Money:
+    total = Decimal("0")
+    for item in discounts:
+        total += item.amount.amount
+    return Money.of(total, like.currency)
+
+
+def _require_discount_snapshots(
+    discounts: tuple[DiscountSnapshotV1, ...], *, total: Money
+) -> None:
+    """Fail closed on any discount that is not exact, positive, same-money evidence."""
+    seen: set[str] = set()
+    for item in discounts:
+        if not isinstance(item, DiscountSnapshotV1) or not isinstance(
+            item.amount, Money
+        ):
+            raise BillingRuleViolation(
+                "discount_invalid", "discounts must be typed exact snapshots"
+            )
+        _require_same_money(total, item.amount)
+        text_fields = (item.discount_code, item.description, item.source_version)
+        if any(
+            not isinstance(value, str) or not value.strip() or len(value) > 255
+            for value in text_fields
+        ):
+            raise BillingRuleViolation(
+                "discount_invalid",
+                "a discount requires a bounded code, description and source version",
+            )
+        if (
+            not item.amount.amount.is_finite()
+            or item.amount.amount <= 0
+            or _money(
+                item.amount.amount,
+                item.amount.currency.code,
+                item.amount.currency.minor_units,
+            ).amount
+            != item.amount.amount
+        ):
+            raise BillingRuleViolation(
+                "discount_invalid",
+                "a discount amount must be a positive exact currency amount",
+            )
+        if item.discount_code in seen:
+            raise BillingRuleViolation(
+                "discount_duplicate", "a discount code may appear once per charge"
+            )
+        seen.add(item.discount_code)
+
+
+def _require_rated_discounts(command: AcceptRatedObligationV1) -> None:
+    """Discounts exist only on the V3 intake and reduce the taxable base."""
+    if not isinstance(command, AcceptRatedObligationV3) or not command.discounts:
+        return
+    _require_discount_snapshots(command.discounts, total=command.total_amount)
+    for item in command.tax_evidence:
+        if (
+            item.purpose == "invoice_tax"
+            and item.determination.net_amount.amount > command.pre_tax_amount.amount
+        ):
+            # pre_tax_amount is already net of the discounts; a determination
+            # on a larger base was made on the undiscounted gross.
+            raise BillingRuleViolation(
+                "discount_base_not_reduced",
+                "Tax must be determined on the base net of discounts",
+            )
+
+
+def _obligation_discounts(obligation: _ObligationRow) -> tuple[DiscountSnapshotV1, ...]:
+    """Immutable discount snapshots retained with a V3 obligation, else none."""
+    payload = obligation.tax_evidence
+    if (
+        not _is_dependency_evidence_payload(payload)
+        or "discounts" not in cast(list[dict[str, object]], payload)[0]
+    ):
+        return ()
+    try:
+        discounts = cast(
+            tuple[DiscountSnapshotV1, ...],
+            _decode(
+                cast(list[dict[str, object]], payload)[0]["discounts"],
+                tuple[DiscountSnapshotV1, ...],
+            ),
+        )
+        _require_discount_snapshots(
+            discounts,
+            total=_money(
+                obligation.total_amount, obligation.currency, obligation.minor_units
+            ),
+        )
+    except (ValueError, TypeError, DecimalException) as exc:
+        raise BillingRuleViolation(
+            "discount_invalid", "stored discount evidence is invalid"
+        ) from exc
+    return discounts
+
+
 def _require_rated_tax_evidence(
     command: AcceptRatedObligationV1, *, scope: Scope
 ) -> None:
@@ -639,6 +775,7 @@ def accept_rated_obligation(
             "obligation_total_mismatch", "pre-tax plus tax must equal total"
         )
     _require_rated_tax_evidence(command, scope=scope)
+    _require_rated_discounts(command)
     plane = _models(scope)
     account = _one(
         db,
@@ -649,7 +786,7 @@ def accept_rated_obligation(
     )
     _require_account_money(account, command.total_amount)
     natural_key = _rated_obligation_natural_key(command)
-    offered = fingerprint_of(asdict(command))
+    offered = fingerprint_of(_rated_fingerprint_payload(command))
 
     def operation(session: Session) -> dict[str, object]:
         if command.supersedes_obligation_id is not None:
@@ -727,6 +864,13 @@ def accept_rated_obligation(
                                 command.commercial_sources
                             ),
                             "evidence": _wire_value(command.tax_evidence),
+                            # Present only when discounts exist, so the a10
+                            # envelope bytes are unchanged for every other charge.
+                            **(
+                                {"discounts": _wire_value(command.discounts)}
+                                if command.discounts
+                                else {}
+                            ),
                         }
                     ]
                     if isinstance(command, AcceptRatedObligationV3)
@@ -874,7 +1018,17 @@ def create_draft_document(
                     "description": command.description,
                     "quantity": command.quantity,
                     "unit_code": command.unit_code,
-                    "unit_amount": obligation.pre_tax_amount,
+                    # Gross before discounts; equals the net for an undiscounted
+                    # charge. ``pre_tax_amount`` below is always the net base.
+                    "unit_amount": obligation.pre_tax_amount
+                    + _discount_total(
+                        _obligation_discounts(obligation),
+                        _money(
+                            obligation.pre_tax_amount,
+                            obligation.currency,
+                            obligation.minor_units,
+                        ),
+                    ).amount,
                     "pre_tax_amount": obligation.pre_tax_amount,
                     "tax_amount": obligation.tax_amount,
                     "total_amount": obligation.total_amount,
@@ -943,6 +1097,7 @@ def issue_rated_invoice(
         )
     obligation_command = command.obligation
     _require_rated_tax_evidence(obligation_command, scope=scope)
+    _require_rated_discounts(obligation_command)
     _require_scope_matches(routed=scope, declared=obligation_command.scope)
     obligation_sources.require_obligation_source(obligation_command.source_kind)
     command.due_date_basis.require_collectible(native=True)
@@ -1033,7 +1188,7 @@ def issue_rated_invoice(
         scope=scope,
         operation_scope="billing.invoice.issue.rated.v1",
         key=_rated_obligation_natural_key(obligation_command),
-        fingerprint=fingerprint_of(asdict(command)),
+        fingerprint=fingerprint_of(_rated_fingerprint_payload(command)),
         operation=operation,
     )
     result = outcome.result
@@ -1078,18 +1233,34 @@ def _require_line_input(line: DraftDocumentLine, obligation: _ObligationRow) -> 
     with localcontext() as context:
         context.prec = 60  # Numeric(20,6) operands multiply without context rounding.
         product = amount.amount * quantity
-    if (
-        not amount.amount.is_finite()
-        or amount.amount < 0
-        or product != obligation.pre_tax_amount
-    ):
+        gross = (
+            obligation.pre_tax_amount
+            + _discount_total(_obligation_discounts(obligation), amount).amount
+        )
+    if not amount.amount.is_finite() or amount.amount < 0 or product != gross:
         raise BillingRuleViolation(
             "line_amount_mismatch",
-            "explicit unit price times quantity must exactly equal rated pre-tax",
+            "explicit unit price times quantity must exactly equal rated pre-tax "
+            "plus its discounts",
+        )
+
+
+def _require_single_exposure_service(obligations: tuple[_ObligationRow, ...]) -> None:
+    """One collectible document exposes exactly one service.
+
+    The document exposure is anchored to the first line's obligation. A document
+    whose lines carry different ``service_ref`` values (``None`` counts as a
+    value) would silently expose only the first one, so it is refused outright.
+    """
+    if len({row.service_ref for row in obligations}) > 1:
+        raise BillingRuleViolation(
+            "exposure_service_ambiguous",
+            "a collectible document's lines must share one service_ref",
         )
 
 
 def _require_homogeneous(obligations: tuple[_ObligationRow, ...]) -> None:
+    _require_single_exposure_service(obligations)
     attributes = (
         "billing_account_id",
         "currency",
@@ -1438,6 +1609,25 @@ def _receivable_exposure(
         model=plane.obligation,
         row_id=document.obligation_id,
     )
+    line_obligation_ids = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.line.obligation_id).where(
+                    plane.line.document_id == document.id,
+                    plane.line.obligation_id.is_not(None),
+                ),
+                scope,
+                plane.line,
+            )
+        ).scalars()
+    )
+    if line_obligation_ids:
+        _require_single_exposure_service(
+            tuple(
+                _one(db, scope=scope, model=plane.obligation, row_id=identity)
+                for identity in dict.fromkeys(line_obligation_ids)
+            )
+        )
     void_statement = select(plane.event.id).where(
         plane.event.document_id == document.id,
         plane.event.event_kind == "voided",
@@ -1538,7 +1728,15 @@ def _decode_tax_evidence(
                 raise ValueError("invalid Tax evidence envelope")
             if (
                 set(payload[0])
-                != {"contract_version", "evidence", "commercial_sources"}
+                not in (
+                    {"contract_version", "evidence", "commercial_sources"},
+                    {
+                        "contract_version",
+                        "evidence",
+                        "commercial_sources",
+                        "discounts",
+                    },
+                )
                 or payload[0]["contract_version"] != "billing.tax.evidence.v2"
             ):
                 raise ValueError("unsupported Tax evidence envelope")
@@ -2596,6 +2794,17 @@ def _due_date_basis(value: object) -> DueDateBasisV1:
     )
 
 
+def _line_discounts(
+    db: Session, *, scope: Scope, plane: _PlaneModels, line: Any
+) -> tuple[DiscountSnapshotV1, ...]:
+    """Discount snapshots of the rated obligation behind one document line."""
+    if line.obligation_id is None:
+        return ()
+    return _obligation_discounts(
+        _one(db, scope=scope, model=plane.obligation, row_id=line.obligation_id)
+    )
+
+
 def _document_fact(
     db: Session,
     *,
@@ -2647,12 +2856,19 @@ def _document_fact(
             unit_code=line.unit_code,
             unit_amount=_money(line.unit_amount, line.currency, line.minor_units),
             pre_tax_amount=_money(line.pre_tax_amount, line.currency, line.minor_units),
-            discount_total=_money(Decimal("0"), line.currency, line.minor_units),
+            discount_total=_discount_total(
+                line_discounts,
+                _money(line.pre_tax_amount, line.currency, line.minor_units),
+            ),
             tax_amount=_money(line.tax_amount, line.currency, line.minor_units),
             total_amount=_money(line.total_amount, line.currency, line.minor_units),
             price_source_version=line.price_source_version,
+            discounts=line_discounts,
         )
         for line in lines
+        for line_discounts in (
+            _line_discounts(db, scope=scope, plane=plane, line=line),
+        )
     )
     party_tax_facts = tuple(
         PartyTaxIdentitySnapshotV1(
@@ -2901,6 +3117,7 @@ def issue_document(
             series_code=command.series_code,
             reference_date=command.reference_date,
             idempotency_key=f"billing:{document.id}",
+            document_reference=f"billing:{document.id}",
         )
         document.series_code = command.series_code
         document.document_number = number
@@ -3218,6 +3435,8 @@ def issue_credit_note(
             series_code=command.series_code,
             reference_date=command.reference_date,
             idempotency_key=f"billing:credit:{command.correlation_id}",
+            # Command-stable, not the per-execution ``document_id`` above.
+            document_reference=f"billing:credit:{command.correlation_id}",
         )
         document = plane.document(
             **_values(
@@ -6219,7 +6438,14 @@ def seal_opening_window(
     scope: Scope,
     command: SealOpeningWindowV1,
     verifier: OpeningWindowSealVerifier | None = None,
+    authority_switch: OpeningAuthoritySwitchParticipant | None = None,
 ) -> OpeningWindowSealV1:
+    """Seal the window; an optional participant switches authority atomically.
+
+    ADR 0031: fence, re-observe, seal and switch are one transaction. The
+    participant runs inside the same savepoint as the seal insert, so any
+    participant failure rolls the seal back and nothing is sealed.
+    """
     if type(command) is not SealOpeningWindowV1:
         raise BillingRuleViolation("opening_command_invalid", "expected seal command")
     _require_scope_matches(routed=scope, declared=command.scope)
@@ -6278,7 +6504,7 @@ def seal_opening_window(
         # Only fresh evidence observed under the physical custody lock seals.
         verified = qualify()
         actual = get_opening_window_admissions(session, scope=scope)
-        expected = {
+        positive = {
             item.partition.account_id
             for item in (
                 *window.manifest.cash_lots,
@@ -6286,6 +6512,23 @@ def seal_opening_window(
             )
             if item.residual_minor > 0
         }
+        held = set(command.held_account_ids)
+        if not held <= positive:
+            raise BillingRuleViolation(
+                "opening_hold_list_invalid",
+                "held partitions must come from the frozen manifest population",
+            )
+        if isinstance(window.manifest, OpeningManifestV2):
+            try:
+                require_hold_list_covers_manifest(
+                    window.manifest, command.held_account_ids
+                )
+            except OpeningEvidenceError as exc:
+                raise BillingRuleViolation(
+                    "opening_hold_list_invalid",
+                    "sealed hold list must cover every held-marked partition once",
+                ) from exc
+        expected = positive - held
         if {item.billing_account_id for item in actual} != expected or len(
             actual
         ) != len(expected):
@@ -6318,6 +6561,50 @@ def seal_opening_window(
             values["tenant_id"] = scope.tenant_id
         session.execute(insert(_table(scope, "opening_window_seals")).values(**values))
         session.flush()
+        if authority_switch is not None:
+            try:
+                receipt = authority_switch.switch_authority(
+                    session, OpeningAuthoritySwitchContextV1(scope, seal)
+                )
+                if type(receipt) is not OpeningAuthoritySwitchReceiptV1:
+                    raise BillingRuleViolation(
+                        "opening_authority_switch_failed",
+                        "participant returned no receipt",
+                    )
+                stored = StoredOpeningAuthoritySwitchReceiptV1(
+                    window.window_id, receipt, datetime.now(UTC)
+                )
+                receipt_evidence = _jsonable(stored)
+                receipt_values = {
+                    "id": uuid4(),
+                    "window_id": window.window_id,
+                    "participant_ref": receipt.participant_ref,
+                    "participant_version": receipt.participant_version,
+                    "switched_to": receipt.switched_to,
+                    "state_digest": receipt.state_digest,
+                    "evidence": receipt_evidence,
+                    "evidence_digest": fingerprint_of(receipt_evidence),
+                }
+                if isinstance(scope, TenantScope):
+                    receipt_values["tenant_id"] = scope.tenant_id
+                session.execute(
+                    insert(_table(scope, "opening_authority_switch_receipts")).values(
+                        **receipt_values
+                    )
+                )
+                session.flush()
+            except Exception as exc:
+                raise BillingRuleViolation(
+                    "opening_authority_switch_failed",
+                    "authority switch participant failed; the seal is rolled back",
+                ) from exc
+            if not session.in_transaction() or (
+                get_opening_window_seal(session, scope=scope) is None
+            ):
+                raise BillingRuleViolation(
+                    "opening_authority_switch_failed",
+                    "authority switch participant ended the seal transaction",
+                )
         return {"window_id": str(window.window_id)}
 
     _idempotent_opening_admission(
@@ -7700,6 +7987,35 @@ def import_opening_account_v2(
     command: ImportOpeningAccountV2,
     verifier: OpeningAccountImportVerifierV2 | None = None,
 ) -> OpeningImportReceiptV2:
+    return _import_opening_account_v2(
+        db,
+        scope=scope,
+        command=command,
+        verifier=verifier,
+        operation_scope="billing.opening.import.v2",
+        fingerprint=None,
+        admit=lambda session, verified: _admit_opening_window(
+            session,
+            scope=scope,
+            manifest_fingerprint=verified.manifest_fingerprint,
+            manifest_version=2,
+        ),
+        after_import=None,
+    )
+
+
+def _import_opening_account_v2(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ImportOpeningAccountV2,
+    verifier: OpeningAccountImportVerifierV2 | None,
+    operation_scope: str,
+    fingerprint: str | None,
+    admit: Callable[[Session, OpeningImportVerificationV2], object],
+    after_import: Callable[[Session, OpeningImportReceiptV2], None] | None,
+) -> OpeningImportReceiptV2:
+    """Shared V2 import body: the window-entry rule and the idempotency scope vary."""
     if type(command) is not ImportOpeningAccountV2:
         raise BillingRuleViolation(
             "opening_command_invalid", "expected ImportOpeningAccountV2"
@@ -7748,12 +8064,7 @@ def import_opening_account_v2(
     digest = opening_account_command_digest_v2(command)
 
     def operation(session: Session) -> dict[str, object]:
-        _admit_opening_window(
-            session,
-            scope=scope,
-            manifest_fingerprint=verified.manifest_fingerprint,
-            manifest_version=2,
-        )
+        admit(session, verified)
         account = _one(
             session,
             scope=scope,
@@ -7942,18 +8253,157 @@ def import_opening_account_v2(
             opening_effects=opening,
             opening_bases=tuple(bases),
         )
+        if after_import is not None:
+            after_import(session, receipt)
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
 
     outcome = _idempotent_cash_claim(
         db,
         scope=scope,
-        operation_scope="billing.opening.import.v2",
+        operation_scope=operation_scope,
         key=command.idempotency_key,
-        fingerprint=digest,
+        fingerprint=fingerprint or digest,
         operation=operation,
     )
     return get_opening_import_receipt_v2(
         db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )
+
+
+@_exact_cash_operation
+def admit_held_opening_account_v2(
+    db: Session,
+    *,
+    scope: Scope,
+    command: AdmitHeldOpeningAccountV2,
+    verifier: OpeningAccountImportVerifierV2 | None = None,
+    approvals: OpeningHoldApprovalPort | None = None,
+) -> OpeningImportReceiptV2:
+    """Admit ONE sealed-hold partition after the seal (recorded widening, D-5).
+
+    Reuses the V2 import validators, verifier and writer. Additionally requires:
+    the partition is on the hold list recorded in the seal; no activity since
+    the seal; a reviewed disposition digest; and a standing Approvals decision
+    whose maker is not a checker. The database independently refuses any
+    post-seal opening write for an account that is not held and unadmitted.
+    """
+    if type(command) is not AdmitHeldOpeningAccountV2:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected AdmitHeldOpeningAccountV2"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    if approvals is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted approvals port is required"
+        )
+    imported = command.import_command
+    content_digest = opening_hold_content_digest(command)
+    fingerprint = fingerprint_of(
+        {
+            "domain": "billing.opening.hold.admit.v1",
+            "content_digest": content_digest,
+            "approval_request_id": str(command.approval_request_id),
+        }
+    )
+    standing: list[HeldOpeningHoldApprovalV1] = []
+
+    def admit(session: Session, verified: OpeningImportVerificationV2) -> None:
+        window = get_opening_window(session, scope=scope)
+        if window is None:
+            raise BillingRuleViolation(
+                "opening_window_missing", "opening window is required"
+            )
+        seal = get_opening_window_seal(session, scope=scope)
+        if seal is None:
+            raise BillingRuleViolation(
+                "opening_hold_window_not_sealed",
+                "held partitions are admitted only after the seal",
+            )
+        if (
+            window.window_id != command.window_id
+            or window.manifest_version != 2
+            or window.manifest_fingerprint != verified.manifest_fingerprint
+        ):
+            raise BillingRuleViolation(
+                "opening_window_binding", "hold admission window binding differs"
+            )
+        account_id = imported.partition.account_id
+        if account_id not in seal.command.held_account_ids:
+            raise BillingRuleViolation(
+                "opening_hold_not_listed", "partition is not on the sealed hold list"
+            )
+        if any(
+            item.billing_account_id == account_id
+            for item in get_opening_hold_admissions(session, scope=scope)
+        ):
+            raise BillingConflict(
+                "opening_hold_already_admitted", "held partition is already admitted"
+            )
+        try:
+            _require_pristine_opening_target(session, scope=scope, command=imported)
+        except (BillingRuleViolation, BillingConflict) as exc:
+            raise BillingRuleViolation(
+                "opening_hold_post_seal_activity",
+                "held account has activity since the seal",
+            ) from exc
+        try:
+            held = approvals.hold_approval(
+                session,
+                scope=scope,
+                request_id=command.approval_request_id,
+                subject_type=HOLD_APPROVAL_SUBJECT_TYPE,
+                subject_id=opening_hold_subject_id(command),
+                content_digest=content_digest,
+            )
+        except OpeningVerificationUnavailable as exc:
+            raise BillingRuleViolation(
+                "opening_verifier_unavailable", "approval qualification unavailable"
+            ) from exc
+        standing.append(require_hold_maker_checker(command, held))
+
+    def record(session: Session, receipt: OpeningImportReceiptV2) -> None:
+        admission = OpeningHoldAdmissionV1(
+            scope,
+            uuid4(),
+            command.window_id,
+            receipt.billing_account_id,
+            receipt.receipt_id,
+            opening_account_command_digest_v2(imported),
+            content_digest,
+            command.disposition,
+            command.maker_ref,
+            standing[0],
+            datetime.now(UTC),
+        )
+        evidence = _jsonable(admission)
+        values = {
+            "id": admission.admission_id,
+            "window_id": admission.window_id,
+            "billing_account_id": admission.billing_account_id,
+            "receipt_id": admission.receipt_id,
+            "disposition_digest": command.disposition.disposition_digest,
+            "maker_ref": command.maker_ref,
+            "approval_request_id": command.approval_request_id,
+            "approver_refs": list(standing[0].approver_refs),
+            "evidence": evidence,
+            "evidence_digest": fingerprint_of(evidence),
+        }
+        if isinstance(scope, TenantScope):
+            values["tenant_id"] = scope.tenant_id
+        session.execute(
+            insert(_table(scope, "opening_hold_admissions")).values(**values)
+        )
+        session.flush()
+
+    return _import_opening_account_v2(
+        db,
+        scope=scope,
+        command=imported,
+        verifier=verifier,
+        operation_scope="billing.opening.hold.admit.v2",
+        fingerprint=fingerprint,
+        admit=admit,
+        after_import=record,
     )
 
 

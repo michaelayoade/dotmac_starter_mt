@@ -9,7 +9,7 @@ from dotmac_payments.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="payments",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="payments",
     migration_prefix="pm",

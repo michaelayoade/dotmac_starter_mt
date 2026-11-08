@@ -1,6 +1,7 @@
 # ADR 0020 — Billing owns operational receivables; commercial modules stay separate
 
-**Status:** Accepted
+**Status:** Accepted. Amended 2026-08-14, 2026-10-15, and 2026-11-03
+(wording only, approved by Michael; see the end of this record)
 **Date:** 2026-08-12
 **Decision owner:** Michael
 **Extends:** ADR-0003's commercial-module boundary, ADR-0006's extraction and
@@ -205,13 +206,15 @@ not proposals; the specs they govern are updated to match.
 | Decision | Ruling |
 |---|---|
 | **Money persistence** | `NUMERIC(20,6)`, uppercase ISO currency, persisted minor-unit precision. Decimal strings remain a **wire format only** — Vendor's `String(40)` storage does not survive extraction. |
-| **ERP accounting transport** | Billing durable outbox → idempotent ERP inbox. Migrated explicitly from ERP pull. **The two never run as accounting writers at the same time.** |
+| **ERP accounting transport** | Billing durable outbox → idempotent ERP inbox. Migrated explicitly from ERP pull. **The two never run as accounting writers at the same time.** *Transport wording superseded by the 2026-11-03 amendment below: facts reach ERP through an Integrator connector, not a direct push.* |
 | **Artifact mismatch** | **Strict.** A different semantic projection cannot replace an issued invoice's official artifact. There is no "cosmetic-only" exemption, because nothing can verify a diff is cosmetic — an exemption whose premise is unenforceable is refused under ADR-0018. |
 | **Finance vocabulary** | `external_finance`. `manual_erp` retires. |
 
 **The accounting migration is a sequence, and its order is the decision.** Pull
 remains authoritative → push shadow comparison → single watermark cutover →
-disable pull posting → enable inbox posting → retire the pull decision path. A
+disable pull posting → enable inbox posting → retire the pull decision path.
+*("Push shadow comparison" is superseded by the 2026-11-03 amendment below:
+it is a backtest, not a live side-by-side run.)* A
 pull reconciler may afterwards detect gaps and request replay, but **it may never
 post independently** — that would restore the second writer the sequence exists
 to remove. This resolves the contradiction the adoption workstream found between
@@ -482,7 +485,8 @@ opening lanes; closed history remains a provenance-labelled, read-only Sub
 archive.
 
 Caller migration proceeds incrementally behind released contracts, shadow
-comparison, rehearsal, and retirement proof. The operational ledger authority
+comparison, rehearsal, and retirement proof. *("Shadow comparison" is
+superseded by the 2026-11-03 amendment below: backtest and saved tests.)* The operational ledger authority
 changes once globally after the complete migration and one-writer readiness
 gates pass. There are no account-cohort authority flips and no dual writing.
 ERP's new receiving side is outside the Sub switch's critical path. The existing
@@ -491,3 +495,43 @@ contract, while ERP retains
 GL and statutory accounting authority. This amendment records sequencing only;
 it does not claim an adopter is live, a rehearsal is complete, or authorize a
 writer change or authority switch.
+
+## Amendment, 2026-11-03: accounting transport through the Integrator, and backtest instead of shadow
+
+**Status of this amendment:** Accepted 2026-11-03, approved by Michael. It
+changes wording only. It changes no owner, no authority
+and no sequence step, and it authorizes no writer change.
+
+**1. The ERP accounting transport is an Integrator connector.** A7's "Billing
+durable outbox → idempotent ERP inbox" is read as follows from this date:
+
+- Billing records committed accounting facts and exposes them through a public,
+  ordered fact query with a count and a digest.
+- An Integrator connector on the `dotmac-integration` SPI (ADR-0024 §§ 6–7)
+  polls that query. The Integrator engine owns the cursor, retry and receipts.
+- The facts travel as Billing's published, versioned accounting-fact message
+  schema (ADR-0024 § 14.6). The connector delivers them to ERP's
+  ProductObservation receiver. ERP posts idempotently through its own posting
+  package, which validates against that pinned schema. ERP remains the GL and
+  statutory-accounting authority (§ 2), and never installs the `dotmac-billing`
+  distribution (A6).
+- There is one envelope for this flow. `dotmac-app-sync` is not the Sub → ERP
+  billing transport.
+- Until the connector delivers, committed facts stay queued in Billing's own
+  fact store. That is the "safely queue them" case in the 2026-10-15 amendment.
+
+A7's rule is unchanged: **pull posting and push posting never run as accounting
+writers at the same time**, and a pull reconciler may detect gaps and request
+replay but may never post independently.
+
+**2. "Shadow" is replaced by backtest.** In A7's accounting sequence, "push
+shadow comparison" becomes **backtest**: the push path's postings are computed
+from already-committed Billing facts and saved tests and compared with what the
+pull path posted. No live side-by-side run and no N-day observation gate is
+used. In the 2026-10-15 amendment, "shadow comparison" becomes **backtest and
+saved tests**, alongside rehearsal and retirement proof. The words
+"shadow-and-cutover" in A6 (Sub row) and § 6 are read the same way: backtest,
+saved tests and real-record preview, then the sealed cutover of ADR-0031.
+
+**What this amendment does not do.** It does not start the ERP receiving side,
+release a connector, change a pin, or claim that any adopter is live.
