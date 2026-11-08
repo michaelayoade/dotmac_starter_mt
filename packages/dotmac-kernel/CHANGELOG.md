@@ -6,6 +6,13 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Development — scoped console document scripts (unallocated)
+
+Prepare a route-bound, reviewed SHA-256 inline-script declaration in the existing
+browser composition/security owner. This development source does not allocate a
+successor or authorize release or adoption. Preserve global CSP tightening and
+all unrelated response policy; no unsafe-inline/eval or path-prefix exceptions.
+
 ## 0.1.0a107 — Release inventory
 
 This inventories the proposed identity-lifecycle and account-writer successor

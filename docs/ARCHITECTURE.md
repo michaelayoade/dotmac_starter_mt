@@ -1961,6 +1961,15 @@ policy fails application construction. The baseline uses the vendored Alpine
 CSP build and therefore grants neither `script-src 'unsafe-inline'` nor
 `'unsafe-eval'`.
 
+Unreleased console-document script policy preparation remains in the same Kernel
+browser-composition and response-security owners (`web_surfaces`, `web_runtime`,
+`app_factory`, `middleware/security_headers`). Its bounded contract will select
+reviewed static script hashes only for a resolved authenticated GET HTML document
+route. Academy keeps console authorization, proxying, provider assets and worker
+execution. The negative ERP/Sub/Academy source inventory is recorded in
+`docs/inventories/console-csp-source-observations.json` and the Kernel extraction
+dossier; it is not a production extraction or installed-adoption claim.
+
 Template security governance consumes the same composition declaration: the
 architecture sweep derives roots from `ProductAssemblySpec`, its installed
 presentation-package directories and every v2 surface's `TemplatePackage`.

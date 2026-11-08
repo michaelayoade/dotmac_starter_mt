@@ -1,0 +1,78 @@
+{
+  "scope": "source-only; not a production deployment census",
+  "products": [
+    {
+      "repository": "dotmac_erp",
+      "revision": "74fa788ae562905e4c8a1fcd46616585e4bf7694",
+      "files": [
+        {
+          "path": "app/middleware/csp.py",
+          "sha256": "778570c3cc1b06cf572c885a42f257fa99c7fc36211c844283f3fba5c469d3a6",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "app/main.py",
+          "sha256": "7d04828cb3448b9bfc93bd3bd1cf839d064316f0e1765e033c58cf0382e81fd1",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "tests/test_security_headers_middleware.py",
+          "sha256": "486c10848f91e96b8d2bed4ccc025fc4181090c5fa8662f7c5d29e0b88f3a65d",
+          "worktree_matches_commit": true
+        }
+      ]
+    },
+    {
+      "repository": "dotmac_sub",
+      "revision": "c7707880232c9298ef89c24a1aea66d35bd3a1e6",
+      "files": [
+        {
+          "path": "app/main.py",
+          "sha256": "4504fc4af83f3ddb37041800fc22f14c5fc03efe3df2a127a668e0237a4078e4",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "app/composition.py",
+          "sha256": "7db5c0f0fac0807acb671db12e91c00e656fc8369ace91fcf6fa02c9565b25de",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "static/js/automation-client-runtime.js",
+          "sha256": "405d95de09aaf7ffbde21333f988687cd334a262a97d4efce61c7f8b30de3916",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "tests/architecture/test_automation_runtime_boundary.py",
+          "sha256": "1e70e771280ab2763501c8c257b1d19706832a2d52c3944e27d5cd6231184a21",
+          "worktree_matches_commit": true
+        }
+      ]
+    },
+    {
+      "repository": "dotmac_academy_v2-browser-csrf-20261108",
+      "revision": "124155959c755cbb142099dd5517acc259f56fa8",
+      "files": [
+        {
+          "path": "app/config.py",
+          "sha256": "863e18b06a9e9942e80125ceb0c25d5df4800ae21857bde35926e156f7ce19b2",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "app/assembly.py",
+          "sha256": "0950ebd85cca7e80620c0b4796bc0e58fd9c56fed3d4f50123228c9f4f4829d1",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "app/web/labs.py",
+          "sha256": "128f3eb6c364ed054987824814af519635301a4ec8939fdfb05027a028095f58",
+          "worktree_matches_commit": true
+        },
+        {
+          "path": "legacy_probe/web/test_console_ws.py",
+          "sha256": "ff31fcc1eeebfcc5d5922191e07e7718b4c698e9624568c98a3ecb94c024e960",
+          "worktree_matches_commit": true
+        }
+      ]
+    }
+  ]
+}

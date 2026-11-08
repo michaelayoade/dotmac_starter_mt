@@ -142,6 +142,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a107+dev",
+      "reason": "UNALLOCATED DEVELOPMENT SOURCE. Published a107 remains immutable and consumed. The local +dev marker prepares the reviewed route-bound static script-hash CSP contract after product inventory; it allocates no successor and cannot be published. Source review, exact merge-result hosted qualification, separate protected release authorization, mechanical allocation, publication/install-back/record and consumer admission remain owed. Remove this row only through an oracle-backed release record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-payments": {
       "declared": "0.1.0a4",
       "reason": "PROPOSED SUCCESSOR, UNPUBLISHED. Published a3 (tag dotmac-payments-v0.1.0a3) and its migrations remain unchanged. Candidate a4 adds P3 InstructRefund (request id is the idempotency key, provider reference derived from it, amount bounded by confirmed cash minus prior and in-flight refunds), P4 ObserveCashOutcome (refund completed or failed, chargeback, bounce, admin correction; an unmatched outcome is parked in an attention state) and the additive pm_0007_refund_outcomes migration, with no fee field and no mandate field. Hosted PostgreSQL acceptance, security review of the money-egress bound, an authorized publication dispatch, install-back verification, canonical tag evidence and an accepted release record remain due; this declaration does not switch a product authority. Remove this row only with the verified a4 publication record.",
