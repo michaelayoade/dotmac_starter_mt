@@ -2115,6 +2115,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-collections ──
+    "dotmac-collections-v0.1.0a2": (
+        "dotmac-collections",
+        "e1bfa54e23bd8184c20beb2dc1d9f0938fa336f6",
+        {
+            "cl_0001_collections.py": (
+                "f718c94d4044bb925da92aa9e186ee1c0765d4e5d67b1bbc6bc66ccf161d86f4"
+            ),
+        },
+    ),
     "dotmac-collections-v0.1.0a1": (
         "dotmac-collections",
         "6ecf518a6985b8bf4b163eccb3de2fef171ecccc",
