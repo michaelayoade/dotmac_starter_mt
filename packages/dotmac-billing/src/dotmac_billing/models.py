@@ -2753,6 +2753,7 @@ class _VarianceEventColumns(_EvidenceTime):
     maker_ref: Mapped[str | None] = mapped_column(String(255))
     approver_refs: Mapped[list[str] | None] = mapped_column(JSONB)
     approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
+    fact_posting_group_id: Mapped[UUID | None] = mapped_column(Uuid())
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -2778,6 +2779,11 @@ class OpeningVarianceEvent(Base, _WindowTenantRow, _VarianceEventColumns):
             "posting_group_id",
             name="uq_opening_variance_events_posting_group",
         ),
+        UniqueConstraint(
+            "tenant_id",
+            "fact_posting_group_id",
+            name="uq_opening_variance_events_fact_group",
+        ),
         CheckConstraint(_EVENT_KIND_CHECK, name="ck_opening_variance_events_kind"),
         CheckConstraint(
             _RESOLUTION_CHECK, name="ck_opening_variance_events_resolution"
@@ -2802,6 +2808,10 @@ class PlatformOpeningVarianceEvent(Base, _VarianceEventColumns):
         UniqueConstraint("seq", name="uq_platform_opening_variance_events_seq"),
         UniqueConstraint(
             "posting_group_id", name="uq_platform_opening_variance_events_posting_group"
+        ),
+        UniqueConstraint(
+            "fact_posting_group_id",
+            name="uq_platform_opening_variance_events_fact_group",
         ),
         CheckConstraint(
             _EVENT_KIND_CHECK, name="ck_platform_opening_variance_events_kind"

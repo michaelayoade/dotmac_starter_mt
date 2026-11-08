@@ -9,6 +9,11 @@ resolution sign and cumulative bound, kind per basis, and a ``position_corrected
 event must name a posting group of the same account, currency and lane whose
 effect equals the amount.
 
+Each ledger-lane recorded, voided and recognised/corrected event names an
+effect-free posting group (``fact_posting_group_id``, unique, checked at commit)
+carrying one AccountingFactV6; ``guard_opening_entry`` adds the recorded and
+voided group kinds to the opening-principal set.
+
 Replaced functions keep their triggers. The seal guard now (a) defines the
 carryable population as ``T != 0 or any variance``, (b) requires the sealed hold
 list to be the manifest's partition-level holds plus typed operational holds,
@@ -187,6 +192,8 @@ def _tables(platform: bool) -> None:
         sa.Column("maker_ref", sa.String(255)),
         sa.Column("approver_refs", JSONB()),
         sa.Column("approval_request_id", sa.Uuid()),
+        # The effect-free posting group carrying this event's AccountingFactV6.
+        sa.Column("fact_posting_group_id", sa.Uuid()),
         sa.Column("actor", sa.String(255), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint(f"kind IN {_EVENTS}", name=f"ck_{events}_kind"),
@@ -198,6 +205,9 @@ def _tables(platform: bool) -> None:
         sa.UniqueConstraint(*scope, "seq", name=f"uq_{events}_seq"),
         sa.UniqueConstraint(
             *scope, "posting_group_id", name=f"uq_{events}_posting_group"
+        ),
+        sa.UniqueConstraint(
+            *scope, "fact_posting_group_id", name=f"uq_{events}_fact_group"
         ),
         fk(["variance_id"], "opening_variances", ["id"]),
         fk(["window_id"], "opening_windows", ["id"]),
@@ -368,7 +378,7 @@ def _guards(platform: bool) -> None:
     CREATE FUNCTION mod_billing.guard_{p}opening_variance_event() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
     DECLARE v record; prev record; grp record; sealed boolean; done numeric; total numeric;
-      eff numeric; lane_name text; adverse boolean;
+      eff numeric; lane_name text; adverse boolean; needs_fact boolean;
     BEGIN
       SELECT * INTO v FROM mod_billing.{p}opening_variances x WHERE x.id = NEW.variance_id{new_scope};
       IF v.id IS NULL OR v.window_id <> NEW.window_id
@@ -378,6 +388,12 @@ def _guards(platform: bool) -> None:
       SELECT EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_seals s WHERE s.window_id = NEW.window_id{s_new}) INTO sealed;
       SELECT * INTO prev FROM mod_billing.{p}opening_variance_events x
         WHERE x.variance_id = NEW.variance_id{new_scope} ORDER BY x.seq DESC LIMIT 1;
+      needs_fact := v.basis = 'ledger_lane' AND v.scope_level = 'partition' AND (
+        NEW.kind IN ('recorded','voided_by_import_reversal')
+        OR (NEW.kind IN ('resolved','partially_resolved')
+            AND NEW.resolution_kind IN ('recognised','position_corrected')));
+      IF needs_fact <> (NEW.fact_posting_group_id IS NOT NULL)
+      THEN RAISE EXCEPTION 'a ledger-lane recorded, voided or recognised/corrected event carries exactly one fact group' USING ERRCODE = '23514'; END IF;
       IF NEW.kind IN ('recorded','voided_by_import_reversal') AND (
         NEW.resolution_kind IS NOT NULL OR NEW.amount_minor IS NOT NULL
         OR NEW.posting_group_id IS NOT NULL OR NEW.gl_target_class IS NOT NULL OR NEW.evidence_ref IS NOT NULL
@@ -448,6 +464,30 @@ def _guards(platform: bool) -> None:
     END $$;
     CREATE TRIGGER opening_variance_event_guard BEFORE INSERT ON mod_billing.{p}opening_variance_events
       FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}opening_variance_event();
+
+    -- The fact group must exist by commit, with the kind implied by the event,
+    -- the variance's account and currency, and no posting effects.
+    CREATE FUNCTION mod_billing.check_{p}variance_fact_group() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    DECLARE v record; g record; want text;
+    BEGIN
+      IF NEW.fact_posting_group_id IS NULL THEN RETURN NEW; END IF;
+      SELECT * INTO v FROM mod_billing.{p}opening_variances x WHERE x.id = NEW.variance_id{new_scope};
+      SELECT * INTO g FROM mod_billing.{p}posting_groups x WHERE x.id = NEW.fact_posting_group_id{new_scope};
+      want := CASE WHEN NEW.kind = 'recorded' THEN 'opening_variance_recorded'
+        WHEN NEW.kind = 'voided_by_import_reversal' THEN 'opening_variance_voided'
+        WHEN NEW.resolution_kind = 'recognised' THEN 'opening_variance_recognised'
+        WHEN NEW.resolution_kind = 'position_corrected' THEN 'opening_variance_position_corrected'
+        ELSE NULL END;
+      IF g.id IS NULL OR want IS NULL OR g.group_kind <> want
+        OR g.billing_account_id <> v.billing_account_id OR g.currency <> v.currency
+        OR g.minor_units <> v.minor_units OR g.reverses_group_id IS NOT NULL
+        OR EXISTS (SELECT 1 FROM mod_billing.{p}posting_effects e WHERE e.posting_group_id = g.id{"" if platform else " AND e.tenant_id = NEW.tenant_id"})
+      THEN RAISE EXCEPTION 'variance event requires its effect-free fact posting group of the matching kind, account and currency' USING ERRCODE = '23514'; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE CONSTRAINT TRIGGER variance_event_fact_group AFTER INSERT ON mod_billing.{p}opening_variance_events
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mod_billing.check_{p}variance_fact_group();
 
     CREATE FUNCTION mod_billing.guard_{p}opening_gap_event() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
@@ -618,7 +658,51 @@ def _replace_guards(platform: bool) -> None:
         else "jsonb_build_object('tenant_id', NEW.tenant_id::text)"
     )
     held_args = "NEW.tenant_id, " if not platform else ""
+    seal_scope = "" if platform else " WHERE s.tenant_id = NEW.tenant_id"
+    receipt_scope = "" if platform else " AND r.tenant_id = NEW.tenant_id"
+    kinds = (
+        "('opening_cash_imported','opening_account_imported',"
+        "'opening_variance_recorded','opening_variance_voided')"
+    )
     op.execute(f"""
+    -- bi_0013's function with the two opening-principal variance fact kinds added
+    -- (both the posting_groups and posting_effects branches). The two online
+    -- kinds (recognised, position_corrected) are deliberately not listed.
+    CREATE OR REPLACE FUNCTION mod_billing.guard_{p}opening_entry() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    DECLARE opening boolean := false; window_id uuid; acct uuid; sealed boolean;
+    BEGIN
+      IF TG_TABLE_NAME = '{p}documents' THEN
+        opening := NEW.authoring_mode = 'imported_open_item';
+        IF TG_OP = 'UPDATE' THEN opening := opening OR OLD.authoring_mode = 'imported_open_item'; END IF;
+      ELSIF TG_TABLE_NAME = '{p}opening_import_receipts' THEN opening := NEW.receipt_kind = 'import';
+      ELSIF TG_TABLE_NAME = '{p}opening_cash_effects' THEN opening := NEW.effect_kind = 'recognition';
+      ELSIF TG_TABLE_NAME = '{p}posting_groups' THEN opening := NEW.group_kind IN {kinds};
+      ELSIF TG_TABLE_NAME = '{p}posting_effects' THEN
+        SELECT x.group_kind IN {kinds} INTO opening
+          FROM mod_billing.{p}posting_groups x WHERE x.id = NEW.posting_group_id{new_scope};
+      ELSE opening := true;
+      END IF;
+      IF opening THEN
+        IF TG_TABLE_NAME = '{p}posting_effects' THEN
+          SELECT x.billing_account_id INTO acct FROM mod_billing.{p}posting_groups x WHERE x.id = NEW.posting_group_id{new_scope};
+        ELSE
+          acct := nullif(to_jsonb(NEW)->>'billing_account_id','')::uuid;
+        END IF;
+        SELECT EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_seals s{seal_scope}) INTO sealed;
+        IF sealed THEN
+          IF TG_TABLE_NAME = '{p}opening_import_receipts' AND EXISTS (
+            SELECT 1 FROM mod_billing.{p}opening_import_receipts r
+            WHERE r.billing_account_id = acct AND r.receipt_kind = 'import'{receipt_scope})
+          THEN RAISE EXCEPTION 'held partition already has an opening import' USING ERRCODE = '23514'; END IF;
+          window_id := mod_billing.touch_{p}opening_window_held({held_args}acct);
+        ELSE
+          window_id := mod_billing.touch_{p}opening_window({argument});
+        END IF;
+      END IF;
+      RETURN NEW;
+    END $$;
+
     CREATE OR REPLACE FUNCTION mod_billing.guard_{p}opening_hold_admission() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
     DECLARE bound uuid; receipt record; refs jsonb; ev jsonb; manifest jsonb;

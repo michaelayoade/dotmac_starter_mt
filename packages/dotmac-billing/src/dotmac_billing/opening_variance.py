@@ -25,12 +25,19 @@ from sqlalchemy.orm import Session
 
 from dotmac_billing.errors import BillingRuleViolation
 from dotmac_billing.opening_contracts import OpeningPartitionV1
-from dotmac_billing.opening_queries import _scoped, _table
+from dotmac_billing.opening_queries import (
+    _decode_row,
+    _group,
+    _require,
+    _scoped,
+    _table,
+)
 from dotmac_billing.opening_receivable_contracts import OpeningManifestV2
 from dotmac_billing.opening_variance_contracts import (
     HISTORY_FIELDS,
     LANES,
     LEDGER_BASIS,
+    AccountingFactV6,
     OpeningControlReportV1,
     OpeningControlRowV1,
     OpeningHistoryRowV1,
@@ -45,8 +52,46 @@ from dotmac_billing.opening_window_queries import (
     get_opening_window_seal,
 )
 
-#: Emits one ledger-lane fact: ``(kind, payload)``. The service owns the outbox.
-FactEmitter = Callable[[str, dict[str, object]], None]
+
+@dataclass(frozen=True, slots=True)
+class VarianceFactRequest:
+    """One AccountingFactV6 to post on a fresh effect-free posting group.
+
+    The event row is inserted first (it fixes ``event_seq``) and names
+    ``group_id`` in ``fact_posting_group_id``; the database checks at commit that
+    the group exists with the matching kind, account and currency.
+    """
+
+    effect_kind: str
+    group_id: UUID
+    event_id: UUID
+    event_seq: int
+    variance_id: UUID
+    window_id: UUID
+    account_id: UUID
+    currency: str
+    precision: int
+    lane: str
+    reason_code: str
+    source_kind: str
+    source_ref: str
+    amount_minor: int
+    import_receipt_id: UUID
+    evidence_digest: str
+    rules_digest: str
+    occurred_at: datetime
+    reverses_group_id: UUID | None = None
+    resolution_kind: str | None = None
+    resolved_state: str | None = None
+    gl_target_class: str | None = None
+    corrected_by_posting_group_id: UUID | None = None
+    approval_request_id: UUID | None = None
+    maker_ref: str | None = None
+    approver_refs: tuple[str, ...] = ()
+
+
+#: Posts one ledger-lane fact. The service owns the posting group and the outbox.
+FactEmitter = Callable[[VarianceFactRequest], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,26 +116,6 @@ def _vals(scope: Scope, values: dict[str, object]) -> dict[str, object]:
         if isinstance(scope, TenantScope)
         else values
     )
-
-
-def variance_fact_payload(
-    variance_id: UUID, window_id: UUID, v: OpeningVarianceV1, *, kind: str
-) -> dict[str, object]:
-    """Ledger-lane facts only: memo bases post nothing (design 3.5)."""
-    return {
-        "fact_version": 1,
-        "kind": kind,
-        "variance_id": str(variance_id),
-        "window_id": str(window_id),
-        "billing_account_id": None if v.account_id is None else str(v.account_id),
-        "currency": v.currency,
-        "minor_units": v.precision,
-        "lane": v.lane,
-        "reason_code": v.reason_code,
-        "amount_minor": v.amount_minor,
-        "customer_adverse": is_customer_adverse(v.lane, v.amount_minor),
-        "evidence_digest": v.evidence_digest,
-    }
 
 
 def _latest_kind(db: Session, scope: Scope, variance_id: UUID) -> str | None:
@@ -119,13 +144,17 @@ def _append_event(
     actor: str,
     occurred_at: datetime,
     **extra: object,
-) -> None:
-    db.execute(
-        insert(_table(scope, "opening_variance_events")).values(
+) -> tuple[UUID, int]:
+    """Insert one lifecycle event; returns ``(event_id, seq)``."""
+    new_id = uuid4()
+    table = _table(scope, "opening_variance_events")
+    seq = db.execute(
+        insert(table)
+        .values(
             **_vals(
                 scope,
                 {
-                    "id": uuid4(),
+                    "id": new_id,
                     "window_id": window_id,
                     "variance_id": variance_id,
                     "billing_account_id": account_id,
@@ -136,7 +165,15 @@ def _append_event(
                 },
             )
         )
-    )
+        .returning(table.c.seq)
+    ).scalar_one()
+    return new_id, int(seq)
+
+
+def _fact_wanted(basis: str, level: str) -> bool:
+    """Only partition-scope ledger-lane variances reach the GL (memo bases and
+    batch scope post nothing)."""
+    return basis == LEDGER_BASIS and level == "partition"
 
 
 def _record(
@@ -204,7 +241,9 @@ def _record(
             )
         )
     )
-    _append_event(
+    wanted = _fact_wanted(v.basis, v.level)
+    group_id = uuid4() if wanted else None
+    event_id, seq = _append_event(
         db,
         scope,
         window_id=window_id,
@@ -213,11 +252,34 @@ def _record(
         kind="recorded",
         actor=actor,
         occurred_at=occurred_at,
+        fact_posting_group_id=group_id,
     )
-    if emit is not None and v.basis == LEDGER_BASIS:
+    if wanted and group_id is not None and receipt_id is not None:
+        if emit is None or v.account_id is None:
+            raise BillingRuleViolation(
+                "variance_fact_emitter_missing", "a ledger-lane fact needs its emitter"
+            )
         emit(
-            "recorded",
-            variance_fact_payload(variance_id, window_id, v, kind="recorded"),
+            VarianceFactRequest(
+                "opening_variance_recorded",
+                group_id,
+                event_id,
+                seq,
+                variance_id,
+                window_id,
+                v.account_id,
+                v.currency,
+                v.precision,
+                v.lane,
+                v.reason_code,
+                v.source.kind,
+                v.source.key,
+                v.amount_minor,
+                receipt_id,
+                v.evidence_digest,
+                v.rules_digest,
+                occurred_at,
+            )
         )
     return True
 
@@ -344,6 +406,7 @@ def void_partition_variances(
     account_id: UUID,
     actor: str,
     occurred_at: datetime,
+    emit: FactEmitter,
 ) -> int:
     """Pre-seal import reversal: void the account's recorded variances and gaps.
 
@@ -351,10 +414,11 @@ def void_partition_variances(
     receipt has an unwind receipt.
     """
     table = _table(scope, "opening_variances")
+    events_table = _table(scope, "opening_variance_events")
     rows = (
         db.execute(
             _scoped(
-                select(table.c.id).where(
+                select(table).where(
                     table.c.window_id == window_id,
                     table.c.billing_account_id == account_id,
                 ),
@@ -362,23 +426,64 @@ def void_partition_variances(
                 table,
             )
         )
-        .scalars()
+        .mappings()
         .all()
     )
     voided = 0
-    for variance_id in rows:
-        if _latest_kind(db, scope, variance_id) == "recorded":
-            _append_event(
-                db,
-                scope,
-                window_id=window_id,
-                variance_id=variance_id,
-                account_id=account_id,
-                kind="voided_by_import_reversal",
-                actor=actor,
-                occurred_at=occurred_at,
+    for row in rows:
+        variance_id = row["id"]
+        if _latest_kind(db, scope, variance_id) != "recorded":
+            continue
+        wanted = _fact_wanted(row["basis"], row["scope_level"])
+        recorded_group = None
+        if wanted:
+            recorded_group = db.execute(
+                _scoped(
+                    select(events_table.c.fact_posting_group_id).where(
+                        events_table.c.variance_id == variance_id,
+                        events_table.c.kind == "recorded",
+                    ),
+                    scope,
+                    events_table,
+                )
+            ).scalar_one()
+        group_id = uuid4() if wanted else None
+        event_id, seq = _append_event(
+            db,
+            scope,
+            window_id=window_id,
+            variance_id=variance_id,
+            account_id=account_id,
+            kind="voided_by_import_reversal",
+            actor=actor,
+            occurred_at=occurred_at,
+            fact_posting_group_id=group_id,
+        )
+        if group_id is not None:
+            emit(
+                VarianceFactRequest(
+                    "opening_variance_voided",
+                    group_id,
+                    event_id,
+                    seq,
+                    variance_id,
+                    window_id,
+                    account_id,
+                    row["currency"],
+                    row["minor_units"],
+                    row["lane"],
+                    row["reason_code"],
+                    row["source_kind"],
+                    row["source_ref"],
+                    int(row["amount_minor"]),
+                    row["import_receipt_id"],
+                    row["evidence_digest"],
+                    row["rules_digest"],
+                    occurred_at,
+                    reverses_group_id=recorded_group,
+                )
             )
-            voided += 1
+        voided += 1
     gaps = _table(scope, "opening_control_gaps")
     gap_events = _table(scope, "opening_control_gap_events")
     for gap_id in (
@@ -581,56 +686,73 @@ def resolve_variance(
         "approver_refs": list(approval.approver_refs),
         "approval_request_id": approval.request_id,
     }
-    for event_kind, extra in (
-        ("resolving", approval_fields),
-        (
-            kind,
-            {
-                **approval_fields,
-                "resolution_kind": resolution_kind,
-                "amount_minor": amount_minor,
-                "posting_group_id": posting_group_id,
-                "gl_target_class": gl_target_class,
-                "evidence_ref": evidence_ref,
-            },
-        ),
-    ):
-        _append_event(
-            db,
-            scope,
-            window_id=row["window_id"],
-            variance_id=variance_id,
-            account_id=row["billing_account_id"],
-            kind=event_kind,
-            actor=approval.maker_ref,
-            occurred_at=occurred_at,
-            **extra,
-        )
+    _append_event(
+        db,
+        scope,
+        window_id=row["window_id"],
+        variance_id=variance_id,
+        account_id=row["billing_account_id"],
+        kind="resolving",
+        actor=approval.maker_ref,
+        occurred_at=occurred_at,
+        **approval_fields,
+    )
+    wanted = _fact_wanted(row["basis"], row["scope_level"]) and resolution_kind in (
+        "recognised",
+        "position_corrected",
+    )
+    group_id = uuid4() if wanted else None
+    event_id, seq = _append_event(
+        db,
+        scope,
+        window_id=row["window_id"],
+        variance_id=variance_id,
+        account_id=row["billing_account_id"],
+        kind=kind,
+        actor=approval.maker_ref,
+        occurred_at=occurred_at,
+        resolution_kind=resolution_kind,
+        amount_minor=amount_minor,
+        posting_group_id=posting_group_id,
+        gl_target_class=gl_target_class,
+        evidence_ref=evidence_ref,
+        fact_posting_group_id=group_id,
+        **approval_fields,
+    )
     db.flush()
-    if emit is not None and row["basis"] == LEDGER_BASIS:
+    if group_id is not None:
+        if emit is None:
+            raise BillingRuleViolation(
+                "variance_fact_emitter_missing", "a ledger-lane fact needs its emitter"
+            )
         emit(
-            "recognised" if resolution_kind == "recognised" else "resolved",
-            {
-                "fact_version": 1,
-                "kind": resolution_kind,
-                "variance_id": str(variance_id),
-                "window_id": str(row["window_id"]),
-                "billing_account_id": None
-                if row["billing_account_id"] is None
-                else str(row["billing_account_id"]),
-                "currency": row["currency"],
-                "minor_units": row["minor_units"],
-                "lane": row["lane"],
-                "amount_minor": amount_minor,
-                "gl_target_class": gl_target_class,
-                "posting_group_id": None
-                if posting_group_id is None
-                else str(posting_group_id),
-                "approval_request_id": str(approval.request_id),
-                "customer_adverse": is_customer_adverse(
-                    row["lane"], int(row["amount_minor"])
-                ),
-            },
+            VarianceFactRequest(
+                f"opening_variance_{resolution_kind}",
+                group_id,
+                event_id,
+                seq,
+                variance_id,
+                row["window_id"],
+                row["billing_account_id"],
+                row["currency"],
+                row["minor_units"],
+                row["lane"],
+                row["reason_code"],
+                row["source_kind"],
+                row["source_ref"],
+                amount_minor,
+                row["import_receipt_id"],
+                row["evidence_digest"],
+                row["rules_digest"],
+                occurred_at,
+                resolution_kind=resolution_kind,
+                resolved_state=kind,
+                gl_target_class=gl_target_class,
+                corrected_by_posting_group_id=posting_group_id,
+                approval_request_id=approval.request_id,
+                maker_ref=approval.maker_ref,
+                approver_refs=approval.approver_refs,
+            )
         )
     return kind
 
@@ -638,6 +760,54 @@ def resolve_variance(
 # --------------------------------------------------------------------------
 # Reads
 # --------------------------------------------------------------------------
+
+
+def get_accounting_fact_v6(
+    db: Session, *, scope: Scope, posting_group_id: UUID
+) -> AccountingFactV6:
+    """The verified V6 fact of a posting group: digest, envelope and group agree."""
+    table = _table(scope, "accounting_facts")
+    with db.no_autoflush:
+        row = (
+            db.execute(
+                _scoped(
+                    select(table).where(
+                        table.c.posting_group_id == posting_group_id,
+                        table.c.fact_version == 6,
+                    ),
+                    scope,
+                    table,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    if row is None:
+        raise BillingRuleViolation(
+            "not_found", "opening V6 accounting fact is unavailable"
+        )
+    fact = _decode_row(
+        row, AccountingFactV6, payload="fact_payload", digest="fact_digest"
+    )
+    group = _group(
+        db,
+        scope,
+        posting_group_id,
+        fact.billing_account_id,
+        fact.variance.amount.currency.code,
+        fact.variance.amount.currency.minor_units,
+    )
+    _require(
+        fact.scope == scope
+        and fact.posting_group_id == posting_group_id
+        and fact.fact_id == row["id"]
+        and fact.source_system == row["source_system"] == "dotmac-billing"
+        and fact.source_authority == row["source_authority"] == "internal"
+        and fact.effect_kind == row["effect_kind"] == group["group_kind"]
+        and fact.occurred_at == row["occurred_at"]
+        and fact.reverses_fact_id == row["reverses_fact_id"]
+    )
+    return fact
 
 
 def _states(db: Session, scope: Scope, window_id: UUID) -> dict[UUID, tuple[str, int]]:
@@ -940,6 +1110,8 @@ def opening_control_report(db: Session, *, scope: Scope) -> OpeningControlReport
 __all__ = [
     "LANES",
     "FactEmitter",
+    "VarianceFactRequest",
+    "get_accounting_fact_v6",
     "list_opening_variances",
     "opening_control_report",
     "record_batch_variances",
@@ -948,7 +1120,6 @@ __all__ = [
     "require_resolution_primitive",
     "record_partition_variances",
     "resolve_variance",
-    "variance_fact_payload",
     "void_partition_variances",
 ]
 _ = UTC

@@ -205,6 +205,7 @@ from dotmac_billing.opening_validation import (
 )
 from dotmac_billing.opening_variance import (
     ApprovalEvidence,
+    VarianceFactRequest,
     record_batch_variances,
     record_partition_variances,
     require_group_not_variance_resolution,
@@ -215,11 +216,15 @@ from dotmac_billing.opening_variance import (
 )
 from dotmac_billing.opening_variance_contracts import (
     VARIANCE_APPROVAL_SUBJECT_TYPE,
+    AccountingFactV6,
     ConfirmOpeningVarianceEvidenceV1,
     OpeningVarianceApprovalPort,
     OpeningVarianceApprovalV1,
+    OpeningVarianceFactBlockV1,
+    OpeningVarianceResolutionFactV1,
     OpeningVarianceResolutionRefV1,
     RecogniseOpeningVarianceV1,
+    is_customer_adverse,
     variance_approval_subject_id,
     variance_resolution_content_digest,
 )
@@ -266,6 +271,10 @@ from dotmac_billing.tax_evidence import (
 _AccountingEffectKind = Literal[
     "opening_account_imported",
     "opening_account_import_reversed",
+    "opening_variance_recorded",
+    "opening_variance_voided",
+    "opening_variance_recognised",
+    "opening_variance_position_corrected",
     "opening_cash_imported",
     "opening_cash_applied",
     "cash_credit_draw_reversed",
@@ -2018,6 +2027,7 @@ def _post_group(
     opening_effects: tuple[OpeningCashEffectV1, ...] = (),
     cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
     corrects_posting_group_id: UUID | None = None,
+    variance_fact: VarianceFactRequest | None = None,
     _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
@@ -2416,8 +2426,66 @@ def _post_group(
         | AccountingFactV3
         | AccountingFactV4
         | AccountingFactV5
+        | AccountingFactV6
     )
-    if isinstance(opening_receipt, OpeningImportReceiptV2):
+    if variance_fact is not None:
+        if variance_fact.reverses_group_id is not None:
+            reverses_fact_id = db.execute(
+                _where_scope(
+                    select(plane.accounting_fact.id).where(
+                        plane.accounting_fact.posting_group_id
+                        == variance_fact.reverses_group_id
+                    ),
+                    scope,
+                    plane.accounting_fact,
+                )
+            ).scalar_one()
+        resolution = None
+        if variance_fact.resolution_kind is not None:
+            resolution = OpeningVarianceResolutionFactV1(
+                cast(Any, variance_fact.resolution_kind),
+                cast(Any, variance_fact.resolved_state),
+                cast(Any, variance_fact.gl_target_class),
+                variance_fact.corrected_by_posting_group_id,
+                cast(UUID, variance_fact.approval_request_id),
+                cast(str, variance_fact.maker_ref),
+                variance_fact.approver_refs,
+            )
+        fact_amount = money_from_minor(
+            variance_fact.amount_minor, currency, minor_units
+        )
+        typed_fact = AccountingFactV6(
+            scope,
+            "dotmac-billing",
+            accounting_fact_id,
+            6,
+            account_id,
+            group_id,
+            source_ref,
+            "internal",
+            cast(Any, kind),
+            occurred_at,
+            observed_at,
+            OpeningVarianceFactBlockV1(
+                variance_fact.variance_id,
+                variance_fact.window_id,
+                variance_fact.event_id,
+                variance_fact.event_seq,
+                cast(Any, variance_fact.lane),
+                "ledger_lane",
+                variance_fact.reason_code,
+                variance_fact.source_kind,
+                variance_fact.source_ref,
+                fact_amount,
+                is_customer_adverse(variance_fact.lane, variance_fact.amount_minor),
+                variance_fact.import_receipt_id,
+                variance_fact.evidence_digest,
+                variance_fact.rules_digest,
+            ),
+            resolution,
+            reverses_fact_id,
+        )
+    elif isinstance(opening_receipt, OpeningImportReceiptV2):
         typed_fact = AccountingFactV5(
             scope,
             "dotmac-billing",
@@ -2641,7 +2709,14 @@ def _post_group(
         )
     )
     db.flush()
-    if isinstance(typed_fact, AccountingFactV5):
+    if isinstance(typed_fact, AccountingFactV6):
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v6",
+            payload=fact_payload,
+        )
+    elif isinstance(typed_fact, AccountingFactV5):
         _emit(
             db,
             scope=scope,
@@ -6584,9 +6659,7 @@ def _resolve_by_posting_group(
         ),
         occurred_at=occurred_at,
         posting_group_id=group_id,
-        emit=lambda kind, payload: _emit_variance_fact(
-            session, scope=scope, kind=kind, payload=payload
-        ),
+        emit=lambda request: _post_variance_fact(session, scope=scope, request=request),
     )
 
 
@@ -6690,8 +6763,8 @@ def recognise_opening_variance(
             ),
             occurred_at=command.occurred_at,
             gl_target_class=command.gl_target_class,
-            emit=lambda kind, payload: _emit_variance_fact(
-                session, scope=scope, kind=kind, payload=payload
+            emit=lambda request: _post_variance_fact(
+                session, scope=scope, request=request
             ),
         )
         return {"state": outcome}
@@ -6763,31 +6836,24 @@ def confirm_opening_variance_evidence(
     return str(result.result["state"])
 
 
-def _emit_variance_fact(
-    db: Session, *, scope: Scope, kind: str, payload: dict[str, object]
+def _post_variance_fact(
+    session: Session, *, scope: Scope, request: VarianceFactRequest
 ) -> None:
-    """Ordered ledger-lane variance facts (outbox; S15 maps them, D-6 queues)."""
-    if kind == "recorded":
-        _emit(
-            db,
-            scope=scope,
-            event_type="billing.opening.variance.recorded.v1",
-            payload=payload,
-        )
-    elif kind == "recognised":
-        _emit(
-            db,
-            scope=scope,
-            event_type="billing.opening.variance.recognised.v1",
-            payload=payload,
-        )
-    else:
-        _emit(
-            db,
-            scope=scope,
-            event_type="billing.opening.variance.resolved.v1",
-            payload=payload,
-        )
+    """One effect-free posting group and one AccountingFactV6 (the fact is emitted
+    as ``billing.accounting.fact.v6`` by the normal ``_post_group`` path)."""
+    _post_group(
+        session,
+        scope=scope,
+        account_id=request.account_id,
+        kind=cast(Any, request.effect_kind),
+        currency=request.currency,
+        minor_units=request.precision,
+        source_ref=f"opening-variance-event:{request.event_id}",
+        occurred_at=request.occurred_at,
+        effects=(),
+        opening_group_id=request.group_id,
+        variance_fact=request,
+    )
 
 
 def _sealed_hold_list(db: Session, *, scope: Scope) -> tuple[UUID, ...]:
@@ -6922,8 +6988,8 @@ def seal_opening_window(
                 manifest=window.manifest,
                 actor=command.authority_ref,
                 occurred_at=command.occurred_at,
-                emit=lambda kind, payload: _emit_variance_fact(
-                    session, scope=scope, kind=kind, payload=payload
+                emit=lambda request: _post_variance_fact(
+                    session, scope=scope, request=request
                 ),
             )
         seal = OpeningWindowSealV1(
@@ -8654,8 +8720,8 @@ def _import_opening_account_v2(
                 receipt_id=receipt_id,
                 actor=command.migration_authority_ref,
                 occurred_at=command.occurred_at,
-                emit=lambda kind, payload: _emit_variance_fact(
-                    session, scope=scope, kind=kind, payload=payload
+                emit=lambda request: _post_variance_fact(
+                    session, scope=scope, request=request
                 ),
             )
         if after_import is not None:
@@ -8993,6 +9059,9 @@ def reverse_opening_account_import_v2(
                 account_id=original.billing_account_id,
                 actor=command.migration_authority_ref,
                 occurred_at=command.occurred_at,
+                emit=lambda request: _post_variance_fact(
+                    session, scope=scope, request=request
+                ),
             )
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
 

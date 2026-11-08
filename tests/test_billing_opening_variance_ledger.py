@@ -300,6 +300,7 @@ def _event(session, window_id, variance, **values):
         "refs": '["checker:v"]',
         "req": uuid4(),
         "actor": "maker:v",
+        "fact": None,
     }
     base.update(values)
     session.execute(
@@ -307,9 +308,9 @@ def _event(session, window_id, variance, **values):
             "INSERT INTO mod_billing.opening_variance_events (id, tenant_id, "
             "window_id, variance_id, billing_account_id, kind, resolution_kind, "
             "amount_minor, gl_target_class, evidence_ref, maker_ref, approver_refs, "
-            "approval_request_id, actor, occurred_at) VALUES (:id, :t, :w, :v, :a, "
-            ":kind, :rk, :amount, :gl, :ev, :maker, CAST(:refs AS jsonb), :req, "
-            ":actor, now())"
+            "approval_request_id, fact_posting_group_id, actor, occurred_at) VALUES ("
+            ":id, :t, :w, :v, :a, :kind, :rk, :amount, :gl, :ev, :maker, "
+            "CAST(:refs AS jsonb), :req, :fact, :actor, now())"
         ),
         base,
     )
@@ -362,6 +363,7 @@ def test_database_enforces_maker_checker_on_every_resolution_event(scratch):
             rk="recognised",
             amount=300,
             gl="bad_debt",
+            fact=uuid4(),
             refs='["checker:other"]',
         )
 
@@ -383,6 +385,7 @@ def test_database_refuses_recognise_on_adverse_and_a_bad_gl_class(scratch):
                 rk="recognised",
                 amount=amount,
                 gl=gl,
+                fact=uuid4(),
                 req=req,
             )
         # the same resolution with a valid class on a non-adverse variance passes
@@ -395,6 +398,7 @@ def test_database_refuses_recognise_on_adverse_and_a_bad_gl_class(scratch):
             rk="recognised",
             amount=300,
             gl="bad_debt",
+            fact=uuid4(),
             req=session.execute(
                 text(
                     "SELECT approval_request_id "
@@ -743,6 +747,7 @@ def test_database_refuses_over_resolution_wrong_sign_and_wrong_kind_for_the_basi
                     row=row,
                     rk="recognised" if row is ledger else "evidence_confirmed",
                     gl="bad_debt" if row is ledger else None,
+                    fact=uuid4() if row is ledger else None,
                     ev=None if row is ledger else "evidence:1",
                     req=req,
                     **bad,

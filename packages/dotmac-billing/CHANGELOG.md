@@ -115,6 +115,13 @@ All notable changes follow Semantic Versioning.
   non-zero unapplied-credit or funding figure, or a credit/funding variance,
   is refused (`credit_transfer_unsupported`) until Gap C (ST-4b). B7 and
   B1/IssueCharge are not resolution primitives yet.
+- ST-4c: Add distinct AccountingFactV6 (`billing.accounting.fact.v6`) for ledger-lane opening-variance recorded/voided/recognised/position-corrected facts on effect-free posting groups; V1-V5 shapes, literals and bytes unchanged. Each fact sits on its own posting group of the same kind;
+  `opening_variance_recorded` and `_voided` are written by the opening principal,
+  the other two online. `opening_variance_events.fact_posting_group_id` (unique,
+  checked at commit) binds each event to its group. The voided fact links the
+  recorded one with `reverses_fact_id`; the group's `reverses_group_id` stays NULL.
+  `get_accounting_fact_v6` is the verified reader. The three
+  `billing.opening.variance.*` outbox types are dropped.
 
 ## 0.1.0a10 — released
 

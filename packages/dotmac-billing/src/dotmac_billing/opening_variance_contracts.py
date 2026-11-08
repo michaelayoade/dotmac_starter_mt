@@ -18,12 +18,14 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Final, Literal, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope
 from dotmac_kernel.fingerprints import fingerprint_of
+from dotmac_kernel.money import Money
 
+from dotmac_billing._opening_values import OpeningCashValue
 from dotmac_billing.opening_contracts import (
     OpeningEvidenceError,
     OpeningPartitionV1,
@@ -474,6 +476,147 @@ def variance_resolution_content_digest(
 
 
 # --------------------------------------------------------------------------
+# AccountingFactV6: ledger-lane variance facts (distinct family; V1-V5 unchanged)
+# --------------------------------------------------------------------------
+
+ACCOUNTING_FACT_V6_CONTRACT: Final = "billing.accounting.fact.v6"
+VARIANCE_FACT_KINDS: Final = (
+    "opening_variance_recorded",
+    "opening_variance_voided",
+    "opening_variance_recognised",
+    "opening_variance_position_corrected",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningVarianceFactBlockV1(OpeningCashValue):
+    """The variance a V6 fact is about. ``amount`` is signed: the variance for a
+    recorded or voided fact, the resolution amount for the other two."""
+
+    variance_id: UUID
+    window_id: UUID
+    event_id: UUID
+    event_seq: int
+    lane: Literal["receivable", "customer_credit", "prepaid_funding"]
+    basis: Literal["ledger_lane"]
+    reason_code: str
+    source_kind: str
+    source_ref: str
+    amount: Money
+    customer_adverse: bool
+    import_receipt_id: UUID
+    evidence_digest: str
+    rules_digest: str
+
+    def __post_init__(self) -> None:
+        OpeningCashValue.__post_init__(self)
+        policy = reason_policy(self.reason_code)
+        if (
+            policy is None
+            or policy.level != "partition"
+            or LEDGER_BASIS not in policy.bases
+            or self.lane not in policy.lanes
+            or self.source_kind not in policy.kinds
+            or self.source_kind not in SOURCE_KINDS
+            or self.event_seq < 1
+            or self.amount.amount == 0
+            or self.customer_adverse
+            != is_customer_adverse(self.lane, 1 if self.amount.amount > 0 else -1)
+            or _DIGEST64.fullmatch(self.evidence_digest) is None
+            or _DIGEST64.fullmatch(self.rules_digest) is None
+            or len(self.source_ref) > _MAX_REF
+        ):
+            raise OpeningEvidenceError("variance fact block invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningVarianceResolutionFactV1(OpeningCashValue):
+    resolution_kind: Literal["recognised", "position_corrected"]
+    resolved_state: Literal["resolved", "partially_resolved"]
+    gl_target_class: (
+        Literal["bad_debt", "revenue_adjustment", "customer_liability"] | None
+    )
+    corrected_by_posting_group_id: UUID | None
+    approval_request_id: UUID
+    maker_ref: str
+    approver_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        OpeningCashValue.__post_init__(self)
+        if (
+            len(set(self.approver_refs)) != len(self.approver_refs)
+            or not self.approver_refs
+            or self.maker_ref in self.approver_refs
+            or (self.resolution_kind == "recognised")
+            != (self.gl_target_class is not None)
+            or (self.resolution_kind == "position_corrected")
+            != (self.corrected_by_posting_group_id is not None)
+        ):
+            raise OpeningEvidenceError("variance resolution fact invalid")
+
+
+_RESOLUTION_OF_KIND: Final = {
+    "opening_variance_recognised": "recognised",
+    "opening_variance_position_corrected": "position_corrected",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingFactV6(OpeningCashValue):
+    """``billing.accounting.fact.v6``: one ledger-lane opening-variance fact on an
+    effect-free posting group whose kind equals ``effect_kind``."""
+
+    scope: Scope
+    source_system: str
+    fact_id: UUID
+    fact_version: Literal[6]
+    billing_account_id: UUID
+    posting_group_id: UUID
+    source_ref: str
+    source_authority: Literal["internal"]
+    effect_kind: Literal[
+        "opening_variance_recorded",
+        "opening_variance_voided",
+        "opening_variance_recognised",
+        "opening_variance_position_corrected",
+    ]
+    occurred_at: datetime
+    committed_at: datetime
+    variance: OpeningVarianceFactBlockV1
+    resolution: OpeningVarianceResolutionFactV1 | None
+    reverses_fact_id: UUID | None
+
+    def __post_init__(self) -> None:
+        OpeningCashValue.__post_init__(self)
+        expected = _RESOLUTION_OF_KIND.get(self.effect_kind)
+        gl = None if self.resolution is None else self.resolution.gl_target_class
+        lane_ok = True
+        if gl is not None:
+            lane_ok = (
+                gl in ("bad_debt", "revenue_adjustment")
+                if self.variance.lane == "receivable"
+                else gl == "customer_liability"
+            )
+        if (
+            self.source_system != "dotmac-billing"
+            or self.source_ref != f"opening-variance-event:{self.variance.event_id}"
+            or (self.resolution is None) != (expected is None)
+            or (
+                self.resolution is not None
+                and self.resolution.resolution_kind != expected
+            )
+            or not lane_ok
+            or (self.effect_kind == "opening_variance_voided")
+            != (self.reverses_fact_id is not None)
+            or (
+                self.effect_kind == "opening_variance_recognised"
+                and self.variance.customer_adverse
+            )
+        ):
+            raise OpeningEvidenceError("variance fact invalid")
+
+
+# --------------------------------------------------------------------------
 # Read models
 # --------------------------------------------------------------------------
 
@@ -591,6 +734,7 @@ def sum_by_basis(
 
 
 __all__ = [
+    "ACCOUNTING_FACT_V6_CONTRACT",
     "AGGREGATE_KINDS",
     "BASES",
     "EVENT_KINDS",
@@ -607,6 +751,10 @@ __all__ = [
     "SOURCE_KINDS",
     "UNEXPLAINED",
     "VARIANCE_APPROVAL_SUBJECT_TYPE",
+    "VARIANCE_FACT_KINDS",
+    "AccountingFactV6",
+    "OpeningVarianceFactBlockV1",
+    "OpeningVarianceResolutionFactV1",
     "ConfirmOpeningVarianceEvidenceV1",
     "OpeningBatchControlV1",
     "OpeningControlReportV1",
