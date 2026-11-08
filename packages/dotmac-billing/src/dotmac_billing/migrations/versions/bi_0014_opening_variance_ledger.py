@@ -580,7 +580,7 @@ def _replace_guards(platform: bool) -> None:
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
     DECLARE bound record; identity uuid; command jsonb; proof jsonb;
       actual jsonb; proposed jsonb; expected_accounts jsonb; actual_accounts jsonb;
-      held jsonb; manifest jsonb; marked jsonb; operational jsonb; carryable text[];
+      held jsonb; manifest jsonb; operational jsonb; carryable text[];
       admitted text[];
     BEGIN
       identity := mod_billing.touch_{p}opening_window({argument});
@@ -589,8 +589,6 @@ def _replace_guards(platform: bool) -> None:
       manifest := bound.evidence::jsonb->'window'->'manifest';
       held := coalesce(command->'held_account_ids', '[]'::jsonb);
       operational := coalesce(command->'operational_holds', '[]'::jsonb);
-      SELECT coalesce(jsonb_agg(DISTINCT h->'partition'->>'account_id'), '[]'::jsonb) INTO marked
-        FROM jsonb_array_elements(coalesce(manifest->'holds', '[]'::jsonb)) h;
       SELECT coalesce(array_agg(a), ARRAY[]::text[]) INTO carryable FROM mod_billing.opening_carryable_accounts(manifest) a;
       SELECT coalesce(jsonb_agg(jsonb_build_object(
           'scope', {scope_json}, 'window_id', x.window_id::text,
@@ -606,15 +604,14 @@ def _replace_guards(platform: bool) -> None:
         OR jsonb_typeof(operational) IS DISTINCT FROM 'array'
         OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(held) h GROUP BY h HAVING count(*) > 1)
         OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(held) h WHERE NOT (h = ANY(carryable)))
-        OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(marked) m WHERE NOT (held ? m))
         OR EXISTS (SELECT 1 FROM jsonb_array_elements(operational) o
-                   WHERE NOT (held ? (o->>'account_id')) OR marked ? (o->>'account_id')
+                   WHERE NOT (held ? (o->>'account_id'))
                       OR o->>'reason_code' NOT IN ('target_not_pristine','import_refused'))
         OR EXISTS (SELECT 1 FROM jsonb_array_elements(operational) o GROUP BY o->>'account_id' HAVING count(*) > 1)
         OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(held) h
-                   WHERE NOT (marked ? h) AND NOT EXISTS (
+                   WHERE NOT EXISTS (
                      SELECT 1 FROM jsonb_array_elements(operational) o WHERE o->>'account_id' = h))
-      THEN RAISE EXCEPTION 'seal hold list must be the manifest holds plus typed operational holds' USING ERRCODE = '23514'; END IF;
+      THEN RAISE EXCEPTION 'seal hold list must equal the typed operational holds' USING ERRCODE = '23514'; END IF;
       SELECT coalesce(jsonb_agg(account ORDER BY account), '[]'::jsonb) INTO expected_accounts FROM (
         SELECT c AS account FROM unnest(carryable) c WHERE NOT (held ? c)) frozen;
       SELECT coalesce(jsonb_agg(x.billing_account_id::text ORDER BY x.billing_account_id::text), '[]'::jsonb)

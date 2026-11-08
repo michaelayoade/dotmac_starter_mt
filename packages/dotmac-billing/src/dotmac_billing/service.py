@@ -8298,15 +8298,8 @@ def _import_opening_account_v2(
     fingerprint: str | None,
     admit: Callable[[Session, OpeningImportVerificationV2], object],
     after_import: Callable[[Session, OpeningImportReceiptV2], None] | None,
-    admitting_held_partition: UUID | None = None,
-    sealed_hold_list: tuple[UUID, ...] = (),
 ) -> OpeningImportReceiptV2:
-    """Shared V2 import body: the window-entry rule and the idempotency scope vary.
-
-    ``admitting_held_partition`` / ``sealed_hold_list`` are set only by the
-    post-seal admit path, which has already proved the partition is on the
-    sealed hold list; they remove exactly ``partition_held``.
-    """
+    """Shared V2 import body: the window-entry rule and the idempotency scope vary."""
     if type(command) is not ImportOpeningAccountV2:
         raise BillingRuleViolation(
             "opening_command_invalid", "expected ImportOpeningAccountV2"
@@ -8323,11 +8316,7 @@ def _import_opening_account_v2(
             "opening_authority_binding",
             "trusted V2 qualification must bind this complete command",
         )
-    blockers = opening_account_import_blockers_v2(
-        command,
-        admitting_held_partition=admitting_held_partition,
-        sealed_hold_list=sealed_hold_list,
-    )
+    blockers = opening_account_import_blockers_v2(command)
     if blockers:
         raise BillingRuleViolation(
             "opening_manifest_blocked",
@@ -8721,8 +8710,6 @@ def admit_held_opening_account_v2(
         fingerprint=fingerprint,
         admit=admit,
         after_import=record,
-        admitting_held_partition=imported.partition.account_id,
-        sealed_hold_list=_sealed_hold_list(db, scope=scope),
     )
 
 

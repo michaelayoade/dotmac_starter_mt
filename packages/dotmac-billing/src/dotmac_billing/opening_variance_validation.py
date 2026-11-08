@@ -98,21 +98,17 @@ def check_variances(
     for part in partitions:
         if part not in measures:
             block(part, "partition_measures_missing", part.source_account_key)
-    held: set[OpeningPartitionV1] = set()
-    for hold in manifest.holds:
-        if hold.partition not in partitions:
-            block(
-                hold.partition,
-                "partition_hold_unknown",
-                hold.partition.source_account_key,
-            )
-        elif hold.partition in held:
-            block(
-                hold.partition,
-                "partition_hold_duplicate",
-                hold.partition.source_account_key,
-            )
-        held.add(hold.partition)
+    for d in manifest.dispositions:
+        if d.disposition == "blocking" or d.reason.startswith("held:"):
+            block(d.partition, "manifest_noncarryable_row", d.identity.key)
+    for part, m in measures.items():
+        if getattr(m, "non_carryable_rows", 0) != 0:
+            block(part, "manifest_noncarryable_row", part.source_account_key)
+    if manifest.cash_lots:
+        # T_credit is undefined until ST-4b: imported lots plus a
+        # lane_not_transferred variance would carry the same credit twice.
+        for lot in manifest.cash_lots:
+            block(lot.partition, "credit_transfer_unsupported", lot.lot_id)
 
     # ---- variance structure ----------------------------------------------
     population = set(manifest.population)

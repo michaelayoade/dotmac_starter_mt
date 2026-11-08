@@ -42,7 +42,6 @@ from dotmac_billing.opening_contracts import (
 )
 from dotmac_billing.opening_variance_contracts import (
     OpeningBatchControlV1,
-    OpeningPartitionHoldV1,
     OpeningPartitionMeasuresV1,
     OpeningVarianceV1,
 )
@@ -181,7 +180,6 @@ class OpeningManifestV2(OpeningCashValue):
     # (#973 Finding-5 precedent); a missing measures row is a counted blocker.
     measures: tuple[OpeningPartitionMeasuresV1, ...] = ()
     variances: tuple[OpeningVarianceV1, ...] = ()
-    holds: tuple[OpeningPartitionHoldV1, ...] = ()
     batch_controls: tuple[OpeningBatchControlV1, ...] = ()
 
 

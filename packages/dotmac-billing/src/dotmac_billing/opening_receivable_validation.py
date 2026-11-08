@@ -227,9 +227,6 @@ class _ReceivableManifestAnalysis:
             ),
             honor_held_marker=False,
         )
-        # The hold is a partition-level, digest-bound manifest record, never an
-        # overloaded invoice disposition reason.
-        self.cash.held_partitions.update(h.partition for h in manifest.holds)
         self.cited_keys = variance_citations(manifest)
         self.failures: dict[str, list[str]] = {}
         # The same findings, keyed by the partition they are about (None: the
@@ -690,61 +687,38 @@ def _freeze(failures: dict[str, list[str]]) -> tuple[OpeningBlockerV1, ...]:
     )
 
 
-def opening_manifest_hold_accounts(manifest: OpeningManifestV2) -> frozenset[UUID]:
-    """Accounts the manifest itself marks held (partition-level hold records)."""
-    return frozenset(h.partition.account_id for h in manifest.holds)
-
-
 def require_hold_list_covers_manifest(
     manifest: OpeningManifestV2,
     held_account_ids: Collection[UUID],
     operational_holds: Collection[OpeningOperationalHoldV1] = (),
 ) -> None:
-    """The sealed hold list is exactly: marked partitions + typed operational holds.
+    """The sealed hold list equals the typed operational holds exactly.
 
-    * no duplicates; every manifest-marked partition is listed (otherwise it is
-      neither imported nor held);
-    * every other listed partition carries a typed operational reason, one each,
-      and an operational reason never names a marked or an unlisted account;
-    * every listed partition is carryable (``T != 0`` or any variance).
+    Partitions without an authoritative lane figure never enter the manifest
+    (routed to governed correction), so there is no manifest-marked hold. Every
+    listed account carries one typed operational reason, and is carryable.
     """
     listed = set(held_account_ids)
-    marked = opening_manifest_hold_accounts(manifest)
     operational = [h.account_id for h in operational_holds]
     if (
         len(listed) != len(held_account_ids)
         or len(set(operational)) != len(operational)
-        or not marked <= listed
-        or set(operational) & marked
-        or listed != marked | set(operational)
+        or listed != set(operational)
         or not listed <= carryable_accounts(manifest)
     ):
         raise OpeningEvidenceError(
-            "sealed hold list must be the marked partitions plus operational holds"
+            "sealed hold list must equal the typed operational holds"
         )
 
 
 def opening_account_import_blockers_v2(
     command: ImportOpeningAccountV2,
     *,
-    admitting_held_partition: UUID | None = None,
-    sealed_hold_list: Collection[UUID] = (),
     _analysis: _ReceivableManifestAnalysis | None = None,
 ) -> tuple[OpeningBlockerV1, ...]:
-    """Validate the complete manifest, including partitions not selected here.
-
-    ``admitting_held_partition`` is the post-seal admit path only: it removes
-    exactly ``partition_held``, and only for that one partition, and only when
-    the account is on the sealed hold list. Every other blocker still applies.
-    """
+    """Validate the complete manifest, including partitions not selected here."""
     analysis = _analysis if _analysis is not None else _analysis_of(command.manifest)
-    merged = _blockers_from(analysis, command)
-    account = command.partition.account_id
-    if admitting_held_partition is not None and (
-        admitting_held_partition == account and account in set(sealed_hold_list)
-    ):
-        merged.pop("partition_held", None)
-    return _freeze(merged)
+    return _freeze(_blockers_from(analysis, command))
 
 
 def _verification_blockers(

@@ -63,8 +63,6 @@ EVENT_KINDS: Final = (
     "voided_by_import_reversal",
 )
 GL_TARGET_CLASSES: Final = ("bad_debt", "revenue_adjustment", "customer_liability")
-#: Partition-level holds recorded in the manifest (digest-bound, typed).
-HOLD_REASONS: Final = frozenset({"lane_authority_unestablished"})
 #: Typed reasons a sealing operator may give for listing an UNMARKED partition.
 OPERATIONAL_HOLD_REASONS: Final = frozenset({"target_not_pristine", "import_refused"})
 ITEM_NOT_TRANSFERRED_CODES: Final = frozenset(
@@ -306,23 +304,6 @@ class OpeningBatchControlV1(_ClosedEvidence):
     basis: str
     source_minor: int
     rows: tuple[OpeningSourceIdentityV1, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class OpeningPartitionHoldV1(_ClosedEvidence):
-    """Digest-bound partition hold: content stays complete, import waits for B-4."""
-
-    partition: OpeningPartitionV1
-    reason_code: str
-    evidence_digest: str
-
-    def __post_init__(self) -> None:
-        _ClosedEvidence.__post_init__(self)
-        if (
-            self.reason_code not in HOLD_REASONS
-            or _DIGEST64.fullmatch(self.evidence_digest) is None
-        ):
-            raise OpeningEvidenceError("partition hold reason or digest invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -574,7 +555,6 @@ __all__ = [
     "BASES",
     "EVENT_KINDS",
     "GL_TARGET_CLASSES",
-    "HOLD_REASONS",
     "ITEM_NOT_TRANSFERRED_CODES",
     "LANES",
     "LEDGER_BASIS",
@@ -591,7 +571,6 @@ __all__ = [
     "OpeningControlReportV1",
     "OpeningControlRowV1",
     "OpeningOperationalHoldV1",
-    "OpeningPartitionHoldV1",
     "OpeningPartitionMeasuresV1",
     "OpeningVarianceApprovalPort",
     "OpeningVarianceApprovalV1",
