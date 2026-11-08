@@ -344,6 +344,11 @@ def _guards(platform: bool) -> None:
     r_scope = "" if platform else " AND r.tenant_id = tenant"
     e_scope = "" if platform else " AND e.tenant_id = tenant"
     u_scope = "" if platform else " AND u.tenant_id = tenant"
+    scope_json = (
+        "'{}'::jsonb"
+        if platform
+        else "jsonb_build_object('tenant_id', NEW.tenant_id::text)"
+    )
     s_new = "" if platform else " AND s.tenant_id = NEW.tenant_id"
     op.execute(f"""
     CREATE FUNCTION mod_billing.guard_{p}opening_variance() RETURNS trigger
@@ -547,7 +552,7 @@ def _guards(platform: bool) -> None:
       SELECT * INTO g FROM mod_billing.{p}posting_groups x WHERE x.id = NEW.posting_group_id{new_scope};
       IF g.id IS NULL OR g.group_kind NOT IN ('opening_variance_recorded','opening_variance_voided',
           'opening_variance_recognised','opening_variance_position_corrected') THEN
-        IF NEW.fact_version = 6 OR NEW.effect_kind LIKE 'opening_variance_%' THEN
+        IF NEW.fact_version = 6 OR left(NEW.effect_kind, 17) = 'opening_variance_' THEN
           RAISE EXCEPTION 'a V6 variance fact needs a variance posting group' USING ERRCODE = '23514'; END IF;
         RETURN NEW;
       END IF;
@@ -563,6 +568,10 @@ def _guards(platform: bool) -> None:
         OR payload->>'posting_group_id' IS DISTINCT FROM g.id::text
         OR payload->>'billing_account_id' IS DISTINCT FROM g.billing_account_id::text
         OR payload->>'effect_kind' IS DISTINCT FROM g.group_kind
+        OR payload->>'fact_version' IS DISTINCT FROM '6'
+        OR (payload->'variance'->>'customer_adverse')::boolean IS DISTINCT FROM
+           (CASE WHEN v.lane = 'receivable' THEN want_minor < 0 ELSE want_minor > 0 END)
+        OR payload->'scope' IS DISTINCT FROM {scope_json}
         OR payload->>'source_ref' IS DISTINCT FROM 'opening-variance-event:' || e.id::text
         OR payload->'variance'->>'event_id' IS DISTINCT FROM e.id::text
         OR payload->'variance'->>'event_seq' IS DISTINCT FROM e.seq::text

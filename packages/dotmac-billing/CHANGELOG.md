@@ -109,13 +109,15 @@ All notable changes follow Semantic Versioning.
   references cannot be reversed (`variance_resolution_locked`).
   Breaking: `OpeningManifestV2` gains `measures`, `variances` and
   `batch_controls` in place, so its shape and fingerprint change in a11 and an
-  a10-produced manifest is refused (`partition_measures_missing`); the opening
+  a10-produced manifest is refused (`partition_measures_missing`). A V5 fact
+  embeds the whole V2 manifest, so V5 payload bytes for new imports differ from
+  a10 (no V5 fact exists anywhere: zero opening import receipts); the opening
   has never run (zero rows in the opening tables on Sub production and staging).
   A partition with cash lots keeps its credit under the cash control: a
   non-zero unapplied-credit or funding figure, or a credit/funding variance,
   is refused (`credit_transfer_unsupported`) until Gap C (ST-4b). B7 and
   B1/IssueCharge are not resolution primitives yet.
-- ST-4c: Add distinct AccountingFactV6 (`billing.accounting.fact.v6`) for ledger-lane opening-variance recorded/voided/recognised/position-corrected facts on effect-free posting groups; V1-V5 shapes, literals and bytes unchanged. Each fact sits on its own posting group of the same kind;
+- ST-4c: Add distinct AccountingFactV6 (`billing.accounting.fact.v6`) for ledger-lane opening-variance recorded/voided/recognised/position-corrected facts on effect-free posting groups; V1-V5 classes and literals unchanged; V5 payload carries the a11 manifest. Each fact sits on its own posting group of the same kind;
   `opening_variance_recorded` and `_voided` are written by the opening principal,
   the other two online. `opening_variance_events.fact_posting_group_id` (unique,
   checked at commit) binds each event to its group. The voided fact links the

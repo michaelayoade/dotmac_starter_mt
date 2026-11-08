@@ -1,6 +1,7 @@
 """AccountingFactV6 (ledger-lane opening-variance facts): contract and V5 freeze.
 
-V6 is a distinct family. V1-V5 shapes, literals and bytes do not change.
+V6 is a distinct family. V1-V5 classes and literals do not change; the V5 payload
+carries the a11 manifest.
 """
 
 from __future__ import annotations
@@ -231,8 +232,9 @@ def test_the_frozen_replace_keeps_the_closed_checks() -> None:
 
 
 def test_a_real_v5_fact_keeps_its_exact_bytes() -> None:
-    """The a10 'bytes unchanged' guarantee: a V5 fact written by the importer is
-    decoded and re-serialised to the identical payload and pinned digest."""
+    """Pins V5 bytes from a11 onward: a V5 fact written by the importer is decoded
+    and re-serialised to the identical payload and pinned digest. (V5 embeds the
+    a11 V2 manifest, so this is a regression pin, not proof of a10 bytes.)"""
     import json
     from pathlib import Path
 
