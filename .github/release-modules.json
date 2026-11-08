@@ -507,7 +507,11 @@
           "dotmac_billing/opening_admissibility.py",
           "dotmac_billing/migrations/versions/bi_0013_opening_hold_admission.py",
           "dotmac_billing/opening_hold_contracts.py",
-          "dotmac_billing/opening_lane.py"
+          "dotmac_billing/opening_lane.py",
+          "dotmac_billing/migrations/versions/bi_0014_opening_variance_ledger.py",
+          "dotmac_billing/opening_variance_contracts.py",
+          "dotmac_billing/opening_variance_validation.py",
+          "dotmac_billing/opening_variance.py"
         ],
         "forbidden_prefixes": [
           "app/",

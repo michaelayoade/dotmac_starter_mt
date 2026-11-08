@@ -44,6 +44,7 @@ from dotmac_billing.opening_receivable_validation import (
 from dotmac_kernel.money import Currency, Money
 
 from tests.unit import test_billing_opening_manifest as cash
+from tests import billing_opening_variance_fixtures as variance_fixture
 
 NOW = cash.NOW
 
@@ -257,6 +258,7 @@ def _candidate():
         tuple(lots),
         tuple(items),
     )
+    manifest = variance_fixture.with_exact_measures(manifest)
     return ImportOpeningAccountV2(
         base.manifest.scope,
         manifest,
@@ -544,6 +546,7 @@ def test_shared_payment_is_one_cash_source_with_two_exact_invoice_components():
         dispositions=dispositions,
         counts=OpeningPopulationCountsV1(3, 3, 0, 0),
     )
+    manifest = variance_fixture.with_exact_measures(manifest)
     positive = preview_opening_account_import_v2(
         replace(cmd, manifest=manifest), verifier=TrustedVerifier()
     )

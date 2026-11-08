@@ -83,11 +83,15 @@ class _CashManifestAnalysis:
         "cash_totals",
         "controls_by_partition",
         "eligible_by_partition",
+        "_honor_held_marker",
         "_fingerprint",
     )
 
-    def __init__(self, manifest: OpeningManifestV1) -> None:
+    def __init__(
+        self, manifest: OpeningManifestV1, *, honor_held_marker: bool = True
+    ) -> None:
         self.manifest = manifest
+        self._honor_held_marker = honor_held_marker
         self._fingerprint: str | None = None
         self.failures: dict[str, list[str]] = {}
         self.attributed: dict[OpeningPartitionV1 | None, dict[str, list[str]]] = {}
@@ -192,7 +196,9 @@ class _CashManifestAnalysis:
             if item.disposition == "excluded" and item.residual_minor != 0:
                 block("excluded_nonzero_residue", item.identity.key)
             if item.disposition == "blocking":
-                if item.reason.startswith(HELD_REASON_PREFIX):
+                if self._honor_held_marker and item.reason.startswith(
+                    HELD_REASON_PREFIX
+                ):
                     # A digest-bound hold marker: the partition stays in the
                     # frozen manifest but cannot be imported before the seal.
                     held_partitions.add(item.partition)

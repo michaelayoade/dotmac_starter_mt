@@ -97,6 +97,9 @@ def test_billing_declares_exactly_the_events_its_module_emits() -> None:
             "billing.settlement.accepted.v1",
             "billing.settlement.earmarked.v1",
             "billing.settlement.earmark.changed.v1",
+            "billing.opening.variance.recorded.v1",
+            "billing.opening.variance.recognised.v1",
+            "billing.opening.variance.resolved.v1",
         }
     )
 

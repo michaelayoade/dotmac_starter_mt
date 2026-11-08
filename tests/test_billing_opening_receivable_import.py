@@ -150,6 +150,9 @@ def _command(session, scope, account_id):
         ),
         receivables=items,
         cash_lots=lots,
+        measures=tuple(
+            replace(value, partition=partition) for value in cmd.manifest.measures
+        ),
     )
     return replace(
         cmd, scope=scope, partition=partition, target=target, manifest=manifest

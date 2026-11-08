@@ -102,6 +102,7 @@ def _two_partitions(session, scope):
         controls=first.manifest.controls + second.manifest.controls,
         receivables=first.manifest.receivables + second.manifest.receivables,
         cash_lots=first.manifest.cash_lots + second.manifest.cash_lots,
+        measures=first.manifest.measures + second.manifest.measures,
         counts=replace(
             first.manifest.counts,
             **{

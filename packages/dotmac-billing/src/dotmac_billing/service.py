@@ -202,6 +202,23 @@ from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
 )
+from dotmac_billing.opening_variance import (
+    record_batch_variances,
+    record_partition_variances,
+    resolve_variance,
+    void_partition_variances,
+)
+from dotmac_billing.opening_variance_contracts import (
+    VARIANCE_APPROVAL_SUBJECT_TYPE,
+    ConfirmOpeningVarianceEvidenceV1,
+    OpeningVarianceApprovalPort,
+    OpeningVarianceApprovalV1,
+    OpeningVarianceResolutionRefV1,
+    RecogniseOpeningVarianceV1,
+    variance_approval_subject_id,
+    variance_resolution_content_digest,
+)
+from dotmac_billing.opening_variance_validation import carryable_accounts
 from dotmac_billing.opening_window_contracts import (
     OpeningAuthoritySwitchContextV1,
     OpeningAuthoritySwitchParticipant,
@@ -3599,6 +3616,14 @@ def issue_credit_note(
             state="issued",
             correlation_id=command.correlation_id,
         )
+        if command.resolves_variance_ref is not None:
+            _resolve_by_posting_group(
+                session,
+                scope=scope,
+                ref=command.resolves_variance_ref,
+                group_id=group.id,
+                occurred_at=command.occurred_at,
+            )
         return {"document_id": str(document_id), "posting_group_id": str(group.id)}
 
     outcome = _idempotent(
@@ -4404,7 +4429,7 @@ def grant_non_cash_credit(
                     non_cash_effects += (applied,)
                     ar_effects = ((EffectLane.RECEIVABLE, -amount),)
                     documents = (invoice.id,)
-        _post_group(
+        grant_group = _post_group(
             session,
             scope=scope,
             account_id=account.id,
@@ -4419,6 +4444,14 @@ def grant_non_cash_credit(
             non_cash_effects=non_cash_effects,
             non_cash_request_digest=digest,
         )
+        if command.resolves_variance_ref is not None:
+            _resolve_by_posting_group(
+                session,
+                scope=scope,
+                ref=command.resolves_variance_ref,
+                group_id=grant_group.id,
+                occurred_at=command.occurred_at,
+            )
         return {"grant_id": str(grant.grant_id)}
 
     outcome = _idempotent(
@@ -6432,6 +6465,237 @@ def _admit_opening_window(
     return window
 
 
+def _resolve_by_posting_group(
+    session: Session,
+    *,
+    scope: Scope,
+    ref: OpeningVarianceResolutionRefV1,
+    group_id: UUID,
+    occurred_at: datetime,
+) -> None:
+    """A governed primitive resolves one variance in its own transaction.
+
+    The database requires a posting group of the same account, currency and
+    lane whose effect equals the amount; anything else rolls the primitive back.
+    """
+    resolve_variance(
+        session,
+        scope=scope,
+        variance_id=ref.variance_id,
+        resolution_kind="position_corrected",
+        amount_minor=ref.amount_minor,
+        approval_ref=ref.approval_ref,
+        actor=ref.actor,
+        occurred_at=occurred_at,
+        posting_group_id=group_id,
+        emit=lambda kind, payload: _emit_variance_fact(
+            session, scope=scope, kind=kind, payload=payload
+        ),
+    )
+
+
+def _require_variance_approval(
+    db: Session,
+    *,
+    scope: Scope,
+    approvals: OpeningVarianceApprovalPort | None,
+    request_id: UUID,
+    variance_id: UUID,
+    content_digest: str,
+    maker_ref: str,
+) -> OpeningVarianceApprovalV1:
+    if approvals is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted approvals port is required"
+        )
+    try:
+        held = approvals.hold_approval(
+            db,
+            scope=scope,
+            request_id=request_id,
+            subject_type=VARIANCE_APPROVAL_SUBJECT_TYPE,
+            subject_id=variance_approval_subject_id(variance_id),
+            content_digest=content_digest,
+        )
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "approval qualification unavailable"
+        ) from exc
+    if (
+        type(held) is not OpeningVarianceApprovalV1
+        or held.request_id != request_id
+        or held.subject_type != VARIANCE_APPROVAL_SUBJECT_TYPE
+        or held.subject_id != variance_approval_subject_id(variance_id)
+        or held.content_digest != content_digest
+    ):
+        raise BillingRuleViolation(
+            "opening_variance_approval_binding",
+            "approval does not bind this variance, kind and amount",
+        )
+    checkers = held.approver_refs
+    if (
+        not checkers
+        or len(set(checkers)) != len(checkers)
+        or held.requester_ref != maker_ref
+        or maker_ref in checkers
+    ):
+        raise BillingRuleViolation(
+            "opening_variance_maker_checker",
+            "maker must be the requester and may not be a checker",
+        )
+    return held
+
+
+def recognise_opening_variance(
+    db: Session,
+    *,
+    scope: Scope,
+    command: RecogniseOpeningVarianceV1,
+    approvals: OpeningVarianceApprovalPort | None = None,
+) -> str:
+    """W-V2 (DV-4): recognise a ledger-lane variance; no customer effect.
+
+    Emits ``opening_variance_recognised`` with a GL target class; the posting
+    package moves the amount out of suspense. Returns ``resolved`` or
+    ``partially_resolved``. The database refuses it on a memo basis.
+    """
+    if type(command) is not RecogniseOpeningVarianceV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected RecogniseOpeningVarianceV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    digest = variance_resolution_content_digest(
+        kind="recognised",
+        variance_id=command.variance_id,
+        amount_minor=command.amount_minor,
+        detail=command.gl_target_class,
+        maker_ref=command.maker_ref,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        held = _require_variance_approval(
+            session,
+            scope=scope,
+            approvals=approvals,
+            request_id=command.approval_request_id,
+            variance_id=command.variance_id,
+            content_digest=digest,
+            maker_ref=command.maker_ref,
+        )
+        outcome = resolve_variance(
+            session,
+            scope=scope,
+            variance_id=command.variance_id,
+            resolution_kind="recognised",
+            amount_minor=command.amount_minor,
+            approval_ref=str(held.request_id),
+            actor=command.maker_ref,
+            occurred_at=command.occurred_at,
+            gl_target_class=command.gl_target_class,
+            emit=lambda kind, payload: _emit_variance_fact(
+                session, scope=scope, kind=kind, payload=payload
+            ),
+        )
+        return {"state": outcome}
+
+    result = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.variance.recognise.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return str(result.result["state"])
+
+
+def confirm_opening_variance_evidence(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ConfirmOpeningVarianceEvidenceV1,
+    approvals: OpeningVarianceApprovalPort | None = None,
+) -> str:
+    """Memo bases only: record the evidence that the authoritative measure stands."""
+    if type(command) is not ConfirmOpeningVarianceEvidenceV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected ConfirmOpeningVarianceEvidenceV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    digest = variance_resolution_content_digest(
+        kind="evidence_confirmed",
+        variance_id=command.variance_id,
+        amount_minor=command.amount_minor,
+        detail=command.evidence_ref,
+        maker_ref=command.maker_ref,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        held = _require_variance_approval(
+            session,
+            scope=scope,
+            approvals=approvals,
+            request_id=command.approval_request_id,
+            variance_id=command.variance_id,
+            content_digest=digest,
+            maker_ref=command.maker_ref,
+        )
+        outcome = resolve_variance(
+            session,
+            scope=scope,
+            variance_id=command.variance_id,
+            resolution_kind="evidence_confirmed",
+            amount_minor=command.amount_minor,
+            approval_ref=str(held.request_id),
+            actor=command.maker_ref,
+            occurred_at=command.occurred_at,
+            evidence_ref=command.evidence_ref,
+        )
+        return {"state": outcome}
+
+    result = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.variance.confirm_evidence.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return str(result.result["state"])
+
+
+def _emit_variance_fact(
+    db: Session, *, scope: Scope, kind: str, payload: dict[str, object]
+) -> None:
+    """Ordered ledger-lane variance facts (outbox; S15 maps them, D-6 queues)."""
+    if kind == "recorded":
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.opening.variance.recorded.v1",
+            payload=payload,
+        )
+    elif kind == "recognised":
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.opening.variance.recognised.v1",
+            payload=payload,
+        )
+    else:
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.opening.variance.resolved.v1",
+            payload=payload,
+        )
+
+
+def _sealed_hold_list(db: Session, *, scope: Scope) -> tuple[UUID, ...]:
+    seal = get_opening_window_seal(db, scope=scope)
+    return () if seal is None else seal.command.held_account_ids
+
+
 def seal_opening_window(
     db: Session,
     *,
@@ -6504,14 +6768,15 @@ def seal_opening_window(
         # Only fresh evidence observed under the physical custody lock seals.
         verified = qualify()
         actual = get_opening_window_admissions(session, scope=scope)
-        positive = {
-            item.partition.account_id
-            for item in (
-                *window.manifest.cash_lots,
-                *getattr(window.manifest, "receivables", ()),
-            )
-            if item.residual_minor > 0
-        }
+        if isinstance(window.manifest, OpeningManifestV2):
+            # One carryable definition: T != 0 or any variance on the partition.
+            positive = set(carryable_accounts(window.manifest))
+        else:
+            positive = {
+                item.partition.account_id
+                for item in window.manifest.cash_lots
+                if item.residual_minor > 0
+            }
         held = set(command.held_account_ids)
         if not held <= positive:
             raise BillingRuleViolation(
@@ -6521,13 +6786,20 @@ def seal_opening_window(
         if isinstance(window.manifest, OpeningManifestV2):
             try:
                 require_hold_list_covers_manifest(
-                    window.manifest, command.held_account_ids
+                    window.manifest,
+                    command.held_account_ids,
+                    command.operational_holds,
                 )
             except OpeningEvidenceError as exc:
                 raise BillingRuleViolation(
                     "opening_hold_list_invalid",
-                    "sealed hold list must cover every held-marked partition once",
+                    "sealed hold list must be the manifest holds plus typed "
+                    "operational holds",
                 ) from exc
+        elif command.operational_holds:
+            raise BillingRuleViolation(
+                "opening_hold_list_invalid", "operational holds need a V2 manifest"
+            )
         expected = positive - held
         if {item.billing_account_id for item in actual} != expected or len(
             actual
@@ -6542,6 +6814,18 @@ def seal_opening_window(
         ):
             raise BillingRuleViolation(
                 "opening_window_population", "complete local admissions differ"
+            )
+        if isinstance(window.manifest, OpeningManifestV2):
+            record_batch_variances(
+                session,
+                scope=scope,
+                window_id=window.window_id,
+                manifest=window.manifest,
+                actor=command.authority_ref,
+                occurred_at=command.occurred_at,
+                emit=lambda kind, payload: _emit_variance_fact(
+                    session, scope=scope, kind=kind, payload=payload
+                ),
             )
         seal = OpeningWindowSealV1(
             command, verified, population_digest, len(actual), datetime.now(UTC)
@@ -8014,8 +8298,15 @@ def _import_opening_account_v2(
     fingerprint: str | None,
     admit: Callable[[Session, OpeningImportVerificationV2], object],
     after_import: Callable[[Session, OpeningImportReceiptV2], None] | None,
+    admitting_held_partition: UUID | None = None,
+    sealed_hold_list: tuple[UUID, ...] = (),
 ) -> OpeningImportReceiptV2:
-    """Shared V2 import body: the window-entry rule and the idempotency scope vary."""
+    """Shared V2 import body: the window-entry rule and the idempotency scope vary.
+
+    ``admitting_held_partition`` / ``sealed_hold_list`` are set only by the
+    post-seal admit path, which has already proved the partition is on the
+    sealed hold list; they remove exactly ``partition_held``.
+    """
     if type(command) is not ImportOpeningAccountV2:
         raise BillingRuleViolation(
             "opening_command_invalid", "expected ImportOpeningAccountV2"
@@ -8032,7 +8323,11 @@ def _import_opening_account_v2(
             "opening_authority_binding",
             "trusted V2 qualification must bind this complete command",
         )
-    blockers = opening_account_import_blockers_v2(command)
+    blockers = opening_account_import_blockers_v2(
+        command,
+        admitting_held_partition=admitting_held_partition,
+        sealed_hold_list=sealed_hold_list,
+    )
     if blockers:
         raise BillingRuleViolation(
             "opening_manifest_blocked",
@@ -8049,10 +8344,17 @@ def _import_opening_account_v2(
         sum(x.residual_minor for x in sources),
         sum(x.residual_minor for x in items),
     )
-    if cash_minor < 0 or ar_minor < 0 or cash_minor + ar_minor <= 0:
+    partition_variances = tuple(
+        v for v in command.manifest.variances if v.partition == command.partition
+    )
+    if (
+        cash_minor < 0
+        or ar_minor < 0
+        or (cash_minor + ar_minor == 0 and not partition_variances)
+    ):
         raise BillingRuleViolation(
             "opening_partition_nonpositive",
-            "selected complete partition must recognize positive backing",
+            "selected complete partition must carry value (T != 0) or a variance",
         )
     amount = money_from_minor(
         cash_minor, command.partition.currency, command.partition.precision
@@ -8253,6 +8555,21 @@ def _import_opening_account_v2(
             opening_effects=opening,
             opening_bases=tuple(bases),
         )
+        window = get_opening_window(session, scope=scope)
+        if window is not None:
+            record_partition_variances(
+                session,
+                scope=scope,
+                window_id=window.window_id,
+                manifest=command.manifest,
+                partition=command.partition,
+                receipt_id=receipt_id,
+                actor=command.migration_authority_ref,
+                occurred_at=command.occurred_at,
+                emit=lambda kind, payload: _emit_variance_fact(
+                    session, scope=scope, kind=kind, payload=payload
+                ),
+            )
         if after_import is not None:
             after_import(session, receipt)
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
@@ -8404,6 +8721,8 @@ def admit_held_opening_account_v2(
         fingerprint=fingerprint,
         admit=admit,
         after_import=record,
+        admitting_held_partition=imported.partition.account_id,
+        sealed_hold_list=_sealed_hold_list(db, scope=scope),
     )
 
 
@@ -8579,6 +8898,16 @@ def reverse_opening_account_import_v2(
             opening_effects=opening,
             corrects_posting_group_id=original.posting_group_id,
         )
+        window = get_opening_window(session, scope=scope)
+        if window is not None and get_opening_window_seal(session, scope=scope) is None:
+            void_partition_variances(
+                session,
+                scope=scope,
+                window_id=window.window_id,
+                account_id=original.billing_account_id,
+                actor=command.migration_authority_ref,
+                occurred_at=command.occurred_at,
+            )
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
 
     outcome = _idempotent(
