@@ -812,6 +812,22 @@ Union of every brand field found in any repo. Cells: how that repo sources it.
 | 7 | slug / portal identifier | `Tenant.slug` (tenancy, not brand) | DB `Organization.slug` (careers portal) | — |
 | 8 | brand provenance (`source_scope`) | — | — | `ResolvedBrand.source_scope` / `source_scope_id` |
 
+### N4 approved tagline addition (source preparation, 2026-11-08)
+
+The approved module change carries optional profile tagline data (maximum 255
+characters) as DISPLAY and LOCKABLE, not IDENTITY. `ProfileFields(None)` remains
+no-update; explicit clear stores SQL NULL. Resolution treats only the exact
+empty string as absent and preserves spaces. The module owns this data and its
+existing per-field precedence/source attribution/locks; the assembly renders
+it. The qualifying Sub implementation is pinned to
+`dotmac_sub-n1-20261106` commit
+`e449653a53e04a720d59f896e131e8feb258259c`: `app/models/branding.py:57`
+uses nullable `String(255)`, `app/schemas/branding.py:14` limits it to 255,
+and `app/services/brand_profiles.py:167-171,248-282` establishes existing
+resolver and upsert behavior. Consumer adoption is unchanged and waits for a
+released module; the platform host binding is part of the authorized flip.
+This is source preparation, not publication or operational proof.
+
 ## 2.2 Imagery
 
 | # | Field | starter | ERP | Sub |

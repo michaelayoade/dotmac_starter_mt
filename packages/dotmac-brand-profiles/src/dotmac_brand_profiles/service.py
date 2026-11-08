@@ -53,10 +53,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from dotmac_kernel.audit import write_platform_audit_event
+from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.idempotency import execute_once, execute_once_platform
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -142,6 +143,7 @@ def _values_of(row: BrandProfile | PlatformBrandProfile) -> dict[str, Any]:
         field: getattr(row, field)
         for field in sorted(LOCKABLE_FIELDS)
         if getattr(row, field, None) is not None
+        and not (field == "tagline" and getattr(row, field) == "")
     }
 
 
@@ -150,6 +152,35 @@ def _require_lockable(fields: Sequence[str]) -> tuple[str, ...]:
     if unknown:
         raise UnknownLockedFieldError(unknown)
     return tuple(sorted(set(fields)))
+
+
+def _prepare_fields(
+    fields: ProfileFields, clear_fields: tuple[Literal["tagline"], ...]
+) -> dict[str, Any]:
+    """Validate the entire edit before entering the idempotency ledger.
+
+    Explicit clearing removes an override; it does not suppress inheritance.
+    Text is retained exactly, including empty strings and whitespace.
+    """
+    if not isinstance(clear_fields, tuple) or any(
+        field != "tagline" for field in clear_fields
+    ):
+        raise ProfileRefusedError("clear_fields may only name tagline")
+    if len(clear_fields) != len(set(clear_fields)):
+        raise ProfileRefusedError("clear_fields cannot contain duplicate names")
+    payload = fields.as_dict()
+    if "tagline" in payload:
+        tagline = payload["tagline"]
+        if not isinstance(tagline, str) or len(tagline) > 255:
+            raise ProfileRefusedError(
+                "tagline must be a string of at most 255 characters"
+            )
+        if "tagline" in clear_fields:
+            raise ProfileRefusedError("tagline cannot be set and cleared together")
+    validate_brand_values(payload)
+    for field in clear_fields:
+        payload[field] = None
+    return payload
 
 
 def resolve(
@@ -208,6 +239,7 @@ class UpsertTenantProfileCommand:
     fields: ProfileFields
     scope_id: UUID | None = None
     lock: Sequence[str] = ()
+    clear_fields: tuple[Literal["tagline"], ...] = ()
 
 
 def upsert_tenant_profile(db: Session, command: UpsertTenantProfileCommand) -> UUID:
@@ -218,10 +250,7 @@ def upsert_tenant_profile(db: Session, command: UpsertTenantProfileCommand) -> U
     front of customers the moment someone opened the form.
     """
     locks = _require_lockable(tuple(command.lock))
-    payload = command.fields.as_dict()
-    # Fail where the value was entered, not when a page renders. Uses
-    # dotmac-ui's own parser through the published surface.
-    validate_brand_values(payload)
+    payload = _prepare_fields(command.fields, command.clear_fields)
 
     def handler(session: Session) -> Mapping[str, object]:
         row = session.execute(
@@ -259,6 +288,17 @@ def upsert_tenant_profile(db: Session, command: UpsertTenantProfileCommand) -> U
         scope=SCOPE_UPSERT_TENANT,
         key=command.command_id,
         operation=handler,
+        fingerprint=fingerprint_of(
+            {
+                "tenant_id": command.tenant_id,
+                "scope_type": command.scope_type,
+                "scope_id": command.scope_id,
+                "profile_code": command.profile_code,
+                "fields": payload,
+                "lock": locks,
+                "clear_fields": command.clear_fields,
+            }
+        ),
     )
     return UUID(str(outcome.result["id"]))
 
@@ -327,15 +367,13 @@ class UpsertPlatformProfileCommand:
     fields: ProfileFields
     lock: Sequence[str] = ()
     actor_admin_id: UUID | None = None
+    clear_fields: tuple[Literal["tagline"], ...] = ()
 
 
 def upsert_platform_profile(db: Session, command: UpsertPlatformProfileCommand) -> UUID:
     """Create or update a platform-plane (OEM / white-label) profile."""
     locks = _require_lockable(tuple(command.lock))
-    payload = command.fields.as_dict()
-    # Fail where the value was entered, not when a page renders. Uses
-    # dotmac-ui's own parser through the published surface.
-    validate_brand_values(payload)
+    payload = _prepare_fields(command.fields, command.clear_fields)
 
     def handler(session: Session) -> Mapping[str, object]:
         row = session.execute(
@@ -378,6 +416,15 @@ def upsert_platform_profile(db: Session, command: UpsertPlatformProfileCommand) 
         scope=SCOPE_UPSERT_PLATFORM,
         key=command.command_id,
         operation=handler,
+        fingerprint=fingerprint_of(
+            {
+                "profile_code": command.profile_code,
+                "fields": payload,
+                "lock": locks,
+                "clear_fields": command.clear_fields,
+                "actor_admin_id": command.actor_admin_id,
+            }
+        ),
     )
     return UUID(str(outcome.result["id"]))
 

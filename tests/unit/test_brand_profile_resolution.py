@@ -120,6 +120,207 @@ def _profile(**overrides: object) -> BrandProfile:
     return BrandProfile(**fields)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+class TestTaglineWrites:
+    def write(self, db, plane, fields, *, clear=(), key=None):
+        if plane == "tenant":
+            return upsert_tenant_profile(
+                db,
+                UpsertTenantProfileCommand(
+                    key or _cmd(),
+                    _TENANT,
+                    "tenant",
+                    "tagline",
+                    fields,
+                    clear_fields=clear,
+                ),
+            )
+        return upsert_platform_profile(
+            db,
+            UpsertPlatformProfileCommand(
+                key or _cmd(),
+                "tagline",
+                fields,
+                clear_fields=clear,
+            ),
+        )
+
+    def test_set_replace_none_clear_and_replay(self, db, plane):
+        from dotmac_kernel.idempotency import IdempotencyConflict
+
+        model = BrandProfile if plane == "tenant" else PlatformBrandProfile
+        ident = self.write(
+            db, plane, ProfileFields(tagline="x" * 255, legal_name="Legal")
+        )
+        row = db.get(model, ident)
+        assert row.tagline == "x" * 255
+        assert row.status == "draft"
+        assert row.record_version == 1
+        row.status = "active"
+        row.locked_fields = ["legal_name"]
+        self.write(db, plane, ProfileFields(tagline="  "))
+        assert row.tagline == "  "
+        assert row.record_version == 2
+        assert row.locked_fields == []
+        assert row.status == "active"
+        self.write(db, plane, ProfileFields())
+        assert row.record_version == 3
+        self.write(db, plane, ProfileFields(tagline=None))
+        assert row.record_version == 4
+        assert row.tagline == "  "
+        self.write(db, plane, ProfileFields(tagline=""))
+        assert row.tagline == ""
+        assert row.record_version == 5
+        key = _cmd()
+        self.write(db, plane, ProfileFields(), clear=("tagline",), key=key)
+        assert row.tagline is None
+        assert row.record_version == 6
+        assert row.legal_name == "Legal"
+        version = row.record_version
+        self.write(db, plane, ProfileFields(), clear=("tagline",), key=key)
+        assert row.record_version == version
+        with pytest.raises(IdempotencyConflict):
+            self.write(db, plane, ProfileFields(tagline="changed"), key=key)
+
+    @pytest.mark.parametrize("value", ["x" * 256, 12, False, [], {}])
+    def test_invalid_tagline_has_no_database_side_effect(self, plane, value):
+        class NoDatabase:
+            def __getattr__(self, name):
+                pytest.fail(f"validation touched database: {name}")
+
+        with pytest.raises(ProfileRefusedError):
+            self.write(NoDatabase(), plane, ProfileFields(tagline=value))
+
+    @pytest.mark.parametrize(
+        "clear,value",
+        [
+            (("id",), None),
+            (("legal_name",), None),
+            (("unknown",), None),
+            (("tagline", "tagline"), None),
+            (("tagline",), ""),
+            (("tagline",), "text"),
+            (["tagline"], None),
+            (([],), None),
+        ],
+    )
+    def test_invalid_clear_has_no_database_side_effect(self, plane, clear, value):
+        class NoDatabase:
+            def __getattr__(self, name):
+                pytest.fail(f"validation touched database: {name}")
+
+        with pytest.raises(ProfileRefusedError):
+            self.write(NoDatabase(), plane, ProfileFields(tagline=value), clear=clear)
+
+    def test_caller_rollback_owns_tagline_write(self, db, plane):
+        model = BrandProfile if plane == "tenant" else PlatformBrandProfile
+        ident = self.write(db, plane, ProfileFields(tagline="before"))
+        db.commit()
+        self.write(db, plane, ProfileFields(tagline="after"))
+        db.rollback()
+        assert db.get(model, ident).tagline == "before"
+
+    def test_legacy_fingerprintless_replay_does_not_execute_clear(self, db, plane):
+        from dotmac_kernel.idempotency_models import (
+            IdempotencyRecord,
+            PlatformIdempotencyRecord,
+        )
+        from sqlalchemy import select
+
+        model = BrandProfile if plane == "tenant" else PlatformBrandProfile
+        key = _cmd()
+        ident = self.write(db, plane, ProfileFields(tagline="legacy"), key=key)
+        ledger = IdempotencyRecord if plane == "tenant" else PlatformIdempotencyRecord
+        record = db.execute(select(ledger).where(ledger.key == key)).scalar_one()
+        record.fingerprint = None
+        db.flush()
+        version = db.get(model, ident).record_version
+        assert (
+            self.write(db, plane, ProfileFields(), clear=("tagline",), key=key) == ident
+        )
+        assert db.get(model, ident).tagline == "legacy"
+        assert db.get(model, ident).record_version == version
+        self.write(db, plane, ProfileFields(), clear=("tagline",))
+        assert db.get(model, ident).tagline is None
+
+    def test_new_key_refuses_different_non_tagline_intent(self, db, plane):
+        from dotmac_kernel.idempotency import IdempotencyConflict
+
+        key = _cmd()
+        self.write(
+            db, plane, ProfileFields(legal_name="Original", tagline="copy"), key=key
+        )
+        with pytest.raises(IdempotencyConflict):
+            self.write(db, plane, ProfileFields(legal_name="Different"), key=key)
+        with pytest.raises(IdempotencyConflict):
+            self.write(db, plane, ProfileFields(), clear=("tagline",), key=key)
+
+
+def test_platform_tagline_clear_audits_once_and_rollback_restores(db):
+    from dotmac_kernel.models_platform import PlatformAuditEvent
+    from sqlalchemy import select
+
+    def events():
+        return db.execute(select(PlatformAuditEvent)).scalars().all()
+
+    ident = upsert_platform_profile(
+        db,
+        UpsertPlatformProfileCommand(
+            _cmd(), "audit-copy", ProfileFields(tagline="original")
+        ),
+    )
+    db.commit()
+    row = db.get(PlatformBrandProfile, ident)
+    before = len(events())
+    key = _cmd()
+    clear = UpsertPlatformProfileCommand(
+        key, "audit-copy", ProfileFields(), clear_fields=("tagline",)
+    )
+    upsert_platform_profile(db, clear)
+    assert row.record_version == 2
+    assert len(events()) == before + 1
+    written = next(event for event in events() if event.details["record_version"] == 2)
+    assert written.details["created"] is False
+    upsert_platform_profile(db, clear)
+    assert row.record_version == 2
+    assert len(events()) == before + 1
+    db.rollback()
+    assert row.tagline == "original"
+    assert row.record_version == 1
+    assert len(events()) == before
+
+
+@pytest.mark.parametrize(
+    "value,expected,source",
+    [
+        (None, "fallback", "platform"),
+        ("", "fallback", "platform"),
+        ("  ", "  ", "tenant"),
+        ("copy", "copy", "tenant"),
+    ],
+)
+def test_tagline_resolution_and_lock_metadata(value, expected, source):
+    resolved = resolve(
+        [
+            ("tenant", _profile(tagline=value, locked_fields=["tagline"])),
+            ("platform", _profile(tagline="fallback")),
+        ]
+    )
+    assert resolved.get("tagline") == expected
+    assert resolved.source_of("tagline") == source
+    assert "tagline" in resolved.locked
+    assert "tagline" not in resolvable_by(resolved, scope_type="tenant")
+    assert "tagline" in DISPLAY_FIELDS & LOCKABLE_FIELDS
+    assert "tagline" not in IDENTITY_FIELDS | set(BRAND_OVERRIDE_INPUTS)
+
+
+def test_tagline_is_not_a_legacy_colour_override_input():
+    translated = translate_legacy_brand_values({"tagline": "Customer copy"})
+    assert translated.accepted == {}
+    assert len(translated.unsupported) == 1
+    assert translated.unsupported[0].disposition is Disposition.NOT_AN_ALLOWLISTED_INPUT
+
+
 # ── The merge mechanics ─────────────────────────────────────────────────────
 
 

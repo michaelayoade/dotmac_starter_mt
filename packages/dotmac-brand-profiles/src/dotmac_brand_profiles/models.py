@@ -95,6 +95,7 @@ PLATFORM_TABLES: tuple[str, ...] = (_PLATFORM_PROFILES, _PLATFORM_HOSTS)
 #: list that accepted them would let a caller write a lock nothing can honour.
 LOCKABLE_FIELDS: frozenset[str] = frozenset(
     {
+        "tagline",
         "display_name",
         "product_name",
         "legal_name",
@@ -122,6 +123,7 @@ LOCKABLE_FIELDS: frozenset[str] = frozenset(
 #: look, not who they are" needs the split to be expressible.
 DISPLAY_FIELDS: frozenset[str] = frozenset(
     {
+        "tagline",
         "display_name",
         "product_name",
         "primary_hex",
@@ -162,6 +164,7 @@ class _ProfileFields:
     profile_code: Mapped[str] = mapped_column(String(120), nullable=False)
     display_name: Mapped[str] = mapped_column(String(160), nullable=False)
     product_name: Mapped[str | None] = mapped_column(String(160))
+    tagline: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     #: Legal identity. ADR-0006 § 3: separate from display brand, and never
     #: silently inherited from a lower-precedence layer.

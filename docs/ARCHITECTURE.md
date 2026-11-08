@@ -2308,6 +2308,18 @@ There are now **zero** `| safe` usages in the tree; the guard stays, backed by
 `test_the_safe_filter_guard_still_bites`, because the rule is about the next
 one rather than the last one.
 
+**Brand profile module boundary (N4 approved design, source preparation).**
+`dotmac-brand-profiles` owns optional profile tagline data on whichever
+tenant/platform plane the assembly selects; the assembly owns rendering and
+consumer presentation. Tagline is DISPLAY and LOCKABLE, not IDENTITY. It is
+limited to 255 characters; source attribution and locking follow the existing
+per-field rules. `ProfileFields(None)` is no update, while the explicit clear
+signal stores SQL NULL. The resolver ignores only an exact empty tagline and
+preserves whitespace. This does not add tagline to `brand_values.py`, which
+translates COLOR overrides only. Consumer adoption and the platform host
+binding remain at the separately authorized flip; source preparation does not
+claim publication, deployment, operational proof, or a change to adoption.
+
 Write path: `POST /admin/settings/branding` composes the submitted
 sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/`accent_color`) back
 into the `ui_branding` dict, preserving the presence of any injected retired
