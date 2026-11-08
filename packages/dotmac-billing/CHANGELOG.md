@@ -2,7 +2,91 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a10 — UNRELEASED
+## 0.1.0a11 — UNRELEASED
+
+- Breaking for adapters: `NumberingProvider.allocate` now also receives a
+  required `document_reference`, the stable identity of the document being
+  numbered (an invoice: `billing:<document id>`; a credit note: the
+  command-stable `billing:credit:<correlation id>`, never a per-execution
+  value). A locked or enrolled Numbering series requires it; the adapter decides
+  whether to forward it for a series that does not accept it.
+- Add `discounts` (`DiscountSnapshotV1`) to the one rated intake Sub uses,
+  `AcceptRatedObligationV3`; no other intake version changes. `pre_tax_amount`
+  is the net taxable base and the gross is net plus discounts. Discounts are
+  retained in the existing immutable obligation envelope (only when present, so
+  a10 bytes and replay fingerprints are unchanged; no DDL). Issued line facts
+  carry the real `discount_total` and snapshots. Malformed or duplicate
+  discounts, and Tax determined on a base larger than the net, are refused.
+- Add `get_document_exposure` (latest sealed per-document exposure, re-verified
+  against receivable resolution; imported items return the opening-owned V2),
+  `get_document_withholding_evidence`, and `list_accounting_facts`: a
+  total-ordered keyset-paged accounting-fact index, and
+  `summarize_accounting_fact_window`, the separate once-per-window-close count
+  and chained digest. A consumer closes a window only after a summary taken at
+  least one settle interval after its end, because `occurred_at` is business time.
+- Refuse a document whose lines carry different `service_ref` with
+  `exposure_service_ambiguous` at drafting, issuing and exposure derivation,
+  because exposure is anchored to the first line.
+- An unlinked taxed credit needs no new code: a credit note always requires an
+  issued invoice and non-cash grants carry no tax.
+- Adapters should raise a number collision as
+  `BillingRuleViolation("document_number_collision")`; Billing does not import
+  Numbering and does not map it.
+- Write-off needs no new command: it is a `grant_non_cash_credit` whose
+  classification category is a policy value, restricted to the document and
+  applied on issue. Choosing credit note or grant is the caller's policy.
+- Not changed: a credit note larger than the open receivable is still refused
+  (`credit_exceeds_receivable`). Excess is composed above Billing (unapply prior
+  discharges, then issue the full credit note); Billing gains no excess path.
+- Source preparation only; hosted CI and publication remain required.
+- ST-3 (recorded widening D-5; includes unreleased `bi_0013`): the opening seal
+  records a hold list (`SealOpeningWindowV1.held_account_ids`); one held partition
+  per command may later be admitted by `admit_held_opening_account_v2` with a
+  reviewed disposition digest and an Approvals maker-checker decision (port only;
+  tenant-plane hold awaits approvals 0.1.0a9). A deferred constraint trigger makes
+  its `opening_hold_admissions` audit row mandatory. `seal_opening_window` accepts
+  an `authority_switch` participant inside the seal savepoint; its
+  `OpeningAuthoritySwitchReceiptV1` is stored append-only. `opening_lane` is the
+  import-specific assembly authority port.
+- ST-4: opening admissibility as data (`opening_admissibility`): a reviewed rules
+  document (digest-identified, closed schema) plus the A10 account classes
+  decide account-level admissibility (A10 `opening_exact` and post-cutover
+  `match`; D-2). Every census blocking code is blocking: no rule relaxes,
+  drops or carries a finding, and an unlisted code is blocking. Every held
+  partition has exactly one reason from a closed, rules-ordered set. Every
+  member account of a reseller partition must pass A10. A held partition that
+  did not fail structurally stays in the frozen manifest with a digest-bound
+  `held:<reason>` disposition marker (validators refuse its import with
+  `partition_held`, never block the others); structural failures stay out
+  (governed correction). `admissibility.json` records the route and the exact
+  archived totals. A manifest with held-marked partitions cannot be sealed
+  until the variance ledger (ST-4c): the seal refuses a hold list that omits a
+  held-marked partition or repeats one (`opening_hold_list_invalid`). Drafts
+  are excluded and archived (X1; accounts whose A10 cause is a draft allocation
+  are held), V1 gates only status-open documents, D-3 needs a supplied original
+  for each, and reseller option A re-keys a managed subscriber's invoices and
+  wallet lanes to the reseller account with one `service_ref` per document.
+- ST-4: import cost: the command digest binds the manifest by its fingerprint (not its
+  body) and the fingerprint/analysis are cached per manifest object, so
+  `import_opening_account_v2` validation no longer scales with manifest size
+  (15,293 commands: 28 s). The a11 command digest therefore differs from a10's.
+- ST-4: scale (F2): the complete-manifest validators run once per run
+  (`preview_opening_account_import_batch_v2`, `opening_validation_scope`), the
+  rehearsal reporter indexes instead of rescanning, and a manifest-wide
+  finding is reported once, not once per partition. Single-command validators
+  keep their results and ordering.
+- ST-4: land Gap A: a supplied, bound original satisfies the M8-minimal documentary
+  check (commit c15afa28).
+- ST-4: D-8 Starter-native verifier production profile: `OpeningVerifierProfileV1`
+  pins scope, installation, audience, both public-key fingerprints and
+  validity/revocation ceilings; `ProfileBoundAuthorityReaderV1` refuses any
+  policy outside the pin (unavailable, never verified);
+  `build_starter_native_opening_import_verifier_v2` composes the signed a10
+  providers. Rehearsal and production audiences are disjoint namespaces.
+  Import reversal is never granted. Provision/seal verifiers and Gap C
+  (cash lots) are not part of this change.
+
+## 0.1.0a10 — released
 
 - Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,
   original commercial identity, prior references and selected component snapshots.

@@ -15,7 +15,11 @@ from uuid import UUID
 from dotmac_kernel.cache import Scope
 
 from dotmac_billing._opening_values import OpeningCashValue
-from dotmac_billing.opening_contracts import OpeningCaptureV1, OpeningSourceIdentityV1
+from dotmac_billing.opening_contracts import (
+    OpeningCaptureV1,
+    OpeningEvidenceError,
+    OpeningSourceIdentityV1,
+)
 from dotmac_billing.opening_receivable_contracts import (
     ImportOpeningAccountV2,
     OpeningImportVerificationRequestV2,
@@ -54,6 +58,44 @@ class OpeningTrustKeyV1(OpeningCashValue):
     public_key_fingerprint: str
     not_before: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningVerifierProfileV1(OpeningCashValue):
+    """The deployment-pinned trust profile an opening verifier is composed with.
+
+    Pins, not requests, decide what is trusted: the scope and installation, the
+    audience, and the fingerprints of the exact source and grant public keys.
+    The two ceilings bound what a policy may grant; they are required values
+    entered by the deployment, never defaults. ``rehearsal`` and ``production``
+    differ by audience namespace (``rehearsal:`` prefix) as well as by pins, so
+    a rehearsal-signed statement can never verify under the production profile.
+    """
+
+    name: Literal["rehearsal", "production"]
+    scope: Scope
+    installation_id: str
+    audience: str
+    source_key_fingerprint: str
+    grant_key_fingerprint: str
+    max_validity_seconds: int
+    max_revocation_age_seconds: int
+
+    def __post_init__(self) -> None:
+        OpeningCashValue.__post_init__(self)
+        # Checked on every construction path, not only in the factory.
+        hexed = (self.source_key_fingerprint, self.grant_key_fingerprint)
+        if (
+            any(
+                len(v) != 64 or any(c not in "0123456789abcdef" for c in v)
+                for v in hexed
+            )
+            or self.source_key_fingerprint == self.grant_key_fingerprint
+            or self.max_validity_seconds <= 0
+            or self.max_revocation_age_seconds <= 0
+            or self.audience.startswith("rehearsal:") != (self.name == "rehearsal")
+        ):
+            raise OpeningEvidenceError("invalid opening verifier profile")
 
 
 @dataclass(frozen=True, slots=True)

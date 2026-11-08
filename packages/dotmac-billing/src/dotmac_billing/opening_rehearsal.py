@@ -7,6 +7,7 @@ verifier, cash qualification, import, seal or activation authority.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import fields
 from datetime import UTC, datetime, timedelta
@@ -24,10 +25,13 @@ from dotmac_billing._opening_values import cash_decimal_context, minor_units_of
 from dotmac_billing.opening_contracts import (
     OpeningBlockerV1,
     OpeningEvidenceError,
+    OpeningPartitionV1,
     OpeningSourceIdentityV1,
 )
 from dotmac_billing.opening_receivable_validation import opening_manifest_fingerprint_v2
 from dotmac_billing.opening_rehearsal_contracts import (
+    OpeningObservedInvoiceV1,
+    OpeningObservedSettlementV1,
     OpeningRehearsalAssemblyPartitionV1,
     OpeningRehearsalAssemblyV1,
     OpeningRehearsalBindingV1,
@@ -321,11 +325,17 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         block("duplicate_evidence", "source_invoices")
     if set(invoices) != set(source.invoice_ids):
         block("source_population_incomplete", "invoice_observations")
-    for key, control in controls.items():
-        cohort = tuple(x for x in source.invoices if (x.account_id, x.currency) == key)
-        eligible_cohort = tuple(
-            x for x in cohort if x.invoice_id in source.eligible_invoice_ids
+    # One pass groups the source invoices by partition; the per-control checks
+    # below are then dictionary reads (O(N + P), not O(P x N)).
+    eligible_set = frozenset(source.eligible_invoice_ids)
+    cohorts: dict[tuple[UUID | None, str | None], list[OpeningObservedInvoiceV1]] = {}
+    for invoice_row in source.invoices:
+        cohorts.setdefault((invoice_row.account_id, invoice_row.currency), []).append(
+            invoice_row
         )
+    for key, control in controls.items():
+        cohort = tuple(cohorts.get(key, ()))
+        eligible_cohort = tuple(x for x in cohort if x.invoice_id in eligible_set)
         if (
             len(cohort) != control.invoice_count
             or len(eligible_cohort) != control.eligible_count
@@ -383,6 +393,13 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         if settlement.invoice_id not in invoices:
             block("source_population_incomplete", f"{settlement.id}:invoice")
     used_settlements: set[tuple[str, UUID]] = set()
+    settlements_by_invoice: dict[
+        UUID, list[tuple[tuple[str, UUID], OpeningObservedSettlementV1]]
+    ] = {}
+    for settlement_key, settlement_row in settlements.items():
+        settlements_by_invoice.setdefault(settlement_row.invoice_id, []).append(
+            (settlement_key, settlement_row)
+        )
     expected_source_ids = {
         (x.settlement_kind, x.settlement_id): x.source_id
         for x in run.discharge_mappings
@@ -400,12 +417,15 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
             or mapped_invoice.precision != mapped_receivable.partition.precision
         ):
             block("invoice_partition_binding_mismatch", str(source_id))
-        # The actual V2 observation has no frozen subtotal, tax, FX, party or
-        # documentary snapshots. Total-only equality cannot attest the complete
-        # imported original. Keep this explicitly unavailable until Sub exports
-        # the documentary evidence through its own read-only contract.
-        block("original_documentary_evidence_unavailable", str(source_id))
+        # M8-minimal originals (Phase B decision, 2026-10-26): the V2
+        # observation carries totals only, so an original is attested by the
+        # assembly-aligned evidence that placed it in the manifest plus the
+        # binding checks below (total, document number, issued_at, discharge
+        # and residual equality). Documentary completeness beyond those
+        # bindings is the assembly/Finance attestation recorded outside this
+        # pure reporter; without a supplied original it stays unavailable.
         if mapped_receivable.original is None:
+            block("original_documentary_evidence_unavailable", str(source_id))
             block(
                 "original_documentary_evidence_unavailable", mapping.source_invoice_key
             )
@@ -443,14 +463,9 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
                     block("source_invoice_residual_mismatch", str(source_id))
             except (OpeningEvidenceError, MoneyError, DecimalException, ValueError):
                 block("currency_precision_mismatch", str(source_id))
-        observed = {
-            key: value
-            for key, value in settlements.items()
-            if value.invoice_id == source_id and value.active
-        }
-        all_observed_ids = [
-            value.id for value in settlements.values() if value.invoice_id == source_id
-        ]
+        invoice_settlements = settlements_by_invoice.get(source_id, [])
+        observed = {key: value for key, value in invoice_settlements if value.active}
+        all_observed_ids = [value.id for _key, value in invoice_settlements]
         if len(set(mapped_invoice.settlement_ids)) != len(
             mapped_invoice.settlement_ids
         ) or sorted(mapped_invoice.settlement_ids) != sorted(all_observed_ids):
@@ -491,6 +506,17 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         block("partition_population_mismatch", "previews")
     manifest_digest = opening_manifest_fingerprint_v2(manifest)
     deltas: list[OpeningRehearsalDeltaV1] = []
+    blocker_uses: Counter[int] = Counter()
+    for preview_row in run.previews:
+        blocker_uses.update(id(item) for item in preview_row.blockers)
+    shared_blockers = {key for key, uses in blocker_uses.items() if uses > 1}
+    reported_shared: set[int] = set()
+    receivable_totals: Counter[OpeningPartitionV1] = Counter()
+    for receivable in manifest.receivables:
+        receivable_totals[receivable.partition] += receivable.residual_minor
+    cash_totals: Counter[OpeningPartitionV1] = Counter()
+    for lot in manifest.cash_lots:
+        cash_totals[lot.partition] += lot.residual_minor
     for key, partition in sorted(
         mappings.items(), key=lambda x: (str(x[0][0]), x[0][1])
     ):
@@ -513,6 +539,17 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
         ):
             block("preview_binding_mismatch", ref)
         for item in preview.blockers:
+            if id(item) in shared_blockers:
+                # A complete-manifest finding carried by every preview: report
+                # its references once, not once per partition (O(P x N) rows).
+                if id(item) not in reported_shared:
+                    reported_shared.add(id(item))
+                    failures.setdefault(item.code, []).extend(
+                        f"manifest:{x}" for x in item.references
+                    )
+                    if item.count != len(item.references) or item.count <= 0:
+                        block("malformed_blocker", item.code)
+                continue
             failures.setdefault(item.code, []).extend(
                 f"{ref}:{x}" for x in item.references
             )
@@ -522,12 +559,8 @@ def report_opening_rehearsal(run: OpeningRehearsalRunV1) -> OpeningRehearsalRepo
             block("preview_incomplete", ref)
         if preview.admissible and preview.blockers:
             block("preview_binding_mismatch", ref)
-        expected_ar = sum(
-            x.residual_minor for x in manifest.receivables if x.partition == partition
-        )
-        expected_cash = sum(
-            x.residual_minor for x in manifest.cash_lots if x.partition == partition
-        )
+        expected_ar = receivable_totals[partition]
+        expected_cash = cash_totals[partition]
         if (preview.cash_residual_minor, preview.receivable_residual_minor) != (
             expected_cash,
             expected_ar,

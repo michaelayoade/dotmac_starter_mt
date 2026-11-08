@@ -4,14 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope, TenantScope
 from dotmac_kernel.semantic_encoding import digest_of, encode_fields, encode_unordered
 
-from dotmac_billing.opening_contracts import OpeningManifestV1, _ClosedEvidence
+from dotmac_billing.opening_contracts import (
+    OpeningEvidenceError,
+    OpeningManifestV1,
+    _ClosedEvidence,
+)
 from dotmac_billing.opening_receivable_contracts import OpeningManifestV2
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +130,17 @@ class SealOpeningWindowV1(_ClosedEvidence):
     command_key: str
     authority_ref: str
     occurred_at: datetime
+    #: Manifest partitions the seal deliberately leaves out of the admitted
+    #: population (the sealed hold list). Canonical order: ascending by text.
+    held_account_ids: tuple[UUID, ...] = ()
+
+    def __post_init__(self) -> None:
+        _ClosedEvidence.__post_init__(self)
+        keys = [str(item) for item in self.held_account_ids]
+        if keys != sorted(set(keys)):
+            raise OpeningEvidenceError(
+                "held accounts must be unique and in ascending canonical order"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,3 +186,53 @@ class OpeningWindowSealV1(_ClosedEvidence):
     population_digest: str
     population_count: int
     recorded_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningAuthoritySwitchReceiptV1(_ClosedEvidence):
+    """What the participant switched, persisted append-only with the seal."""
+
+    participant_ref: str
+    participant_version: str
+    switched_to: str
+    state_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredOpeningAuthoritySwitchReceiptV1(_ClosedEvidence):
+    window_id: UUID
+    receipt: OpeningAuthoritySwitchReceiptV1
+    recorded_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningAuthoritySwitchContextV1(_ClosedEvidence):
+    """What a participant may observe: the seal it is switching authority with."""
+
+    scope: Scope
+    seal: OpeningWindowSealV1
+
+
+class OpeningAuthoritySwitchParticipant(Protocol):
+    """Runs INSIDE Billing's seal transaction (ADR 0031: seal and switch are one).
+
+    Billing defines only this protocol. The participant receives the caller's
+    own session, writes through it and must neither commit nor roll back. Any
+    exception rolls the seal back with every other effect of the operation; a
+    participant that returns normally has switched authority atomically with
+    the seal. It is not run on an idempotent replay of an already-stored seal.
+
+    It must return an ``OpeningAuthoritySwitchReceiptV1``; ``None`` or any other
+    value counts as failure and rolls the seal back. Billing stores the receipt
+    append-only in the same transaction (one per window).
+
+    Privilege note (SUB-13): the seal runs as the restricted opening principal,
+    so the participant writes as that principal. A product participant needs a
+    narrow product-owned grant (for example EXECUTE on one SECURITY DEFINER
+    switch function); that widens the principal's privilege closure and must be
+    provisioned and read back effective (ADR 0031 section 4).
+    """
+
+    def switch_authority(
+        self, session: Session, context: OpeningAuthoritySwitchContextV1
+    ) -> OpeningAuthoritySwitchReceiptV1: ...

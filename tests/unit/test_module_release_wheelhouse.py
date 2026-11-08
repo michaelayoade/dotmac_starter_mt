@@ -284,7 +284,7 @@ def test_smoke_refusal_happens_before_any_install(release, monkeypatch, tmp_path
         requires=["vendor @ https://unapproved.invalid/source.tar.gz"],
     )
     kernel = wheel(tmp_path / "kernel", "dotmac-kernel", _source_kernel_version())
-    timer = wheel(tmp_path / "timer", "dotmac-durable-timers", "0.1.0a1")
+    timer = wheel(tmp_path / "timer", "dotmac-durable-timers", "0.1.0a2")
     commands = []
     monkeypatch.setattr(
         release, "_venv", lambda _: (tmp_path / "python", tmp_path / "pip")

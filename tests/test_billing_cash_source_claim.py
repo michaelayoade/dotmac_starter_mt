@@ -487,6 +487,8 @@ def test_genuine_bi0005_upgrade_preserves_all_history_and_backfills_exact_identi
             "opening_windows",
             "opening_window_admissions",
             "opening_window_seals",
+            "opening_hold_admissions",
+            "opening_authority_switch_receipts",
             "cash_source_claims",
             "opening_import_receipts",
             "opening_cash_lots",

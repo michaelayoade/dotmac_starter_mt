@@ -82,6 +82,19 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
 )
+from dotmac_billing.document_queries import (
+    AccountingFactCursorV1,
+    AccountingFactIndexEntryV1,
+    AccountingFactIndexPageV1,
+    AccountingFactWindowSummaryV1,
+    DocumentWithholdingEvidenceV1,
+    ListAccountingFactsV1,
+    SummarizeAccountingFactWindowV1,
+    get_document_exposure,
+    get_document_withholding_evidence,
+    list_accounting_facts,
+    summarize_accounting_fact_window,
+)
 from dotmac_billing.earmark_authority import (
     CorrectSettlementEarmarkV1,
     EarmarkCorrectionVerificationRequestV1,
@@ -163,6 +176,17 @@ from dotmac_billing.opening_contracts import (
     OpeningTargetV1,
     OpeningVerificationUnavailable,
     OpeningVerificationV1,
+)
+from dotmac_billing.opening_hold_contracts import (
+    HOLD_APPROVAL_SUBJECT_TYPE,
+    AdmitHeldOpeningAccountV2,
+    HeldOpeningHoldApprovalV1,
+    OpeningHoldAdmissionV1,
+    OpeningHoldApprovalPort,
+    OpeningHoldDispositionV1,
+    opening_hold_content_digest,
+    opening_hold_subject_id,
+    require_hold_maker_checker,
 )
 from dotmac_billing.opening_qualification import (
     OpeningImportGrantProviderV2,
@@ -246,12 +270,16 @@ from dotmac_billing.opening_validation import (
     preview_opening_account_import,
 )
 from dotmac_billing.opening_verification import (
+    ProfileBoundAuthorityReaderV1,
     SignedOpeningImportGrantProviderV2,
     SignedOpeningSourceEvidenceProviderV2,
+    StarterNativeOpeningImportVerifierV2,
+    build_starter_native_opening_import_verifier_v2,
     opening_import_grant_digest_v1,
     opening_import_grant_signing_input_v1,
     opening_source_attestation_digest_v1,
     opening_source_attestation_signing_input_v1,
+    opening_verifier_profile_v1,
     required_opening_evidence_v1,
 )
 from dotmac_billing.opening_verification_contracts import (
@@ -272,12 +300,16 @@ from dotmac_billing.opening_verification_contracts import (
     OpeningSignedSourceReaderV1,
     OpeningTrustKeyV1,
     OpeningVerificationClockV1,
+    OpeningVerifierProfileV1,
     OpeningWindowIdentityReaderV1,
     OpeningWindowIdentityV1,
     SignedOpeningCommandGrantV1,
     SignedOpeningSourceAttestationV1,
 )
 from dotmac_billing.opening_window_contracts import (
+    OpeningAuthoritySwitchContextV1,
+    OpeningAuthoritySwitchParticipant,
+    OpeningAuthoritySwitchReceiptV1,
     OpeningWindowAdmissionV1,
     OpeningWindowProvisionVerificationRequestV1,
     OpeningWindowProvisionVerificationV1,
@@ -314,7 +346,7 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a10"
+__version__ = "0.1.0a11"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
@@ -334,6 +366,17 @@ from dotmac_billing.tax_evidence import (
 )
 
 __all__ = [
+    "AccountingFactCursorV1",
+    "AccountingFactIndexEntryV1",
+    "AccountingFactIndexPageV1",
+    "DocumentWithholdingEvidenceV1",
+    "ListAccountingFactsV1",
+    "get_document_exposure",
+    "get_document_withholding_evidence",
+    "list_accounting_facts",
+    "summarize_accounting_fact_window",
+    "AccountingFactWindowSummaryV1",
+    "SummarizeAccountingFactWindowV1",
     "InvoiceTaxEvidenceV2",
     "TaxCommercialSourceEvidenceV1",
     "TaxFactSignatureEvidenceV1",
@@ -411,17 +454,34 @@ __all__ = [
     "OpeningSignedSourceReaderV1",
     "OpeningTrustKeyV1",
     "OpeningVerificationClockV1",
+    "OpeningVerifierProfileV1",
     "OpeningWindowIdentityReaderV1",
     "OpeningWindowIdentityV1",
+    "ProfileBoundAuthorityReaderV1",
     "SignedOpeningCommandGrantV1",
     "SignedOpeningImportGrantProviderV2",
     "SignedOpeningSourceAttestationV1",
     "SignedOpeningSourceEvidenceProviderV2",
+    "StarterNativeOpeningImportVerifierV2",
+    "build_starter_native_opening_import_verifier_v2",
     "opening_import_grant_digest_v1",
     "opening_import_grant_signing_input_v1",
     "opening_source_attestation_digest_v1",
     "opening_source_attestation_signing_input_v1",
+    "opening_verifier_profile_v1",
     "required_opening_evidence_v1",
+    "HOLD_APPROVAL_SUBJECT_TYPE",
+    "AdmitHeldOpeningAccountV2",
+    "HeldOpeningHoldApprovalV1",
+    "OpeningHoldAdmissionV1",
+    "OpeningHoldApprovalPort",
+    "OpeningHoldDispositionV1",
+    "opening_hold_content_digest",
+    "opening_hold_subject_id",
+    "require_hold_maker_checker",
+    "OpeningAuthoritySwitchContextV1",
+    "OpeningAuthoritySwitchParticipant",
+    "OpeningAuthoritySwitchReceiptV1",
     "OpeningWindowAdmissionV1",
     "OpeningWindowProvisionVerificationRequestV1",
     "OpeningWindowProvisionVerificationV1",

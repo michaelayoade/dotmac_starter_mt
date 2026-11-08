@@ -880,7 +880,7 @@ def test_explicit_original_mapping_refuses_misbinding(attack, entrypoint):
 @pytest.mark.parametrize(
     "fixture", ["census_one_eligible_v2.json", "census_v3_documentary.json"]
 )
-def test_census_preserves_explicit_original_without_qualifying_report(fixture):
+def test_census_preserves_explicit_original_and_qualifies_documentary_side(fixture):
     from uuid import UUID
 
     from dotmac_billing.opening_receivable_validation import (
@@ -910,7 +910,9 @@ def test_census_preserves_explicit_original_without_qualifying_report(fixture):
     assert artifact.v3_documentary_sidecar == without.v3_documentary_sidecar
     rendered = json.loads(render_opening_rehearsal_census(artifact))
     assert "verifier_unavailable" in _all_codes(rendered)
-    assert "original_documentary_evidence_unavailable" in _codes(
+    # M8-minimal: the supplied, assembly-aligned original satisfies the
+    # documentary side; only the missing verifier keeps this unqualified.
+    assert "original_documentary_evidence_unavailable" not in _codes(
         rendered, "report_blockers"
     )
     assert artifact.rollup.complete_exact_reconciliation is False
@@ -995,7 +997,7 @@ def _sidecar_cli(tmp_path, raw, assembly, wire):
     return result, out
 
 
-def test_cli_original_evidence_reaches_manifest_without_qualification(
+def test_cli_original_evidence_reaches_manifest_and_qualifies_documentary(
     tmp_path, monkeypatch
 ):
     payload = _fixture("census_one_eligible_v2.json")
@@ -1014,11 +1016,10 @@ def test_cli_original_evidence_reaches_manifest_without_qualification(
     assert seen[0].manifest.receivables[0].original == _explicit_original(payload)
     assert seen[0].manifest.cash_lots == ()
     artifact = json.loads(out.read_text())
-    # Mapping originals supplies values, not authenticated qualification. The
-    # single-run census reports the missing authority; run_blocked belongs to
-    # the separate three-run comparison contract.
+    # M8-minimal: the aligned original satisfies the documentary side; the
+    # census still reports the missing verifier authority, so nothing is
+    # admissible yet. run_blocked belongs to the three-run comparison.
     assert _all_codes(artifact) == {
-        "original_documentary_evidence_unavailable",
         "verifier_unavailable",
     }
     assert artifact["adapter_blockers"] == []
@@ -1148,7 +1149,7 @@ def test_cli_preserves_exact_discharge_evidence_and_namespace(tmp_path, monkeypa
     assert "historical_discharge_evidence_unavailable" not in _all_codes(
         json.loads(out.read_text())
     )
-    assert "original_documentary_evidence_unavailable" in _all_codes(
+    assert "original_documentary_evidence_unavailable" not in _all_codes(
         json.loads(out.read_text())
     )
 
@@ -1253,7 +1254,9 @@ def test_cli_original_evidence_preserves_v3_unavailable_history(tmp_path):
     artifact = json.loads(out.read_text())
     default = _census(payload)
     assert artifact["v3_documentary_sidecar"] == default["v3_documentary_sidecar"]
-    assert "original_documentary_evidence_unavailable" in _all_codes(artifact)
+    # The v3 sidecar keeps the historical unavailable record verbatim even
+    # though the supplied original now satisfies the report (M8-minimal).
+    assert "original_documentary_evidence_unavailable" not in _all_codes(artifact)
 
 
 @pytest.mark.parametrize("attack", ["excluded", "unmapped", "duplicate_observation"])

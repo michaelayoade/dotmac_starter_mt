@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from decimal import (
@@ -14,6 +17,7 @@ from decimal import (
     Overflow,
     localcontext,
 )
+from functools import cache
 from types import UnionType
 from typing import Literal, Union, get_args, get_origin, get_type_hints
 
@@ -93,7 +97,51 @@ def cash_decimal_context() -> Context:
     )
 
 
+@cache
+def _hints_of(cls: type) -> dict[str, object]:
+    """Resolved field types are a property of the class, not of the value."""
+    return get_type_hints(cls)
+
+
+_MEMO: ContextVar[dict[tuple[int, object], object] | None] = ContextVar(
+    "opening_validation_memo", default=None
+)
+
+
+@contextmanager
+def validation_memo() -> Iterator[None]:
+    """Validate each already-qualified frozen value once within this scope.
+
+    Opening values are frozen dataclasses and tuples. Rebuilding an enclosing
+    command around a manifest that was just qualified would otherwise walk the
+    whole manifest again for every partition (O(P x N)). Inside the scope a
+    value that passed validation for an expected type is remembered by identity
+    (the scope holds a reference, so an identity cannot be recycled) and is not
+    walked again. Outside any scope behaviour is unchanged: the memo is private
+    to the caller's own context, never shared, and dropped on exit.
+    """
+    token = _MEMO.set({})
+    try:
+        yield
+    finally:
+        _MEMO.reset(token)
+
+
 def _validate_closed(value: object, expected: object) -> None:
+    memo = _MEMO.get()
+    if memo is not None and (
+        type(value) is tuple or (is_dataclass(value) and not isinstance(value, type))
+    ):
+        key = (id(value), expected)
+        if key in memo:
+            return
+        _validate_closed_walk(value, expected)
+        memo[key] = value
+        return
+    _validate_closed_walk(value, expected)
+
+
+def _validate_closed_walk(value: object, expected: object) -> None:
     origin = get_origin(expected)
     if origin is UnionType or origin is Union:
         for member in get_args(expected):
@@ -122,7 +170,7 @@ def _validate_closed(value: object, expected: object) -> None:
         minor_units_of(value)
         return
     if is_dataclass(value) and not isinstance(value, type):
-        hints = get_type_hints(type(value))
+        hints = _hints_of(type(value))
         for field in fields(value):
             _validate_closed(getattr(value, field.name), hints[field.name])
         return

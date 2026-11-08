@@ -12,7 +12,7 @@ from dotmac_durable_timers.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="durable_timers",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="timers",
     migration_prefix="dt",

@@ -10,7 +10,7 @@ from dotmac_service_access_policy.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="service_access_policy",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="serviceaccess",
     migration_prefix="sap",
