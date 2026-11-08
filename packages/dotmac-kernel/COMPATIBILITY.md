@@ -816,7 +816,7 @@ Kernel security-header writer; disabling it in favor of an external proxy is
 refused for this opt-in.
 
 The source gate admits only **FastAPI 0.140.13 and Starlette 1.10.0**, the
-actual Academy framework pair. Hosted qualification is pending. Active
+actual Academy framework pair. Hosted CI owns qualification of this exact runtime pair. Active
 declarations under another or malformed runtime pair refuse construction. The
 Kernel's broader dependency range remains supported without this opt-in. Expanding the
 feature's qualified runtime requires hosted lifecycle evidence; version-mocked

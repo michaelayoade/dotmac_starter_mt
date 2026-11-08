@@ -2427,7 +2427,13 @@ hosted, release, Academy factory or pair-adoption qualification is claimed.
 
 ### Proposed amendment 2026-11-08: reviewed script hashes on a composed document
 
-Status: unallocated development source for review. This does not authorize a
+Historical pre-authorization proposal snapshot, recorded 2026-11-08: the status,
+authorization-marker paragraph and qualification table below describe that
+proposal stage. Subsequent publication status belongs to the release captain's
+protected release records; installed adoption and terminal status belong to
+Academy's acceptance evidence. These observations are not current release claims.
+
+Proposal status: unallocated development source for review. This does not authorize a
 Kernel release, an artifact pin, a production policy exception or Academy
 retirement. Published a107 and its tightening-only contract remain immutable.
 

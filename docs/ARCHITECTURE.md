@@ -1961,7 +1961,7 @@ policy fails application construction. The baseline uses the vendored Alpine
 CSP build and therefore grants neither `script-src 'unsafe-inline'` nor
 `'unsafe-eval'`.
 
-Unreleased console-document script policy preparation remains in the same Kernel
+Console-document script policy remains in the same Kernel
 browser-composition and response-security owners (`web_surfaces`, `web_runtime`,
 `app_factory`, `middleware/security_headers`). Its bounded contract selects
 reviewed static script hashes only for a resolved authenticated GET HTML document
