@@ -218,6 +218,10 @@ from lane3_authorization import (
     prepare_authorization,
 )
 from lane3_execution import TopologyRefused, load_topology
+from lane3_exposure_recording import (
+    ExposureCallRecord,
+    RecordingExposureEffects,
+)
 
 # `observed_foreign`, `provoke_apply_failure` and `seed_foreign_rules` are NOT
 # imported any more and are deliberately NOT deleted from `lane3_provocation`.
@@ -1013,6 +1017,12 @@ class TerminalContext:
     #: `probe_vantage_ref`, the parser's counts and the Fleet `host_id`. None
     #: until the record is read and bound, so a refusal before that claims none.
     vantage_topology: dict[str, object] | None = None
+    #: Private Executor-boundary exposure records for a later evidence join.
+    #: The sink exists before execution so a terminal path can still read it;
+    #: the runner's own snapshot and cleanup calls do not write here.
+    exposure_calls: list[ExposureCallRecord] = dataclasses.field(
+        default_factory=list, repr=False
+    )
     acts: list[CleanupAct] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
 
@@ -1664,6 +1674,10 @@ def run(
             runner=controller,
             timeout_seconds=args.timeout,
         )
+        # Only the object handed to the Executor is recorded. The raw effects
+        # retain the runner's pre-change snapshot and cleanup paths, so those
+        # observations cannot be mistaken for the transaction's boundaries.
+        executor_exposure = RecordingExposureEffects(effects, ctx.exposure_calls)
         ctx.vm_installation_id = read_installation_id(controller)
 
         # ── item 3, before anything mutates ─────────────────────────────────────
@@ -1714,7 +1728,7 @@ def run(
                 spec=spec,
                 deployment_plan=deployment_plan,
                 effects=deployment_effects,
-                exposure_effects=effects,
+                exposure_effects=executor_exposure,
                 bindings=bindings,
                 lock=held,
             )
