@@ -469,9 +469,10 @@ def receipt_v2_refusals(
       when no verifier is installed, so it keeps that fact's status rather than
       borrowing a refusal's.
     * "an input contradicts what a receipt may bind" (`ReceiptRefused`) becomes
-      `refused_as`, chosen AT THE CALL SITE: before any host contact it is
-      `PreconditionUnfit`, the honest "nothing attempted"; at assembly, after
-      the lease was held and the host observed, it is `SpecError`, which
+      `refused_as`, chosen AT THE CALL SITE: before any host mutation it is
+      `PreconditionUnfit`, the honest "nothing attempted" — including a
+      failed read-only prestate observation; at assembly, after the lease
+      was held and the host observed, it is `SpecError`, which
       `classify_refusal` records as host state uncertified.
     """
     try:
@@ -1545,30 +1546,46 @@ def run(
     spec = ProductDeploymentSpec.load(str(descriptor))
     descriptor_digest = spec.to_canonical_document().sha256_digest()
 
-    # ── the authorization, which cannot be self-attested ────────────────────
+    # ── the prestate, then authorization, which cannot be self-attested ────
     #
-    # BEFORE the lease and before any host contact, so a refusal here is
-    # `precondition_unfit` with the machine genuinely untouched — and, since no
-    # lease is in hand yet, no release is written and the host keeps whatever
+    # The V3 plan freezes the incumbent host roles, so the deployment effects
+    # must OBSERVE them before Control can authorize that exact plan. That
+    # read-only observation is the one host contact allowed before the grant
+    # and lease: it issues no effect, and `build_base_plan` turns an
+    # observation or render failure into a `ReceiptRefused`, mapped here to
+    # `PreconditionUnfit` because no mutation was attempted. Since no lease
+    # is in hand yet, no release is written and the host keeps whatever
     # standing it already had.
     #
-    # This is deliberately not `if args.authorization_doc_digest == something`.
-    # The dispatch inputs are not parameters of `establish_authorization` at
+    # The discovered bindings, the underlying deployment plan and the exact
+    # observing effects instance are retained for the later Executor drive.
+    # Rediscovering the bindings or rebuilding the effects after
+    # authorization could substitute a different assembly or observer for
+    # the one whose prestate the plan froze.
+    #
+    # Authorization still precedes the lease and every mutation. This is
+    # deliberately not `if args.authorization_doc_digest == something`. The
+    # dispatch inputs are not parameters of `establish_authorization` at
     # all, so there is no path through it that promotes caller-supplied text
     # into permission by forgetting a comparison. The V3 authority path
-    # requires a trusted CP-rendered plan and Control V2
-    # authorization+dispatch pair. This workflow has no such composition, so
-    # this call refuses before the lease or any host contact. V1 material is
-    # never upgraded by comparing descriptor or target text with itself.
-    #
-    # The plan is the trusted CP-rendered `FoundationExecutionPlanV3`, and only
-    # the D4 producer may supply it (`lane3_receipt_v2.acquire_execution_plan`).
-    # Until a provider exists that call refuses as UNANSWERABLE, which is the
-    # same standing `establish_authorization` reports for a missing plan, so the
-    # observable verdict of this lane does not change; what changes is that the
-    # plan now has exactly one source and the grant is issued against it.
+    # requires a trusted CP-rendered plan and a Control V2
+    # authorization+dispatch pair. With no such composition installed, the
+    # bindings acquisition refuses as UNANSWERABLE before any observation;
+    # with one installed, the grant is issued against the one mirrored plan
+    # below. V1 material is never upgraded by comparing descriptor or target
+    # text with itself.
     with receipt_v2_refusals(refused_as=PreconditionUnfit):
-        execution_plan = receipt_v2.acquire_execution_plan()
+        authority_bindings = receipt_v2.acquire_authority_bindings()
+        base_build = receipt_v2.build_base_plan(
+            spec,
+            target=args.target,
+            deploy_dir=args.deploy_dir,
+            bindings=authority_bindings,
+        )
+        execution_plan = receipt_v2.acquire_execution_plan(
+            base_build.base_plan,
+            bindings=authority_bindings,
+        )
     # The record was bound by the DISPATCHED host; the plan names the host it
     # was rendered for. They must be one host, or the topology describes a
     # machine the grant does not cover.
@@ -1678,12 +1695,25 @@ def run(
     # The plan is executed HERE, by the public `Executor` under the grant, and
     # its `DeploymentOutcome` is item 9's last term (Q1, 2026-10-06:
     # `lane3_receipt_v2.execute_authorized_plan`). Nothing in this file orders
-    # an effect. Until a Starter-owned host-source admission provider can
-    # attest, the call refuses as UNANSWERABLE; with the lease in hand
-    # `classify_refusal` records that as host state uncertified, the same
-    # answer an owned host gets for any refusal under the lease.
+    # an effect. The Executor receives the retained deployment plan, the
+    # exact deployment-effects instance that observed the prestate, this
+    # runner's exposure effects, and the same discovered bindings the plan
+    # was mirrored through. Without a bindings-supplied host-source
+    # admission provider, the drive still refuses before its first effect;
+    # with the lease in hand `classify_refusal` records that as host state
+    # uncertified, the same answer an owned host gets for any refusal under
+    # the lease.
     with receipt_v2_refusals(refused_as=SpecError):
-        execution_outcome = receipt_v2.execute_authorized_plan(execution_plan, grant)
+        execution_outcome = receipt_v2.execute_authorized_plan(
+            execution_plan,
+            grant,
+            spec=spec,
+            deployment_plan=base_build.deployment_plan,
+            effects=base_build.effects,
+            exposure_effects=effects,
+            bindings=authority_bindings,
+            lock_dir=args.lock_dir,
+        )
 
     # ── item 4 is BLOCKED, and the block is the honest answer ───────────────
     #
