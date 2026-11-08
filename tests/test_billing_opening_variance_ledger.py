@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from dotmac_billing import service as s
+from dotmac_billing.commands import IssueCreditNote
 from dotmac_billing.errors import BillingRuleViolation
 from dotmac_billing.opening_commands import ReverseOpeningAccountImportV1
 from dotmac_billing.opening_contracts import OpeningSourceIdentityV1
@@ -22,6 +23,7 @@ from dotmac_billing.opening_variance import (
 )
 from dotmac_billing.opening_variance_contracts import (
     OpeningVarianceApprovalV1,
+    OpeningVarianceResolutionRefV1,
     OpeningVarianceV1,
     RecogniseOpeningVarianceV1,
 )
@@ -29,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from tests import billing_opening_variance_fixtures as variance_fixture
+from tests import test_billing_isolation as b
 from tests import test_billing_opening_cash_import as cash
 from tests import test_billing_opening_hold_admission as hold
 from tests import test_billing_opening_receivable_import as ar
@@ -74,7 +77,7 @@ def _variance(part, **kw) -> OpeningVarianceV1:
     return OpeningVarianceV1(source=OpeningSourceIdentityV1(kind, key), **values)
 
 
-def _carrying_command(session, scope, *, exact: bool = False):
+def _carrying_command(session, scope, *, exact: bool = False, gap: bool = False):
     """A mixed lot + receivable partition carrying a ledger and a memo variance."""
     account = cash._new_account(session, scope)
     cmd = ar._command(session, scope, account)
@@ -125,11 +128,19 @@ def _carrying_command(session, scope, *, exact: bool = False):
             for m in measures
         ),
     )
+    if gap:  # E4 cannot be formed: a typed control gap, never a blocker
+        manifest = replace(
+            manifest,
+            measures=tuple(
+                replace(m, rebuild_minor=None, rebuild_gap_reason="a10_missing")
+                for m in manifest.measures
+            ),
+        )
     return replace(cmd, manifest=manifest)
 
 
-def _imported(session, scope, *, seal: bool = True):
-    cmd = _carrying_command(session, scope)
+def _imported(session, scope, *, seal: bool = True, gap: bool = False):
+    cmd = _carrying_command(session, scope, gap=gap)
     cash._prepare_window(session, scope, cmd)
     session.commit()
     receipt = cash._import_command(
@@ -146,8 +157,8 @@ def _imported(session, scope, *, seal: bool = True):
     return cmd, receipt
 
 
-def _scope(scratch):
-    return cash.runtime._scope_url(scratch, "tenant")
+def _scope(scratch, plane="tenant"):
+    return cash.runtime._scope_url(scratch, plane)
 
 
 def _ids(session, scope):
@@ -156,8 +167,9 @@ def _ids(session, scope):
     return records, by_amount
 
 
-def test_import_records_variances_and_the_control_report_closes(scratch):
-    scope, url = _scope(scratch)
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_import_records_variances_and_the_control_report_closes(scratch, plane):
+    scope, url = _scope(scratch, plane)
     with cash._session(scratch, url, scope) as session:
         _imported(session, scope)
         records, by_amount = _ids(session, scope)
@@ -191,15 +203,21 @@ def test_import_records_variances_and_the_control_report_closes(scratch):
         )
 
 
-def test_replay_adds_no_variance_rows(scratch):
-    scope, url = _scope(scratch)
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_replay_adds_no_variance_rows(scratch, plane):
+    scope, url = _scope(scratch, plane)
+    prefix = "platform_" if plane == "platform" else ""
+
+    def count(session, table: str) -> int:
+        return session.scalar(
+            text(f"SELECT count(*) FROM mod_billing.{prefix}{table}")  # noqa: S608
+        )
+
     with cash._session(scratch, url, scope) as session:
         cmd, receipt = _imported(session, scope, seal=False)
-        before = session.scalar(
-            text("SELECT count(*) FROM mod_billing.opening_variances")
-        )
-        events = session.scalar(
-            text("SELECT count(*) FROM mod_billing.opening_variance_events")
+        before = (
+            count(session, "opening_variances"),
+            count(session, "opening_variance_events"),
         )
         again = cash._import_command(
             session,
@@ -210,17 +228,11 @@ def test_replay_adds_no_variance_rows(scratch):
         )
         session.commit()
         assert again == receipt
-        assert before == 3 and events == 3
+        assert before == (3, 3)
         assert (
-            session.scalar(text("SELECT count(*) FROM mod_billing.opening_variances"))
-            == before
-        )
-        assert (
-            session.scalar(
-                text("SELECT count(*) FROM mod_billing.opening_variance_events")
-            )
-            == events
-        )
+            count(session, "opening_variances"),
+            count(session, "opening_variance_events"),
+        ) == before
 
 
 def _defects(session, scope, account: UUID, change: str | None = None) -> int:
@@ -543,3 +555,162 @@ def test_a_manifest_that_does_not_close_never_becomes_a_window(scratch):
         with pytest.raises(BillingRuleViolation) as refused:
             cash._prepare_window(session, scope, replace(cmd, manifest=a10_shaped))
         assert refused.value.code.endswith("opening_manifest_unclosed")
+
+
+def test_a_missing_rebuild_figure_opens_a_gap_whose_resolution_needs_maker_checker(
+    scratch,
+):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        cmd, _receipt = _imported(session, scope, gap=True)
+        assert _defects(session, scope, cmd.partition.account_id) == 0
+        gap = (
+            session.execute(
+                text(
+                    "SELECT id, tenant_id, window_id, billing_account_id "
+                    "FROM mod_billing.opening_control_gaps"
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+        def insert(**values):
+            row = {
+                "id": uuid4(),
+                "t": gap["tenant_id"],
+                "w": gap["window_id"],
+                "g": gap["id"],
+                "a": gap["billing_account_id"],
+                "ev": "rebuild-run:1",
+                "maker": "maker:g",
+                "refs": '["checker:g"]',
+                "req": uuid4(),
+                "actor": "maker:g",
+            }
+            row.update(values)
+            session.execute(
+                text(
+                    "INSERT INTO mod_billing.opening_control_gap_events (id, "
+                    "tenant_id, window_id, gap_id, billing_account_id, kind, "
+                    "evidence_ref, maker_ref, approver_refs, approval_request_id, "
+                    "actor, occurred_at) VALUES (:id, :t, :w, :g, :a, 'resolved', "
+                    ":ev, :maker, CAST(:refs AS jsonb), :req, :actor, now())"
+                ),
+                row,
+            )
+
+        for bad in (
+            {"refs": '["maker:g"]'},
+            {"refs": "[]"},
+            {"ev": None},
+            {"req": None},
+            {"actor": "someone:else"},
+        ):
+            with pytest.raises(DBAPIError) as refused:
+                with session.begin_nested():
+                    insert(**bad)
+            assert refused.value.orig.sqlstate == "23514"
+        insert()  # a valid, approved resolution
+
+
+def _credit_note(document_id, amount: str, **overrides):
+    return replace(
+        IssueCreditNote(
+            document_id,
+            b._money(amount),
+            b._money("0"),
+            b._money(amount),
+            "evidenced correction",
+            "credit",
+            evidence.NOW.date(),
+            "billing-test",
+            str(uuid4()),
+            evidence.NOW,
+            "credit.standard",
+            "1",
+        ),
+        **overrides,
+    )
+
+
+def test_a_credit_note_resolves_an_adverse_variance_only_behind_the_approvals_port(
+    scratch,
+):
+    """Findings 1 and 8: no approvals port, no resolution; a resolving posting
+    group can never be reversed."""
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _cmd, receipt = _imported(session, scope)
+        _records, by_amount = _ids(session, scope)
+        adverse = by_amount[-700]
+        first, _second = ar._bases(session, scope, receipt)
+        ref = OpeningVarianceResolutionRefV1(
+            adverse.variance_id, -700, uuid4(), "maker:v"
+        )
+        command = _credit_note(first.document_id, "7", resolves_variance_ref=ref)
+        with pytest.raises(BillingRuleViolation) as refused:
+            s.issue_credit_note(
+                session,
+                scope=scope,
+                command=command,
+                numbering=b.NUMBERING,
+                approvals=None,
+            )
+        assert refused.value.code.endswith("opening_verifier_unavailable")
+        session.rollback()
+        with pytest.raises(BillingRuleViolation) as refused:  # maker is a checker
+            s.issue_credit_note(
+                session,
+                scope=scope,
+                command=command,
+                numbering=b.NUMBERING,
+                approvals=VarianceApprovals(checkers=("maker:v",)),
+            )
+        assert refused.value.code.endswith("opening_variance_maker_checker")
+        session.rollback()
+        note = s.issue_credit_note(
+            session,
+            scope=scope,
+            command=command,
+            numbering=b.NUMBERING,
+            approvals=VarianceApprovals(),
+        )
+        session.commit()
+        after, _ = _ids(session, scope)
+        resolved = {r.amount_minor: r for r in after}[-700]
+        assert resolved.state == "resolved" and resolved.resolved_minor == -700
+        group = session.scalar(
+            text(
+                "SELECT posting_group_id FROM mod_billing.opening_variance_events "
+                "WHERE variance_id = :v AND kind = 'resolved'"
+            ),
+            {"v": adverse.variance_id},
+        )
+        assert group is not None and note.id is not None
+        # the resolving group is locked: reversing it is refused, fail closed
+        with pytest.raises(BillingRuleViolation) as locked:
+            s.reverse_posting_group(
+                session,
+                scope=scope,
+                command=cash.ReversePostingGroupCommand(
+                    group, evidence.NOW, str(uuid4())
+                ),
+            )
+        assert locked.value.code.endswith("variance_resolution_locked")
+        session.rollback()
+        # a credit note that resolves a memo variance has no lane effect: refused
+        memo_ref = OpeningVarianceResolutionRefV1(
+            by_amount[500].variance_id, 500, uuid4(), "maker:v"
+        )
+        with pytest.raises(BillingRuleViolation) as refused:
+            s.issue_credit_note(
+                session,
+                scope=scope,
+                command=_credit_note(
+                    first.document_id, "5", resolves_variance_ref=memo_ref
+                ),
+                numbering=b.NUMBERING,
+                approvals=VarianceApprovals(),
+            )
+        assert refused.value.code.endswith("variance_resolution_lane_effect_missing")
