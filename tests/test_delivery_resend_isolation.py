@@ -52,6 +52,6 @@ def test_fence_imports_no_product_modules() -> None:
 def test_exact_sqlalchemy_pin_is_the_contract() -> None:
     pyproject = (PACKAGE / "pyproject.toml").read_text()
     assert 'sqlalchemy = "==2.0.51"' in pyproject
-    assert 'dotmac-kernel = ">=0.1.0a107"' in pyproject
+    assert 'dotmac-kernel = ">=0.1.0a105"' in pyproject
     fence = (PACKAGE / "src/dotmac_delivery_resend/fence.py").read_text()
     assert 'sqlalchemy_version != "2.0.51"' in fence
