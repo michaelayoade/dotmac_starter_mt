@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "dotmac-delivery-resend"
+version = "0.1.0a1"
+description = "Transactional fence for human-triggered delivery resends inside a caller transaction"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_delivery_resend", from = "src" }]
+include = [
+    { path = "src/dotmac_delivery_resend/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# Kernel floor is set by the transactions conflict-savepoint API this
+# package consumes; the first adopter (Academy) already pins a107
+# exactly, so adoption raises nothing. Not floor-probe proven below a107.
+dotmac-kernel = ">=0.1.0a107"
+# EXACT on purpose (house deviation, documented in COMPATIBILITY.md):
+# the fence depends on SQLAlchemy 2.0.51 private call sites and refuses
+# any other version at runtime. A new qualified version is a reviewed
+# requalification (pin bump + full Academy resend suites green).
+sqlalchemy = "==2.0.51"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
