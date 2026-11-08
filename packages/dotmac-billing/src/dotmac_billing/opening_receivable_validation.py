@@ -589,6 +589,26 @@ class _ReceivableManifestAnalysis:
         ctx[0] = None
 
 
+def opening_manifest_variance_blockers(
+    manifest: OpeningManifestV2,
+) -> tuple[OpeningBlockerV1, ...]:
+    """The closure, count, citation, duplicate and batch findings of the manifest.
+
+    Run at window admission (``opening_manifest_unclosed``): a manifest whose
+    variance ledger does not close never becomes a window.
+    """
+    ar_totals: Counter[OpeningPartitionV1] = Counter()
+    for item in manifest.receivables:
+        ar_totals[item.partition] += item.residual_minor
+    found: dict[str, list[str]] = {}
+
+    def block(_part: OpeningPartitionV1 | None, code: str, reference: str) -> None:
+        found.setdefault(code, []).append(reference)
+
+    check_variances(manifest, ar_totals, block)
+    return _freeze(found)
+
+
 def _analysis_of(manifest: OpeningManifestV2) -> _ReceivableManifestAnalysis:
     """The manifest's complete-partition analysis, built once per manifest object."""
     entry = _entry(manifest)

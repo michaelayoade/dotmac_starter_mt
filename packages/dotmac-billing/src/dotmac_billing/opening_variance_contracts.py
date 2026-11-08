@@ -62,6 +62,13 @@ EVENT_KINDS: Final = (
     "resolved",
     "voided_by_import_reversal",
 )
+#: Cumulative flow fields of the lane controls: history rows, never an equation.
+HISTORY_FIELDS: Final = (
+    "prepaid_funding_consumed_minor",
+    "written_off_total_minor",
+    "refunded_total_minor",
+    "adjustment_total_minor",
+)
 GL_TARGET_CLASSES: Final = ("bad_debt", "revenue_adjustment", "customer_liability")
 #: Typed reasons a sealing operator may give for listing an UNMARKED partition.
 OPERATIONAL_HOLD_REASONS: Final = frozenset({"target_not_pristine", "import_refused"})
@@ -143,8 +150,12 @@ _NOT_TRANSFERRED = _Policy(
     frozenset({"customer_credit", "prepaid_funding"}),
     "partition",
 )
+#: The rebuild is a net, credit-positive figure: only the receivable lane compares.
 _REBUILD = _Policy(
-    frozenset({"rebuild"}), frozenset({"rebuild_account"}), _L, "partition"
+    frozenset({"rebuild"}),
+    frozenset({"rebuild_account"}),
+    frozenset({"receivable"}),
+    "partition",
 )
 _REMAINDER = _Policy(frozenset(BASES), frozenset({REMAINDER_KIND}), _L, "partition")
 
@@ -210,6 +221,8 @@ class OpeningVarianceV1(_ClosedEvidence):
             or self.source.kind not in policy.kinds
         ):
             raise OpeningEvidenceError("variance source kind not allowed for reason")
+        if self.basis == "rebuild" and self.lane != "receivable":
+            raise OpeningEvidenceError("the rebuild basis is receivable-lane only")
         if self.reason_code.startswith("lane_not_transferred:") and (
             self.reason_code.partition(":")[2] != self.lane
         ):
@@ -328,22 +341,25 @@ class OpeningOperationalHoldV1(_ClosedEvidence):
 
 @dataclass(frozen=True, slots=True)
 class OpeningVarianceResolutionRefV1(_ClosedEvidence):
-    """Carried by a governed primitive (credit note, grant, reallocation).
+    """Carried by a governed primitive (credit note, grant).
 
-    The primitive's own transaction appends the resolution event; the governed
-    adapter (F3) owns the approval, Billing only records and bounds it.
+    The primitive's own transaction appends the resolution events, but only
+    after the trusted approvals port vouches for exactly this variance, kind,
+    amount, the primitive's request fingerprint and maker. Billing never trusts
+    a caller-supplied approver or actor.
     """
 
     variance_id: UUID
     amount_minor: int
-    approval_ref: str
-    actor: str
+    approval_request_id: UUID
+    maker_ref: str
 
     def __post_init__(self) -> None:
         _ClosedEvidence.__post_init__(self)
         if (
             self.amount_minor == 0
-            or max(len(self.approval_ref), len(self.actor)) > _MAX_REF
+            or not self.maker_ref.strip()
+            or len(self.maker_ref) > _MAX_REF
         ):
             raise OpeningEvidenceError("variance resolution reference invalid")
 
@@ -509,6 +525,9 @@ class OpeningControlReportV1(_ClosedEvidence):
     customer_adverse_count: int
     customer_adverse_minor: int
     operational_holds: tuple[tuple[str, str], ...]  # (account, reason)
+    #: Cumulative flow fields are history, not balances: no equation, no blocker.
+    #: (field, currency, sum, accounts with a non-zero value)
+    history: tuple[tuple[str, str, int, int], ...]
     closed: bool
     digest: str
 
@@ -555,6 +574,7 @@ __all__ = [
     "BASES",
     "EVENT_KINDS",
     "GL_TARGET_CLASSES",
+    "HISTORY_FIELDS",
     "ITEM_NOT_TRANSFERRED_CODES",
     "LANES",
     "LEDGER_BASIS",

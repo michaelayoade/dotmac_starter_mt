@@ -27,6 +27,7 @@ from __future__ import annotations
 # ruff: noqa: S608
 import sqlalchemy as sa
 from dotmac_kernel.planes import ModulePlane, selected_module_planes
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.schema import SchemaItem
 
 from alembic import op
@@ -144,6 +145,7 @@ def _tables(platform: bool) -> None:
             *scope,
             "window_id",
             "billing_account_id",
+            "import_receipt_id",
             "currency",
             "lane",
             "basis",
@@ -182,7 +184,9 @@ def _tables(platform: bool) -> None:
         sa.Column("posting_group_id", sa.Uuid()),
         sa.Column("gl_target_class", sa.String(32)),
         sa.Column("evidence_ref", sa.String(255)),
-        sa.Column("approval_ref", sa.String(255)),
+        sa.Column("maker_ref", sa.String(255)),
+        sa.Column("approver_refs", JSONB()),
+        sa.Column("approval_request_id", sa.Uuid()),
         sa.Column("actor", sa.String(255), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint(f"kind IN {_EVENTS}", name=f"ck_{events}_kind"),
@@ -217,6 +221,7 @@ def _tables(platform: bool) -> None:
             *scope,
             "window_id",
             "billing_account_id",
+            "import_receipt_id",
             "basis",
             name=f"uq_{gaps}_identity",
         ),
@@ -240,13 +245,16 @@ def _tables(platform: bool) -> None:
         sa.Column("window_id", sa.Uuid(), nullable=False),
         sa.Column("gap_id", sa.Uuid(), nullable=False),
         sa.Column("billing_account_id", sa.Uuid(), nullable=False),
-        sa.Column("kind", sa.String(16), nullable=False),
+        sa.Column("kind", sa.String(32), nullable=False),
         sa.Column("evidence_ref", sa.String(255)),
-        sa.Column("approval_ref", sa.String(255)),
+        sa.Column("maker_ref", sa.String(255)),
+        sa.Column("approver_refs", JSONB()),
+        sa.Column("approval_request_id", sa.Uuid()),
         sa.Column("actor", sa.String(255), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.CheckConstraint(
-            "kind IN ('recorded','resolved')", name=f"ck_{gap_events}_kind"
+            "kind IN ('recorded','resolved','voided_by_import_reversal')",
+            name=f"ck_{gap_events}_kind",
         ),
         sa.UniqueConstraint(*scope, "gap_id", "kind", name=f"uq_{gap_events}_once"),
         fk(["gap_id"], "opening_control_gaps", ["id"]),
@@ -282,9 +290,25 @@ def _shared() -> None:
         WHEN reason = 'unattributed_source' THEN lvl = 'batch' AND basis = 'ledger_lane'
           AND kind IN ('control_row','payment')
         WHEN reason = 'unexplained_difference' THEN lvl = 'partition' AND kind = 'partition_remainder'
+          AND (basis <> 'rebuild' OR lane = 'receivable')
         WHEN reason ~ '^rebuild_[a-z0-9]+(_[a-z0-9]+)*$' THEN lvl = 'partition'
-          AND basis = 'rebuild' AND kind = 'rebuild_account'
+          AND basis = 'rebuild' AND kind = 'rebuild_account' AND lane = 'receivable'
         ELSE false END
+    $$;
+
+    -- bi_0013 hold-admission parity for a variance/gap resolution: a non-empty
+    -- maker, a non-empty array of distinct non-empty checker strings, the maker
+    -- not among them, and an approval request id.
+    CREATE FUNCTION mod_billing.opening_approval_ok(
+      maker text, approvers jsonb, request uuid) RETURNS boolean
+    LANGUAGE sql IMMUTABLE SET search_path = pg_catalog AS $$
+      SELECT CASE WHEN nullif(trim(maker), '') IS NULL OR request IS NULL
+          OR jsonb_typeof(approvers) IS DISTINCT FROM 'array' THEN false
+        ELSE jsonb_array_length(approvers) > 0
+          AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(approvers) e
+                WHERE jsonb_typeof(e) <> 'string' OR nullif(trim(e #>> '{{}}'), '') IS NULL)
+          AND (SELECT count(DISTINCT e #>> '{{}}') FROM jsonb_array_elements(approvers) e) = jsonb_array_length(approvers)
+          AND NOT (approvers ? maker) END
     $$;
 
     -- The one carryable definition: T != 0 or any variance on the partition.
@@ -309,6 +333,7 @@ def _guards(platform: bool) -> None:
     x_scope = "" if platform else " AND x.tenant_id = tenant"
     r_scope = "" if platform else " AND r.tenant_id = tenant"
     e_scope = "" if platform else " AND e.tenant_id = tenant"
+    u_scope = "" if platform else " AND u.tenant_id = tenant"
     s_new = "" if platform else " AND s.tenant_id = NEW.tenant_id"
     op.execute(f"""
     CREATE FUNCTION mod_billing.guard_{p}opening_variance() RETURNS trigger
@@ -332,18 +357,18 @@ def _guards(platform: bool) -> None:
     CREATE TRIGGER opening_variance_entry BEFORE INSERT ON mod_billing.{p}opening_variances
       FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}opening_entry();
     CREATE TRIGGER opening_variance_event_entry BEFORE INSERT ON mod_billing.{p}opening_variance_events
-      FOR EACH ROW WHEN (NEW.kind = 'recorded')
+      FOR EACH ROW WHEN (NEW.kind IN ('recorded','voided_by_import_reversal'))
       EXECUTE FUNCTION mod_billing.guard_{p}opening_entry();
     CREATE TRIGGER opening_gap_entry BEFORE INSERT ON mod_billing.{p}opening_control_gaps
       FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}opening_entry();
     CREATE TRIGGER opening_gap_event_entry BEFORE INSERT ON mod_billing.{p}opening_control_gap_events
-      FOR EACH ROW WHEN (NEW.kind = 'recorded')
+      FOR EACH ROW WHEN (NEW.kind IN ('recorded','voided_by_import_reversal'))
       EXECUTE FUNCTION mod_billing.guard_{p}opening_entry();
 
     CREATE FUNCTION mod_billing.guard_{p}opening_variance_event() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
     DECLARE v record; prev record; grp record; sealed boolean; done numeric; total numeric;
-      eff numeric; lane_name text;
+      eff numeric; lane_name text; adverse boolean;
     BEGIN
       SELECT * INTO v FROM mod_billing.{p}opening_variances x WHERE x.id = NEW.variance_id{new_scope};
       IF v.id IS NULL OR v.window_id <> NEW.window_id
@@ -353,12 +378,18 @@ def _guards(platform: bool) -> None:
       SELECT EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_seals s WHERE s.window_id = NEW.window_id{s_new}) INTO sealed;
       SELECT * INTO prev FROM mod_billing.{p}opening_variance_events x
         WHERE x.variance_id = NEW.variance_id{new_scope} ORDER BY x.seq DESC LIMIT 1;
-      IF NEW.kind IN ('recorded','voided_by_import_reversal','resolving') AND (
+      IF NEW.kind IN ('recorded','voided_by_import_reversal') AND (
+        NEW.resolution_kind IS NOT NULL OR NEW.amount_minor IS NOT NULL
+        OR NEW.posting_group_id IS NOT NULL OR NEW.gl_target_class IS NOT NULL OR NEW.evidence_ref IS NOT NULL
+        OR NEW.maker_ref IS NOT NULL OR NEW.approver_refs IS NOT NULL OR NEW.approval_request_id IS NOT NULL)
+      THEN RAISE EXCEPTION 'only a resolution event carries resolution fields' USING ERRCODE = '23514'; END IF;
+      IF NEW.kind = 'resolving' AND (
         NEW.resolution_kind IS NOT NULL OR NEW.amount_minor IS NOT NULL
         OR NEW.posting_group_id IS NOT NULL OR NEW.gl_target_class IS NOT NULL OR NEW.evidence_ref IS NOT NULL)
       THEN RAISE EXCEPTION 'only a resolution event carries resolution fields' USING ERRCODE = '23514'; END IF;
       IF NEW.kind = 'recorded' THEN
-        IF prev.id IS NOT NULL AND prev.kind <> 'voided_by_import_reversal' THEN
+        -- A void is terminal: a re-import records fresh rows, never this one again.
+        IF prev.id IS NOT NULL THEN
           RAISE EXCEPTION 'variance is already recorded' USING ERRCODE = '23514'; END IF;
         IF sealed AND v.scope_level = 'batch' THEN
           RAISE EXCEPTION 'batch variances are recorded before the seal' USING ERRCODE = '23514'; END IF;
@@ -369,14 +400,18 @@ def _guards(platform: bool) -> None:
         THEN RAISE EXCEPTION 'only a recorded variance of an unwound import is voided, before the seal' USING ERRCODE = '23514'; END IF;
       ELSIF NEW.kind = 'resolving' THEN
         IF NOT sealed OR prev.kind NOT IN ('recorded','partially_resolved')
-          OR nullif(trim(NEW.approval_ref), '') IS NULL
-        THEN RAISE EXCEPTION 'resolving needs a sealed window, an open variance and its approval' USING ERRCODE = '23514'; END IF;
+          OR NOT mod_billing.opening_approval_ok(NEW.maker_ref, NEW.approver_refs, NEW.approval_request_id)
+          OR NEW.actor IS DISTINCT FROM NEW.maker_ref
+        THEN RAISE EXCEPTION 'resolving needs a sealed window, an open variance and maker-checker approval' USING ERRCODE = '23514'; END IF;
       ELSE
         IF NOT sealed OR prev.kind IS DISTINCT FROM 'resolving'
-          OR NEW.approval_ref IS DISTINCT FROM prev.approval_ref
+          OR NEW.maker_ref IS DISTINCT FROM prev.maker_ref
+          OR NEW.approver_refs IS DISTINCT FROM prev.approver_refs
+          OR NEW.approval_request_id IS DISTINCT FROM prev.approval_request_id
+          OR NEW.actor IS DISTINCT FROM NEW.maker_ref
           OR NEW.resolution_kind IS NULL OR NEW.amount_minor IS NULL OR NEW.amount_minor = 0
           OR sign(NEW.amount_minor) <> sign(v.amount_minor)
-        THEN RAISE EXCEPTION 'resolution must follow its approved resolving event with the variance sign' USING ERRCODE = '23514'; END IF;
+        THEN RAISE EXCEPTION 'resolution must equal its approved resolving event and carry the variance sign' USING ERRCODE = '23514'; END IF;
         SELECT coalesce(sum(x.amount_minor), 0) INTO done FROM mod_billing.{p}opening_variance_events x
           WHERE x.variance_id = NEW.variance_id AND x.kind IN ('resolved','partially_resolved'){new_scope};
         total := done + NEW.amount_minor;
@@ -384,10 +419,13 @@ def _guards(platform: bool) -> None:
           OR (NEW.kind = 'resolved') <> (total = v.amount_minor)
           OR NEW.kind NOT IN ('resolved','partially_resolved')
         THEN RAISE EXCEPTION 'resolution over-resolves, or the kind does not match the remaining amount' USING ERRCODE = '23514'; END IF;
+        adverse := (v.lane = 'receivable' AND v.amount_minor < 0) OR (v.lane <> 'receivable' AND v.amount_minor > 0);
         IF NEW.resolution_kind = 'recognised' THEN
-          IF v.basis <> 'ledger_lane' OR nullif(trim(NEW.gl_target_class), '') IS NULL
+          IF v.basis <> 'ledger_lane' OR adverse OR nullif(trim(NEW.gl_target_class), '') IS NULL
             OR NEW.posting_group_id IS NOT NULL OR NEW.evidence_ref IS NOT NULL
-          THEN RAISE EXCEPTION 'recognised applies only to the ledger lane with a GL target class' USING ERRCODE = '23514'; END IF;
+            OR NOT (CASE WHEN v.lane = 'receivable' THEN NEW.gl_target_class IN ('bad_debt','revenue_adjustment')
+                         ELSE NEW.gl_target_class = 'customer_liability' END)
+          THEN RAISE EXCEPTION 'recognised applies only to a non-adverse ledger-lane variance with a GL target class valid for its lane' USING ERRCODE = '23514'; END IF;
         ELSIF NEW.resolution_kind = 'evidence_confirmed' THEN
           IF v.basis = 'ledger_lane' OR nullif(trim(NEW.evidence_ref), '') IS NULL
             OR NEW.posting_group_id IS NOT NULL OR NEW.gl_target_class IS NOT NULL
@@ -398,12 +436,12 @@ def _guards(platform: bool) -> None:
           SELECT sum(e.amount_delta * power(10::numeric, e.minor_units)) INTO eff
             FROM mod_billing.{p}posting_effects e
             WHERE e.posting_group_id = NEW.posting_group_id AND e.lane = lane_name{"" if platform else " AND e.tenant_id = NEW.tenant_id"};
-          IF v.basis <> 'ledger_lane' OR grp.id IS NULL
+          IF v.basis <> 'ledger_lane' OR grp.id IS NULL OR grp.reverses_group_id IS NOT NULL
             OR grp.billing_account_id <> v.billing_account_id OR grp.currency <> v.currency
             OR grp.group_kind IN ('opening_cash_imported','opening_account_imported')
             OR eff IS DISTINCT FROM NEW.amount_minor::numeric
             OR NEW.gl_target_class IS NOT NULL OR NEW.evidence_ref IS NOT NULL
-          THEN RAISE EXCEPTION 'position_corrected needs a posting group of the same account, currency and lane with an equal amount' USING ERRCODE = '23514'; END IF;
+          THEN RAISE EXCEPTION 'position_corrected needs a non-reversal posting group of the same account, currency and lane with an equal amount' USING ERRCODE = '23514'; END IF;
         END IF;
       END IF;
       RETURN NEW;
@@ -413,22 +451,47 @@ def _guards(platform: bool) -> None:
 
     CREATE FUNCTION mod_billing.guard_{p}opening_gap_event() RETURNS trigger
     LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
-    DECLARE g record; sealed boolean;
+    DECLARE g record; prev record; sealed boolean;
     BEGIN
       SELECT * INTO g FROM mod_billing.{p}opening_control_gaps x WHERE x.id = NEW.gap_id{new_scope};
       SELECT EXISTS (SELECT 1 FROM mod_billing.{p}opening_window_seals s WHERE s.window_id = NEW.window_id{s_new}) INTO sealed;
+      SELECT * INTO prev FROM mod_billing.{p}opening_control_gap_events x
+        WHERE x.gap_id = NEW.gap_id{new_scope} ORDER BY x.seq DESC LIMIT 1;
       IF g.id IS NULL OR g.window_id <> NEW.window_id OR g.billing_account_id <> NEW.billing_account_id
         OR nullif(trim(NEW.actor), '') IS NULL
-        OR (NEW.kind = 'resolved' AND (NOT sealed OR nullif(trim(NEW.approval_ref), '') IS NULL
-            OR nullif(trim(NEW.evidence_ref), '') IS NULL))
-        OR (NEW.kind = 'recorded' AND (NEW.approval_ref IS NOT NULL OR NEW.evidence_ref IS NOT NULL))
-        OR (NEW.kind = 'resolved' AND NOT EXISTS (
-          SELECT 1 FROM mod_billing.{p}opening_control_gap_events x WHERE x.gap_id = NEW.gap_id AND x.kind = 'recorded'{new_scope}))
-      THEN RAISE EXCEPTION 'control gap event requires its gap, and a sealed window with evidence to resolve' USING ERRCODE = '23514'; END IF;
+      THEN RAISE EXCEPTION 'control gap event requires its gap, window and actor' USING ERRCODE = '23514'; END IF;
+      IF NEW.kind IN ('recorded','voided_by_import_reversal') AND (
+        NEW.approval_request_id IS NOT NULL OR NEW.maker_ref IS NOT NULL
+        OR NEW.approver_refs IS NOT NULL OR NEW.evidence_ref IS NOT NULL)
+      THEN RAISE EXCEPTION 'only a resolution carries evidence and approval' USING ERRCODE = '23514'; END IF;
+      IF NEW.kind = 'recorded' AND prev.id IS NOT NULL
+      THEN RAISE EXCEPTION 'control gap is already recorded' USING ERRCODE = '23514'; END IF;
+      IF NEW.kind = 'voided_by_import_reversal' AND (sealed OR prev.kind IS DISTINCT FROM 'recorded' OR NOT EXISTS (
+          SELECT 1 FROM mod_billing.{p}opening_import_receipts r
+          WHERE r.original_receipt_id = g.import_receipt_id AND r.receipt_kind = 'unwind'{"" if platform else " AND r.tenant_id = NEW.tenant_id"}))
+      THEN RAISE EXCEPTION 'only a recorded gap of an unwound import is voided, before the seal' USING ERRCODE = '23514'; END IF;
+      IF NEW.kind = 'resolved' AND (NOT sealed OR prev.kind IS DISTINCT FROM 'recorded'
+          OR nullif(trim(NEW.evidence_ref), '') IS NULL
+          OR NOT mod_billing.opening_approval_ok(NEW.maker_ref, NEW.approver_refs, NEW.approval_request_id)
+          OR NEW.actor IS DISTINCT FROM NEW.maker_ref)
+      THEN RAISE EXCEPTION 'a control gap resolves after the seal with evidence and maker-checker approval' USING ERRCODE = '23514'; END IF;
       RETURN NEW;
     END $$;
     CREATE TRIGGER opening_gap_event_guard BEFORE INSERT ON mod_billing.{p}opening_control_gap_events
       FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_{p}opening_gap_event();
+
+    -- Finding 8: a posting group a resolution event references is not reversible.
+    CREATE FUNCTION mod_billing.guard_{p}variance_resolution_lock() RETURNS trigger
+    LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog AS $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM mod_billing.{p}opening_variance_events e
+          WHERE e.posting_group_id = NEW.reverses_group_id{"" if platform else " AND e.tenant_id = NEW.tenant_id"})
+      THEN RAISE EXCEPTION 'variance_resolution_locked: posting group resolves an opening variance' USING ERRCODE = '23514'; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER variance_resolution_lock BEFORE INSERT ON mod_billing.{p}posting_groups
+      FOR EACH ROW WHEN (NEW.reverses_group_id IS NOT NULL)
+      EXECUTE FUNCTION mod_billing.guard_{p}variance_resolution_lock();
 
     -- Recorded (non-voided) variances and gaps of the accounts under check, as
     -- jsonb, against the frozen manifest set for the same accounts. Batch scope
@@ -465,7 +528,9 @@ def _guards(platform: bool) -> None:
         SELECT jsonb_build_object('a', g.billing_account_id::text, 'r', g.reason_code) AS row
         FROM mod_billing.{p}opening_control_gaps g
         WHERE g.window_id = identity{"" if platform else " AND g.tenant_id = tenant"}
-          AND g.billing_account_id::text = ANY(accounts)) q;
+          AND g.billing_account_id::text = ANY(accounts)
+          AND coalesce((SELECT e.kind FROM mod_billing.{p}opening_control_gap_events e
+                WHERE e.gap_id = g.id{e_scope} ORDER BY e.seq DESC LIMIT 1), '') = 'recorded') q;
       RETURN proposed IS NOT DISTINCT FROM actual AND gap_proposed IS NOT DISTINCT FROM gap_actual;
     END $$;
 
@@ -491,10 +556,17 @@ def _guards(platform: bool) -> None:
       tr AS (
         SELECT r.billing_account_id AS acct,
           sum((r.evidence::jsonb->'total_receivable'->>'amount')::numeric
-              * power(10::numeric, (r.evidence::jsonb->'total_receivable'->>'minor_units')::int)) AS t
+              * power(10::numeric, (r.evidence::jsonb->'total_receivable'->>'minor_units')::int)) AS t,
+          sum((r.evidence::jsonb->'total_residual'->>'amount')::numeric
+              * power(10::numeric, (r.evidence::jsonb->'total_residual'->>'minor_units')::int)) AS lot
         FROM mod_billing.{p}opening_import_receipts r
         WHERE r.receipt_kind = 'import'{r_scope} AND r.billing_account_id::text = ANY(accounts)
+          AND NOT EXISTS (SELECT 1 FROM mod_billing.{p}opening_import_receipts u
+                WHERE u.original_receipt_id = r.id AND u.receipt_kind = 'unwind'{u_scope})
         GROUP BY 1),
+      lots AS (
+        SELECT DISTINCT c->'partition'->>'account_id' AS acct
+        FROM jsonb_array_elements(coalesce(manifest->'cash_lots','[]'::jsonb)) c),
       va AS (
         SELECT x.billing_account_id AS acct, x.lane, x.basis, sum(x.amount_minor)::numeric AS v
         FROM mod_billing.{p}opening_variances x
@@ -510,7 +582,9 @@ def _guards(platform: bool) -> None:
         OR ctl.fund <> coalesce((SELECT v FROM va WHERE va.acct = ctl.acct AND lane = 'prepaid_funding' AND basis = 'ledger_lane'), 0)
         OR mea.doc <> coalesce(tr.t, 0) + coalesce((SELECT sum(v) FROM va WHERE va.acct = ctl.acct AND basis = 'document_residual'), 0)
         OR mea.sto <> coalesce(tr.t, 0) + coalesce((SELECT sum(v) FROM va WHERE va.acct = ctl.acct AND basis = 'stored_balance'), 0)
-        OR (mea.reb IS NOT NULL AND mea.reb <> coalesce(tr.t, 0) + coalesce((SELECT sum(v) FROM va WHERE va.acct = ctl.acct AND basis = 'rebuild'), 0))
+        OR (mea.reb IS NOT NULL AND mea.reb <> coalesce(tr.t, 0) - coalesce(tr.lot, 0) + coalesce((SELECT sum(v) FROM va WHERE va.acct = ctl.acct AND basis = 'rebuild'), 0))
+        OR (ctl.acct::text IN (SELECT acct FROM lots) AND (ctl.cred <> 0 OR ctl.fund <> 0
+            OR EXISTS (SELECT 1 FROM va WHERE va.acct = ctl.acct AND lane IN ('customer_credit','prepaid_funding'))))
         OR (mea.reb IS NULL AND EXISTS (SELECT 1 FROM va WHERE va.acct = ctl.acct AND basis = 'rebuild'));
       batch_bad := 0;
       IF include_batch THEN
@@ -643,7 +717,10 @@ def _replace_guards(platform: bool) -> None:
       -- Seal-time closure: (a) the recorded variance and gap sets equal the
       -- manifest sets for the admitted accounts and the batch; (b) every
       -- closure row is exactly zero.
-      SELECT coalesce(array_agg(c), ARRAY[]::text[]) INTO admitted FROM unnest(carryable) c WHERE NOT (held ? c);
+      -- Finding 5: closure covers EVERY control partition minus the held ones,
+      -- with T = 0 where nothing was imported; none can leave silently.
+      SELECT coalesce(array_agg(DISTINCT c->'partition'->>'account_id'), ARRAY[]::text[]) INTO admitted
+        FROM jsonb_array_elements(manifest->'controls') c WHERE NOT (held ? (c->'partition'->>'account_id'));
       IF NOT mod_billing.opening_variance_set_matches({new_args}identity, manifest, admitted, true)
       THEN RAISE EXCEPTION 'seal refused: recorded variance set differs from the manifest variance set' USING ERRCODE = '23514'; END IF;
       IF mod_billing.opening_closure_defects({new_args}identity, manifest, admitted, true) <> 0

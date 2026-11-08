@@ -22,6 +22,7 @@ def measures_for(manifest: OpeningManifestV2) -> tuple[OpeningPartitionMeasuresV
     for control in manifest.controls:
         part = control.partition
         t = sum(i.residual_minor for i in manifest.receivables if i.partition == part)
+        lots = sum(x.residual_minor for x in manifest.cash_lots if x.partition == part)
         disp = [d for d in manifest.dispositions if d.partition == part]
         eligible = sum(1 for d in disp if d.disposition == "eligible")
         blocking = sum(1 for d in disp if d.disposition == "blocking")
@@ -31,7 +32,7 @@ def measures_for(manifest: OpeningManifestV2) -> tuple[OpeningPartitionMeasuresV
                 part,
                 t,
                 t,
-                t,
+                t - lots,
                 None,
                 len(disp),
                 eligible,

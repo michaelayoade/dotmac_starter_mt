@@ -194,6 +194,7 @@ from dotmac_billing.opening_receivable_validation import (
     opening_account_command_digest_v2,
     opening_account_import_blockers_v2,
     opening_manifest_fingerprint_v2,
+    opening_manifest_variance_blockers,
     opening_withholding_component_identity,
     require_hold_list_covers_manifest,
     verify_opening_account_import_v2,
@@ -203,8 +204,11 @@ from dotmac_billing.opening_validation import (
     preview_opening_account_import,
 )
 from dotmac_billing.opening_variance import (
+    ApprovalEvidence,
     record_batch_variances,
     record_partition_variances,
+    require_group_not_variance_resolution,
+    require_resolution_primitive,
     resolve_variance,
     void_partition_variances,
 )
@@ -2016,6 +2020,10 @@ def _post_group(
     _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
+    if reverses_group_id is not None:
+        require_group_not_variance_resolution(
+            db, scope=scope, group_id=reverses_group_id
+        )
     allocation_inputs = tuple(
         replace(item, allocation_id=item.allocation_id or uuid4())
         for item in allocations
@@ -3370,6 +3378,7 @@ def issue_credit_note(
     scope: Scope,
     command: IssueCreditNote,
     numbering: NumberingProvider,
+    approvals: OpeningVarianceApprovalPort | None = None,
 ) -> _DocumentRow:
     plane = _models(scope)
     original_evidence = _one(
@@ -3445,6 +3454,15 @@ def issue_credit_note(
             raise BillingRuleViolation(
                 "credit_exceeds_receivable", "credit note exceeds the open receivable"
             )
+        resolution = _variance_resolution_approval(
+            session,
+            scope=scope,
+            ref=command.resolves_variance_ref,
+            approvals=approvals,
+            primitive="credit_note",
+            apply_on_issue=False,
+            primitive_fingerprint=_primitive_fingerprint(command),
+        )
         document_id = uuid4()
         number = numbering.allocate(
             session,
@@ -3616,11 +3634,12 @@ def issue_credit_note(
             state="issued",
             correlation_id=command.correlation_id,
         )
-        if command.resolves_variance_ref is not None:
+        if resolution is not None:
             _resolve_by_posting_group(
                 session,
                 scope=scope,
                 ref=command.resolves_variance_ref,
+                approval=resolution,
                 group_id=group.id,
                 occurred_at=command.occurred_at,
             )
@@ -4267,7 +4286,11 @@ def _non_cash_effect(
 
 
 def grant_non_cash_credit(
-    db: Session, *, scope: Scope, command: GrantNonCashCredit
+    db: Session,
+    *,
+    scope: Scope,
+    command: GrantNonCashCredit,
+    approvals: OpeningVarianceApprovalPort | None = None,
 ) -> NonCashCreditGrantV1:
     """Grant ordinary non-tax commercial value; adopting assembly authorizes finance.
 
@@ -4288,6 +4311,15 @@ def grant_non_cash_credit(
         )
         if replay is not None:
             return {"grant_id": str(cast(NonCashCreditGrantV1, replay).grant_id)}
+        resolution = _variance_resolution_approval(
+            session,
+            scope=scope,
+            ref=command.resolves_variance_ref,
+            approvals=approvals,
+            primitive="grant",
+            apply_on_issue=command.apply_on_issue,
+            primitive_fingerprint=_primitive_fingerprint(command),
+        )
         account = _one(
             session,
             scope=scope,
@@ -4444,11 +4476,12 @@ def grant_non_cash_credit(
             non_cash_effects=non_cash_effects,
             non_cash_request_digest=digest,
         )
-        if command.resolves_variance_ref is not None:
+        if resolution is not None:
             _resolve_by_posting_group(
                 session,
                 scope=scope,
                 ref=command.resolves_variance_ref,
+                approval=resolution,
                 group_id=grant_group.id,
                 occurred_at=command.occurred_at,
             )
@@ -6377,6 +6410,14 @@ def provision_opening_window(
         raise BillingRuleViolation(
             "opening_window_manifest", "window requires exact complete manifest"
         )
+    if isinstance(window.manifest, OpeningManifestV2):
+        unclosed = opening_manifest_variance_blockers(window.manifest)
+        if unclosed:
+            raise BillingRuleViolation(
+                "opening_manifest_unclosed",
+                "manifest variance ledger does not close: "
+                + ", ".join(sorted({b.code for b in unclosed})),
+            )
     if verifier is None:
         raise BillingRuleViolation(
             "opening_verifier_unavailable", "trusted provision verifier required"
@@ -6465,27 +6506,81 @@ def _admit_opening_window(
     return window
 
 
+def _primitive_fingerprint(command: object) -> str:
+    """The primitive's own request, without the resolution ref (no circularity:
+    the approver signs a digest that cannot contain the approval request id)."""
+    values = asdict(cast(Any, command))
+    values.pop("resolves_variance_ref", None)
+    values.pop("idempotency_key", None)
+    return fingerprint_of(values)
+
+
+def _variance_resolution_approval(
+    session: Session,
+    *,
+    scope: Scope,
+    ref: OpeningVarianceResolutionRefV1 | None,
+    approvals: OpeningVarianceApprovalPort | None,
+    primitive: str,
+    apply_on_issue: bool,
+    primitive_fingerprint: str,
+) -> OpeningVarianceApprovalV1 | None:
+    """Findings 1 and Q2: a primitive that resolves a variance needs the approvals
+    port and a lane-effect-capable variance BEFORE it posts anything."""
+    if ref is None:
+        return None
+    require_resolution_primitive(
+        session,
+        scope=scope,
+        variance_id=ref.variance_id,
+        primitive=primitive,
+        apply_on_issue=apply_on_issue,
+    )
+    return _require_variance_approval(
+        session,
+        scope=scope,
+        approvals=approvals,
+        request_id=ref.approval_request_id,
+        variance_id=ref.variance_id,
+        content_digest=variance_resolution_content_digest(
+            kind="position_corrected",
+            variance_id=ref.variance_id,
+            amount_minor=ref.amount_minor,
+            detail=primitive_fingerprint,
+            maker_ref=ref.maker_ref,
+        ),
+        maker_ref=ref.maker_ref,
+    )
+
+
 def _resolve_by_posting_group(
     session: Session,
     *,
     scope: Scope,
-    ref: OpeningVarianceResolutionRefV1,
+    ref: OpeningVarianceResolutionRefV1 | None,
+    approval: OpeningVarianceApprovalV1,
     group_id: UUID,
     occurred_at: datetime,
 ) -> None:
     """A governed primitive resolves one variance in its own transaction.
 
     The database requires a posting group of the same account, currency and
-    lane whose effect equals the amount; anything else rolls the primitive back.
+    lane whose effect equals the amount, and maker-checker evidence equal on the
+    resolving and resolved events.
     """
+    if ref is None:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "a variance resolution needs its reference"
+        )
     resolve_variance(
         session,
         scope=scope,
         variance_id=ref.variance_id,
         resolution_kind="position_corrected",
         amount_minor=ref.amount_minor,
-        approval_ref=ref.approval_ref,
-        actor=ref.actor,
+        approval=ApprovalEvidence(
+            approval.request_id, ref.maker_ref, approval.approver_refs
+        ),
         occurred_at=occurred_at,
         posting_group_id=group_id,
         emit=lambda kind, payload: _emit_variance_fact(
@@ -6588,8 +6683,9 @@ def recognise_opening_variance(
             variance_id=command.variance_id,
             resolution_kind="recognised",
             amount_minor=command.amount_minor,
-            approval_ref=str(held.request_id),
-            actor=command.maker_ref,
+            approval=ApprovalEvidence(
+                held.request_id, command.maker_ref, held.approver_refs
+            ),
             occurred_at=command.occurred_at,
             gl_target_class=command.gl_target_class,
             emit=lambda kind, payload: _emit_variance_fact(
@@ -6646,8 +6742,9 @@ def confirm_opening_variance_evidence(
             variance_id=command.variance_id,
             resolution_kind="evidence_confirmed",
             amount_minor=command.amount_minor,
-            approval_ref=str(held.request_id),
-            actor=command.maker_ref,
+            approval=ApprovalEvidence(
+                held.request_id, command.maker_ref, held.approver_refs
+            ),
             occurred_at=command.occurred_at,
             evidence_ref=command.evidence_ref,
         )
