@@ -67,3 +67,25 @@ def test_inactive_policy_factory_does_not_restrict_runtime_metadata(
             browser_document_policies=() if web_enabled else (policy,),
         )
     )
+
+
+@pytest.mark.parametrize("web_enabled", [True, False])
+def test_inactive_policies_preserve_disabled_kernel_header_writer(
+    monkeypatch, web_enabled
+):
+    from dotmac_kernel.config import settings
+
+    monkeypatch.setattr(settings, "security_headers_enabled", False)
+    policy = BrowserDocumentPolicyV1(
+        "learner",
+        WebRouteRef("labs", "console", "document"),
+        (InlineScriptHashV1("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),),
+    )
+    create_app(
+        ProductAssemblySpec(
+            name="inactive-disabled-header-writer",
+            api_documentation=api_documentation_policy("development"),
+            web_enabled=web_enabled,
+            browser_document_policies=() if web_enabled else (policy,),
+        )
+    )

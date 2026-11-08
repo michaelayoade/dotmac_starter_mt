@@ -662,6 +662,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         ),
     )
     _validate_browser_document_runtime(bool(surface_registry.browser_document_policies))
+    if (
+        surface_registry.browser_document_policies
+        and not settings.security_headers_enabled
+    ):
+        raise ValueError(
+            "browser document policies require the Kernel security-header writer "
+            "to be enabled"
+        )
     for facet in surface_registry.facets:
         if facet.admission_permission is not None:
             permission_catalogue.require(facet.admission_permission)

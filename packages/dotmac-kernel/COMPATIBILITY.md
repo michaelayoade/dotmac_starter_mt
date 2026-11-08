@@ -811,7 +811,9 @@ bindings are refused. Each `InlineScriptHashV1(sha256)` contains the canonical
 base64 encoding of exactly 32 SHA-256 digest bytes. The adopter pins reviewed
 script bytes in source; this API neither downloads assets nor hashes arbitrary
 upstream responses. Empty declarations preserve the existing behavior, and
-API-only composition ignores the declarations.
+API-only composition ignores the declarations. Active declarations require the
+Kernel security-header writer; disabling it in favor of an external proxy is
+refused for this opt-in.
 
 The source gate admits only **FastAPI 0.140.13 and Starlette 1.10.0**, the
 actual Academy framework pair. Hosted qualification is pending. Active
@@ -847,6 +849,13 @@ retract already-sent headers and must not produce another response start. This
 contract does not assert that all request-scope commits or cleanup completed
 before delivery. The hosted compatibility lane captures actual ASGI messages
 on the installed target pair; mocked version refusals are separate unit tests.
+
+The disjoint hosted `console-document-policy` job runs the actual-framework
+suite in `tests/compatibility`; ordinary unit tests cover metadata refusal and
+inactive behavior under the reference lock. A mutation-tested architecture
+canary keeps the isolated hash-locked install, full suite selector, execution
+evidence and build dependency connected. No skipped test is accepted as
+compatibility evidence.
 
 This is development source (`a107+dev`), not an allocated or published successor.
 Consumer asset pinning, installed-artifact admission and genuine terminal

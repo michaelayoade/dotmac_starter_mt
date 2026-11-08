@@ -463,7 +463,7 @@ def _capture_terminal_request(app):
             messages.append(dict(message))
 
         with pytest.raises(RuntimeError, match="response already started"):
-            await app(scope, receive, send)
+            await asyncio.wait_for(app(scope, receive, send), timeout=10)
 
     asyncio.run(request())
     starts = [
@@ -648,3 +648,14 @@ def test_prestart_auth_endpoint_validation_and_response_failures_use_baseline(
         )
     assert response.status_code == 200
     assert response.headers.get_list("content-security-policy") == [BASELINE]
+
+
+def test_active_document_policy_refuses_disabled_kernel_header_writer(monkeypatch):
+    from dotmac_kernel.config import settings
+
+    monkeypatch.setattr(settings, "security_headers_enabled", False)
+    with pytest.raises(
+        ValueError,
+        match="browser document policies require the Kernel security-header writer",
+    ):
+        create_app(spec())
