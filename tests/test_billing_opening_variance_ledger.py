@@ -714,3 +714,99 @@ def test_a_credit_note_resolves_an_adverse_variance_only_behind_the_approvals_po
                 approvals=VarianceApprovals(),
             )
         assert refused.value.code.endswith("variance_resolution_lane_effect_missing")
+
+
+def test_database_refuses_over_resolution_wrong_sign_and_wrong_kind_for_the_basis(
+    scratch,
+):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _imported(session, scope)
+        ledger, memo = _row(session, 300), _row(session, 500)
+        for row, amount in ((ledger, 300), (memo, 500)):
+            _event(session, row["window_id"], row, req=uuid4())
+            req = session.execute(
+                text(
+                    "SELECT approval_request_id FROM mod_billing.opening_variance_events "  # noqa: E501
+                    "WHERE variance_id = :v AND kind = 'resolving'"
+                ),
+                {"v": row["id"]},
+            ).scalar_one()
+            for bad in (
+                {"amount": amount + 1, "kind": "resolved"},  # over-resolves
+                {"amount": -amount, "kind": "resolved"},  # wrong sign
+                {"amount": amount - 1, "kind": "resolved"},  # partial named resolved
+                {"amount": amount, "kind": "partially_resolved"},  # full named partial
+            ):
+                _refused(
+                    session,
+                    row=row,
+                    rk="recognised" if row is ledger else "evidence_confirmed",
+                    gl="bad_debt" if row is ledger else None,
+                    ev=None if row is ledger else "evidence:1",
+                    req=req,
+                    **bad,
+                )
+        # evidence_confirmed never touches the authoritative ledger lane, and a
+        # memo basis is never recognised into the GL
+        _refused(
+            session,
+            row=ledger,
+            kind="resolved",
+            rk="evidence_confirmed",
+            amount=300,
+            ev="evidence:1",
+            req=session.execute(
+                text(
+                    "SELECT approval_request_id FROM mod_billing.opening_variance_events "  # noqa: E501
+                    "WHERE variance_id = :v AND kind = 'resolving'"
+                ),
+                {"v": ledger["id"]},
+            ).scalar_one(),
+        )
+        _refused(
+            session,
+            row=memo,
+            kind="resolved",
+            rk="recognised",
+            amount=500,
+            gl="bad_debt",
+            req=session.execute(
+                text(
+                    "SELECT approval_request_id FROM mod_billing.opening_variance_events "  # noqa: E501
+                    "WHERE variance_id = :v AND kind = 'resolving'"
+                ),
+                {"v": memo["id"]},
+            ).scalar_one(),
+        )
+
+
+def test_the_seal_set_check_refuses_a_recorded_set_that_differs_from_the_manifest(
+    scratch,
+):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        cmd, _receipt = _imported(session, scope, seal=False)
+
+        def matches(change: str | None) -> bool:
+            manifest = "w.evidence::jsonb->'window'->'manifest'"
+            if change is not None:
+                manifest = change.replace("{m}", manifest)
+            return session.scalar(
+                text(
+                    "SELECT mod_billing.opening_variance_set_matches("  # noqa: S608
+                    f"w.tenant_id, w.id, {manifest}, ARRAY[:a], true) "
+                    "FROM mod_billing.opening_windows w"
+                ),
+                {"a": str(cmd.partition.account_id)},
+            )
+
+        assert matches(None) is True
+        assert (
+            matches(
+                "jsonb_set({m}, '{variances,0,amount_minor}', "
+                "to_jsonb((({m}#>>'{variances,0,amount_minor}'))::bigint + 1))"
+            )
+            is False
+        )
+        assert matches("jsonb_set({m}, '{variances}', '[]'::jsonb)") is False
