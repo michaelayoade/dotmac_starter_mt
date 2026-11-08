@@ -451,6 +451,9 @@ def census_measures_ledger(
 
     def build(manifest: OpeningManifestV2) -> LedgerInputsV1:
         rows = []
+        by_partition: dict[OpeningPartitionV1, list[OpeningDispositionV1]] = {}
+        for disposition in manifest.dispositions:
+            by_partition.setdefault(disposition.partition, []).append(disposition)
         for control in manifest.controls:
             part = control.partition
             source = source_account_of.get(part)
@@ -463,7 +466,7 @@ def census_measures_ledger(
             stored = _minor_units(Decimal(figure[1]), precisions.get(part.currency))
             if doc is None or stored is None:
                 continue
-            disp = [d for d in manifest.dispositions if d.partition == part]
+            disp = by_partition.get(part, [])
             eligible = sum(1 for d in disp if d.disposition == "eligible")
             blocking = sum(1 for d in disp if d.disposition == "blocking")
             rows.append(
@@ -513,6 +516,16 @@ def census_variance_ledger(
     def build(manifest: OpeningManifestV2) -> LedgerInputsV1:
         measures: list[OpeningPartitionMeasuresV1] = []
         variances: list[OpeningVarianceV1] = []
+        # one pass each: the per-partition work below is a dictionary read
+        totals: Counter[OpeningPartitionV1] = Counter()
+        for receivable in manifest.receivables:
+            totals[receivable.partition] += receivable.residual_minor
+        lot_totals: Counter[OpeningPartitionV1] = Counter()
+        for lot in manifest.cash_lots:
+            lot_totals[lot.partition] += lot.residual_minor
+        rows_of: dict[OpeningPartitionV1, list[OpeningDispositionV1]] = {}
+        for disposition in manifest.dispositions:
+            rows_of.setdefault(disposition.partition, []).append(disposition)
         for control in manifest.controls:
             part = control.partition
             source = source_of.get(part)
@@ -528,12 +541,8 @@ def census_variance_ledger(
             stored = _minor_units(plan.stored_balance, prec)
             if doc is None or stored is None:
                 continue
-            total = sum(
-                r.residual_minor for r in manifest.receivables if r.partition == part
-            )
-            lots = sum(
-                x.residual_minor for x in manifest.cash_lots if x.partition == part
-            )
+            total = totals[part]
+            lots = lot_totals[part]
             mine: list[OpeningVarianceV1] = []
 
             def add(
@@ -683,9 +692,7 @@ def census_variance_ledger(
                         )
             cited = {v.source.key for v in mine if v.source.kind not in AGGREGATE_KINDS}
             counts: Counter[str] = Counter()
-            for d in manifest.dispositions:
-                if d.partition != part:
-                    continue
+            for d in rows_of.get(part, ()):
                 counts["population_rows"] += 1
                 if d.disposition == "eligible":
                     counts["transferred_rows"] += 1
