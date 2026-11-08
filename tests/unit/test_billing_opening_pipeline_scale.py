@@ -157,7 +157,7 @@ def test_batch_validation_equals_the_one_command_at_a_time_path(tmp_path):
     )
     census = json.loads(files["census"].read_text())
     from dotmac_billing.opening_admissibility import (
-        parse_a10_classes,
+        parse_a10_input,
         parse_admissibility_rules,
         project_census,
     )
@@ -165,11 +165,21 @@ def test_batch_validation_equals_the_one_command_at_a_time_path(tmp_path):
     projection = project_census(
         census,
         rules=parse_admissibility_rules(json.loads(files["rules"].read_text())),
-        a10=parse_a10_classes(json.loads(files["a10"].read_text())),
+        a10=parse_a10_input(json.loads(files["a10"].read_text()))[0],
+        rebuild=parse_a10_input(json.loads(files["a10"].read_text()))[1],
         original_invoice_ids=None,
     )
     obs, sidecar = adapter.load_sub_observation(projection.census)
-    run = adapter.assemble_rehearsal_run(obs, assembly=assembly, sidecar=sidecar)
+    run = adapter.assemble_rehearsal_run(
+        obs,
+        assembly=assembly,
+        sidecar=sidecar,
+        ledger_for=adapter.census_variance_ledger(
+            projection,
+            assembly,
+            {r.currency: r.precision for r in obs.currency_precisions},
+        ),
+    )
     commands = list(run.commands)
     assert len(commands) > 5
     batch = preview_opening_account_import_batch_v2(commands)
@@ -308,7 +318,7 @@ def test_full_scale_fixture_meets_the_phase_b_entry_budget(tmp_path):
 
 def _run_for(partitions: int, invoices: int, tmp_path: Path):
     from dotmac_billing.opening_admissibility import (
-        parse_a10_classes,
+        parse_a10_input,
         parse_admissibility_rules,
         project_census,
     )
@@ -317,7 +327,8 @@ def _run_for(partitions: int, invoices: int, tmp_path: Path):
     projection = project_census(
         data["census"],
         rules=parse_admissibility_rules(data["rules"]),
-        a10=parse_a10_classes(data["a10"]),
+        a10=parse_a10_input(data["a10"])[0],
+        rebuild=parse_a10_input(data["a10"])[1],
         original_invoice_ids=None,
     )
     draft = drafter.draft_assembly(
@@ -329,9 +340,9 @@ def _run_for(partitions: int, invoices: int, tmp_path: Path):
         obs,
         assembly=assembly,
         sidecar=sidecar,
-        ledger_for=adapter.census_measures_ledger(
-            projection.figures,
-            {m.partition: m.source_account_id for m in assembly.partitions},
+        ledger_for=adapter.census_variance_ledger(
+            projection,
+            assembly,
             {r.currency: r.precision for r in obs.currency_precisions},
         ),
     )

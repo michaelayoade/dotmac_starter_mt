@@ -48,7 +48,8 @@ All notable changes follow Semantic Versioning.
   an `authority_switch` participant inside the seal savepoint; its
   `OpeningAuthoritySwitchReceiptV1` is stored append-only. `opening_lane` is the
   import-specific assembly authority port.
-- ST-4: opening admissibility as data (`opening_admissibility`): a reviewed rules
+- ST-4 (A10 gate and held-draft rules superseded by the ST-4c projection below):
+  opening admissibility as data (`opening_admissibility`): a reviewed rules
   document (digest-identified, closed schema) plus the A10 account classes
   decide account-level admissibility (A10 `opening_exact` and post-cutover
   `match`; D-2). Every census blocking code is blocking: no rule relaxes,
@@ -117,6 +118,32 @@ All notable changes follow Semantic Versioning.
   non-zero unapplied-credit or funding figure, or a credit/funding variance,
   is refused (`credit_transfer_unsupported`) until Gap C (ST-4b). B7 and
   B1/IssueCharge are not resolution primitives yet.
+- ST-4c: the projection carries findings instead of dropping or blocking them.
+  `carry_as_variance` is a third rules policy (fixed code to reason map, never
+  chosen by the rules document): invoice-level `residual_mismatch` ->
+  `stored_balance_difference`, `excluded_nonzero_residue` ->
+  `closed_invoice_residue`, `negative_residual` -> `negative_residue`, an open
+  invoice with `invoice_provenance`, `duplicate_identity`, `source_after_cutoff`,
+  `currency_precision`, `settlement_provenance`, `original_evidence_missing`,
+  `status_residual_conflict` or `v1_vat_evidence_missing` ->
+  `item_not_transferred:<code>` (the item is excluded from T and its residual
+  carried), account-level mismatch -> `lane_document_difference`, `unbacked_lane`
+  -> `lane_not_transferred:<lane>`. The adapter converts the plan to exact minor
+  units: at most one `unexplained_difference` remainder per partition, lane and
+  basis, T never adjusted, unattributed control rows in batch scope (no GL fact).
+  A10 is no longer an admission gate (W-V1): the new drafter input
+  `billing.opening.a10-account-rebuild.v1` (`{account_id, currency, rebuild_net,
+  opening_class, post_cause}`, NGN only, exact decimal, credit-positive) gives
+  `rebuild_minor = -to_minor(rebuild_net)`, one attributed rebuild memo variance
+  per partition (`rebuild_<class>`, else `rebuild_<cause>`, else
+  `unexplained_difference`), `a10_missing` / `a10_currency_unsupported` control
+  gaps, and `a10_rebuild_required` when the input is absent. The decision record
+  adds the routed-out reconciliation (census = manifest + batch + routed-out, by
+  invoice rows and by currency and lane) and binds its digest. The read-only
+  converter `scripts/billing_opening_a10_rebuild_converter.py` turns the A10
+  classified CSV into that input. Not yet carried: reseller fold
+  (`reseller_fold_unavailable`) and settlement-level `draft_allocation`
+  itemisation; both stay routed out or fall to the lane remainder.
 - ST-4c: Add distinct AccountingFactV6 (`billing.accounting.fact.v6`) for ledger-lane opening-variance recorded/voided/recognised/position-corrected facts on effect-free posting groups; V1-V5 classes and literals unchanged; V5 payload carries the a11 manifest. Each fact sits on its own posting group of the same kind;
   `opening_variance_recorded` and `_voided` are written by the opening principal,
   the other two online. `opening_variance_events.fact_posting_group_id` (unique,

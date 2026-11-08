@@ -422,6 +422,14 @@ def reseller_map(default="svc-1", overrides=()):
     )
 
 
+def carry_wallet():
+    """A reseller wallet lane is non-AR money: it is admitted only when the rules
+    carry it as a lane_not_transferred variance (design 2.2)."""
+    return rules(
+        code_policies=[{"code": "unbacked_lane", "policy": "carry_as_variance"}]
+    )
+
+
 def reseller_census():
     c = census()
     c["lanes"] = [lane("a", "60.00", credit="7.00"), lane("r", "0.00", credit="3.00")]
@@ -433,7 +441,9 @@ RES_CLASSES = a10(EXACT, ("r", "opening_exact", "match"))
 
 
 def test_reseller_subscriber_invoices_and_wallet_map_to_the_reseller_account():
-    result = run(reseller_census(), classes=RES_CLASSES, reseller=reseller_map())
+    result = run(
+        reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=reseller_map()
+    )
     decisions = {d.account_id: d for d in result.decisions}
     assert uid("a") not in decisions  # folded away
     reseller = decisions[uid("r")]
@@ -451,13 +461,17 @@ def test_reseller_subscriber_invoices_and_wallet_map_to_the_reseller_account():
 
 def test_one_service_ref_per_document_with_per_invoice_override():
     mapping = reseller_map(overrides=[("i-open", "svc-9")])
-    result = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    result = run(
+        reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=mapping
+    )
     assert result.service_refs == {UUID(uid("i-open")): "svc-9"}
 
 
 def test_a_missing_service_ref_holds_the_reseller_partition():
     mapping = reseller_map(default=None)
-    result = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    result = run(
+        reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=mapping
+    )
     decision = only(
         type(
             "P",
@@ -547,15 +561,17 @@ def test_an_excluded_residue_is_never_dropped_it_holds_the_partition():
 
 def test_every_member_of_a_reseller_partition_must_pass_a10():
     mapping = reseller_map()
-    ok = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    ok = run(reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=mapping)
     assert [d.admitted for d in ok.decisions] == [True]
     bad = a10(("a", "opening_gap_other", "match"), ("r", "opening_exact", "match"))
-    held = run(reseller_census(), classes=bad, reseller=mapping)
+    held = run(reseller_census(), carry_wallet(), classes=bad, reseller=mapping)
     decision = only(held)
     assert (decision.account_id, decision.reason) == (uid("r"), "a10_opening_not_exact")
     assert decision.detail == (f"{uid('a')}:opening_gap_other",)
     missing = a10(("r", "opening_exact", "match"))
-    decision = only(run(reseller_census(), classes=missing, reseller=mapping))
+    decision = only(
+        run(reseller_census(), carry_wallet(), classes=missing, reseller=mapping)
+    )
     assert (decision.reason, decision.detail) == ("a10_missing", (uid("a"),))
     # a reseller's folded subscribers are not "unused" A10 accounts
     assert ok.a10_accounts_unused == 0

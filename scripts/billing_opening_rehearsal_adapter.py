@@ -42,8 +42,9 @@ from dotmac_billing.contracts import (
 )
 from dotmac_billing.opening_admissibility import (
     AdmissibilityError,
+    AdmissibilityProjection,
     census_measure_figures,
-    parse_a10_classes,
+    parse_a10_input,
     parse_admissibility_rules,
     parse_reseller_map,
     project_census,
@@ -110,11 +111,13 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningSubObservationV2,
 )
 from dotmac_billing.opening_variance_contracts import (
+    AGGREGATE_KINDS,
     OpeningBatchControlV1,
     OpeningPartitionMeasuresV1,
     OpeningVarianceV1,
 )
 from dotmac_kernel.cache import Scope
+from dotmac_kernel.fingerprints import fingerprint_of
 
 __all__ = [
     "AdapterInputError",
@@ -471,7 +474,7 @@ def census_measures_ledger(
                     None,
                     "a10_currency_unsupported"
                     if part.currency != "NGN"
-                    else "a10_amount_not_supplied",
+                    else "a10_missing",
                     len(disp),
                     eligible,
                     0,
@@ -481,6 +484,264 @@ def census_measures_ledger(
                 )
             )
         return LedgerInputsV1(tuple(rows))
+
+    return build
+
+
+def census_variance_ledger(
+    projection: AdmissibilityProjection,
+    assembly: AssemblyInputs,
+    precisions: Mapping[str, int],
+) -> LedgerFor:
+    """The full ledger half from a projection plan, in exact minor units.
+
+    Every itemised variance cites a census row; the only residue is at most one
+    ``unexplained_difference`` (or the carried ``lane_document_difference``) per
+    partition, lane and basis, and T is never adjusted. The rebuild basis is
+    ``rebuild_minor = -to_minor(rebuild_net)`` with one attribution variance of
+    exactly ``rebuild_minor - T_net``.
+    """
+    if not projection.rebuild_supplied:
+        raise _malformed("a10_rebuild_required")
+    source_of = {m.partition: m.source_account_id for m in assembly.partitions}
+    identity_of = {
+        m.source_invoice_id: m.source_identity for m in assembly.invoice_mappings
+    }
+    eligible = {UUID(text) for text in projection.eligible_invoice_ids}
+    rules_digest = projection.digests["rules"]
+
+    def build(manifest: OpeningManifestV2) -> LedgerInputsV1:
+        measures: list[OpeningPartitionMeasuresV1] = []
+        variances: list[OpeningVarianceV1] = []
+        for control in manifest.controls:
+            part = control.partition
+            source = source_of.get(part)
+            plan = (
+                None
+                if source is None
+                else projection.plans.get((str(source), part.currency))
+            )
+            prec = precisions.get(part.currency)
+            if plan is None or prec is None or plan.stored_balance is None:
+                continue
+            doc = _minor_units(plan.document_residual, prec)
+            stored = _minor_units(plan.stored_balance, prec)
+            if doc is None or stored is None:
+                continue
+            total = sum(
+                r.residual_minor for r in manifest.receivables if r.partition == part
+            )
+            lots = sum(
+                x.residual_minor for x in manifest.cash_lots if x.partition == part
+            )
+            mine: list[OpeningVarianceV1] = []
+
+            def add(
+                lane: str,
+                basis: str,
+                reason: str,
+                kind: str,
+                key: str,
+                amount: int,
+                evidence: object,
+                part: OpeningPartitionV1 = part,
+                prec: int = prec,
+                sink: list[OpeningVarianceV1] = mine,
+            ) -> None:
+                if amount == 0:
+                    return
+                sink.append(
+                    OpeningVarianceV1(
+                        "partition",
+                        part,
+                        part.currency,
+                        prec,
+                        lane,
+                        basis,
+                        reason,
+                        OpeningSourceIdentityV1(kind, key),
+                        amount,
+                        fingerprint_of(
+                            {"evidence": evidence, "reason": reason, "amount": amount}
+                        ),
+                        rules_digest,
+                    )
+                )
+
+            ok = True
+            itemised = {"ledger_lane": 0, "document_residual": 0, "stored_balance": 0}
+            for item in plan.items:
+                amount = _minor_units(item.amount, prec)
+                if amount is None:
+                    ok = False
+                    break
+                invoice_id = UUID(item.source_ref)
+                if invoice_id in eligible and invoice_id in identity_of:
+                    key = identity_of[invoice_id].key
+                else:
+                    key = str(invoice_id)
+                itemised[item.basis] += amount
+                add(
+                    item.lane,
+                    item.basis,
+                    item.reason_code,
+                    item.source_kind,
+                    key,
+                    amount,
+                    item.evidence,
+                )
+            if not ok:
+                continue
+            lane_remainder = (
+                control.collectible_receivable_minor - total - itemised["ledger_lane"]
+            )
+            if plan.lane_diff_carried:
+                add(
+                    "receivable",
+                    "ledger_lane",
+                    "lane_document_difference",
+                    "lane",
+                    part.source_account_key,
+                    lane_remainder,
+                    "lane",
+                )
+            else:
+                add(
+                    "receivable",
+                    "ledger_lane",
+                    "unexplained_difference",
+                    "partition_remainder",
+                    part.source_account_key,
+                    lane_remainder,
+                    "lane",
+                )
+            if not lots:
+                add(
+                    "customer_credit",
+                    "ledger_lane",
+                    "lane_not_transferred:customer_credit",
+                    "lane",
+                    part.source_account_key,
+                    control.unapplied_customer_credit_minor,
+                    "credit",
+                )
+                add(
+                    "prepaid_funding",
+                    "ledger_lane",
+                    "lane_not_transferred:prepaid_funding",
+                    "lane",
+                    part.source_account_key,
+                    control.prepaid_funding_reserved_minor,
+                    "funding",
+                )
+            add(
+                "receivable",
+                "document_residual",
+                "unexplained_difference",
+                "partition_remainder",
+                part.source_account_key,
+                doc - total - itemised["document_residual"],
+                "document",
+            )
+            add(
+                "receivable",
+                "stored_balance",
+                "unexplained_difference",
+                "partition_remainder",
+                part.source_account_key,
+                stored - total - itemised["stored_balance"],
+                "stored",
+            )
+            rebuild_minor: int | None = None
+            gap = plan.rebuild_gap_reason
+            if plan.rebuild_net is not None:
+                net = _minor_units(plan.rebuild_net, prec)
+                if net is None:
+                    gap = "a10_missing"
+                else:
+                    rebuild_minor = -net
+                    diff = rebuild_minor - (total - lots)
+                    if plan.rebuild_reason == "unexplained_difference":
+                        add(
+                            "receivable",
+                            "rebuild",
+                            "unexplained_difference",
+                            "partition_remainder",
+                            part.source_account_key,
+                            diff,
+                            "rebuild",
+                        )
+                    else:
+                        add(
+                            "receivable",
+                            "rebuild",
+                            plan.rebuild_reason or "unexplained_difference",
+                            "rebuild_account",
+                            part.source_account_key,
+                            diff,
+                            "rebuild",
+                        )
+            cited = {v.source.key for v in mine if v.source.kind not in AGGREGATE_KINDS}
+            counts: Counter[str] = Counter()
+            for d in manifest.dispositions:
+                if d.partition != part:
+                    continue
+                counts["population_rows"] += 1
+                if d.disposition == "eligible":
+                    counts["transferred_rows"] += 1
+                elif d.disposition == "blocking":
+                    counts["non_carryable_rows"] += 1
+                elif d.reason == "archived_draft":
+                    counts["archived_rows"] += 1
+                elif d.identity.key in cited:
+                    counts["carried_rows"] += 1
+                else:
+                    counts["excluded_rows"] += 1
+            measures.append(
+                OpeningPartitionMeasuresV1(
+                    part,
+                    doc,
+                    stored,
+                    rebuild_minor,
+                    None if rebuild_minor is not None else (gap or "a10_missing"),
+                    counts["population_rows"],
+                    counts["transferred_rows"],
+                    counts["carried_rows"],
+                    counts["excluded_rows"],
+                    counts["archived_rows"],
+                    counts["non_carryable_rows"],
+                )
+            )
+            variances.extend(mine)
+        batch_controls: list[OpeningBatchControlV1] = []
+        for entry in projection.batch:
+            prec = precisions.get(entry.currency)
+            amount = None if prec is None else _minor_units(entry.amount, prec)
+            if prec is None or not amount:
+                continue
+            batch_controls.append(
+                OpeningBatchControlV1(
+                    entry.currency, prec, entry.lane, entry.basis, amount, ()
+                )
+            )
+            variances.append(
+                OpeningVarianceV1(
+                    "batch",
+                    None,
+                    entry.currency,
+                    prec,
+                    entry.lane,
+                    entry.basis,
+                    "unattributed_source",
+                    OpeningSourceIdentityV1(
+                        "control_row", f"{entry.currency}:{entry.lane}:{entry.basis}"
+                    ),
+                    amount,
+                    fingerprint_of({"batch": entry.currency, "amount": amount}),
+                    rules_digest,
+                )
+            )
+        return LedgerInputsV1(tuple(measures), tuple(variances), tuple(batch_controls))
 
     return build
 
@@ -1501,29 +1762,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reseller = parse_reseller_map(
                         _read_json(Path(args.reseller_map), "malformed_reseller_map")
                     )
+                classes, rebuild_rows = parse_a10_input(
+                    _read_json(Path(args.a10), "malformed_a10_classes")
+                )
                 projection = project_census(
                     census_payload,
                     rules=parse_admissibility_rules(
                         _read_json(Path(args.rules), "malformed_rules")
                     ),
-                    a10=parse_a10_classes(
-                        _read_json(Path(args.a10), "malformed_a10_classes")
-                    ),
+                    a10=classes,
                     reseller=reseller,
                     # D-3: only a supplied, aligned original counts.
                     original_invoice_ids=frozenset(row[0] for row in originals),
+                    rebuild=rebuild_rows,
+                    require_rebuild=True,  # never a silent all-gap run
                 )
             except AdmissibilityError as exc:
                 raise _malformed(exc.code) from None
             payload = projection.census
             service_refs = projection.service_refs
         observed, _sidecar = load_sub_observation(payload)
-        ledger_for: LedgerFor | None = census_measures_ledger(
-            projection.figures
+        precisions = {r.currency: r.precision for r in observed.currency_precisions}
+        ledger_for: LedgerFor | None = (
+            census_variance_ledger(projection, assembly, precisions)
             if projection is not None
-            else census_measure_figures(payload),
-            {m.partition: m.source_account_id for m in assembly.partitions},
-            {r.currency: r.precision for r in observed.currency_precisions},
+            else census_measures_ledger(
+                census_measure_figures(payload),
+                {m.partition: m.source_account_id for m in assembly.partitions},
+                precisions,
+            )
         )
         artifact = rehearsal_census(
             payload,
