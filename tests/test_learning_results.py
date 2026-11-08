@@ -88,6 +88,16 @@ def result_database(learning_database):
             other_person = _person(conn, other)
             root_only = _person(conn, tenant, subtype=False)
             malformed_org = _person(conn, tenant, party_type="organization")
+            # Composition grant: lr_0011 grants EXECUTE to nobody; the
+            # Python lab API caller (app_user here) must hold it.
+            conn.execute(
+                text(
+                    "GRANT EXECUTE ON FUNCTION "
+                    "mod_learning.record_lab_result_v1(uuid, uuid, uuid, uuid, "
+                    "jsonb, double precision, double precision, "
+                    "double precision, boolean, jsonb) TO app_user"
+                )
+            )
         course, activity = uuid4(), uuid4()
         with scoped(app, tenant) as db:
             create_course(
@@ -649,48 +659,57 @@ def test_policy_failure_and_changed_activity_never_append(result_database, kind)
 
 
 def test_certificate_failure_propagates_through_result_and_caller_savepoint(
-    result_database, monkeypatch
+    result_database,
 ):
-    from dotmac_learning import certificates
     from dotmac_learning.models import Certificate, CourseCompletion, LearningEvent
+    from sqlalchemy.exc import DBAPIError
 
-    _, app, tenant, *_ = result_database
+    admin, app, tenant, *_ = result_database
 
-    class CertificateFailure(Exception):
-        pass
-
-    def fail(*args):
-        raise CertificateFailure()
-
-    monkeypatch.setattr(certificates, "issue_certificate", fail)
-    with scoped(app, tenant) as db:
-        sentinel = uuid4()
-        create_course(
-            db,
-            CourseWrite(
-                id=sentinel,
-                tenant_id=tenant,
-                slug=sentinel.hex,
-                title="Sentinel",
-                discipline="test",
-                source_ref="test",
-                status="published",
-                listed=False,
-            ),
-        )
-        with pytest.raises(CertificateFailure), db.begin_nested():
-            payload = command(result_database).model_copy(
-                update={
-                    "grading": GradedResult(
-                        score=1, max_score=1, fraction=1, passed=True
-                    )
-                }
+    # Denying the certificate insert inside the SQL writer is a
+    # required-consequence failure: it must propagate out of the
+    # result write so the caller's savepoint discards the whole
+    # submission/score/completion/event group.
+    with admin.begin() as conn:
+        conn.execute(text("REVOKE INSERT ON mod_learning.certificates FROM app_user"))
+    try:
+        with scoped(app, tenant) as db:
+            sentinel = uuid4()
+            create_course(
+                db,
+                CourseWrite(
+                    id=sentinel,
+                    tenant_id=tenant,
+                    slug=sentinel.hex,
+                    title="Sentinel",
+                    discipline="test",
+                    source_ref="test",
+                    status="published",
+                    listed=False,
+                ),
             )
-            results.record_mcq_result(db, payload, policy=Policy())
-        assert get_course(db, tenant_id=tenant, course_id=sentinel) is not None
-        for model in (Submission, Score, CourseCompletion, Certificate, LearningEvent):
-            assert db.scalar(select(func.count()).select_from(model)) == 0
-        assert db.scalar(text("SELECT 7")) == 7
+            with pytest.raises(DBAPIError), db.begin_nested():
+                payload = command(result_database).model_copy(
+                    update={
+                        "grading": GradedResult(
+                            score=1, max_score=1, fraction=1, passed=True
+                        )
+                    }
+                )
+                results.record_mcq_result(db, payload, policy=Policy())
+            assert get_course(db, tenant_id=tenant, course_id=sentinel) is not None
+            for model in (
+                Submission,
+                Score,
+                CourseCompletion,
+                Certificate,
+                LearningEvent,
+            ):
+                assert db.scalar(select(func.count()).select_from(model)) == 0
+            assert db.scalar(text("SELECT 7")) == 7
+    finally:
+        with admin.begin() as conn:
+            conn.execute(text("GRANT INSERT ON mod_learning.certificates TO app_user"))
 
 
 def test_mcq_grade_cannot_spoof_override_or_win_equal_fraction_ranking(result_database):
@@ -1138,33 +1157,36 @@ def test_submit_uses_admitted_terms_after_question_read(result_database, monkeyp
         assert value.completion.completion.course_id == course
 
 
-def test_submit_certificate_failure_propagates_caller_savepoint(
-    result_database, monkeypatch
-):
-    from dotmac_learning import certificates
+def test_submit_certificate_failure_propagates_caller_savepoint(result_database):
     from dotmac_learning.models import Certificate, CourseCompletion, LearningEvent
+    from sqlalchemy.exc import DBAPIError
 
-    _, app, tenant, *_ = result_database
+    admin, app, tenant, *_ = result_database
 
-    class CertificateFailure(Exception):
-        pass
-
-    def fail(*args, **kwargs):
-        raise CertificateFailure()
-
-    monkeypatch.setattr(certificates, "issue_certificate", fail)
-    with scoped(app, tenant) as db:
-        seed_submit_questions(db, result_database)
-        root = db.get_transaction()
-        with pytest.raises(CertificateFailure), db.begin_nested():
-            payload = submit_command(result_database).model_copy(
-                update={"answers": {"q": ["yes"], "second": ["yes"]}}
-            )
-            results.submit_mcq_activity(db, payload)
-        assert db.get_transaction() is root
-        for model in (Submission, Score, CourseCompletion, Certificate, LearningEvent):
-            assert db.scalar(select(func.count()).select_from(model)) == 0
-        assert db.scalar(text("SELECT 7")) == 7
+    with admin.begin() as conn:
+        conn.execute(text("REVOKE INSERT ON mod_learning.certificates FROM app_user"))
+    try:
+        with scoped(app, tenant) as db:
+            seed_submit_questions(db, result_database)
+            root = db.get_transaction()
+            with pytest.raises(DBAPIError), db.begin_nested():
+                payload = submit_command(result_database).model_copy(
+                    update={"answers": {"q": ["yes"], "second": ["yes"]}}
+                )
+                results.submit_mcq_activity(db, payload)
+            assert db.get_transaction() is root
+            for model in (
+                Submission,
+                Score,
+                CourseCompletion,
+                Certificate,
+                LearningEvent,
+            ):
+                assert db.scalar(select(func.count()).select_from(model)) == 0
+            assert db.scalar(text("SELECT 7")) == 7
+    finally:
+        with admin.begin() as conn:
+            conn.execute(text("GRANT INSERT ON mod_learning.certificates TO app_user"))
 
 
 def test_submit_optional_event_sql_fault_leaves_required_result_and_root_usable(

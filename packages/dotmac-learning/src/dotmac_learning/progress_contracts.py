@@ -10,6 +10,20 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 
 from .event_contracts import EventEmission
 
+COMPLETION_CAPABILITY = (
+    "mod_learning.recompute_completion_v1("
+    "pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, "
+    "pg_catalog.timestamptz)"
+)
+"""Identity signature of the lr_0012 SQL completion recompute writer."""
+
+CERTIFICATE_CAPABILITY = (
+    "mod_learning.issue_certificate_v1("
+    "pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, "
+    "pg_catalog.timestamptz)"
+)
+"""Identity signature of the lr_0012 SQL certificate issuance writer."""
+
 
 class CompletionCommand(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")

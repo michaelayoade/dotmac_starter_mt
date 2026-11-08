@@ -167,6 +167,24 @@ def _load_bindings(args: argparse.Namespace) -> ExecutionBindings | None:
     return discover_bindings()
 
 
+def _deployment_admission_provider(bindings: ExecutionBindings | None):
+    """The admission provider `Executor` (deploy/rollback) is wired with.
+
+    Exactly the discovered bindings' `deployment_admission_provider` when
+    the assembly declared one; the refusing provider otherwise — refusal
+    stays the default, never an accident of omission. Discovery already
+    happened on the execute path that calls this; `validate` and dry
+    runs never reach it, and nothing here reads request material.
+    Recovery execution does NOT use this helper: it keeps its literal
+    refusing provider until it has a grant/consumption contract.
+    """
+    from .host_source_admission import RefusingHostSourceAdmissionProvider
+
+    if bindings is not None and bindings.deployment_admission_provider is not None:
+        return bindings.deployment_admission_provider
+    return RefusingHostSourceAdmissionProvider()
+
+
 def _build_exposure_effects(
     spec: ProductDeploymentSpec, args: argparse.Namespace, *, bindings=None
 ) -> ExposureEffects | None:
@@ -541,7 +559,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
-    from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     bindings = _load_bindings(args)
     effects = _build_effects(spec, args, bindings=bindings)
@@ -589,12 +606,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
         exposure_effects=_build_exposure_effects(spec, args, bindings=bindings),
-        # This CLI wires no real host-source admission (that requires a
-        # trusted, non-request-selectable assembly binding and fresh
-        # Control-backed verification — later cross-repo work). Passing the
-        # refusing provider explicitly preserves today's unconditional
-        # refusal, now as a visible decision rather than a silent default.
-        admission_provider=RefusingHostSourceAdmissionProvider(),
+        # Host-source admission comes only from the discovered bindings
+        # (fixed at assembly installation, never request-selected); the
+        # helper keeps the refusing provider whenever the assembly
+        # declared none, preserving today's unconditional refusal.
+        admission_provider=_deployment_admission_provider(bindings),
     )
     # The lock wraps the WHOLE run, not a piece of it: `_do_acquire_lock` and
     # `_do_release_lock` are no-op steps that say so in their own detail text
@@ -1199,7 +1215,6 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     from .engine.lock import deployment_lock
     from .engine.run import Executor
     from .execution_plan import HostPrestateV1, render_execution_plan
-    from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     # A SEPARATE grant from the deploy's. One approval that covered both would
     # let a single decision make a change and then erase it.
@@ -1233,9 +1248,9 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         evidence_verifier=bindings.evidence_verifier if bindings else None,
         recovery_verifier=bindings.recovery_verifier if bindings else None,
         exposure_effects=_build_exposure_effects(spec, args, bindings=bindings),
-        # Same rule as `cmd_deploy`: no real admission is wired in, so the
-        # refusing provider is passed explicitly to preserve today's refusal.
-        admission_provider=RefusingHostSourceAdmissionProvider(),
+        # Same rule as `cmd_deploy`: admission only from the discovered
+        # bindings via the helper; refusing provider when none declared.
+        admission_provider=_deployment_admission_provider(bindings),
     )
     # Same rule as `cmd_deploy`: the lock wraps the whole run, and the hold is
     # handed to it rather than asserted around it.

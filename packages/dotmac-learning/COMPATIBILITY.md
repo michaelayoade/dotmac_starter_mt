@@ -1,5 +1,60 @@
 # Compatibility — dotmac-learning
 
+## Current source correction — 2026-11-06 (allocated a6 source candidate)
+
+Published 0.1.0a5 remains immutable (publication recorded by PR #980, tag
+`dotmac-learning-v0.1.0a5`). The older sections below are historical; their
+a5-unpublished statements do not describe current publication.
+
+The a6 candidate is additive in storage and API: one new migration
+`lr_0012_completion_capability` (`lr_0001`–`lr_0011` bytes unchanged,
+single head `lr_0012`), two new root exports `COMPLETION_CAPABILITY` and
+`CERTIFICATE_CAPABILITY` (603 root exports), 28 tables / 298 fields and
+Kernel floor unchanged. The behavioural contract change is again at the
+database-privilege layer: Python `recompute_completion` and
+`issue_certificate` now delegate to the SECURITY INVOKER functions
+`mod_learning.recompute_completion_v1` / `mod_learning.issue_certificate_v1`,
+and `record_lab_result_v1` delegates its recompute/certificate tail to
+`recompute_completion_v1`, so every role that calls the Python completion,
+certificate, result or lab APIs needs EXECUTE on both new functions (in
+addition to the lr_0011 grant for lab callers). Learning grants EXECUTE to
+nobody (`REVOKE ALL FROM PUBLIC`, no grants); product composition must
+grant it to its Python caller roles. The Python recompute/certificate
+mirror is retired: SQL is the sole writer, retiring the dated
+dual-implementation exception. Certificate ineligibility is returned as
+an outcome, so `CertificateNotEligible` still raises as a plain Python
+error without aborting the caller's transaction; a capability refusal for
+null arguments (SQLSTATE 22004) remains a database error that requires
+caller rollback, as in lr_0011. Signatures, fact shapes, event detail
+shapes, completion and certificate semantics are unchanged. This source
+allocation is not a published, installable or adopted a6.
+
+## Current source correction — 2026-11-04 (allocated a5 source candidate)
+
+Published 0.1.0a4 remains immutable (publication recorded by PR #948). The
+older sections below are historical; their a4-unpublished statements do not
+describe current publication.
+
+The a5 candidate is additive in storage and API: one new migration
+`lr_0011_lab_result_capability` (`lr_0001`–`lr_0010` bytes unchanged, single
+head `lr_0011`), one new root export `LAB_RESULT_CAPABILITY` (601 root
+exports), 28 tables / 298 fields and Kernel floor `>=0.1.0a106` unchanged.
+The one behavioural contract change is at the database-privilege layer:
+Python `record_lab_result` now delegates to the SECURITY INVOKER function
+`mod_learning.record_lab_result_v1`, so every role that calls the Python
+lab API needs EXECUTE on that function. Learning grants EXECUTE to nobody
+(`REVOKE ALL FROM PUBLIC`, no grants); product composition must grant it
+to its Python caller roles. A product definer owned by the adopting
+application may call the same function as its owner without any Learning
+grant. A capability refusal (SQLSTATE 22004/22023) reaches Python callers
+as `ResultBadRequest`, but the database error has already aborted the
+caller's transaction: the caller must roll back its root transaction (or
+its savepoint, where it opened one around the call) before issuing any
+further SQL, rather than catching the error and continuing in the same
+transaction. Signatures, `ResultWrite` facts, event detail shapes, completion
+and certificate semantics are unchanged. This source allocation is not a
+published, installable or adopted a5.
+
 ## Current source correction — 2026-10-28 (allocated a4 source candidate)
 
 Published 0.1.0a3 remains immutable: peeled tag 7f8f1e6646e531154450370e51dbede46723cc60, release run 40484794529, wheel SHA256 11a0393f7b43dc51618b1ff51fc90cfa1fda39da4c53bd75a22d08ae07428d0c.

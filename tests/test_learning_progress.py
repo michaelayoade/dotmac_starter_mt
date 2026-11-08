@@ -2,7 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from threading import Barrier, Event
+from threading import Event
 from uuid import uuid4
 
 import pytest
@@ -222,24 +222,37 @@ def test_refusal_and_missing_course_do_not_fabricate_completion(progress_case):
         assert db.scalar(select(func.count()).select_from(CourseCompletion)) == 0
 
 
-def test_required_certificate_failure_and_owner_rollback(progress_case, monkeypatch):
+def test_required_certificate_failure_and_owner_rollback(
+    progress_case, learning_database
+):
     engine, tenant, person, course = progress_case
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
         a = _activity(db, tenant, course)
         _score(db, tenant, person, a)
-    from dotmac_learning import certificates
-
-    original = certificates._serial
-    monkeypatch.setattr(certificates, "_serial", lambda: "x" * 33)
-    with Session(engine) as db:
-        with pytest.raises(DBAPIError), db.begin():
-            _scope(db, tenant)
-            recompute_completion(
-                db,
-                CompletionCommand(tenant_id=tenant, person_id=person, course_id=course),
+    # Certificate insertion is a required consequence of first
+    # completion: denying it inside the SQL writer must propagate as a
+    # database error (never be isolated like the optional event), and
+    # owner rollback must leave no completion or certificate behind.
+    admin = create_engine(learning_database[0])
+    try:
+        with admin.begin() as conn:
+            conn.execute(
+                text("REVOKE INSERT ON mod_learning.certificates FROM app_user")
             )
-    monkeypatch.setattr(certificates, "_serial", original)
+        with Session(engine) as db:
+            with pytest.raises(DBAPIError), db.begin():
+                _scope(db, tenant)
+                recompute_completion(
+                    db,
+                    CompletionCommand(
+                        tenant_id=tenant, person_id=person, course_id=course
+                    ),
+                )
+    finally:
+        with admin.begin() as conn:
+            conn.execute(text("GRANT INSERT ON mod_learning.certificates TO app_user"))
+        admin.dispose()
     with Session(engine) as db:
         transaction = db.begin()
         _scope(db, tenant)
@@ -255,27 +268,38 @@ def test_required_certificate_failure_and_owner_rollback(progress_case, monkeypa
 
 
 def test_optional_event_sql_failure_preserves_required_certificate(
-    progress_case, monkeypatch
+    progress_case, learning_database
 ):
     engine, tenant, person, course = progress_case
-    from dotmac_learning import events
-
-    def broken_record(db, payload, **kwargs):
-        db.execute(text("SELECT 1/0"))
-
-    monkeypatch.setattr(events, "record", broken_record)
-    with Session(engine) as db, db.begin():
-        _scope(db, tenant)
-        a = _activity(db, tenant, course)
-        _score(db, tenant, person, a)
-        result = recompute_completion(
-            db, CompletionCommand(tenant_id=tenant, person_id=person, course_id=course)
-        )
-        assert (
-            result.certificate.created and result.certificate.event.status == "failed"
-        )
-        assert db.scalar(text("SELECT 42")) == 42
-        assert db.scalar(select(func.count()).select_from(Certificate)) == 1
+    # The certificate_earned event is the optional append: denying it
+    # inside the SQL writer reports a failed emission while the
+    # required certificate persists and the transaction stays usable.
+    admin = create_engine(learning_database[0])
+    try:
+        with admin.begin() as conn:
+            conn.execute(
+                text("REVOKE INSERT ON mod_learning.learning_events FROM app_user")
+            )
+        with Session(engine) as db, db.begin():
+            _scope(db, tenant)
+            a = _activity(db, tenant, course)
+            _score(db, tenant, person, a)
+            result = recompute_completion(
+                db,
+                CompletionCommand(tenant_id=tenant, person_id=person, course_id=course),
+            )
+            assert (
+                result.certificate.created
+                and result.certificate.event.status == "failed"
+            )
+            assert db.scalar(text("SELECT 42")) == 42
+            assert db.scalar(select(func.count()).select_from(Certificate)) == 1
+    finally:
+        with admin.begin() as conn:
+            conn.execute(
+                text("GRANT INSERT ON mod_learning.learning_events TO app_user")
+            )
+        admin.dispose()
 
 
 def test_concurrent_first_recomputes_and_certificate_recheck(progress_case):
@@ -313,9 +337,7 @@ def test_concurrent_first_recomputes_and_certificate_recheck(progress_case):
         assert db.scalar(select(func.count()).select_from(Certificate)) == 1
 
 
-def test_concurrent_direct_issuers_recheck_under_real_aggregate_lock(
-    progress_case, monkeypatch
-):
+def test_concurrent_direct_issuers_recheck_under_real_aggregate_lock(progress_case):
     engine, tenant, person, course = progress_case
     with Session(engine) as db, db.begin():
         _scope(db, tenant)
@@ -329,16 +351,6 @@ def test_concurrent_direct_issuers_recheck_under_real_aggregate_lock(
                 completed_at=datetime.now(UTC),
             )
         )
-    from dotmac_learning import certificates
-
-    rendezvous = Barrier(2)
-    real_lock = certificates.lock_existing_completion
-
-    def synchronized_lock(db, **kwargs):
-        rendezvous.wait(timeout=5)
-        return real_lock(db, **kwargs)
-
-    monkeypatch.setattr(certificates, "lock_existing_completion", synchronized_lock)
 
     def issue(_):
         with Session(engine) as db, db.begin():
@@ -351,8 +363,40 @@ def test_concurrent_direct_issuers_recheck_under_real_aggregate_lock(
                 ),
             )
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(issue, (1, 2)))
+    # Hold the aggregate row lock so both issuers pass their first
+    # (unlocked) certificate read, then block inside the SQL writer on
+    # its FOR UPDATE. Releasing the lock serializes them: the second
+    # issuer must take the post-lock recheck path and observe the
+    # winner's certificate instead of inserting a second one.
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        with Session(engine) as holder, holder.begin():
+            _scope(holder, tenant)
+            holder.execute(
+                text(
+                    "SELECT id FROM mod_learning.course_completions "
+                    "WHERE tenant_id = :tenant AND person_id = :person "
+                    "AND course_id = :course FOR UPDATE"
+                ),
+                {"tenant": tenant, "person": person, "course": course},
+            )
+            futures = [pool.submit(issue, n) for n in (1, 2)]
+            deadline = datetime.now(UTC) + timedelta(seconds=10)
+            waiting = 0
+            while datetime.now(UTC) < deadline:
+                waiting = holder.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_locks "
+                        "WHERE NOT granted AND pid <> pg_backend_pid()"
+                    )
+                )
+                if waiting >= 2:
+                    break
+            assert waiting >= 2, "both issuers must block on the aggregate lock"
+        # holder commits here, releasing the row lock to the issuers.
+        results = [future.result(timeout=15) for future in futures]
+    finally:
+        pool.shutdown(wait=True)
     assert results[0].certificate == results[1].certificate
     assert sorted(result.created for result in results) == [False, True]
     creator = next(result for result in results if result.created)

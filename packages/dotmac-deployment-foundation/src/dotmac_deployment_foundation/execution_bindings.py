@@ -50,6 +50,7 @@ from .authorization_v3 import ExecutionAuthorityV3Provider
 from .discovery import declared_names, discover_one
 from .errors import SpecError
 from .evidence import SignatureVerifier, TrustPolicy
+from .host_source_admission import HostSourceAdmissionProvider
 from .provenance import AuthorizationVerifier
 
 __all__ = [
@@ -126,6 +127,16 @@ class ExecutionBindings:
     #: a deployment environment built wrong, which is the same judgement
     #: `discover_bindings` already makes about a broken distribution.
     build_exposure_effects: Callable[..., Any] | None = None
+    #: The assembly's host-source admission provider for DEPLOYMENT
+    #: execution (`deploy`/`rollback` through `Executor`). Fixed at
+    #: assembly installation/discovery like every other field here; never
+    #: selected from request material. None means the CLI keeps the
+    #: refusing provider — the unconditional refusal stands exactly as
+    #: before this field existed. Recovery execution deliberately never
+    #: reads this field: `RecoveryExecutor` has no grant/consumption
+    #: contract yet, so its CLI site keeps the literal refusing provider
+    #: until that contract exists.
+    deployment_admission_provider: HostSourceAdmissionProvider | None = None
 
     def __post_init__(self) -> None:
         name = str(self.provider).strip()
@@ -186,6 +197,15 @@ class ExecutionBindings:
                 "ExecutionBindings.evidence_policy must be a TrustPolicy, got "
                 f"{type(self.evidence_policy).__name__}"
             )
+        if self.deployment_admission_provider is not None and not isinstance(
+            self.deployment_admission_provider, HostSourceAdmissionProvider
+        ):
+            raise SpecError(
+                "ExecutionBindings.deployment_admission_provider does not "
+                "implement HostSourceAdmissionProvider (an "
+                "`admit_host_source()` method); got "
+                f"{type(self.deployment_admission_provider).__name__}"
+            )
         for field in ("evidence_verifier", "recovery_verifier"):
             value = getattr(self, field)
             if value is not None and not isinstance(value, SignatureVerifier):
@@ -203,6 +223,7 @@ class ExecutionBindings:
             and self.evidence_policy is None
             and self.evidence_verifier is None
             and self.recovery_verifier is None
+            and self.deployment_admission_provider is None
         ):
             raise SpecError(
                 "ExecutionBindings carries no injectable at all. An empty "

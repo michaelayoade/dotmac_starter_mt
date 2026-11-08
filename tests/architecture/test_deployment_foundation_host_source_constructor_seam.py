@@ -3,10 +3,12 @@ caller state the artifact digest or the launcher digest, by ANY route — and
 `_verify_host_source` on both classes delegates to its admission provider
 with no argument at all. `admission_provider` is now a REQUIRED
 constructor parameter with no default (see `_unsafe_cli_calls` below); the
-shipped CLI passes `RefusingHostSourceAdmissionProvider()` EXPLICITLY at
-every call site, and that provider calls EXACTLY
-`require_host_source(receipt=None)`, never anything a caller could reach. See
-the amendment below for why this is now a two-link claim.
+shipped CLI passes it EXPLICITLY at every call site — the literal
+`RefusingHostSourceAdmissionProvider()`, or at `Executor` sites only the
+exact `_deployment_admission_provider(bindings)` selection over the
+discovered, installation-fixed bindings — and the refusing provider calls
+EXACTLY `require_host_source(receipt=None)`, never anything a caller could
+reach. See the amendment below for why this is now a two-link claim.
 
 ## The defect this closes — three times, now
 
@@ -183,6 +185,27 @@ def _is_safe_refusing_provider_call(node: ast.expr) -> bool:
     )
 
 
+#: The ONE non-literal shape now admitted, at `Executor` sites only: the
+#: CLI-local `_deployment_admission_provider(bindings)` selection over the
+#: DISCOVERED bindings (fixed at assembly installation, never a request
+#: value). The helper returns the bindings' declared deployment provider
+#: or the refusing provider; this guard proves no other expression can
+#: reach the keyword, and `RecoveryExecutor` — which has no grant or
+#: consumption contract yet — keeps the literal refusing provider.
+def _is_safe_deployment_admission_selection(node: ast.Call, value: ast.expr) -> bool:
+    return (
+        isinstance(node.func, ast.Name)
+        and node.func.id == "Executor"
+        and isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "_deployment_admission_provider"
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Name)
+        and value.args[0].id == "bindings"
+        and not value.keywords
+    )
+
+
 def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
     return [
         (keyword.arg, node.lineno)
@@ -193,6 +216,7 @@ def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
         or (
             keyword.arg == "admission_provider"
             and not _is_safe_refusing_provider_call(keyword.value)
+            and not _is_safe_deployment_admission_selection(node, keyword.value)
         )
     ]
 
@@ -232,6 +256,17 @@ def _unsafe_provider_name_bindings(tree: ast.Module) -> list[tuple[str, int]]:
                     unsafe.append(("wildcard import", node.lineno))
                     continue
                 effective = alias.asname or alias.name
+                if effective == "_deployment_admission_provider":
+                    # The selection helper must be the CLI-local def; an
+                    # imported object under its name would read as the
+                    # guarded selection while admitting anything.
+                    unsafe.append(
+                        (
+                            f"helper bound from {node.module!r}:{alias.name!r}",
+                            node.lineno,
+                        )
+                    )
+                    continue
                 if effective != _PROVIDER_NAME:
                     continue
                 if (
@@ -256,9 +291,11 @@ def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
     )
     unsafe = _unsafe_cli_calls(tree)
     assert unsafe == [], (
-        "the shipped CLI contains an admission-provider call that is not "
-        "the safe, literal `RefusingHostSourceAdmissionProvider()`, or a "
-        f"dynamic-keyword call: {unsafe}"
+        "the shipped CLI contains an admission-provider call that is "
+        "neither the safe, literal `RefusingHostSourceAdmissionProvider()` "
+        "nor, at an `Executor` site only, the exact "
+        "`_deployment_admission_provider(bindings)` selection over the "
+        f"discovered bindings, or a dynamic-keyword call: {unsafe}"
     )
     unsafe_bindings = _unsafe_provider_name_bindings(tree)
     assert unsafe_bindings == [], (
@@ -738,8 +775,10 @@ def test_cli_executor_guard_admits_the_real_safe_literal() -> None:
     to accept everything, which would defeat the three refusal tests above
     for the wrong reason (a guard that never fires proves nothing)."""
     source = """
-Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
-RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(bindings))
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=RefusingHostSourceAdmissionProvider())
 Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
 """
     tree = ast.parse(source, filename="<the real, safe CLI shape>")
@@ -785,4 +824,35 @@ Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionPro
 """
     tree = ast.parse(source, filename="<plant: wildcard import>")
     with pytest.raises(AssertionError, match="binds the name"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_helper_at_recovery_site() -> None:
+    """Sensitivity: the deployment selection helper is Executor-only.
+    Recovery has no grant/consumption contract yet, so its site keeps the
+    literal refusing provider; the helper shape there must still refuse."""
+    source = """
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(bindings))
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=_deployment_admission_provider(bindings))
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    tree = ast.parse(source, filename="<plant: helper at recovery site>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_executor_guard_refuses_helper_over_a_request_value() -> None:
+    """Sensitivity: the helper may select only over the discovered
+    `bindings` name — any other argument shape is a request-selected
+    provider wearing the helper's name."""
+    source = """
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(args.bindings))
+RecoveryExecutor(spec, manifest, effects)
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    tree = ast.parse(source, filename="<plant: helper over request value>")
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
         _assert_cli_executor_calls_are_refusal_only(tree)

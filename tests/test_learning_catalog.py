@@ -107,6 +107,24 @@ def learning_database(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[str, st
         finally:
             check.dispose()
         command.upgrade(cfg, "learning@head")
+        # Composition grant: lr_0012 grants EXECUTE to nobody; the
+        # general Python completion/certificate caller (app_user here)
+        # must hold it. The lr_0011 lab function stays granted only by
+        # the lab/result fixtures that exercise that path.
+        grant_engine = create_engine(admin_url)
+        try:
+            with grant_engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "GRANT EXECUTE ON FUNCTION "
+                        "mod_learning.recompute_completion_v1"
+                        "(uuid, uuid, uuid, timestamptz), "
+                        "mod_learning.issue_certificate_v1"
+                        "(uuid, uuid, uuid, timestamptz) TO app_user"
+                    )
+                )
+        finally:
+            grant_engine.dispose()
         yield admin_url, _url_for(superuser, name, user="app_user")
     finally:
         with server.connect() as conn:
