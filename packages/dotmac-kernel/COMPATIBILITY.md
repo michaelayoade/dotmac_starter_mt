@@ -803,7 +803,7 @@ surface uses a browser capability with typed `BrowserSecurityRequirement`s.
 Only active capability providers contribute those requirements; unused
 providers cannot widen CSP, and modules cannot contribute directives or origins.
 
-**Unreleased: reviewed document scripts.** `browser_document_policies` is an
+**Reviewed document scripts.** `browser_document_policies` is an
 assembly-owned tuple of `BrowserDocumentPolicyV1(facet, route, inline_scripts)`.
 Its `WebRouteRef` must resolve to one authenticated, bounded GET document route;
 entry, login/logout, public, unknown, duplicate and path/custom-converter
@@ -858,7 +858,7 @@ canary keeps the isolated hash-locked install, full suite selector, execution
 evidence and build dependency connected. No skipped test is accepted as
 compatibility evidence.
 
-This is development source (`a107+dev`), not an allocated or published successor.
+This contract description is not publication or adoption evidence.
 Consumer asset pinning, installed-artifact admission and genuine terminal
 rendering/WebSocket/input acceptance remain separate gates.
 
