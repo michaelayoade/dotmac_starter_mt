@@ -1,0 +1,5 @@
+owner = "dotmac-settings"
+contract = "validated operator-settings policy layer over kernel domain_settings: declared key registry, strict effective reads, stored-NULL semantics, whole-object override expansion with split-row refusal and compare-and-swap writes, shadow-immune canonical SQL"
+source_repositories = ["dotmac_academy_v2"]
+source_revisions = ["b26c56c (app/services/settings_store.py blob fdfc1e48377f142bf115f56f1a8c1651e33dccac)"]
+consumers = []

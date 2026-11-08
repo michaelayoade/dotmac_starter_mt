@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-settings"
+version = "0.1.0a1"
+description = "Validated operator-settings policy layer over the kernel domain_settings store"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_settings", from = "src" }]
+include = [
+    { path = "src/dotmac_settings/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# The manifest is the only kernel import; storage stays in the kernel's
+# domain_settings table, which every composed app already runs.
+dotmac-kernel = ">=0.1.0a106"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
