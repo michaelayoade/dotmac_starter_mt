@@ -376,6 +376,8 @@ def test_remote_bootstrap_refuses_local_effects_fallback_before_pair_read(
     [
         "bootstrap",
         "pair",
+        "factory_runtime",
+        "factory_os",
         "observe",
         "authority_missing",
         "lease",
@@ -443,6 +445,10 @@ def test_runner_phase_failures_and_exact_object_handoff(
 
     def build_effects(*args: object) -> Effects:
         events.append("build_effects")
+        if failure == "factory_runtime":
+            raise RuntimeError("trusted factory unavailable")
+        if failure == "factory_os":
+            raise OSError("trusted factory input unreadable")
         return effects
 
     bindings = SimpleNamespace(build_effects=build_effects)
@@ -470,10 +476,11 @@ def test_runner_phase_failures_and_exact_object_handoff(
 
     def build_base(spec: Any, **kwargs: Any) -> tuple[object, object, object]:
         assert kwargs["bindings"] is bindings
-        assert kwargs["effects"] is effects and "deployment_plan" not in kwargs
+        assert "effects" not in kwargs and "deployment_plan" not in kwargs
         captured["spec"] = spec
-        effects.observe_roles()
-        return base, deployment_plan, effects
+        used_effects = bindings.build_effects(spec, pathlib.Path(kwargs["deploy_dir"]))
+        used_effects.observe_roles()
+        return base, deployment_plan, used_effects
 
     def render(got_base: object, **kwargs: object) -> object:
         assert got_base is base and kwargs["bindings"] is bindings
@@ -541,7 +548,10 @@ def test_runner_phase_failures_and_exact_object_handoff(
     monkeypatch.setattr(runner, "_load_probe_evidence", lambda *a: {})
     monkeypatch.setattr(runner, "_qualify", lambda *a: None)
     monkeypatch.setattr(runner, "require_inside_probe_harness", lambda *a, **k: None)
-    monkeypatch.setattr(producer, "build_base_plan", build_base)
+    # Factory failures use the real guarded builder: an out-of-builder factory
+    # call would escape main with RuntimeError/OSError instead of a typed refusal.
+    if failure not in {"factory_runtime", "factory_os"}:
+        monkeypatch.setattr(producer, "build_base_plan", build_base)
     monkeypatch.setattr(producer, "acquire_execution_plan", render)
     monkeypatch.setattr(runner, "establish_authorization", authorize)
     monkeypatch.setattr(runner, "bind_authorized_effects", bind)
@@ -556,6 +566,8 @@ def test_runner_phase_failures_and_exact_object_handoff(
     before_lease = {
         "bootstrap",
         "pair",
+        "factory_runtime",
+        "factory_os",
         "observe",
         "authority_missing",
         "render",
@@ -564,7 +576,7 @@ def test_runner_phase_failures_and_exact_object_handoff(
         "plan_controller",
         "exposure",
     }
-    if failure in {"bootstrap", "pair"}:
+    if failure in {"bootstrap", "pair", "factory_runtime", "factory_os"}:
         assert "observe" not in events
     if failure in before_lease:
         assert "load_lease" not in events and "lock" not in events
@@ -587,6 +599,8 @@ def test_runner_phase_failures_and_exact_object_handoff(
         assert terminal.refusal is runner.TerminalRefusal.HOST_STATE_UNCERTIFIED
     if failure in {
         "pair",
+        "factory_runtime",
+        "factory_os",
         "observe",
         "render",
         "host",
@@ -598,6 +612,11 @@ def test_runner_phase_failures_and_exact_object_handoff(
     if failure in {"bootstrap", "authority_missing"}:
         assert isinstance(captured["refusal"], runner.AuthorizationUnverifiable)
     assert ctx.host_mutated is (failure == "executor")
+    if failure in {"factory_runtime", "factory_os"}:
+        assert "render" not in events and "grant" not in events
+    assert events.count("build_effects") == (
+        0 if failure in {"bootstrap", "pair"} else 1
+    )
     assert events.count("bootstrap") == 1
     assert events.count("lock") <= 1
     assert events.count("observe") <= 1

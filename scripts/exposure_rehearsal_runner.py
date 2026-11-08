@@ -1604,12 +1604,10 @@ def run(
         receipt_v2_refusals(refused_as=PreconditionUnfit),
         refusal_of(PreconditionUnfit),
     ):
-        deployment_effects = bindings.build_effects(spec, pathlib.Path(args.deploy_dir))
         base_plan, deployment_plan, deployment_effects = receipt_v2.build_base_plan(
             spec,
             target=args.target,
             deploy_dir=args.deploy_dir,
-            effects=deployment_effects,
             bindings=bindings,
         )
         execution_plan = receipt_v2.acquire_execution_plan(base_plan, bindings=bindings)
