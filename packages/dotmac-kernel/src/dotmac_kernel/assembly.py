@@ -233,9 +233,6 @@ class ProductAssemblySpec:
     web_facets: Sequence[WebFacetMount] = ()
     authentication_profiles: Sequence[AuthenticationProfileBinding] = ()
     browser_capabilities: Sequence[BrowserCapabilityProvision] = ()
-    # Reviewed hashes are bound to individual authenticated document routes;
-    # they never expand the product-wide capability/source union.
-    browser_document_policies: Sequence[BrowserDocumentPolicyV1] = ()
     # Product-specific configuration checks. Each returns human-readable
     # errors and follows the kernel's existing environment policy: warnings in
     # development, fatal startup errors in production.
@@ -294,6 +291,10 @@ class ProductAssemblySpec:
     # base migrations via `version_locations`). Consumed by the assembly's
     # Alembic config, not by `create_app`; carried here for a complete spec.
     assembly_migrations: Path | None = None
+
+    # Reviewed hashes are bound to individual authenticated document routes;
+    # they never expand the product-wide capability/source union.
+    browser_document_policies: Sequence[BrowserDocumentPolicyV1] = ()
 
     def __post_init__(self) -> None:
         if self.request_evidence is not None and not isinstance(
