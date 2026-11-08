@@ -423,10 +423,10 @@ def test_the_seal_hold_list_must_equal_the_typed_operational_holds(tmp_path):
     from dotmac_billing.opening_contracts import OpeningEvidenceError
     from dotmac_billing.opening_variance_contracts import OpeningOperationalHoldV1
 
-    _projection, run = _run_for(200, 1578, tmp_path)
+    _projection, run = _run_for(1000, 7890, tmp_path)
     require = validation.require_hold_list_covers_manifest
     carryable = sorted(
-        {c.partition.account_id for c in run.commands if c.manifest.receivables},
+        {r.partition.account_id for r in run.manifest.receivables if r.residual_minor},
         key=str,
     )
     first, second = carryable[0], carryable[1]
