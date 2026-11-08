@@ -405,6 +405,7 @@ def build_base_plan(
     deploy_dir: Any = None,
     effects: Any = None,
     bindings: Any = None,
+    deployment_plan: Any = None,
     previous_image: str = "",
     skip_backup: bool = False,
     skip_backup_reason: str = "",
@@ -415,7 +416,9 @@ def build_base_plan(
     effects instance whose ``observe_roles`` supplied the prestate. The
     runner can therefore authorize the mirrored V3 plan and later execute
     the underlying deployment plan through that same instance, rather than
-    silently swapping observers between authorization and mutation.
+    silently swapping observers between authorization and mutation. A
+    caller may supply its already-built DeploymentPlan; otherwise this
+    builder constructs one from the same inputs.
 
     A failure to construct the effects, build the deployment plan, observe
     the incumbent roles or render the base plan is a ``ReceiptRefused``:
@@ -435,12 +438,13 @@ def build_base_plan(
         if effects is None:
             effects = _build_deployment_effects(spec, deploy_dir, bindings=bindings)
 
-        deployment_plan = build_plan(
-            spec,
-            previous_image=previous_image,
-            skip_backup=skip_backup,
-            skip_backup_reason=skip_backup_reason,
-        )
+        if deployment_plan is None:
+            deployment_plan = build_plan(
+                spec,
+                previous_image=previous_image,
+                skip_backup=skip_backup,
+                skip_backup_reason=skip_backup_reason,
+            )
         base_plan = render_execution_plan(
             spec,
             deployment_plan,
@@ -551,6 +555,7 @@ def execute_authorized_plan(
     exposure_effects: Any = None,
     bindings: Any = None,
     lock_dir: Any = None,
+    lock: Any = None,
 ) -> DeploymentOutcome:
     """Drive the Executor under ``grant``, in process (Q1, 2026-10-06).
 
@@ -569,6 +574,9 @@ def execute_authorized_plan(
     from dotmac_deployment_foundation.engine.run import Executor
     from lane3_host_source_admission import Lane3HostSourceAdmissionProvider
 
+    if lock is not None:
+        lock.require_held(product=spec.product)
+
     admission = (
         getattr(bindings, "deployment_admission_provider", None)
         if bindings is not None
@@ -580,11 +588,15 @@ def execute_authorized_plan(
         grant,
         evidence_policy=getattr(bindings, "evidence_policy", None),
         evidence_verifier=getattr(bindings, "evidence_verifier", None),
-        admission_provider=admission or Lane3HostSourceAdmissionProvider(),
+        admission_provider=(
+            admission if admission is not None else Lane3HostSourceAdmissionProvider()
+        ),
         recovery_verifier=getattr(bindings, "recovery_verifier", None),
         exposure_effects=exposure_effects,
         execution_plan=plan,
     )
+    if lock is not None:
+        return executor.run(deployment_plan, lock=lock)
     lock_kwargs = {} if lock_dir is None else {"directory": lock_dir}
     with deployment_lock(
         spec.product,

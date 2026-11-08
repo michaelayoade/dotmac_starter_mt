@@ -371,6 +371,40 @@ def _read_document(path: str | pathlib.Path | None) -> Mapping[str, Any]:
     return document
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class PreparedAuthorization:
+    """Startup-resolved inputs, not an ExecutionGrant or proof of permission.
+
+    Only authorize_v3 may validate the held pair against the subsequently
+    observed plan. Holding this context never authorizes host mutation.
+    """
+
+    bindings: Any
+    document_json: str
+
+
+def prepare_authorization(
+    *,
+    authorization_document: str | pathlib.Path | None,
+    entries: Iterable[Any] | None = None,
+    require_build_effects: bool = False,
+) -> PreparedAuthorization:
+    """Resolve installed trust once and read the exact pair before host contact."""
+    _, discover_bindings = _verifying_symbols()
+    bindings = _find_provider(discover_bindings, entries)
+    if require_build_effects and not callable(getattr(bindings, "build_effects", None)):
+        raise AuthorizationUnverifiable(
+            Standing.UNANSWERABLE,
+            "the trusted bindings carry no target-correct build_effects factory; "
+            "a remote rehearsal cannot fall back to local ComposeHostEffects",
+            unmet=("bindings_entry_point",),
+        )
+    return PreparedAuthorization(
+        bindings=bindings,
+        document_json=json.dumps(_read_document(authorization_document)),
+    )
+
+
 def establish_authorization(
     *,
     descriptor_digest: str,
@@ -379,6 +413,7 @@ def establish_authorization(
     execution_plan: FoundationExecutionPlanV3 | None = None,
     operation: str = LANE_OPERATION,
     entries: Iterable[Any] | None = None,
+    prepared: PreparedAuthorization | None = None,
 ) -> Any:
     """The ONLY route from Lane 3's inputs to an `ExecutionGrant`.
 
@@ -395,9 +430,10 @@ def establish_authorization(
     :class:`AuthorizationUnverifiable` otherwise — never a sentinel, so a caller
     cannot treat "refused" as "granted" by forgetting to look.
     """
-    authorize_v3, discover_bindings = _verifying_symbols()
-    bindings = _find_provider(discover_bindings, entries)
-    document = _read_document(authorization_document)
+    if prepared is None:
+        prepared = prepare_authorization(
+            authorization_document=authorization_document, entries=entries
+        )
     if execution_plan is None:
         raise AuthorizationUnverifiable(
             Standing.UNANSWERABLE,
@@ -405,9 +441,11 @@ def establish_authorization(
             "descriptor/target text cannot construct host authority",
             unmet=("issuer_to_verifier_translation",),
         )
+    authorize_v3, _ = _verifying_symbols()
+    document = json.loads(prepared.document_json)
     try:
         return authorize_v3(
-            bindings=bindings,
+            bindings=prepared.bindings,
             authorization_material=document["authorization_material"],
             dispatch_material=document["dispatch_material"],
             plan=execution_plan,
