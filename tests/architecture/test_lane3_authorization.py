@@ -224,9 +224,21 @@ def test_runner_and_workflow_do_not_accept_single_v1_authority() -> None:
         "load_lease(args.target"
     )
     # The grant is issued against the ONE trusted plan, from the D4 producer.
-    assert runner.index("receipt_v2.acquire_execution_plan()") < runner.index(
+    # Its prestate is observed and its V1 base rendered before that grant,
+    # through the bindings and effects retained for the later Executor drive.
+    assert runner.index("receipt_v2.build_base_plan(") < runner.index(
+        "receipt_v2.acquire_execution_plan("
+    )
+    assert runner.index("receipt_v2.acquire_execution_plan(") < runner.index(
         "establish_authorization(\n"
     )
+    assert runner.index("load_lease(args.target") < runner.index(
+        "receipt_v2.execute_authorized_plan("
+    )
+    assert "deployment_plan=base_build.deployment_plan," in runner
+    assert "effects=base_build.effects," in runner
+    assert "bindings=authority_bindings," in runner
+    assert "lock_dir=args.lock_dir," in runner
     assert "execution_plan=execution_plan," in runner
     assert "--authorization-doc-digest" not in runner
     assert "--authorization-document" in runner
