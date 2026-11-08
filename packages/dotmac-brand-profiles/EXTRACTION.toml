@@ -7,7 +7,6 @@ owner = "Brand profile DATA: the stable profile identity, display and product na
 contract = "Hold brand profiles on either plane; upsert as DRAFT and make resolvable only by explicit activation; merge an ordered caller-supplied scope chain highest-precedence-first with first-non-null-wins; report the source scope of EVERY resolved field; let a higher layer LOCK a field from LOCKABLE_FIELDS against lower-precedence override, with IDENTITY_FIELDS naming the legal/support/sender subset that ADR-0006 s3 keeps separate from display brand; refuse a lock naming a field that does not participate in precedence; bind an already-NORMALISED host to a platform profile and resolve a brand by host BEFORE any tenant exists; hold optional tagline as DISPLAY and LOCKABLE data (not IDENTITY), preserving spaces and resolving only the exact empty string as absent; keep ProfileFields(None) as no-update and permit explicit NULL only through the tagline clear signal; hold the constrained runtime brand/accent values dotmac_ui.BrandOverride accepts, publishing BRAND_OVERRIDE_INPUTS as the allowlist the ASSEMBLY maps through; validate them on write through dotmac-ui's own parser; and translate a legacy brand record onto that allowlist while REPORTING every unsupported value with its disposition rather than dropping it. NOT a design system, not a file store, not a host-to-tenant resolver, not a mobile build pipeline, and not a holder of any CSS, token map, colour parser, file byte, certificate or key."
 source_repositories = [
   "dotmac_sub",
-  "dotmac_sub-n1-20261106",
   "dotmac_erp",
   "dotmac_starter_mt",
   # Inventoried and found to hold no brand-profile record. Vendor CP's
@@ -17,11 +16,11 @@ source_repositories = [
   "dotmac_vendor_control_plane",
 ]
 source_revisions = [
-  "dotmac_sub-n1-20261106:e449653a53e04a720d59f896e131e8feb258259c",
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
   "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
   "dotmac_vendor_control_plane:0c77e85c7f54538e69061614c8de42ad0f6d2332",
 ]
+revalidation_revisions = ["dotmac_sub:e449653a53e04a720d59f896e131e8feb258259c"]
 source_paths = [
   "dotmac_sub:app/models/branding.py",
   "dotmac_sub:app/services/brand_profiles.py",
@@ -30,9 +29,6 @@ source_paths = [
   "dotmac_sub:app/services/branding_storage.py",
   "dotmac_sub:app/services/public_branding.py",
   "dotmac_sub:app/schemas/branding.py",
-  "dotmac_sub-n1-20261106:app/models/branding.py",
-  "dotmac_sub-n1-20261106:app/schemas/branding.py",
-  "dotmac_sub-n1-20261106:app/services/brand_profiles.py",
   "dotmac_erp:app/services/email_branding.py",
   "dotmac_erp:app/services/branding_assets.py",
   "dotmac_starter_mt:packages/dotmac-brand-profiles/src/dotmac_brand_profiles",
@@ -69,7 +65,7 @@ next_action = "After hosted CI and a separately authorized release, compose the 
 # 255, and `app/services/brand_profiles.py:167-171,248-282` preserves the
 # existing resolver and upsert semantics. The module adds the field to the
 # selected tenant and/or platform profile plane only; the assembly renders it.
-# Sub's consumer mapping converts explicit null to the tagline clear signal;
+# Sub's consumer mapping must convert explicit null to the tagline clear signal;
 # consumer adoption waits for a released module and binds at the separately
 # authorized flip. This source preparation is not publication or adoption.
 
@@ -89,5 +85,5 @@ evidence_paths = ["app/services/email_branding.py", "app/services/branding_asset
 product = "dotmac_sub"
 writer_state = "qualifying_source"
 retirement_required = true
-revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+revision = "e449653a53e04a720d59f896e131e8feb258259c"
 evidence_paths = ["app/models/branding.py", "app/services/brand_profiles.py", "app/services/brand_theme.py", "app/services/branding_config.py"]
