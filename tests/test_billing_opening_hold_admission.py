@@ -12,11 +12,13 @@ import pytest
 from dotmac_billing import opening_hold_contracts as hold
 from dotmac_billing import service as s
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
+from dotmac_billing.opening_contracts import OpeningEvidenceError
 from dotmac_billing.opening_lane import (
     admit_held_opening_lane_partition,
     import_opening_lane_partition,
     seal_opening_lane,
 )
+from dotmac_billing.opening_variance_contracts import OpeningOperationalHoldV1
 from dotmac_billing.opening_window_contracts import OpeningAuthoritySwitchReceiptV1
 from dotmac_billing.opening_window_queries import (
     get_opening_authority_switch_receipt,
@@ -119,6 +121,14 @@ def _two_partitions(session, scope):
     return first, second
 
 
+def _operational(ids):
+    """The sealed hold list equals the typed operational holds (Q1, 2026-11-08)."""
+    return tuple(
+        OpeningOperationalHoldV1(account_id, "target_not_pristine")
+        for account_id in sorted(ids, key=str)
+    )
+
+
 def _import(session, scope, command):
     return cash._import_command(
         session,
@@ -134,6 +144,7 @@ def _seal(session, scope, *, held, participant=None, prebuilt=None, **override):
     seal_command = prebuilt or replace(
         window_fixture._seal_command(session, scope, window),
         held_account_ids=tuple(sorted(held, key=str)),
+        operational_holds=_operational(held),
     )
     seal_command = replace(seal_command, **override)
     with cash._as_opening_principal(session):
@@ -419,6 +430,7 @@ def test_participant_failure_rolls_the_seal_back_and_retry_can_succeed(
         fixed = replace(
             window_fixture._seal_command(session, scope, window),
             held_account_ids=(_held_id(held),),
+            operational_holds=_operational([_held_id(held)]),
         )
         failing = Switch(failure)
         with pytest.raises(BillingRuleViolation) as refused:
@@ -508,6 +520,7 @@ def test_lane_port_requires_trusted_authority_and_drives_the_whole_lane(scratch)
         seal_command = replace(
             window_fixture._seal_command(session, scope, window),
             held_account_ids=(_held_id(held),),
+            operational_holds=_operational([_held_id(held)]),
         )
         with cash._as_opening_principal(session):
             seal_opening_lane(
@@ -540,6 +553,7 @@ def test_switch_receipt_is_stored_with_the_seal_and_replay_returns_it(scratch):
         fixed = replace(
             window_fixture._seal_command(session, scope, window),
             held_account_ids=(_held_id(held),),
+            operational_holds=_operational([_held_id(held)]),
         )
         assert get_opening_authority_switch_receipt(session, scope=scope) is None
         participant = Switch()
@@ -631,54 +645,45 @@ def test_database_refuses_commit_of_post_seal_import_without_hold_record(scratch
         assert len(get_opening_hold_admissions(session, scope=scope)) == 1
 
 
-def _admissible_and_held_only(session, scope):
-    """The drafter's real held shape: only ``blocking``/``held:`` dispositions."""
-    admitted_id, held_id = (
-        cash._new_account(session, scope),
-        cash._new_account(session, scope),
-    )
-    first = ar._command(session, scope, admitted_id)
-    second = ar._command(session, scope, held_id)
-    held_dispositions = tuple(
-        replace(d, disposition="blocking", reason="held:fixture")
-        for d in second.manifest.dispositions
-    )
-    manifest = replace(
-        first.manifest,
-        population=first.manifest.population + second.manifest.population,
-        dispositions=first.manifest.dispositions + held_dispositions,
-        # the held partition has no lots, so its cash control is zero
-        controls=first.manifest.controls
-        + tuple(
-            replace(c, available_cash_credit_minor=0) for c in second.manifest.controls
-        ),
-        counts=replace(
-            first.manifest.counts,
-            **{
-                f.name: getattr(first.manifest.counts, f.name)
-                + getattr(second.manifest.counts, f.name)
-                for f in fields(first.manifest.counts)
-                if f.name not in {"eligible", "blocking"}
-            },
-            eligible=first.manifest.counts.eligible,
-            blocking=first.manifest.counts.blocking + len(held_dispositions),
-        ),
-    )
-    first = replace(first, manifest=manifest)
-    cash._prepare_window(session, scope, first)
-    session.commit()
-    return first, held_id
-
-
-def test_seal_is_refused_while_a_held_marked_partition_is_not_listed(scratch):
+def test_seal_hold_list_must_equal_the_typed_operational_holds(scratch):
+    """Finding 9 / Q1: listed without a reason, a reason not listed, a duplicate
+    and a non-carryable partition are all refused; there is no manifest mark."""
     scope, url = cash.runtime._scope_url(scratch, "tenant")
     with cash._session(scratch, url, scope) as session:
-        admitted, held_id = _admissible_and_held_only(session, scope)
+        admitted, held = _two_partitions(session, scope)
         _import(session, scope, admitted)
         session.commit()
-        for held in ([], [held_id]):
-            with pytest.raises(BillingRuleViolation) as refused:
-                _seal(session, scope, held=held)
-            assert refused.value.code == "billing.opening_hold_list_invalid"
-            session.rollback()
-            assert get_opening_window_seal(session, scope=scope) is None
+        window = session.info["opening_scratch"].windows[scope]
+        base = window_fixture._seal_command(session, scope, window)
+        held_id = _held_id(held)
+        stranger = uuid4()  # carryable nowhere in the frozen manifest
+        # (a) listed without a reason
+        with pytest.raises(BillingRuleViolation) as refused:
+            _seal(
+                session,
+                scope,
+                held=[],
+                prebuilt=replace(base, held_account_ids=(held_id,)),
+            )
+        assert refused.value.code == "billing.opening_hold_list_invalid"
+        session.rollback()
+        # (b) a reason for a partition that is not listed, (c) a duplicate
+        with pytest.raises(OpeningEvidenceError):
+            replace(base, operational_holds=_operational([held_id]))
+        with pytest.raises(OpeningEvidenceError):
+            replace(base, held_account_ids=(held_id, held_id))
+        # (d) a non-carryable partition listed with a reason
+        with pytest.raises(BillingRuleViolation) as refused:
+            _seal(
+                session,
+                scope,
+                held=[],
+                prebuilt=replace(
+                    base,
+                    held_account_ids=(stranger,),
+                    operational_holds=_operational([stranger]),
+                ),
+            )
+        assert refused.value.code == "billing.opening_hold_list_invalid"
+        session.rollback()
+        assert get_opening_window_seal(session, scope=scope) is None

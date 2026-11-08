@@ -30,6 +30,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, MappedColumn, declared_attr, mapped_column
 
 SCHEMA = module_schema("billing")
@@ -2630,6 +2631,7 @@ class _VarianceColumns(_EvidenceTime):
 _VARIANCE_IDENTITY = (
     "window_id",
     "billing_account_id",
+    "import_receipt_id",
     "currency",
     "lane",
     "basis",
@@ -2748,7 +2750,9 @@ class _VarianceEventColumns(_EvidenceTime):
     posting_group_id: Mapped[UUID | None] = mapped_column(Uuid())
     gl_target_class: Mapped[str | None] = mapped_column(String(32))
     evidence_ref: Mapped[str | None] = mapped_column(String(255))
-    approval_ref: Mapped[str | None] = mapped_column(String(255))
+    maker_ref: Mapped[str | None] = mapped_column(String(255))
+    approver_refs: Mapped[list[str] | None] = mapped_column(JSONB)
+    approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -2836,6 +2840,7 @@ class OpeningControlGap(Base, _WindowTenantRow, _ControlGapColumns):
             "tenant_id",
             "window_id",
             "billing_account_id",
+            "import_receipt_id",
             "basis",
             name="uq_opening_control_gaps_identity",
         ),
@@ -2865,6 +2870,7 @@ class PlatformOpeningControlGap(Base, _ControlGapColumns):
         UniqueConstraint(
             "window_id",
             "billing_account_id",
+            "import_receipt_id",
             "basis",
             name="uq_platform_opening_control_gaps_identity",
         ),
@@ -2895,9 +2901,11 @@ class _ControlGapEventColumns(_EvidenceTime):
     window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     gap_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
     evidence_ref: Mapped[str | None] = mapped_column(String(255))
-    approval_ref: Mapped[str | None] = mapped_column(String(255))
+    maker_ref: Mapped[str | None] = mapped_column(String(255))
+    approver_refs: Mapped[list[str] | None] = mapped_column(JSONB)
+    approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -2912,7 +2920,8 @@ class OpeningControlGapEvent(Base, _WindowTenantRow, _ControlGapEventColumns):
         ),
         UniqueConstraint("tenant_id", "seq", name="uq_opening_control_gap_events_seq"),
         CheckConstraint(
-            "kind IN ('recorded','resolved')", name="ck_opening_control_gap_events_kind"
+            "kind IN ('recorded','resolved','voided_by_import_reversal')",
+            name="ck_opening_control_gap_events_kind",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "gap_id"],
@@ -2939,7 +2948,7 @@ class PlatformOpeningControlGapEvent(Base, _ControlGapEventColumns):
         ),
         UniqueConstraint("seq", name="uq_platform_opening_control_gap_events_seq"),
         CheckConstraint(
-            "kind IN ('recorded','resolved')",
+            "kind IN ('recorded','resolved','voided_by_import_reversal')",
             name="ck_platform_opening_control_gap_events_kind",
         ),
         ForeignKeyConstraint(
@@ -3130,6 +3139,10 @@ TENANT_TABLES = (
     "opening_import_receipts",
     "opening_cash_lots",
     "opening_cash_effects",
+    "opening_variances",
+    "opening_variance_events",
+    "opening_control_gaps",
+    "opening_control_gap_events",
     "cash_source_claims",
     "non_cash_credit_grants",
     "non_cash_credit_effects",
@@ -3170,6 +3183,10 @@ PLATFORM_TABLES = (
     "platform_opening_import_receipts",
     "platform_opening_cash_lots",
     "platform_opening_cash_effects",
+    "platform_opening_variances",
+    "platform_opening_variance_events",
+    "platform_opening_control_gaps",
+    "platform_opening_control_gap_events",
     "platform_cash_source_claims",
     "platform_non_cash_credit_grants",
     "platform_non_cash_credit_effects",
