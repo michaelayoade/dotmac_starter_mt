@@ -113,6 +113,8 @@ def _expected_online_privileges(table_name: str) -> frozenset[str]:
         "opening_window_seals",
         "opening_hold_admissions",
         "opening_authority_switch_receipts",
+        "opening_variances",
+        "opening_control_gaps",
         "opening_cash_lots",
         "opening_receivable_bases",
         "opening_historical_discharge_claims",

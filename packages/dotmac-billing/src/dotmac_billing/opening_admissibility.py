@@ -80,7 +80,10 @@ HOLD_REASONS: Final = frozenset(
         "reseller_mapping_unavailable",
     }
 )
-_POLICIES: Final = frozenset({"blocking"})
+# ``finding_only`` (design 2.2, M8): no amount difference and no variance; the
+# census finding on CLOSED history stays readable in the decision record. On an
+# open document it stays blocking. Every relaxing policy remains refused.
+_POLICIES: Final = frozenset({"blocking", "finding_only"})
 # Q1 (ruling 2026-11-08): a partition that is not admitted leaves the manifest
 # and is routed to governed correction. There is no manifest-marked hold; the
 # decision record lists every routed-out partition with its reason, row count
@@ -469,6 +472,7 @@ class PartitionDecision:
     detail: tuple[str, ...]
     eligible_invoices: int
     member_accounts: tuple[str, ...]  # reseller-managed subscribers folded in
+    findings: tuple[tuple[str, int], ...] = ()  # finding_only census codes (M8)
     route: str = "import"  # import | governed_correction
     rows: int = 0  # census invoice rows of the partition (routed-out only)
     lane_figures: tuple[tuple[str, str], ...] = ()  # stated lane money, routed-out
@@ -649,7 +653,16 @@ def project_census(
     # --- exceptions by partition -------------------------------------------
     census_codes: dict[PKey, Counter[str]] = {}
     blocking_codes: dict[PKey, set[str]] = {}
+    finding_codes: dict[PKey, Counter[str]] = {}
     kept_exceptions: list[tuple[PKey | None, Mapping[str, object]]] = []
+    finding_only = {c for c, policy in rules.code_policies if policy == "finding_only"}
+    open_candidates = {i for ids in candidates.values() for i in ids}
+    invoice_of_source: dict[UUID, UUID] = {}
+    for settlement in settlements_in:
+        invoice = _uuid(settlement.get("invoice_id"))
+        for name in ("id", "source_id"):
+            if settlement.get(name) is not None:
+                invoice_of_source[_uuid(settlement[name])] = invoice
     for exc in exceptions_in:
         code = _str(exc.get("code"))
         if exc.get("account_id") is None or exc.get("currency") is None:
@@ -657,7 +670,17 @@ def project_census(
             continue
         pkey = (key_of(_uuid(exc["account_id"])), _str(exc["currency"]))
         census_codes.setdefault(pkey, Counter())[code] += 1
-        blocking_codes.setdefault(pkey, set()).add(code)
+        source = _uuid(exc["source_id"]) if exc.get("source_id") is not None else None
+        owner = None if source is None else invoice_of_source.get(source, source)
+        if (
+            code in finding_only
+            and owner is not None
+            and owner in by_id
+            and owner not in open_candidates
+        ):
+            finding_codes.setdefault(pkey, Counter())[code] += 1  # closed history
+        else:
+            blocking_codes.setdefault(pkey, set()).add(code)
         kept_exceptions.append((pkey, exc))
 
     # --- V1 gate lines -----------------------------------------------------
@@ -812,6 +835,7 @@ def project_census(
                 () if reason is None else triggered[reason][:20],
                 len(cands) if reason is None else 0,
                 tuple(sorted(str(m) for m in member_accounts if m != account)),
+                tuple(sorted(finding_codes.get(pkey, Counter()).items())),
                 route,
                 routed_rows,
                 figures_text,
@@ -1028,6 +1052,7 @@ def render_admissibility_decisions(projection: AdmissibilityProjection) -> str:
                 "detail": list(d.detail),
                 "eligible_invoices": d.eligible_invoices,
                 "member_accounts": list(d.member_accounts),
+                "findings": dict(d.findings),
                 "route": d.route,
                 "rows": d.rows,
                 "lane_figures": dict(d.lane_figures),

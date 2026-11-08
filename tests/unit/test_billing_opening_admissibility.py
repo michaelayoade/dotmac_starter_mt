@@ -278,6 +278,26 @@ def test_an_unlisted_code_and_an_unresolvable_source_stay_blocking():
     assert only(run(ghost)).reason == "census_blocking_exception"
 
 
+def test_finding_only_applies_to_closed_history_and_never_to_an_open_document():
+    """M8 (design 2.2): a provenance finding on closed history is recorded in the
+    decision, not blocking; on an open document it stays blocking."""
+    policies = [{"code": "settlement_provenance", "policy": "finding_only"}]
+    closed = census(blocking_exceptions=[exc("a", "settlement_provenance", "i-closed")])
+    admitted = run(closed, rules(code_policies=policies))
+    decision = only(admitted)
+    assert decision.admitted and decision.reason is None
+    assert dict(decision.findings) == {"settlement_provenance": 1}
+    assert admitted.census["blocking_exceptions"] == []
+    on_open = census(blocking_exceptions=[exc("a", "settlement_provenance", "i-open")])
+    blocked = only(run(on_open, rules(code_policies=policies)))
+    assert (blocked.admitted, blocked.reason) == (False, "census_blocking_exception")
+    # without the policy the same closed-history code blocks (fail closed)
+    assert only(run(closed)).reason == "census_blocking_exception"
+    # no other relaxing policy exists
+    with pytest.raises(AdmissibilityError):
+        rules(code_policies=[{"code": "residual_mismatch", "policy": "ignore"}])
+
+
 def test_a_non_admitted_partition_is_routed_out_and_listed_with_one_reason():
     """Q1: no manifest-marked hold exists; the partition leaves the manifest and
     the decision record lists its rows, stated lane figures and census codes."""

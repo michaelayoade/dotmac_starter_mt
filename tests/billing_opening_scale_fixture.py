@@ -69,7 +69,8 @@ def rules_document() -> dict[str, object]:
             "matching_post_cause": "match",
             "draft_allocation_post_causes": ["known:stale_draft_allocation"],
         },
-        "code_policies": [],
+        # M8: provenance gaps on CLOSED history are findings, not blockers.
+        "code_policies": [{"code": "settlement_provenance", "policy": "finding_only"}],
         "closed_invoice_statuses": ["paid", "written_off", "void"],
         "open_invoice_statuses": ["issued", "overdue", "partially_paid"],
         "drafts": {"draft_status": "draft"},
@@ -349,21 +350,18 @@ def build_scale_inputs(
         and a10_accounts[p]["post_cause"] == "match"
     }
     eligible_expected = sum(len(open_by_partition.get(p, ())) for p in clean_admitted)
-    # No rule relaxes a census code, so provenance gaps block their partition.
-    # Place them only where the partition is not a clean admission, so the
-    # admitted population (and the eligible count) stay as designed while the
-    # exception volume stays at full-run scale.
-    for p, account, settlement_id in provenance_gaps:
-        if p not in clean_admitted:
-            exceptions.append(
-                {
-                    "account_id": account,
-                    "code": "settlement_provenance",
-                    "currency": "NGN",
-                    "detail": "synthetic provenance gap",
-                    "source_id": settlement_id,
-                }
-            )
+    # Provenance gaps sit on closed history in every partition, admitted ones
+    # included (M8 finding_only); the admitted population stays as designed.
+    for _p, account, settlement_id in provenance_gaps:
+        exceptions.append(
+            {
+                "account_id": account,
+                "code": "settlement_provenance",
+                "currency": "NGN",
+                "detail": "synthetic provenance gap",
+                "source_id": settlement_id,
+            }
+        )
 
     lanes = [
         {
