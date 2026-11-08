@@ -34,6 +34,8 @@ local_copy_retirement = "Delete dotmac_academy_v2:app/services/reminder_resend_u
 next_action = "Review scaffold, run Starter isolation test, then release 0.1.0a1 to Forgejo and adopt in Academy."
 
 [[product_writers]]
-repository = "dotmac_academy_v2"
-path = "app/services/reminder_resend.py"
-role = "sole command-layer caller (resend_reminder)"
+product = "dotmac_academy_v2"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "61c072f5ca5fcc34b7fadc211c8272add4519af4"
+evidence_paths = ["app/services/reminder_resend_unit.py", "app/services/reminder_resend.py"]

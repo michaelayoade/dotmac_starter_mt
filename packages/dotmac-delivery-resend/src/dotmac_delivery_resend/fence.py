@@ -11,13 +11,14 @@ dependencies (SQLAlchemy ==2.0.51, postgresql+psycopg only; refused
 at runtime otherwise). No engine, transaction authority, business
 policy or public capability is issued.
 """
+
 import re
 import sys
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import NoReturn, NotRequired, Protocol, TypedDict, cast
+from typing import Any, NoReturn, NotRequired, Protocol, TypedDict, cast
 from uuid import UUID
 from weakref import WeakKeyDictionary
 
@@ -39,12 +40,15 @@ from sqlalchemy.sql.ddl import ExecutableDDLElement
 from sqlalchemy.sql.elements import TextClause
 from sqlalchemy.sql.visitors import iterate
 
-
 # Native dispatch records preserve the callable and the previous instance slot.
 _ControlMethods = list[tuple[str, bool, object, Callable[..., object]]]
 _ControlRecord = tuple[WeakKeyDictionary[Connection, "ReminderUnit"], _ControlMethods]
 _DriverRecord = tuple[
-    Callable[..., object], bool, object, Callable[..., object], dict[int, tuple[object, "ReminderUnit"]]
+    Callable[..., object],
+    bool,
+    object,
+    Callable[..., object],
+    dict[int, tuple[object, "ReminderUnit"]],
 ]
 
 
@@ -81,13 +85,17 @@ class _Command(TypedDict):
 _NATIVE_FLUSH_CODE = Session._flush.__code__
 _LOCK = RLock()
 _ACTIVE: WeakKeyDictionary[Session, "ReminderUnit"] = WeakKeyDictionary()
-_TX_HANDLERS: WeakKeyDictionary[object, dict[str, Callable[..., object]]] = WeakKeyDictionary()
-_TX_METHODS = {}
+_TX_HANDLERS: WeakKeyDictionary[object, dict[str, Callable[..., object]]] = (
+    WeakKeyDictionary()
+)
+_TX_METHODS: dict[Any, Any] = {}
 _DIALECTS: WeakKeyDictionary[Dialect, _DriverRecord] = WeakKeyDictionary()
 _CONTROL_DIALECTS: WeakKeyDictionary[Dialect, _ControlRecord] = WeakKeyDictionary()
 _CONNECTIONS: WeakKeyDictionary[Connection, "ReminderUnit"] = WeakKeyDictionary()
 _SENTINELS: dict[type[Dialect], dict[str, Callable[..., None]]] = {}
 _EXECUTION_EVENTS = ("do_execute", "do_execute_no_params", "do_executemany")
+
+
 @dataclass(frozen=True)
 class WritePhase:
     """One named write window inside the fence.
@@ -99,8 +107,8 @@ class WritePhase:
     """
 
     name: str
-    inserts: frozenset[type] = frozenset()
-    updates: frozenset[type] = frozenset()
+    inserts: frozenset[type[Any]] = frozenset()
+    updates: frozenset[type[Any]] = frozenset()
 
     @property
     def insert_tables(self) -> frozenset:
@@ -122,8 +130,8 @@ class ResendFence:
     `phases` declare which tables may be written in each named phase.
     """
 
-    consequences: tuple[type, ...]
-    authority_models: tuple[type, ...]
+    consequences: tuple[type[Any], ...]
+    authority_models: tuple[type[Any], ...]
     phases: tuple[WritePhase, ...]
 
     @property
@@ -169,7 +177,13 @@ _CONTROL_VISITS = {
     "do_rollback_to_savepoint": "rollback_to_savepoint",
 }
 _MODE_OPTIONS = frozenset(
-    {"isolation_level", "autocommit", "schema_translate_map", "postgresql_readonly", "postgresql_deferrable"}
+    {
+        "isolation_level",
+        "autocommit",
+        "schema_translate_map",
+        "postgresql_readonly",
+        "postgresql_deferrable",
+    }
 )
 
 
@@ -178,7 +192,10 @@ class ReminderResendError(RuntimeError):
 
 
 def values(row):
-    return {column.key: deepcopy(getattr(row, column.key)) for column in row.__table__.columns}
+    return {
+        column.key: deepcopy(getattr(row, column.key))
+        for column in row.__table__.columns
+    }
 
 
 def _chain(transaction, attribute):
@@ -204,22 +221,31 @@ def _read_sql(statement):
         and len(words) >= 1
         and len(sql.split(None, 1)) == 2
         and words[0] == "SELECT"
-        and not {"INTO", "FOR", "COPY", "COMMIT", "ROLLBACK", "SAVEPOINT"}.intersection(words)
+        and not {"INTO", "FOR", "COPY", "COMMIT", "ROLLBACK", "SAVEPOINT"}.intersection(
+            words
+        )
     )
 
 
 def pending_authority(db, fence: ResendFence | None = None):
     """Observe native mapped pending history; no load, refresh, flush or expiry."""
     tables = _fence_for(db, fence).authority_tables
-    return any(inspect(row).mapper.local_table in tables for row in (*db.new, *db.dirty, *db.deleted))
+    return any(
+        inspect(row).mapper.local_table in tables
+        for row in (*db.new, *db.dirty, *db.deleted)
+    )
 
 
 def authority_preflight(db, fence: ResendFence | None = None):
     if pending_authority(db, fence):
         unit = _unit(db)
         if unit is not None:
-            unit.refuse("pending authority must be explicitly flushed before command reads")
-        raise ReminderResendError("pending authority must be explicitly flushed before command reads")
+            unit.refuse(
+                "pending authority must be explicitly flushed before command reads"
+            )
+        raise ReminderResendError(
+            "pending authority must be explicitly flushed before command reads"
+        )
 
 
 def _transactional_mode(db, connection, root, physical):
@@ -234,14 +260,21 @@ def _transactional_mode(db, connection, root, physical):
         or getattr(physical, "autocommit", None) is not False
         or connection.get_execution_options().get("schema_translate_map")
     ):
-        raise ReminderResendError("unqualified transactional PostgreSQL caller configuration")
+        raise ReminderResendError(
+            "unqualified transactional PostgreSQL caller configuration"
+        )
 
 
 def caller_configuration(db):
     if db.twophase:
         raise ReminderResendError("two-phase caller is outside the reminder contract")
     connection = db.connection()
-    _transactional_mode(db, connection, connection.get_transaction(), connection.connection.dbapi_connection)
+    _transactional_mode(
+        db,
+        connection,
+        connection.get_transaction(),
+        connection.connection.dbapi_connection,
+    )
     _sentinel_admission(connection.dialect)
 
 
@@ -269,7 +302,11 @@ def _sql_tokens(statement):
         r"'(?:[^']|'')*'|[A-Za-z_][A-Za-z_0-9$]*|[(),]|\S",
         sql,
     )
-    words = [token.upper() for token in tokens if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9$]*", token)]
+    words = [
+        token.upper()
+        for token in tokens
+        if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9$]*", token)
+    ]
     return sql, root, words
 
 
@@ -290,8 +327,12 @@ def _classify(clause):
     for node in iterate(clause):
         if isinstance(node, ExecutableDDLElement):
             raise ReminderResendError("DDL cannot be embedded in a reminder statement")
-        if getattr(node, "_is_text_clause", False) and not _read_sql(cast(TextClause, node).text):
-            raise ReminderResendError("nested textual SQL must be one conservative SELECT")
+        if getattr(node, "_is_text_clause", False) and not _read_sql(
+            cast(TextClause, node).text
+        ):
+            raise ReminderResendError(
+                "nested textual SQL must be one conservative SELECT"
+            )
         if getattr(node, "is_dml", False) and node is not root_dml:
             raise ReminderResendError("additional DML/CTE writes are refused")
         if getattr(node, "_prefixes", ()) or getattr(node, "_suffixes", ()):
@@ -341,7 +382,7 @@ def _rendered(statement, kind, clause):
     }
     if forbidden.intersection(words) or re.search(r"\$[A-Za-z_0-9]*\$", sql):
         raise ReminderResendError("transaction/utility SQL is refused")
-    counts = {word: 0 for word in ("INSERT", "UPDATE", "DELETE", "MERGE")}
+    counts = dict.fromkeys(("INSERT", "UPDATE", "DELETE", "MERGE"), 0)
     cases = 0
     for index, word in enumerate(words):
         if word == "CASE":
@@ -352,20 +393,29 @@ def _rendered(statement, kind, clause):
             cases -= 1
         if word in counts:
             lock = word == "UPDATE" and (
-                words[max(0, index - 1) : index] == ["FOR"] or words[max(0, index - 3) : index] == ["FOR", "NO", "KEY"]
+                words[max(0, index - 1) : index] == ["FOR"]
+                or words[max(0, index - 3) : index] == ["FOR", "NO", "KEY"]
             )
-            upsert = word == "UPDATE" and kind == "insert" and words[max(0, index - 1) : index] == ["DO"]
+            upsert = (
+                word == "UPDATE"
+                and kind == "insert"
+                and words[max(0, index - 1) : index] == ["DO"]
+            )
             if not lock and not upsert:
                 counts[word] += 1
     for word, count in counts.items():
         expected = 1 if kind == word.lower() else 0
         if count != expected:
-            raise ReminderResendError("rendered statement contains an additional/different DML root")
+            raise ReminderResendError(
+                "rendered statement contains an additional/different DML root"
+            )
     if kind == "text":
         if root != "SELECT" or not _read_sql(sql):
             raise ReminderResendError("rendered textual SQL is not a supported SELECT")
     elif root != kind.upper():
-        if root != "WITH" or not any(getattr(node, "__visit_name__", "") == "cte" for node in iterate(clause)):
+        if root != "WITH" or not any(
+            getattr(node, "__visit_name__", "") == "cte" for node in iterate(clause)
+        ):
             raise ReminderResendError("rendered root disagrees with admitted structure")
     return sql
 
@@ -376,7 +426,9 @@ def _exclusive(dialect):
         raise ReminderResendError("final dialect execution sentinels are absent")
     for name in _EXECUTION_EVENTS:
         if tuple(getattr(dialect.dispatch, name)) != (sentinels[name],):
-            raise ReminderResendError("guarded dialect requires exclusive execution sentinels")
+            raise ReminderResendError(
+                "guarded dialect requires exclusive execution sentinels"
+            )
 
 
 def _sentinel_admission(dialect):
@@ -438,20 +490,30 @@ def _control_guard(unit):
     with _LOCK:
         record = _CONTROL_DIALECTS.get(dialect)
         if record is None:
-            entries: WeakKeyDictionary[Connection, "ReminderUnit"] = WeakKeyDictionary()
+            entries: WeakKeyDictionary[Connection, ReminderUnit] = WeakKeyDictionary()
             methods: _ControlMethods = []
             try:
                 for name in _CONTROL_VISITS:
                     original = getattr(dialect, name)
-                    if getattr(original, "__func__", None) is not getattr(DefaultDialect, name):
-                        raise ReminderResendError("native control implementation requires separate qualification")
-                    existed, previous = name in dialect.__dict__, dialect.__dict__.get(name)
+                    if getattr(original, "__func__", None) is not getattr(
+                        DefaultDialect, name
+                    ):
+                        raise ReminderResendError(
+                            "native control implementation requires separate "
+                            "qualification"
+                        )
+                    existed, previous = (
+                        name in dialect.__dict__,
+                        dialect.__dict__.get(name),
+                    )
 
                     def guarded(connection, ident, _name=name, _original=original):
                         with _LOCK:
                             owner = entries.get(connection)
                         if owner is not None:
-                            return owner.native_control(_name, connection, ident, _original)
+                            return owner.native_control(
+                                _name, connection, ident, _original
+                            )
                         return _original(connection, ident)
 
                     methods.append((name, existed, previous, guarded))
@@ -466,8 +528,13 @@ def _control_guard(unit):
                 raise
             record = (entries, methods)
             _CONTROL_DIALECTS[dialect] = record
-        if any(dialect.__dict__.get(name) is not guarded for name, _existed, _previous, guarded in record[1]):
-            raise ReminderResendError("native control dispatch was replaced during a guarded lifetime")
+        if any(
+            dialect.__dict__.get(name) is not guarded
+            for name, _existed, _previous, guarded in record[1]
+        ):
+            raise ReminderResendError(
+                "native control dispatch was replaced during a guarded lifetime"
+            )
         unit.control_registration = (dialect, record)
         record[0][unit.connection] = unit
 
@@ -520,14 +587,21 @@ def _driver_guard(unit):
         record = _DIALECTS.get(dialect)
         if record is None:
             original = dialect.do_commit
-            existed, previous = "do_commit" in dialect.__dict__, dialect.__dict__.get("do_commit")
+            existed, previous = (
+                "do_commit" in dialect.__dict__,
+                dialect.__dict__.get("do_commit"),
+            )
             entries: dict[int, tuple[object, ReminderUnit]] = {}
 
             def guarded(connection):
                 raw = getattr(connection, "dbapi_connection", connection)
                 with _LOCK:
                     registered = entries.get(id(raw))
-                    owner = registered[1] if registered is not None and registered[0] is raw else None
+                    owner = (
+                        registered[1]
+                        if registered is not None and registered[0] is raw
+                        else None
+                    )
                 if owner is not None:
                     owner.driver_commit()
                 return original(connection)
@@ -604,30 +678,31 @@ class ReminderUnit:
         self.executing = self.failed = self.corrupt = self.ended = False
         self.phase = "read"
         self.frame: _Frame | None = None
-        self.opening = None
-        self.helper = self.helper_physical = None
+        self.opening: tuple[str, Any] | None = None
+        self.helper: Any = None
+        self.helper_physical: Any = None
         self.command: _Command | None = None
         self.pending: _Receipt | None = None
-        self.receipts = []
-        self.logical = set()
-        self.physical_transactions = set()
-        self.pairs = {}
-        self.rollback_proofs = set()
-        self.logical_aborts = set()
-        self.waiting_aborts = set()
-        self.patches = []
-        self.installed = set()
+        self.receipts: list[Any] = []
+        self.logical: set[Any] = set()
+        self.physical_transactions: set[Any] = set()
+        self.pairs: dict[Any, Any] = {}
+        self.rollback_proofs: set[Any] = set()
+        self.logical_aborts: set[Any] = set()
+        self.waiting_aborts: set[Any] = set()
+        self.patches: list[Any] = []
+        self.installed: set[Any] = set()
         self.generation, self.stamp = 0, -1
         self.validating = self.fencing = 0
         self.deferred = False
         self.execute_depth = 0
         self.control_scope: _ControlScope | None = None
-        self.internal_aborts = {}
+        self.internal_aborts: dict[Any, Any] = {}
         self.native_abort: _InternalAbort | None = None
         self.command_epoch = 0
         self.driver_registration = self.control_registration = None
         self.sql_registered = False
-        self.listened = []
+        self.listened: list[Any] = []
         self.listeners = (
             ("commit", self.connection_commit),
             ("rollback", self.connection_rollback),
@@ -644,7 +719,18 @@ class ReminderUnit:
             _ACTIVE[db] = self
         try:
             for obj, names in (
-                (db, ("commit", "rollback", "close", "invalidate", "begin", "begin_nested", "prepare")),
+                (
+                    db,
+                    (
+                        "commit",
+                        "rollback",
+                        "close",
+                        "invalidate",
+                        "begin",
+                        "begin_nested",
+                        "prepare",
+                    ),
+                ),
                 (
                     self.connection,
                     (
@@ -667,12 +753,16 @@ class ReminderUnit:
                 for name in names:
                     self.patch(obj, name)
             self.register_physical(self.physical_root)
-            for transaction in _chain(self.connection.get_nested_transaction(), "_previous_nested"):
+            for transaction in _chain(
+                self.connection.get_nested_transaction(), "_previous_nested"
+            ):
                 self.register_physical(transaction)
             # SQLAlchemy's actual _connections association records the after_begin
             # relationship for already-materialized caller ancestors. Never zip names
             # or infer a logical pair from whichever savepoint is current later.
-            for transaction in reversed(_chain(db.get_nested_transaction() or self.root, "parent")):
+            for transaction in reversed(
+                _chain(db.get_nested_transaction() or self.root, "parent")
+            ):
                 self.register_logical(transaction)
                 self.capture_association(transaction)
             for name, listener in self.listeners:
@@ -751,14 +841,19 @@ class ReminderUnit:
     def remove_internal_abort(self, record):
         with _LOCK:
             transaction = record.transaction
-            if transaction is not None and transaction.__dict__.get("rollback") is record.wrapper:
+            if (
+                transaction is not None
+                and transaction.__dict__.get("rollback") is record.wrapper
+            ):
                 if record.existed:
                     transaction.rollback = record.previous
                 else:
                     del transaction.rollback
             if self.internal_aborts.get(transaction) is record:
                 self.internal_aborts.pop(transaction)
-            record.transaction = record.root = record.original = record.previous = record.wrapper = None
+            record.transaction = record.root = record.original = record.previous = (
+                record.wrapper
+            ) = None
 
     def internal_ended(self, transaction):
         with _LOCK:
@@ -796,21 +891,40 @@ class ReminderUnit:
                 or self.connection.get_transaction() is not self.physical_root
                 or self.connection.connection.dbapi_connection is not self.physical
             ):
-                self.refuse("internal rollback has no exact native flush origin", corrupt=True)
+                self.refuse(
+                    "internal rollback has no exact native flush origin", corrupt=True
+                )
             # Same nearest actual root/nested-boundary rule as native rollback.
-            boundary = next((t for t in _chain(transaction, "parent") if t.parent is None or t.nested), None)
+            boundary = next(
+                (
+                    t
+                    for t in _chain(transaction, "parent")
+                    if t.parent is None or t.nested
+                ),
+                None,
+            )
             target = self.pairs.get(boundary)
-            association = set(boundary._connections.values()) if boundary is not None else set()
+            association = (
+                set(boundary._connections.values()) if boundary is not None else set()
+            )
             if (
                 boundary not in self.logical
                 or target is None
                 or not target.is_active
                 or not association
-                or any(c is not self.connection or p is not target for c, p, _commit, _close in association)
+                or any(
+                    c is not self.connection or p is not target
+                    for c, p, _commit, _close in association
+                )
                 or target not in self.physical_transactions
-                or (target is not self.physical_root and self.connection.get_nested_transaction() is not target)
+                or (
+                    target is not self.physical_root
+                    and self.connection.get_nested_transaction() is not target
+                )
             ):
-                self.refuse("internal rollback boundary association changed", corrupt=True)
+                self.refuse(
+                    "internal rollback boundary association changed", corrupt=True
+                )
         except BaseException:
             # A refusal must never strand the wrapper: only a forged call refused
             # during an active flush keeps it for the genuine native abort.
@@ -819,7 +933,9 @@ class ReminderUnit:
                 self.remove_internal_abort(record)
             raise
         outer = self.frame
-        frame: _Frame | None = _Frame("abort", transaction, frozenset((boundary,)), frozenset((target,)), target)
+        frame: _Frame | None = _Frame(
+            "abort", transaction, frozenset((boundary,)), frozenset((target,)), target
+        )
         record.consumed = record.active = True
         self.failed = True
         self.stamp = -1
@@ -856,8 +972,13 @@ class ReminderUnit:
     def capture_association(self, logical):
         for connection, physical, _commit, _close in logical._connections.values():
             if connection is not self.connection:
-                self.refuse("resend transaction acquired another Connection", corrupt=True)
-            if physical is not self.physical_root and self.physical_root is not self.connection.get_transaction():
+                self.refuse(
+                    "resend transaction acquired another Connection", corrupt=True
+                )
+            if (
+                physical is not self.physical_root
+                and self.physical_root is not self.connection.get_transaction()
+            ):
                 self.refuse("resend physical root changed", corrupt=True)
             self.pairs[logical] = physical
             self.register_physical(physical)
@@ -871,7 +992,9 @@ class ReminderUnit:
         self.installed.add(key)
         slotted = not hasattr(obj, "__dict__")
         original = _slot_method(obj, name) if slotted else getattr(obj, name)
-        existed, previous = (None, None) if slotted else (name in obj.__dict__, obj.__dict__.get(name))
+        existed, previous = (
+            (None, None) if slotted else (name in obj.__dict__, obj.__dict__.get(name))
+        )
 
         def guarded(*args, **kwargs):
             if self.ended:
@@ -909,12 +1032,14 @@ class ReminderUnit:
             and current.origin is SessionTransactionOrigin.SUBTRANSACTION
             and self.internal_aborts.get(current) is not None
             and parent in self.logical
-            and parent.nested
+            and parent.nested  # type: ignore[union-attr]
             and parent not in self.pairs
             and getattr(current._state, "name", "") == "PROVISIONING_CONNECTION"
-            and getattr(parent._state, "name", "") == "PROVISIONING_CONNECTION"
+            and getattr(parent._state, "name", "") == "PROVISIONING_CONNECTION"  # type: ignore[union-attr]
         )
-        active = self.db.is_active or (prepared and self.frame is not None) or provisioning
+        active = (
+            self.db.is_active or (prepared and self.frame is not None) or provisioning
+        )
         if (
             self.ended
             or self.corrupt
@@ -937,11 +1062,19 @@ class ReminderUnit:
 
     def helper_phase(self, phase):
         state = current_conflict_savepoint(self.db)
-        return state is not None and state.root is self.root and state.savepoint is self.helper and state.phase is phase
+        return (
+            state is not None
+            and state.root is self.root
+            and state.savepoint is self.helper
+            and state.phase is phase
+        )
 
     def _pins(self, *, pending=True):
         folded = {}
-        for receipt in (*self.receipts, *((self.pending,) if pending and self.pending is not None else ())):
+        for receipt in (
+            *self.receipts,
+            *((self.pending,) if pending and self.pending is not None else ()),
+        ):
             for row, expected in receipt.pins:
                 folded[(row.__table__.name, expected["id"])] = (row, expected)
         return tuple(folded.values())
@@ -956,7 +1089,9 @@ class ReminderUnit:
                 if key in state.dict and state.dict[key] != value:
                     self.refuse("a fixed resend consequence changed")
                 history = state.attrs[key].history
-                if history.has_changes() and (not history.added or history.added[0] != value):
+                if history.has_changes() and (
+                    not history.added or history.added[0] != value
+                ):
                     self.refuse("a dirty resend consequence differs")
 
     def _persisted(self):
@@ -990,7 +1125,10 @@ class ReminderUnit:
             self.validating += 1
             try:
                 with self.db.no_autoflush:
-                    for receipt in (*self.receipts, *((self.pending,) if self.pending is not None else ())):
+                    for receipt in (
+                        *self.receipts,
+                        *((self.pending,) if self.pending is not None else ()),
+                    ):
                         receipt.authority()
                     self._persisted()
                 self.require()
@@ -1029,16 +1167,26 @@ class ReminderUnit:
         if target in (self.db, self.connection, self.root, self.physical_root):
             return (
                 frozenset(t for t in self.logical if t.is_active or t is self.root),
-                frozenset(t for t in self.physical_transactions if t.is_active or t is self.physical_root),
+                frozenset(
+                    t
+                    for t in self.physical_transactions
+                    if t.is_active or t is self.physical_root
+                ),
             )
         if target in self.logical:
-            logical = frozenset(t for t in self.logical if target in _chain(t, "parent"))
+            logical = frozenset(
+                t for t in self.logical if target in _chain(t, "parent")
+            )
             physical = frozenset(self.pairs[t] for t in logical if t in self.pairs)
             return logical, physical
         physical = frozenset(
             t
             for t in self.physical_transactions
-            if t is target or (hasattr(t, "_previous_nested") and target in _chain(t, "_previous_nested"))
+            if t is target
+            or (
+                hasattr(t, "_previous_nested")
+                and target in _chain(t, "_previous_nested")
+            )
         )
         logical = frozenset(t for t, p in self.pairs.items() if p in physical)
         return logical, physical
@@ -1046,7 +1194,14 @@ class ReminderUnit:
     def dispatch(self, obj, name, original, args, kwargs):
         if name == "execute":
             return self.execute_entry(original, args, kwargs)
-        if name in ("prepare", "begin_twophase", "commit_prepared", "rollback_prepared", "recover_twophase", "detach"):
+        if name in (
+            "prepare",
+            "begin_twophase",
+            "commit_prepared",
+            "rollback_prepared",
+            "recover_twophase",
+            "detach",
+        ):
             self.refuse("unsupported transaction completion/configuration entry")
         if name == "execution_options":
             if _MODE_OPTIONS.intersection(kwargs):
@@ -1068,17 +1223,27 @@ class ReminderUnit:
         recovering = self.helper_phase(ConflictSavepointPhase.ROLLBACK)
         releasing = self.helper_phase(ConflictSavepointPhase.RELEASE)
         helper_target = obj is self.helper or obj is self.helper_physical
-        if self.executing and not (recovering and helper_target and name in ("rollback", "close")):
+        if self.executing and not (
+            recovering and helper_target and name in ("rollback", "close")
+        ):
             self.refuse("participant attempted transaction completion")
-        if self.command is not None and not ((recovering or releasing) and helper_target):
+        if self.command is not None and not (
+            (recovering or releasing) and helper_target
+        ):
             self.refuse("participant attempted completion during helper lifetime")
         if self.frame is not None:
             return self.cascade(obj, name, original, args, kwargs)
         operation = "commit" if name == "commit" else "abort"
         if helper_target:
-            if not ((operation == "commit" and releasing and not self.failed) or (operation == "abort" and recovering)):
+            if not (
+                (operation == "commit" and releasing and not self.failed)
+                or (operation == "abort" and recovering)
+            ):
                 self.refuse("participant attempted helper completion")
-            logical, physical = frozenset((self.helper,)), frozenset((self.helper_physical,))
+            logical, physical = (
+                frozenset((self.helper,)),
+                frozenset((self.helper_physical,)),
+            )
             operation = "helper_release" if operation == "commit" else "helper_recovery"
         else:
             logical, physical = self._targets(obj)
@@ -1086,7 +1251,9 @@ class ReminderUnit:
         self.frame = frame
         try:
             if operation in ("commit", "helper_release"):
-                logical_entry = operation == "commit" and (obj is self.db or obj in self.logical)
+                logical_entry = operation == "commit" and (
+                    obj is self.db or obj in self.logical
+                )
                 self.validate(defer=logical_entry)
             result = self.cascade(obj, name, original, args, kwargs)
             # Physical direct root completion is native; do not manufacture a
@@ -1139,7 +1306,9 @@ class ReminderUnit:
                 return result
             if obj in frame.physical and name in ("commit", "rollback", "close"):
                 if obj.is_active:
-                    self.refuse("physical transaction did not actually complete", corrupt=True)
+                    self.refuse(
+                        "physical transaction did not actually complete", corrupt=True
+                    )
                 frame.completed.add(obj)
                 if committing and obj is not self.physical_root:
                     frame.sealed = False
@@ -1166,9 +1335,15 @@ class ReminderUnit:
         except BaseException:
             if committing:
                 self.failed = True
-            elif obj in frame.physical and name in ("rollback", "close") and was_active and not self.ended:
-                # PRODUCT: a physical savepoint rollback that raised is unproven; the server savepoint
-                # may be intact. Refuse every commit until the caller rolls back for real.
+            elif (
+                obj in frame.physical
+                and name in ("rollback", "close")
+                and was_active
+                and not self.ended
+            ):
+                # PRODUCT: a physical savepoint rollback that raised is
+                # unproven; the server savepoint may be intact. Refuse every
+                # commit until the caller rolls back for real.
                 self.failed = True
                 self.waiting_aborts.add(obj)
             raise
@@ -1231,7 +1406,9 @@ class ReminderUnit:
             frame = self.frame
             committing = visit == "release_savepoint"
             if frame is None or frame.operation not in (
-                ("commit", "helper_release") if committing else ("abort", "helper_recovery")
+                ("commit", "helper_release")
+                if committing
+                else ("abort", "helper_recovery")
             ):
                 self.refuse("native completion has no exact frame")
             for transaction in frame.physical:
@@ -1241,7 +1418,9 @@ class ReminderUnit:
                 ):
                     target = transaction
             if target is None or self.connection.get_nested_transaction() is not target:
-                self.refuse("native completion target is not the executing physical object")
+                self.refuse(
+                    "native completion target is not the executing physical object"
+                )
             if committing:
                 self.driver_release()
         scope: _ControlScope = {
@@ -1256,7 +1435,9 @@ class ReminderUnit:
         try:
             result = original(connection, ident)
             if not scope["consumed"]:
-                self.refuse("native control did not execute its one-use statement", corrupt=True)
+                self.refuse(
+                    "native control did not execute its one-use statement", corrupt=True
+                )
             return result
         finally:
             self.control_scope = None
@@ -1309,13 +1490,17 @@ class ReminderUnit:
                 self.refuse("participant attempted an unrelated canonical write")
         return kind, clause
 
-    def before_execute(self, connection, clause, multiparams, params, execution_options):
+    def before_execute(
+        self, connection, clause, multiparams, params, execution_options
+    ):
         try:
             self.admit(clause)
         except ReminderResendError:
             self.refuse("unsupported reminder statement admission")
 
-    def before_cursor_execute(self, connection, cursor, statement, parameters, context, executemany):
+    def before_cursor_execute(
+        self, connection, cursor, statement, parameters, context, executemany
+    ):
         # Observation is not the final SQL authority: later retval callbacks may
         # replace statement. The permanent dialect sentinel checks their output.
         compiled = getattr(context, "compiled", None)
@@ -1340,7 +1525,11 @@ class ReminderUnit:
                 self.refuse("final cursor/context custody differs", corrupt=True)
             compiled = getattr(context, "compiled", None)
             if compiled is None:
-                if self.executing or (self.frame is not None and self.frame.sealed) or not _read_sql(statement):
+                if (
+                    self.executing
+                    or (self.frame is not None and self.frame.sealed)
+                    or not _read_sql(statement)
+                ):
                     self.refuse("final raw SQL is outside the read contract")
                 kind, clause = "text", None
             else:
@@ -1350,10 +1539,15 @@ class ReminderUnit:
             if kind == "control":
                 scope = cast(_ControlScope, self.control_scope)
                 if not self.control(
-                    cast(_ControlClause, clause).__visit_name__, cast(_ControlClause, clause).ident, clause, final=True
+                    cast(_ControlClause, clause).__visit_name__,
+                    cast(_ControlClause, clause).ident,
+                    clause,
+                    final=True,
                 ):
                     self.refuse("native control permit was consumed/rebound")
-                quoted = self.connection.dialect.identifier_preparer.quote(scope["ident"])
+                quoted = self.connection.dialect.identifier_preparer.quote(
+                    scope["ident"]
+                )
                 expected = {
                     "savepoint": "SAVEPOINT ",
                     "release_savepoint": "RELEASE SAVEPOINT ",
@@ -1367,7 +1561,9 @@ class ReminderUnit:
                 return
             _rendered(statement, kind, clause)
             if self.frame is not None and self.frame.sealed and not self.fencing:
-                self.refuse("late transformed SQL attempted after the final fence", corrupt=True)
+                self.refuse(
+                    "late transformed SQL attempted after the final fence", corrupt=True
+                )
             self.generation += 1
         except ReminderResendError:
             self.refuse("final rendered statement refused before driver")
@@ -1405,7 +1601,11 @@ class ReminderUnit:
         self._dirty()  # No Session SQL or lazy loading after PREPARED.
 
     def connection_commit(self, connection):
-        if self.frame is None or self.frame.operation != "commit" or not self.frame.sealed:
+        if (
+            self.frame is None
+            or self.frame.operation != "commit"
+            or not self.frame.sealed
+        ):
             self.refuse("physical commit lacks its exact final fence", corrupt=True)
         if self.physical_root not in self.frame.physical:
             self.refuse("physical commit target differs", corrupt=True)
@@ -1414,7 +1614,8 @@ class ReminderUnit:
         if self.native_abort is not None and (
             connection is not self.connection
             or cast(_Frame, self.frame).target is not self.physical_root
-            or (id(self.physical_root), "rollback") not in cast(_Frame, self.frame).calls
+            or (id(self.physical_root), "rollback")
+            not in cast(_Frame, self.frame).calls
         ):
             self.refuse("native root rollback target differs", corrupt=True)
         if self.frame is None or self.frame.operation != "abort":
@@ -1425,17 +1626,25 @@ class ReminderUnit:
             self.refuse("participant attempted an unowned physical savepoint")
 
     def connection_release(self, connection, name, context):
-        if self.frame is None or self.frame.operation not in ("commit", "helper_release") or not self.frame.sealed:
+        if (
+            self.frame is None
+            or self.frame.operation not in ("commit", "helper_release")
+            or not self.frame.sealed
+        ):
             self.refuse("physical savepoint release lacks its exact fence")
 
     def connection_recovery(self, connection, name, context):
         if self.native_abort is not None and (
             connection is not self.connection
             or getattr(cast(_Frame, self.frame).target, "_savepoint", None) != name
-            or (id(cast(_Frame, self.frame).target), "rollback") not in cast(_Frame, self.frame).calls
+            or (id(cast(_Frame, self.frame).target), "rollback")
+            not in cast(_Frame, self.frame).calls
         ):
             self.refuse("native savepoint rollback target differs", corrupt=True)
-        if self.frame is None or self.frame.operation not in ("abort", "helper_recovery"):
+        if self.frame is None or self.frame.operation not in (
+            "abort",
+            "helper_recovery",
+        ):
             self.refuse("physical savepoint rollback lacks its exact abort")
 
     def pin(self, pins, revalidate):
@@ -1444,11 +1653,22 @@ class ReminderUnit:
         copied = tuple((row, deepcopy(expected)) for row, expected in pins)
         prior = self.command["prior"]
         baseline = tuple(
-            (row, expected["id"], deepcopy(prior[row.__table__.name].get(expected["id"]))) for row, expected in copied
+            (
+                row,
+                expected["id"],
+                deepcopy(prior[row.__table__.name].get(expected["id"])),
+            )
+            for row, expected in copied
         )
-        self.pending = _Receipt(copied, revalidate, self.command["logical"], self.command["physical"], baseline)
+        self.pending = _Receipt(
+            copied,
+            revalidate,
+            self.command["logical"],
+            self.command["physical"],
+            baseline,
+        )
 
-    def remember_rollback(self, tenant_id, prior: Mapping[type, dict]):
+    def remember_rollback(self, tenant_id, prior: Mapping[Any, dict]):
         cast(_Command, self.command)["tenant_id"] = tenant_id
         cast(_Command, self.command)["prior"] = deepcopy(
             {model.__tablename__: rows for model, rows in prior.items()}
@@ -1464,14 +1684,21 @@ class ReminderUnit:
                 actual = (
                     self.connection.execute(
                         select(*model.__table__.columns).where(
-                            model.__table__.c.tenant_id == cast(_Command, self.command)["tenant_id"],
+                            model.__table__.c.tenant_id
+                            == cast(_Command, self.command)["tenant_id"],
                         )
                     )
                     .mappings()
                     .all()
                 )
-                if {row["id"]: dict(row) for row in actual} != prior[model.__tablename__]:
-                    self.refuse("helper rollback did not restore its original fixed inventories", corrupt=True)
+                if {row["id"]: dict(row) for row in actual} != prior[
+                    model.__tablename__
+                ]:
+                    self.refuse(
+                        "helper rollback did not restore its original fixed "
+                        "inventories",
+                        corrupt=True,
+                    )
         finally:
             self.fencing -= 1
 
@@ -1486,13 +1713,21 @@ class ReminderUnit:
 
     def retire(self, logical, physical):
         if physical not in self.rollback_proofs:
-            self.refuse("requested rollback has no actual physical outcome", corrupt=True)
+            self.refuse(
+                "requested rollback has no actual physical outcome", corrupt=True
+            )
         prior_pins = self._pins()
-        retired = [r for r in self.receipts if logical in r.logical or physical in r.physical]
+        retired = [
+            r for r in self.receipts if logical in r.logical or physical in r.physical
+        ]
         rollback_values = {}
         for receipt in reversed(retired):
             for row, identity, expected in receipt.baseline:
-                rollback_values[(row.__table__.name, identity)] = (row, identity, expected)
+                rollback_values[(row.__table__.name, identity)] = (
+                    row,
+                    identity,
+                    expected,
+                )
         self.fencing += 1
         try:
             for row, identity, expected in rollback_values.values():
@@ -1506,7 +1741,10 @@ class ReminderUnit:
                     .one_or_none()
                 )
                 if (None if actual is None else dict(actual)) != expected:
-                    self.refuse("actual rollback did not restore fixed resend facts", corrupt=True)
+                    self.refuse(
+                        "actual rollback did not restore fixed resend facts",
+                        corrupt=True,
+                    )
         finally:
             self.fencing -= 1
         self.receipts = [r for r in self.receipts if r not in retired]
@@ -1566,8 +1804,12 @@ class ReminderUnit:
         self.rollback_proofs.clear()
         self.logical_aborts.clear()
         self.waiting_aborts.clear()
-        self.pending = self.command = self.frame = self.opening = self.control_scope = None
-        self.db = self.root = self.connection = self.physical_root = self.physical = self.bind = None
+        self.pending = self.command = self.frame = self.opening = self.control_scope = (
+            None
+        )
+        self.db = self.root = self.connection = self.physical_root = self.physical = (
+            self.bind
+        ) = None
         self.helper = self.helper_physical = None
 
 
@@ -1605,7 +1847,9 @@ def _after_begin(db, transaction, connection):
     unit = _unit(db)
     if unit is not None:
         if connection is not unit.connection:
-            unit.refuse("resend participant rebound the physical Connection", corrupt=True)
+            unit.refuse(
+                "resend participant rebound the physical Connection", corrupt=True
+            )
         unit.register_logical(transaction)
         unit.capture_association(transaction)
 
@@ -1638,8 +1882,16 @@ def _root_ended(db, transaction):
         unit.internal_ended(transaction)
     if unit is not None and transaction is unit.root:
         frame = unit.frame
-        accepted = frame is not None and frame.operation == "commit" and unit.physical_root in frame.completed
-        aborted = unit.physical_root in unit.rollback_proofs or unit.connection.closed or unit.connection.invalidated
+        accepted = (
+            frame is not None
+            and frame.operation == "commit"
+            and unit.physical_root in frame.completed
+        )
+        aborted = (
+            unit.physical_root in unit.rollback_proofs
+            or unit.connection.closed
+            or unit.connection.invalidated
+        )
         if accepted or aborted:
             unit.clear()
         else:
@@ -1659,9 +1911,16 @@ def prepare_resend(db, fence: ResendFence | None = None):
         unit.validate()
     unit.require()
     logical = _chain(db.get_nested_transaction() or unit.root, "parent")
-    physical = (*_chain(unit.connection.get_nested_transaction(), "_previous_nested"), unit.physical_root)
+    physical = (
+        *_chain(unit.connection.get_nested_transaction(), "_previous_nested"),
+        unit.physical_root,
+    )
     unit.command_epoch += 1
-    unit.command = {"logical": logical, "physical": physical, "count": len(unit.receipts)}
+    unit.command = {
+        "logical": logical,
+        "physical": physical,
+        "count": len(unit.receipts),
+    }
     unit.opening = ("helper", db)
     return unit
 
@@ -1696,8 +1955,10 @@ def finish_resend(unit):
         unit.pending is None
         or unit.helper.is_active
         or unit.helper_physical.is_active
-        or unit.db.get_nested_transaction() is not (None if unit.helper.parent is unit.root else unit.helper.parent)
-        or unit.connection.get_nested_transaction() is not unit.helper_physical._previous_nested
+        or unit.db.get_nested_transaction()
+        is not (None if unit.helper.parent is unit.root else unit.helper.parent)
+        or unit.connection.get_nested_transaction()
+        is not unit.helper_physical._previous_nested
     ):
         unit.refuse("resend helper did not actually release", corrupt=True)
     unit.receipts.append(unit.pending)
@@ -1723,8 +1984,13 @@ def recover_previous(unit):
         or unit.helper_physical not in unit.rollback_proofs
         or unit.helper not in unit.logical_aborts
         or unit.db.get_nested_transaction()
-        is not (None if unit.command["logical"][0] is unit.root else unit.command["logical"][0])
-        or unit.connection.get_nested_transaction() is not unit.helper_physical._previous_nested
+        is not (
+            None
+            if unit.command["logical"][0] is unit.root
+            else unit.command["logical"][0]
+        )
+        or unit.connection.get_nested_transaction()
+        is not unit.helper_physical._previous_nested
     ):
         unit.failed = True
         return  # Exact root remains guarded for its genuine caller abort.
