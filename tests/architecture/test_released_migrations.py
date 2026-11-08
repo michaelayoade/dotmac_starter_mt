@@ -7408,6 +7408,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-durable-timers ──
+    "dotmac-durable-timers-v0.1.0a2": (
+        "dotmac-durable-timers",
+        "e223bd7e3b35e9fe9f89658d6534dbf3d998260f",
+        {
+            "dt_0001_durable_timers.py": (
+                "12bdaad16e18a2dca53b989adb80b9c6c2873e2971ab4a8713ccbc1a2b8d4370"
+            ),
+        },
+    ),
     "dotmac-durable-timers-v0.1.0a1": (
         "dotmac-durable-timers",
         "f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
