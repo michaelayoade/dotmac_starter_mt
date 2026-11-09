@@ -104,7 +104,10 @@ manifest = json.loads(Path("deploy/runtime-packages.json").read_text())
 selected = {value.split("[", 1)[0] for value in manifest["distributions"]}
 project = Path("pyproject.toml")
 text = project.read_text()
-dependencies = tomllib.loads(text)["tool"]["poetry"]["dependencies"]
+poetry = tomllib.loads(text)["tool"]["poetry"]
+dependencies = dict(poetry["dependencies"])
+for group in poetry.get("group", {}).values():
+    dependencies.update(group.get("dependencies", {}))
 omitted = {
     name: spec["path"] for name, spec in dependencies.items()
     if isinstance(spec, dict) and "path" in spec and name not in selected
