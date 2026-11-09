@@ -333,7 +333,7 @@ def _shared() -> None:
         WHERE v->'partition'->>'account_id' IS NOT NULL
     $$;
 
-    """)
+    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
 
 
 def _guards(platform: bool) -> None:
@@ -773,7 +773,7 @@ def _guards(platform: bool) -> None:
       END IF;
       RETURN bad + batch_bad;
     END $$;
-    """)
+    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
 
 
 def _replace_guards(platform: bool) -> None:
@@ -943,7 +943,7 @@ def _replace_guards(platform: bool) -> None:
       END IF;
       RETURN NEW;
     END $$;
-    """)
+    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
 
 
 def upgrade() -> None:

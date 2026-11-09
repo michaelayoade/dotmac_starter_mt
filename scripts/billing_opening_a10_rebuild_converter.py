@@ -79,9 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             document = convert(list(csv.DictReader(handle)))
         if out.exists():
             raise ConversionError("output_exists")
-        out.write_text(
-            json.dumps(document, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-        )
+        out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     except (ConversionError, OSError) as exc:
         code = exc.code if isinstance(exc, ConversionError) else "unreadable_input"
         print(json.dumps({"converted": False, "refused": code}))

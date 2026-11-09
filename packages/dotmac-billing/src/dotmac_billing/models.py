@@ -35,6 +35,8 @@ from sqlalchemy.orm import Mapped, MappedColumn, declared_attr, mapped_column
 
 SCHEMA = module_schema("billing")
 MONEY = Numeric(20, 6)
+# jsonb on PostgreSQL (the migration's type), plain JSON on SQLite metadata builds
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 def money_column(
@@ -2751,7 +2753,7 @@ class _VarianceEventColumns(_EvidenceTime):
     gl_target_class: Mapped[str | None] = mapped_column(String(32))
     evidence_ref: Mapped[str | None] = mapped_column(String(255))
     maker_ref: Mapped[str | None] = mapped_column(String(255))
-    approver_refs: Mapped[list[str] | None] = mapped_column(JSONB)
+    approver_refs: Mapped[list[str] | None] = mapped_column(_JSONB)
     approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
     fact_posting_group_id: Mapped[UUID | None] = mapped_column(Uuid())
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -2914,7 +2916,7 @@ class _ControlGapEventColumns(_EvidenceTime):
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     evidence_ref: Mapped[str | None] = mapped_column(String(255))
     maker_ref: Mapped[str | None] = mapped_column(String(255))
-    approver_refs: Mapped[list[str] | None] = mapped_column(JSONB)
+    approver_refs: Mapped[list[str] | None] = mapped_column(_JSONB)
     approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
