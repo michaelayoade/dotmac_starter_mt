@@ -89,6 +89,45 @@ for name in excluded:
     (ui / "templates/dotmac_ui/components" / (name.lower() + ".html")).unlink()
 PY
 
+# Distribute only the package set the reference runtime actually composes.
+# Resolve the smaller dependency graph in a hosted container before archiving
+# so the archive carries the exact lockfile used by its Docker build.
+python3 - <<'PY'
+import json
+import re
+import shutil
+import tomllib
+from pathlib import Path
+
+root = Path.cwd().resolve()
+manifest = json.loads(Path("deploy/runtime-packages.json").read_text())
+selected = {value.split("[", 1)[0] for value in manifest["distributions"]}
+project = Path("pyproject.toml")
+text = project.read_text()
+dependencies = tomllib.loads(text)["tool"]["poetry"]["dependencies"]
+omitted = {
+    name: spec["path"] for name, spec in dependencies.items()
+    if isinstance(spec, dict) and "path" in spec and name not in selected
+}
+assert len(omitted) == 97
+for name, relative in omitted.items():
+    pattern = rf"(?m)^{re.escape(name)}\s*=\s*\{{[^\n]*\}}\n"
+    text, count = re.subn(pattern, "", text)
+    assert count == 1, name
+    path = (root / relative).resolve()
+    assert path.is_relative_to(root / "packages")
+    shutil.rmtree(path)
+project.write_text(text)
+# The published RC1 lock belongs to the full source tree. Generate a new
+# evaluation lock instead of presenting that lock as valid for this subset.
+Path("poetry.lock").unlink()
+PY
+docker run --rm --volume "$destination:/work" --workdir /work \
+  python:3.12-slim-bookworm sh -ec '
+    python -m pip install --disable-pip-version-check --no-cache-dir \
+      --require-hashes --only-binary=:all: -r .github/bootstrap/poetry-requirements-py312.txt
+    poetry lock --no-interaction
+  '
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$destination.tar" .
 tar -tf "$destination.tar" | LC_ALL=C sort > "$destination.files"
 sha256sum "$destination.tar"
