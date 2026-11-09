@@ -13,6 +13,9 @@
   recorded size and sha256 and their content-detected media type must equal the
   recorded type (`IntegrityMismatch`), and may be constrained to
   `allowed_media_types` (`ReadTypeNotAllowed`). Returns `VerifiedFile`.
+  `allowed_media_types` is required, and a provider returning more bytes than
+  requested is refused. `VerifiedFile.checksum_sha256` keeps the row's
+  `sha256:<hex>` format (document-rendering's logo asset uses bare hex).
   Authorization stays with the domain. Additive: no migration, no change to
   upload, download, deletion or reconciliation.
 

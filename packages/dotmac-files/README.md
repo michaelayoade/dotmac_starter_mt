@@ -68,7 +68,14 @@ trusted key. The provider is asked for at most `limit + 1` bytes, then size,
 sha256 and the content-detected media type are compared with the row. This is a
 read primitive for domains (for example a frozen logo for document rendering);
 who may read a file remains the domain's decision. As with download, end the
-database transaction before the provider phase.
+database transaction before the provider phase. `allowed_media_types` is
+required (no allow-all default), and a provider that returns more bytes than
+requested is refused.
+
+Note on digest formats: `VerifiedFile.checksum_sha256` is `sha256:<hex>`, the
+row's format, while the document-rendering `EmbeddedLogoAssetV3.sha256` is bare
+lowercase hex. An assembly composing the two must strip the `sha256:` prefix
+itself; neither contract is changed.
 
 ## Transaction boundary
 

@@ -345,7 +345,7 @@ def read_verified(
     scope: Scope,
     target: StoredObjectRef,
     limit: int,
-    allowed_media_types: frozenset[str] | None = None,
+    allowed_media_types: frozenset[str],
 ) -> VerifiedFile:
     """Read one file's bytes, proving they are the row's file, within ``limit``.
 
@@ -354,13 +354,20 @@ def read_verified(
     are ever requested from the provider, so an oversize or unbounded object is
     refused without being buffered. The bytes must then equal the recorded size
     and sha256, and their content-detected media type must equal the recorded
-    one (and, when given, be in ``allowed_media_types``). Persistence-free: the
+    one and be in ``allowed_media_types``, which is required and may not be empty
+    (there is no allow-all default). Persistence-free: the
     caller ends its database phase before calling this.
     """
     if type(limit) is not int or not 1 <= limit <= MAX_VERIFIED_READ_BYTES:
         raise ValueError(
             f"limit must be an integer from 1 to {MAX_VERIFIED_READ_BYTES}"
         )
+    if (
+        not isinstance(allowed_media_types, frozenset)
+        or not allowed_media_types
+        or not all(isinstance(item, str) for item in allowed_media_types)
+    ):
+        raise ValueError("allowed_media_types must be a non-empty frozenset of text")
     if not isinstance(target, StoredObjectRef):
         raise TypeError("target must be a StoredObjectRef")
     if target.scope != scope or (
@@ -377,11 +384,14 @@ def read_verified(
         parts: list[bytes] = []
         total = 0
         while total < limit + 1:
-            chunk = stream.read(min(_READ_CHUNK, limit + 1 - total))
+            requested = min(_READ_CHUNK, limit + 1 - total)
+            chunk = stream.read(requested)
             if not chunk:
                 break
             if not isinstance(chunk, bytes):
                 raise IntegrityMismatch("provider returned non-bytes content")
+            if len(chunk) > requested:
+                raise IntegrityMismatch("provider returned more bytes than requested")
             parts.append(chunk)
             total += len(chunk)
     finally:
@@ -400,7 +410,7 @@ def read_verified(
         raise IntegrityMismatch("content has no supported signature") from exc
     if detected != target.detected_media_type:
         raise IntegrityMismatch("content type differs from the recorded type")
-    if allowed_media_types is not None and detected not in allowed_media_types:
+    if detected not in allowed_media_types:
         raise ReadTypeNotAllowed(f"media type {detected!r} is not allowed here")
     return VerifiedFile(
         id=target.id,

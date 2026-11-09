@@ -826,6 +826,7 @@ def test_platform_orphan_reaper_cannot_cross_into_a_tenant_prefix(db: Session) -
 
 # --- Scoped verified read ----------------------------------------------------
 
+_ALLOWED = frozenset({"image/png"})
 _PNG = b"\x89PNG\r\n\x1a\n" + b"verified-read-body" * 4
 
 
@@ -857,7 +858,13 @@ def test_verified_read_returns_checked_bytes_within_the_same_scope(db: Session) 
     target = verified_read_target(db, scope=scope, file_ref=str(prepared.id))
     db.rollback()
 
-    result = read_verified(provider, scope=scope, target=target, limit=len(_PNG))
+    result = read_verified(
+        provider,
+        scope=scope,
+        target=target,
+        limit=len(_PNG),
+        allowed_media_types=_ALLOWED,
+    )
     assert result.content == _PNG
     assert result.media_type == "image/png"
     assert result.size_bytes == len(_PNG)
@@ -871,7 +878,14 @@ def test_verified_read_works_on_the_platform_plane(db: Session) -> None:
     prepared = _stage_png(db, provider, scope)
     target = verified_read_target(db, scope=scope, file_ref=prepared.id)
     assert (
-        read_verified(provider, scope=scope, target=target, limit=1_000).content == _PNG
+        read_verified(
+            provider,
+            scope=scope,
+            target=target,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        ).content
+        == _PNG
     )
 
 
@@ -889,14 +903,32 @@ def test_verified_read_refuses_a_foreign_scope_file(db: Session) -> None:
     # Provider phase: a target presented under a different scope is refused.
     for wrong in (other, PlatformScope()):
         with pytest.raises(ForeignScopeFile):
-            read_verified(provider, scope=wrong, target=target, limit=1_000)
+            read_verified(
+                provider,
+                scope=wrong,
+                target=target,
+                limit=1_000,
+                allowed_media_types=_ALLOWED,
+            )
     # A forged key (right scope, someone else's object) is refused before any read.
     forged = replace(target, storage_key=f"tenants/{other.tenant_id}/files/{target.id}")
     with pytest.raises(ForeignScopeFile):
-        read_verified(provider, scope=owner, target=forged, limit=1_000)
+        read_verified(
+            provider,
+            scope=owner,
+            target=forged,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
     traversal = replace(target, storage_key=f"{target.storage_key}/../{uuid4()}")
     with pytest.raises(ForeignScopeFile):
-        read_verified(provider, scope=owner, target=traversal, limit=1_000)
+        read_verified(
+            provider,
+            scope=owner,
+            target=traversal,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
 
 @pytest.mark.parametrize(
@@ -978,7 +1010,13 @@ def test_verified_read_requests_at_most_limit_plus_one_bytes(db: Session) -> Non
     provider.objects[prepared.storage_key] = _PNG + b"x" * 5_000
     small = replace(target, size_bytes=len(_PNG))
     with pytest.raises(ReadLimitExceeded):
-        read_verified(provider, scope=scope, target=small, limit=len(_PNG))
+        read_verified(
+            provider,
+            scope=scope,
+            target=small,
+            limit=len(_PNG),
+            allowed_media_types=_ALLOWED,
+        )
     stream = provider.streams[-1]
     assert stream.closed_by_reader
     assert sum(stream.requested) <= len(_PNG) + 1
@@ -993,7 +1031,13 @@ def test_verified_read_refuses_by_recorded_size_without_opening_the_object(
     prepared = _stage_png(db, provider, scope)
     target = verified_read_target(db, scope=scope, file_ref=prepared.id)
     with pytest.raises(ReadLimitExceeded):
-        read_verified(provider, scope=scope, target=target, limit=len(_PNG) - 1)
+        read_verified(
+            provider,
+            scope=scope,
+            target=target,
+            limit=len(_PNG) - 1,
+            allowed_media_types=_ALLOWED,
+        )
     assert provider.streams == []
 
 
@@ -1002,7 +1046,13 @@ def test_verified_read_accepts_a_file_exactly_at_the_limit(db: Session) -> None:
     provider = MemoryProvider()
     prepared = _stage_png(db, provider, scope)
     target = verified_read_target(db, scope=scope, file_ref=prepared.id)
-    assert read_verified(provider, scope=scope, target=target, limit=len(_PNG)).content
+    assert read_verified(
+        provider,
+        scope=scope,
+        target=target,
+        limit=len(_PNG),
+        allowed_media_types=_ALLOWED,
+    ).content
 
 
 def test_verified_read_refuses_bytes_that_differ_from_the_row(db: Session) -> None:
@@ -1014,19 +1064,43 @@ def test_verified_read_refuses_bytes_that_differ_from_the_row(db: Session) -> No
     same_length = _PNG[:-1] + b"Z"
     provider.objects[prepared.storage_key] = same_length
     with pytest.raises(IntegrityMismatch, match="sha256"):
-        read_verified(provider, scope=scope, target=target, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=target,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
     provider.objects[prepared.storage_key] = _PNG + b"extra"
     with pytest.raises(IntegrityMismatch, match="length"):
-        read_verified(provider, scope=scope, target=target, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=target,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
     provider.objects[prepared.storage_key] = _PNG
     bad_checksum = replace(target, checksum_sha256="sha256:" + "0" * 64)
     with pytest.raises(IntegrityMismatch, match="sha256"):
-        read_verified(provider, scope=scope, target=bad_checksum, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=bad_checksum,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
     malformed = replace(target, checksum_sha256="md5:abc")
     with pytest.raises(IntegrityMismatch):
-        read_verified(provider, scope=scope, target=malformed, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=malformed,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
 
 def test_verified_read_checks_the_content_detected_type(db: Session) -> None:
@@ -1038,7 +1112,13 @@ def test_verified_read_checks_the_content_detected_type(db: Session) -> None:
     # The row claims a PDF but the (checksum-consistent) bytes are a PNG.
     lying = replace(target, detected_media_type="application/pdf")
     with pytest.raises(IntegrityMismatch, match="type"):
-        read_verified(provider, scope=scope, target=lying, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=lying,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
     # Bytes and checksum replaced together by something with no signature.
     opaque = b"\x00\x01\x02\x03" * 8
@@ -1049,7 +1129,13 @@ def test_verified_read_checks_the_content_detected_type(db: Session) -> None:
         checksum_sha256=f"sha256:{hashlib.sha256(opaque).hexdigest()}",
     )
     with pytest.raises(IntegrityMismatch, match="signature"):
-        read_verified(provider, scope=scope, target=forged, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=forged,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
 
 def test_verified_read_enforces_an_allowed_media_type_set(db: Session) -> None:
@@ -1084,7 +1170,13 @@ def test_verified_read_refuses_an_invalid_limit(limit, db: Session) -> None:
     prepared = _stage_png(db, provider, scope)
     target = verified_read_target(db, scope=scope, file_ref=prepared.id)
     with pytest.raises(ValueError, match="limit"):
-        read_verified(provider, scope=scope, target=target, limit=limit)
+        read_verified(
+            provider,
+            scope=scope,
+            target=target,
+            limit=limit,
+            allowed_media_types=_ALLOWED,
+        )
 
 
 def test_verified_read_refuses_files_that_are_not_available(db: Session) -> None:
@@ -1097,7 +1189,13 @@ def test_verified_read_refuses_files_that_are_not_available(db: Session) -> None
         verified_read_target(db, scope=scope, file_ref=prepared.id)
     pending = replace(target, state=FileState.DELETION_PENDING)
     with pytest.raises(InvalidFileState):
-        read_verified(provider, scope=scope, target=pending, limit=1_000)
+        read_verified(
+            provider,
+            scope=scope,
+            target=pending,
+            limit=1_000,
+            allowed_media_types=_ALLOWED,
+        )
 
 
 def test_verified_read_refuses_a_provider_other_than_the_one_that_stores_it(
@@ -1110,4 +1208,55 @@ def test_verified_read_refuses_a_provider_other_than_the_one_that_stores_it(
     other = MemoryProvider()
     other.code = "other"
     with pytest.raises(ProviderMismatch):
-        read_verified(other, scope=scope, target=target, limit=1_000)
+        read_verified(
+            other, scope=scope, target=target, limit=1_000, allowed_media_types=_ALLOWED
+        )
+
+
+def test_allowed_media_types_is_required_and_must_be_a_non_empty_frozenset(
+    db: Session,
+) -> None:
+    scope = TenantScope(uuid4())
+    provider = MemoryProvider()
+    prepared = _stage_png(db, provider, scope)
+    target = verified_read_target(db, scope=scope, file_ref=prepared.id)
+    with pytest.raises(TypeError):
+        read_verified(provider, scope=scope, target=target, limit=1_000)  # type: ignore[call-arg]
+    for bad in (None, frozenset(), {"image/png"}, ["image/png"], "image/png"):
+        with pytest.raises(ValueError, match="allowed_media_types"):
+            read_verified(
+                provider,
+                scope=scope,
+                target=target,
+                limit=1_000,
+                allowed_media_types=bad,  # type: ignore[arg-type]
+            )
+
+
+class OverReadingStream(io.BytesIO):
+    """Ignores the requested size and appends extra bytes."""
+
+    def read(self, size: int | None = -1) -> bytes:
+        return super().read() + b"\x00\x00"
+
+
+class OverReadingProvider(MemoryProvider):
+    def open(self, key: str) -> OverReadingStream:  # type: ignore[override]
+        return OverReadingStream(self.objects[key])
+
+
+def test_verified_read_refuses_a_provider_that_returns_more_than_requested(
+    db: Session,
+) -> None:
+    scope = TenantScope(uuid4())
+    provider = OverReadingProvider()
+    prepared = _stage_png(db, provider, scope)
+    target = verified_read_target(db, scope=scope, file_ref=prepared.id)
+    with pytest.raises(IntegrityMismatch, match="more bytes"):
+        read_verified(
+            provider,
+            scope=scope,
+            target=target,
+            limit=len(_PNG),
+            allowed_media_types=_ALLOWED,
+        )
