@@ -83,6 +83,14 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
 )
+from dotmac_billing.account_statement import (
+    AccountStatementLineV1,
+    AccountStatementV1,
+    GetAccountStatementV1,
+    StatementBalancesV1,
+    compute_account_statement_digest,
+    get_account_statement,
+)
 from dotmac_billing.document_queries import (
     AccountingFactCursorV1,
     AccountingFactIndexEntryV1,
@@ -377,6 +385,12 @@ __all__ = [
     "get_document_exposure",
     "get_document_withholding_evidence",
     "list_accounting_facts",
+    "AccountStatementLineV1",
+    "AccountStatementV1",
+    "GetAccountStatementV1",
+    "StatementBalancesV1",
+    "compute_account_statement_digest",
+    "get_account_statement",
     "summarize_accounting_fact_window",
     "AccountingFactWindowSummaryV1",
     "SummarizeAccountingFactWindowV1",
