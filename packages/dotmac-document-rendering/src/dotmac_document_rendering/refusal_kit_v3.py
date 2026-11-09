@@ -4,13 +4,18 @@
 kit any renderer or PDF engine must pass before an assembly composes it. The
 kit performs no I/O itself: the caller supplies a ``FetchSpy`` that observes
 file, network and name-resolution attempts in the process under test. An empty
-result is the pass. A spy only sees the current process; an engine that
+result is the pass. Passing here is necessary, not sufficient: a real engine
+composed later must pass this kit inside its own sandbox (process, network and
+filesystem confinement), observed where it could actually fetch; its declared
+``data-only`` attribute proves nothing by itself. A spy only sees the current
+process; an engine that
 delegates to a subprocess or service must be observed at that boundary too.
 """
 
 from __future__ import annotations
 
 import hashlib
+import struct
 from contextlib import AbstractContextManager, suppress
 from dataclasses import replace
 from html import escape
@@ -24,6 +29,7 @@ from dotmac_document_rendering.contracts import (
 from dotmac_document_rendering.contracts_v3 import (
     DATA_ONLY_RESOURCE_POLICY,
     LOGO_MAX_BYTES,
+    LOGO_MAX_DIMENSION,
     DocumentRendererV3,
     EmbeddedLogoAssetV3,
     PdfEngineV3,
@@ -154,6 +160,15 @@ def renderer_refusal_violations_v3(
     # Refused assets.
     png = b"\x89PNG\r\n\x1a\n"
     jpeg = b"\xff\xd8\xff"
+    ihdr = b"\x00\x00\x00\rIHDR"
+    big = LOGO_MAX_DIMENSION + 1
+    huge_png = png + ihdr + struct.pack(">II", big, 16) + b"\x08\x02\x00\x00\x00"
+    zero_png = png + ihdr + struct.pack(">II", 0, 16) + b"\x08\x02\x00\x00\x00"
+    bare_png = png + b"\x00" * 16
+    huge_jpeg = (
+        jpeg + b"\xc0\x00\x0b\x08" + struct.pack(">HH", 16, big) + b"\x01\x01\x11\x00"
+    )
+    bare_jpeg = jpeg + b"\x00" * 16
     oversize = png + b"\x00" * (LOGO_MAX_BYTES + 1 - len(png))
     cases: tuple[tuple[str, EmbeddedLogoAssetV3, bytes], ...] = (
         ("oversize logo", _asset_for(logo, "image/png", oversize), oversize),
@@ -176,6 +191,23 @@ def renderer_refusal_violations_v3(
             "wrong type: gif",
             _asset_for(logo, "image/gif", b"GIF89a" + b"\x00" * 16),
             b"GIF89a" + b"\x00" * 16,
+        ),
+        (
+            "oversize PNG dimensions",
+            _asset_for(logo, "image/png", huge_png),
+            huge_png,
+        ),
+        ("zero PNG dimension", _asset_for(logo, "image/png", zero_png), zero_png),
+        ("malformed PNG header", _asset_for(logo, "image/png", bare_png), bare_png),
+        (
+            "oversize JPEG dimensions",
+            _asset_for(logo, "image/jpeg", huge_jpeg),
+            huge_jpeg,
+        ),
+        (
+            "malformed JPEG header",
+            _asset_for(logo, "image/jpeg", bare_jpeg),
+            bare_jpeg,
         ),
         (
             "digest mismatch",

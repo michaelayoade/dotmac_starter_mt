@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import struct
 from dataclasses import fields, replace
 from typing import Any
 
@@ -31,6 +32,7 @@ from dotmac_document_rendering.contracts_v2 import (
 )
 from dotmac_document_rendering.contracts_v3 import (
     LOGO_MAX_BYTES,
+    LOGO_MAX_DIMENSION,
     LOGO_MEDIA_TYPES,
     DocumentProjectionV3,
     EmbeddedLogoAssetV3,
@@ -66,6 +68,59 @@ def validate_logo_asset_v3(asset: EmbeddedLogoAssetV3) -> None:
         )
 
 
+_JPEG_STANDALONE = frozenset({0x01, *range(0xD0, 0xD8)})
+_JPEG_NOT_SOF = frozenset({0xC4, 0xC8, 0xCC})
+
+
+def _png_dimensions(content: bytes) -> tuple[int, int]:
+    # signature(8) + IHDR chunk: length(4)=13, "IHDR", width(4), height(4).
+    if (
+        len(content) < 24
+        or content[8:12] != b"\x00\x00\x00\r"
+        or content[12:16] != b"IHDR"
+    ):
+        raise FactShapeInvalid("brand logo PNG header is malformed")
+    width, height = struct.unpack(">II", content[16:24])
+    return width, height
+
+
+def _jpeg_dimensions(content: bytes) -> tuple[int, int]:
+    position = 2
+    size = len(content)
+    while position < size:
+        if content[position] != 0xFF:
+            raise FactShapeInvalid("brand logo JPEG header is malformed")
+        while position < size and content[position] == 0xFF:
+            position += 1
+        if position >= size:
+            break
+        marker = content[position]
+        position += 1
+        if marker in _JPEG_STANDALONE:
+            continue
+        if marker in (0xD9, 0xDA, 0x00):
+            raise FactShapeInvalid("brand logo JPEG has no frame header")
+        if position + 2 > size:
+            break
+        segment = int.from_bytes(content[position : position + 2], "big")
+        if segment < 2 or position + segment > size:
+            raise FactShapeInvalid("brand logo JPEG segment is malformed")
+        if 0xC0 <= marker <= 0xCF and marker not in _JPEG_NOT_SOF:
+            if segment < 8:
+                raise FactShapeInvalid("brand logo JPEG frame header is malformed")
+            height, width = struct.unpack(">HH", content[position + 3 : position + 7])
+            return width, height
+        position += segment
+    raise FactShapeInvalid("brand logo JPEG has no frame header")
+
+
+def logo_dimensions_v3(media_type: str, content: bytes) -> tuple[int, int]:
+    """Width and height from the image header only; never decodes pixels."""
+    if media_type == "image/png":
+        return _png_dimensions(content)
+    return _jpeg_dimensions(content)
+
+
 def verify_logo_content_v3(asset: EmbeddedLogoAssetV3, content: bytes) -> None:
     """Refuse bytes that are not exactly the frozen logo. Never echoes content."""
     validate_logo_asset_v3(asset)
@@ -77,6 +132,11 @@ def verify_logo_content_v3(asset: EmbeddedLogoAssetV3, content: bytes) -> None:
         raise FactShapeInvalid("brand logo length does not match its frozen length")
     if not content.startswith(_MAGIC[asset.media_type]):
         raise FactShapeInvalid("brand logo content does not match its media type")
+    width, height = logo_dimensions_v3(asset.media_type, content)
+    if not (1 <= width <= LOGO_MAX_DIMENSION and 1 <= height <= LOGO_MAX_DIMENSION):
+        raise FactShapeInvalid(
+            f"brand logo dimensions must be 1 to {LOGO_MAX_DIMENSION} pixels"
+        )
     if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), asset.sha256):
         raise FactShapeInvalid("brand logo digest does not match its frozen digest")
 
@@ -202,6 +262,7 @@ __all__ = [
     "canonical_projection_payload_v3",
     "fact_as_v2",
     "fact_fingerprint_v3",
+    "logo_dimensions_v3",
     "project_invoice_v3",
     "projection_digest_v3",
     "validate_fact_v3",

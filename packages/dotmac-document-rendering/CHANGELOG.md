@@ -27,6 +27,8 @@
   (`renderer_refusal_violations_v3`, `engine_refusal_violations_v3`) with an
   injected fetch spy: zero `file://`/`http://` fetches, hostile names inert,
   oversize/wrong-type/digest-mismatched logos refused, deterministic bytes.
+- Logo dimensions are parsed from the PNG IHDR / JPEG SOFn header and refused
+  above 4096x4096, at zero, or when the header is malformed.
 - Rendering still imports no brand, files or storage owner; brand reaches it as
   frozen snapshots only.
 - Adds `AccountStatementFactV1` (period, opening/closing balances, ordered

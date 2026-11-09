@@ -1,7 +1,9 @@
 """Hosted-only V3 tests: embedded data-only logo, refusals and the engine kit."""
 
 import hashlib
+import struct
 import urllib.request
+import zlib
 from dataclasses import fields, replace
 from html.parser import HTMLParser
 
@@ -26,6 +28,7 @@ from dotmac_document_rendering import (
     engine_refusal_violations_v3,
     fact_fingerprint_v3,
     html_data_only_violations_v3,
+    logo_dimensions_v3,
     project_invoice_v2,
     project_invoice_v3,
     projection_digest_v3,
@@ -42,7 +45,23 @@ from tests.unit.test_billing_document_rendering_contract import NOW
 from tests.unit.test_document_rendering_v2 import catalog, fact
 
 PNG = b"\x89PNG\r\n\x1a\n"
-LOGO = PNG + b"synthetic-logo-bytes" * 4
+
+
+def png_bytes(width: int = 64, height: int = 64, padding: int = 80) -> bytes:
+    """A PNG signature and IHDR declaring the given size, then filler."""
+    ihdr = struct.pack(">II", width, height) + b"\x08\x02\x00\x00\x00"
+    crc = struct.pack(">I", zlib.crc32(b"IHDR" + ihdr))
+    return PNG + b"\x00\x00\x00\rIHDR" + ihdr + crc + b"\x00" * padding
+
+
+def jpeg_bytes(width: int = 64, height: int = 64, total: int = 120) -> bytes:
+    """SOI, one SOF0 frame header declaring the given size, then filler."""
+    head = b"\xff\xd8\xff\xc0\x00\x0b\x08" + struct.pack(">HH", height, width)
+    head += b"\x01\x01\x11\x00"
+    return head + b"\x00" * (total - len(head))
+
+
+LOGO = png_bytes()
 
 
 def asset(content: bytes = LOGO, media_type: str = "image/png") -> EmbeddedLogoAssetV3:
@@ -236,7 +255,7 @@ def test_logo_bytes_are_verified_against_the_frozen_identity(content, declared):
 
 
 def test_boundary_sized_jpeg_is_accepted():
-    content = b"\xff\xd8\xff" + b"\x00" * (LOGO_MAX_BYTES - 3)
+    content = jpeg_bytes(total=LOGO_MAX_BYTES)
     verify_logo_content_v3(asset(content, "image/jpeg"), content)
 
 
@@ -538,3 +557,56 @@ def test_renderer_kit_detects_non_deterministic_bytes():
     )
     assert any("determinism" in problem or "render" in problem for problem in problems)
     assert DocumentProfileBindingV2  # public V2 binding still exported unchanged
+
+
+@pytest.mark.parametrize(
+    "content,media_type",
+    [
+        (png_bytes(4096, 4096), "image/png"),
+        (png_bytes(1, 1), "image/png"),
+        (jpeg_bytes(4096, 4096), "image/jpeg"),
+        (jpeg_bytes(1, 1), "image/jpeg"),
+    ],
+)
+def test_logo_dimensions_at_the_limit_are_accepted(content, media_type):
+    verify_logo_content_v3(asset(content, media_type), content)
+
+
+@pytest.mark.parametrize(
+    "content,media_type",
+    [
+        (png_bytes(4097, 16), "image/png"),
+        (png_bytes(16, 4097), "image/png"),
+        (png_bytes(0, 16), "image/png"),
+        (png_bytes(16, 0), "image/png"),
+        (png_bytes(2**31, 2**31), "image/png"),
+        (PNG + b"\x00" * 40, "image/png"),
+        (PNG + b"\x00\x00\x00\rIDAT" + b"\x00" * 20, "image/png"),
+        (PNG + b"\x00\x00\x00\rIHDR" + b"\x00" * 4, "image/png"),
+        (jpeg_bytes(4097, 16), "image/jpeg"),
+        (jpeg_bytes(16, 4097), "image/jpeg"),
+        (jpeg_bytes(0, 16), "image/jpeg"),
+        (jpeg_bytes(65535, 65535), "image/jpeg"),
+        (b"\xff\xd8\xff" + b"\x00" * 40, "image/jpeg"),
+        (b"\xff\xd8\xff\xda\x00\x02" + b"\x00" * 40, "image/jpeg"),
+        (b"\xff\xd8\xff\xc0\x00\x0b\x08", "image/jpeg"),
+        (b"\xff\xd8\xff\xe0\xff\xff" + b"\x00" * 20, "image/jpeg"),
+        (b"\xff\xd8\xff\xc0\x00\x03\x08\x00", "image/jpeg"),
+    ],
+)
+def test_logo_with_hostile_or_malformed_dimensions_is_refused(content, media_type):
+    with pytest.raises(FactShapeInvalid):
+        verify_logo_content_v3(asset(content, media_type), content)
+
+
+def test_jpeg_dimensions_are_read_past_earlier_segments():
+    app0 = b"\xff\xe0\x00\x06abcd"
+    content = (
+        b"\xff\xd8"
+        + app0
+        + b"\xff\xc2\x00\x0b\x08"
+        + struct.pack(">HH", 32, 48)
+        + b"\x01\x01\x11\x00"
+        + b"\x00" * 40
+    )
+    assert logo_dimensions_v3("image/jpeg", content) == (48, 32)
