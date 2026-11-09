@@ -29,6 +29,7 @@ platform audit trail predates this contract and is not changed by this slice.
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime
 from typing import cast
 from uuid import UUID
@@ -185,7 +186,11 @@ def _scan_details(node: object, path: str, depth: int, found: list[str]) -> None
 
 
 def _forbidden(key: str) -> bool:
-    return key.casefold() in AUDIT_FORBIDDEN_DETAIL_KEYS
+    # NFKC first, so a compatibility spelling (fullwidth `ｌａｔ`, ligatures)
+    # folds to the plain key before the casefold; casefold, not lower, so
+    # case-insensitive equivalents beyond ASCII also match.
+    folded = unicodedata.normalize("NFKC", key).casefold()
+    return folded in AUDIT_FORBIDDEN_DETAIL_KEYS
 
 
 class AuditEvent(Base):

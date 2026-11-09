@@ -50,6 +50,15 @@ def test_matching_is_case_insensitive(key: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "key", ["\uff4c\uff41\uff54", "\uff2c\uff2e\uff27", "\uff47\uff45\uff4f"]
+)
+def test_compatibility_spellings_are_refused_after_nfkc(key: str) -> None:
+    # Fullwidth forms of listed keys fold to the plain key under NFKC.
+    with pytest.raises(AuditDetailsCoordinateError):
+        refuse_coordinate_details({key: 1})
+
+
+@pytest.mark.parametrize(
     "details, path",
     [
         ({"a": {"b": {"lat": 1}}}, "details.a.b.lat"),
