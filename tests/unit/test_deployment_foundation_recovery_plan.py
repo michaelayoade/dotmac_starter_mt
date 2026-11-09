@@ -730,6 +730,11 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
+    # The private `lane3.evidence-bundle-manifest.v1` document listing a
+    # Lane 3 bundle's members by digest; owned by
+    # `lane3_evidence_bundle.py`, carried inside the encrypted bundle it
+    # describes, and written to no Foundation store.
+    "lane3_evidence_bundle.py": 1,
     # The private `lane3.exposure-calls.v1` evidence document (the Executor
     # boundary records a Lane 3 proof joins); owned by
     # `lane3_exposure_evidence.py`, carried only inside the encrypted
