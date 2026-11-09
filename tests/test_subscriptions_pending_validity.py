@@ -81,9 +81,11 @@ def _held(
 
 
 def _resolve(conn: Connection, occurrence: uuid.UUID, state: str = "emitted") -> None:
+    # A cancellation keeps the row's emitted_at (the freeze trigger refuses a change).
+    emitted = ", emitted_at = :at" if state == "emitted" else ""
     conn.execute(
         text(
-            f"UPDATE {TABLE} SET state = :state, emitted_at = :at, "
+            f"UPDATE {TABLE} SET state = :state{emitted}, "
             "validity_owner_code = 'wallet', "
             "validity_evidence_ref = gen_random_uuid(), "
             "validity_resolved_at = :at, "
