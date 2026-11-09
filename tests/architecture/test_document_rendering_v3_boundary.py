@@ -17,7 +17,9 @@ def _locator_fields(cls):
 
 
 def _v3_sources():
-    return sorted(SOURCE_ROOT.glob("*_v3.py"))
+    return sorted(
+        (*SOURCE_ROOT.glob("*_v3.py"), *SOURCE_ROOT.glob("*_statement_v1.py"))
+    )
 
 
 def test_v3_sources_exist_and_import_no_brand_files_or_storage_owner():
@@ -30,6 +32,10 @@ def test_v3_sources_exist_and_import_no_brand_files_or_storage_owner():
         "output_validation_v3.py",
         "conformance_v3.py",
         "refusal_kit_v3.py",
+        "contracts_statement_v1.py",
+        "projection_statement_v1.py",
+        "templates_statement_v1.py",
+        "renderers_statement_v1.py",
     }
     findings = []
     for path in sources:

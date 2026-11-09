@@ -65,6 +65,12 @@ from dotmac_document_rendering.contracts import (
     TemplateInvalid,
     TemplateNotFound,
 )
+from dotmac_document_rendering.contracts_statement_v1 import (
+    AccountStatementFactV1,
+    AccountStatementProjectionV1,
+    StatementEntryV1,
+    StatementProfileBindingV1,
+)
 from dotmac_document_rendering.contracts_v2 import (
     DiscountV2,
     DocumentLineV2,
@@ -115,6 +121,14 @@ from dotmac_document_rendering.projection import (
     validate_fact,
     validate_projection_source_fields,
 )
+from dotmac_document_rendering.projection_statement_v1 import (
+    STATEMENT_PROJECTION_CONTRACT_VERSION_V1,
+    canonical_statement_projection_payload_v1,
+    fact_fingerprint_statement_v1,
+    project_statement_v1,
+    statement_projection_digest_v1,
+    validate_statement_fact_v1,
+)
 from dotmac_document_rendering.projection_v2 import (
     PROJECTION_CONTRACT_VERSION_V2,
     canonical_projection_payload_v2,
@@ -146,6 +160,10 @@ from dotmac_document_rendering.renderers import (
     PdfDocumentRenderer,
     html_from_projection,
 )
+from dotmac_document_rendering.renderers_statement_v1 import (
+    html_from_statement_projection_v1,
+    statement_html_v1,
+)
 from dotmac_document_rendering.renderers_v2 import (
     DeterministicHtmlRendererV2,
     InMemoryDocumentRendererV2,
@@ -168,6 +186,11 @@ from dotmac_document_rendering.templates import (
     TemplateCatalog,
     label_map,
 )
+from dotmac_document_rendering.templates_statement_v1 import (
+    DEFAULT_ENGLISH_LABELS_STATEMENT_V1,
+    SelectedStatementTemplateV1,
+    StatementTemplateCatalogV1,
+)
 from dotmac_document_rendering.templates_v2 import (
     DEFAULT_ENGLISH_LABELS_V2,
     TemplateCatalogV2,
@@ -189,6 +212,10 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
         "dotmac_document_rendering.service_v3",
         "dotmac_document_rendering.conformance_v3",
         "dotmac_document_rendering.refusal_kit_v3",
+        "dotmac_document_rendering.contracts_statement_v1",
+        "dotmac_document_rendering.projection_statement_v1",
+        "dotmac_document_rendering.templates_statement_v1",
+        "dotmac_document_rendering.renderers_statement_v1",
         "dotmac_document_rendering.conformance",
         "dotmac_document_rendering.contracts",
         "dotmac_document_rendering.manifest",
@@ -244,6 +271,21 @@ __all__ = [
     "render_document_v2",
     "renderer_contract_violations_v2",
     "result_contract_violations_v2",
+    "AccountStatementFactV1",
+    "AccountStatementProjectionV1",
+    "StatementEntryV1",
+    "StatementProfileBindingV1",
+    "STATEMENT_PROJECTION_CONTRACT_VERSION_V1",
+    "canonical_statement_projection_payload_v1",
+    "fact_fingerprint_statement_v1",
+    "project_statement_v1",
+    "statement_projection_digest_v1",
+    "validate_statement_fact_v1",
+    "DEFAULT_ENGLISH_LABELS_STATEMENT_V1",
+    "SelectedStatementTemplateV1",
+    "StatementTemplateCatalogV1",
+    "html_from_statement_projection_v1",
+    "statement_html_v1",
     "DATA_ONLY_RESOURCE_POLICY",
     "LOGO_MAX_BYTES",
     "LOGO_MEDIA_TYPES",
