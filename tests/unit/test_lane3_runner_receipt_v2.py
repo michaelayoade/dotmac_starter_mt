@@ -46,6 +46,7 @@ def _load() -> Any:
 
 runner = _load()
 producer = sys.modules["lane3_receipt_v2"]
+recording = sys.modules["lane3_exposure_recording"]
 
 
 def _write_topology(tmp_path: pathlib.Path, document: Any) -> str:
@@ -484,6 +485,7 @@ def test_runner_phase_failures_and_exact_object_handoff(
 
     def render(got_base: object, **kwargs: object) -> object:
         assert got_base is base and kwargs["bindings"] is bindings
+        assert kwargs["spec"] is captured["spec"]
         events.append("render")
         if failure == "render":
             raise producer.ReceiptRefused("prelease renderer contradiction")
@@ -512,7 +514,9 @@ def test_runner_phase_failures_and_exact_object_handoff(
         events.append("exposure_snapshot")
         return SimpleNamespace(sockets=(), chains=(), proxies=())
 
-    exposure = SimpleNamespace(observe=observe_exposure)
+    exposure = SimpleNamespace(
+        observe=observe_exposure, execution_descriptor=b"exposure"
+    )
 
     def load_lease(*args: object, **kwargs: object) -> object:
         assert "grant" in events and events.index("observe") < events.index("grant")
@@ -523,7 +527,13 @@ def test_runner_phase_failures_and_exact_object_handoff(
         assert got_plan is plan and got_grant is grant
         assert kwargs["spec"] is captured["spec"]
         assert kwargs["deployment_plan"] is deployment_plan
-        assert kwargs["effects"] is effects and kwargs["exposure_effects"] is exposure
+        assert kwargs["effects"] is effects
+        wrapper = kwargs["exposure_effects"]
+        assert isinstance(wrapper, recording.RecordingExposureEffects)
+        assert wrapper.execution_descriptor == b"exposure"
+        assert ctx.exposure_calls == []
+        assert wrapper.observe().sockets == ()
+        assert [(r.sequence, r.method) for r in ctx.exposure_calls] == [(0, "observe")]
         assert kwargs["bindings"] is bindings and kwargs["lock"] is held
         assert ctx.host_mutated is True
         events.append("executor")

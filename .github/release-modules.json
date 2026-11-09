@@ -953,6 +953,42 @@
         ]
       }
     },
+    "dotmac-delivery-resend": {
+      "$comment": [
+        "Stateless caller-transaction fence for human-triggered delivery resends,",
+        "extracted from Academy's reminder-resend unit. Owns no tables and no",
+        "migration lineage: adopters inject consequence tables, authority models",
+        "and a write-phase map. kernel_floor is a105: the first published tag",
+        "shipping every dotmac_kernel.transactions conflict-savepoint symbol",
+        "the fence consumes (first adopter Academy pins a107 exactly).",
+        "SQLAlchemy is pinned ==2.0.51 in the package itself \u2014 the fence depends",
+        "on its private call sites and refuses other versions at runtime."
+      ],
+      "db_schema": null,
+      "import_name": "dotmac_delivery_resend",
+      "kernel_floor": "0.1.0a105",
+      "manifest_attr": "module",
+      "package_dir": "packages/dotmac-delivery-resend",
+      "tag_prefix": "dotmac-delivery-resend-v",
+      "wheel_contents": {
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "required": [
+          "dotmac_delivery_resend/py.typed",
+          "dotmac_delivery_resend/manifest.py",
+          "dotmac_delivery_resend/fence.py"
+        ]
+      }
+    },
     "dotmac-durable-timers": {
       "$comment": [
         "Generation-safe due work on separately selectable tenant and platform",

@@ -198,6 +198,12 @@ CAPABILITY_RAISED_FLOORS = {
     # latch. transactions.py existed in a98, but published a98-a104 export
     # only conflict_savepoint; the latch requires a105. a89 allocated Billing.
     "dotmac-billing": ("0.1.0a105", "0.1.0a89"),
+    # Delivery resend owns no lineage and has no namespace allocation; it
+    # registers a stateless ModuleManifest (supported since a88, the
+    # config-layers coordinate) and consumes ConflictSavepointPhase,
+    # claim_conflict_savepoint_commit, conflict_savepoint_requires_rollback
+    # and current_conflict_savepoint, first published together in a105.
+    "dotmac-delivery-resend": ("0.1.0a105", "0.1.0a88"),
     # Files has been raised three times and the table records only the highest:
     # mod_files was ALLOCATED in a54, a56 made fi_0001's prerequisite
     # declarations installable, a61 carried ADR-0028's `supported_plane_sets`

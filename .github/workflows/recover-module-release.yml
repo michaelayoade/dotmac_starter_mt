@@ -52,6 +52,7 @@ on:
           - dotmac-compliance-reporting
           - dotmac-config-layers
           - dotmac-content
+          - dotmac-delivery-resend
           - dotmac-document-rendering
           - dotmac-documents
           - dotmac-durable-timers
