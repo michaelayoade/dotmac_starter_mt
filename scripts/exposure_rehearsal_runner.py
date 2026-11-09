@@ -218,6 +218,11 @@ from lane3_authorization import (
     prepare_authorization,
 )
 from lane3_execution import TopologyRefused, load_topology
+from lane3_exposure_evidence import (
+    ExposureEvidenceRefused,
+    exposure_calls_digest,
+    serialize_exposure_calls,
+)
 from lane3_exposure_recording import (
     ExposureCallRecord,
     RecordingExposureEffects,
@@ -1294,9 +1299,45 @@ def record_terminal(
                         f"the stored release could not be copied for upload: {exc}"
                     )
 
+    # The PRIVATE exposure records leave memory only when the launcher
+    # named a carrier for them, and only as the closed canonical document.
+    # The terminal evidence below stays value-free: count and digest, so
+    # a reader can bind the private bytes without the sidecar holding
+    # host rules of its own. A serialization refusal is noted, never a
+    # second verdict on the run.
+    exposure_calls_written = ""
+    exposure_calls_digest_value = ""
+    exposure_calls_out = getattr(args, "exposure_calls_out", "")
+    if exposure_calls_out:
+        try:
+            calls_out = pathlib.Path(exposure_calls_out)
+            calls_out.parent.mkdir(parents=True, exist_ok=True)
+            calls_partial = calls_out.parent / (
+                f".{calls_out.name}.{os.getpid()}.partial"
+            )
+            calls_partial.write_bytes(serialize_exposure_calls(ctx.exposure_calls))
+            os.replace(calls_partial, calls_out)
+        except (ExposureEvidenceRefused, OSError) as exc:
+            ctx.notes.append(f"exposure calls not written: {exc}")
+        else:
+            exposure_calls_written = str(calls_out)
+            ctx.notes.append(
+                f"exposure calls written {exposure_calls_written} "
+                f"({len(ctx.exposure_calls)} records)"
+            )
+    try:
+        exposure_calls_digest_value = exposure_calls_digest(ctx.exposure_calls)
+    except ExposureEvidenceRefused as exc:
+        ctx.notes.append(f"exposure calls do not serialize: {exc}")
+
     evidence = {
         "document": "lane3-terminal-evidence",
         "version": 1,
+        "exposure_calls": {
+            "count": len(ctx.exposure_calls),
+            "digest": exposure_calls_digest_value,
+            "path": exposure_calls_written,
+        },
         "target": str(args.target),
         "vantage_topology": ctx.vantage_topology,
         "authorization_run_id": str(args.authorization_run),
@@ -2184,6 +2225,11 @@ def main(
     parser.add_argument(
         "--terminal-evidence-out", default="lane3-terminal-evidence.json"
     )
+    # The PRIVATE canonical exposure records, for the encrypted evidence
+    # bundle. Empty writes none: a run the launcher has not taught to
+    # carry them into the bundle must not scatter private host evidence
+    # into a workspace artifact of its own authority.
+    parser.add_argument("--exposure-calls-out", default="")
     parser.add_argument("--principal-audience", default=DEFAULT_PRINCIPAL_AUDIENCE)
     args = parser.parse_args(argv)
     if args.lease_dir is None:
