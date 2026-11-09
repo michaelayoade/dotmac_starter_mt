@@ -14,6 +14,9 @@ from dataclasses import replace
 from decimal import Decimal
 
 import pytest
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from dotmac_billing import models
 from dotmac_billing.contracts import (
     WithholdingDischargeEffectV1,
@@ -25,10 +28,10 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command
-from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from tests import test_billing_isolation as billing
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 
 REVISION = "bi_0004_withholding_discharge"
 MIGRATION = billing.BILLING_VERSIONS / f"{REVISION}.py"
@@ -93,11 +96,11 @@ def _invoice(connection, plane, tenant=None, *, legacy=False):
     connection.execute(
         text(f"""
         INSERT INTO mod_billing.{prefix}document_lines
-            (id, {scope_columns}{'' if legacy else 'billing_account_id, '}document_id,
+            (id, {scope_columns}{"" if legacy else "billing_account_id, "}document_id,
              line_number, description, quantity, unit_code, unit_amount,
              pre_tax_amount, tax_amount, total_amount, currency, minor_units,
              price_source_version)
-        VALUES (:line, {scope_values}{'' if legacy else ':account, '}:document,
+        VALUES (:line, {scope_values}{"" if legacy else ":account, "}:document,
                 1, 'historical service', 1, 'each', 100, 100, 0, 100, 'NGN', 2, '1')
     """),
         values,
@@ -220,11 +223,54 @@ def _next_raw_version(connection, plane, account_id, tenant=None):
     return connection.execute(statement).scalar_one() + 1
 
 
+def _freeze_component(connection, plane, row):
+    """The frozen component a raw discharge must reference (cited, not created)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    table = (
+        models.DocumentWithholdingComponent
+        if plane == "tenant"
+        else models.PlatformDocumentWithholdingComponent
+    ).__table__
+    cited = row["evidence"]["tax_evidence"]
+    values = {
+        "id": uuid.uuid4(),
+        "billing_account_id": row["billing_account_id"],
+        "document_id": row["document_id"],
+        "obligation_id": None,
+        "origin": "late_freeze",
+        "command_id": f"raw-fixture:{row['component_ref']}",
+        "actor_ref": "finance-user:fixture",
+        "reason": "fixture: component cited by a raw SQL discharge",
+        "tax_source_owner": row["tax_source_owner"],
+        "determination_ref": row["determination_ref"],
+        "component_ref": row["component_ref"],
+        "tax_code_id": uuid.uuid4(),
+        "rule_id": uuid.uuid4(),
+        "rule_version": 1,
+        "treatment_code": "withholding",
+        "party_category": "wht-elected",
+        "party_classification_id": uuid.uuid4(),
+        "base_amount": Decimal(cited["taxable_basis"]["amount"]),
+        "tax_amount": Decimal(cited["amount"]["amount"]),
+        "currency": row["currency"],
+        "minor_units": row["minor_units"],
+        "source_fingerprint": "a" * 64,
+        "result_fingerprint": "rv1:" + "a" * 64,
+        "determined_at": billing.NOW,
+    }
+    if "tenant_id" in row:
+        values["tenant_id"] = row["tenant_id"]
+    connection.execute(pg_insert(table).values(**values).on_conflict_do_nothing())
+
+
 def _insert(connection, plane, row, posting, *, effect=True, snapshots=True):
     discharge, group, posting_effect = _tables(plane)
     posting["source_version"] = _next_raw_version(
         connection, plane, posting["billing_account_id"], posting.get("tenant_id")
     )
+    if row["reverses_discharge_id"] is None:
+        _freeze_component(connection, plane, row)
     connection.execute(group.__table__.insert().values(**posting))
     connection.execute(discharge.__table__.insert().values(**row))
     if effect:
@@ -848,12 +894,14 @@ def test_sql_invoice_reversal_and_withholding_cannot_borrow_other_invoice_ar(
         )
         session.commit()
         account_id, invoice_id = account.id, invoice.id
-        command_wht = billing._withholding_command(
+        command_wht = frozen_withholding_command(
+            session,
             account_id,
             invoice_id,
             scope=scope,
             suffix=f"sql-two-{plane}-{withholding_first}",
         )
+        session.commit()
         _, group_model, effect_model = _tables(plane)
         original = session.execute(
             select(group_model).where(
@@ -975,8 +1023,12 @@ def test_raw_invoice_reversal_races_with_withholding_under_account_lock(scratch,
             select(group).where(group.source_ref == f"document:{invoice.id}:issue")
         ).scalar_one()
         account_id, invoice_id, issuance_id = account.id, invoice.id, issuance.id
-        wht = billing._withholding_command(
-            account_id, invoice_id, scope=scope, suffix=f"raw-reverse-race-{plane}"
+        wht = frozen_withholding_command(
+            session,
+            account_id,
+            invoice_id,
+            scope=scope,
+            suffix=f"raw-reverse-race-{plane}",
         )
         session.commit()
     barrier = threading.Barrier(2)

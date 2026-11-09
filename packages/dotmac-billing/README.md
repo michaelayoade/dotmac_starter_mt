@@ -93,7 +93,10 @@ the component identity, plus a guard that keeps the net accepted amount within
 the frozen amount), so a discharge on an invoice that was not elected, with
 evidence that differs from what was frozen, or above the frozen amount, is
 refused. `apply_available_credit` may draw at most the outstanding receivable
-less the undischarged frozen withholding. `WithholdingCashRequirementV1` quotes
+less the undischarged frozen withholding. An invoice issued before components were frozen, or imported as an open
+item, is brought under the same rule by `freeze_issued_invoice_withholding`, a
+governed, idempotent, append-only command that takes the Tax determination as of
+the issue date. `WithholdingCashRequirementV1` quotes
 the cash an invoice requires once a Tax-owned withholding amount is deducted; it
 is not a discharge, cash or credit.
 

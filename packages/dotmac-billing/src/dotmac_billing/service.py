@@ -10,6 +10,7 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.idempotency import (
@@ -44,6 +45,7 @@ from dotmac_billing.commands import (
     CreateMultiLineDraftDocument,
     DeallocationCommand,
     DraftDocumentLine,
+    FreezeIssuedInvoiceWithholding,
     GrantNonCashCredit,
     IssueCreditNote,
     IssueDocument,
@@ -3156,6 +3158,58 @@ def _document_fact(
     return cast(_DocumentFactRow, fact)
 
 
+def _is_elected_withholding(component: Any) -> bool:
+    """Positive and evidenced by a Tax party classification (the election)."""
+
+    return bool(
+        component.tax_amount.amount > 0
+        and component.party_classification_id is not None
+    )
+
+
+def _frozen_component_row(
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    document: _DocumentRow,
+    obligation_id: UUID | None,
+    result: Any,
+    component: Any,
+    origin: dict[str, object],
+) -> Any:
+    """One structural frozen-component row; values are the Tax result verbatim."""
+
+    currency = component.tax_amount.currency
+    return plane.wht_component(
+        **_values(
+            scope,
+            {
+                "id": uuid4(),
+                "billing_account_id": document.billing_account_id,
+                "document_id": document.id,
+                "obligation_id": obligation_id,
+                "tax_source_owner": WITHHOLDING_TAX_OWNER,
+                "determination_ref": str(result.determination_set_id),
+                "component_ref": str(component.determination_id),
+                "tax_code_id": component.tax_code_id,
+                "rule_id": component.rule_id,
+                "rule_version": component.rule_version,
+                "treatment_code": component.treatment_code,
+                "party_category": component.party_category,
+                "party_classification_id": component.party_classification_id,
+                "base_amount": component.base_amount.amount,
+                "tax_amount": component.tax_amount.amount,
+                "currency": currency.code,
+                "minor_units": currency.minor_units,
+                "source_fingerprint": result.source_fingerprint,
+                "result_fingerprint": result.result_fingerprint,
+                "determined_at": result.determined_at,
+                **origin,
+            },
+        )
+    )
+
+
 def _freeze_withholding_components(
     db: Session, *, scope: Scope, plane: _PlaneModels, document: _DocumentRow
 ) -> int:
@@ -3201,47 +3255,176 @@ def _freeze_withholding_components(
                 continue
             result = item.determination
             for component in result.components:
-                currency = component.tax_amount.currency
-                if (
-                    component.tax_amount.amount <= 0
-                    or component.party_classification_id is None
-                ):
+                if not _is_elected_withholding(component):
                     continue
                 db.add(
-                    plane.wht_component(
-                        **_values(
-                            scope,
-                            {
-                                "id": uuid4(),
-                                "billing_account_id": document.billing_account_id,
-                                "document_id": document.id,
-                                "obligation_id": obligation.id,
-                                "tax_source_owner": WITHHOLDING_TAX_OWNER,
-                                "determination_ref": str(result.determination_set_id),
-                                "component_ref": str(component.determination_id),
-                                "tax_code_id": component.tax_code_id,
-                                "rule_id": component.rule_id,
-                                "rule_version": component.rule_version,
-                                "treatment_code": component.treatment_code,
-                                "party_category": component.party_category,
-                                "party_classification_id": (
-                                    component.party_classification_id
-                                ),
-                                "base_amount": component.base_amount.amount,
-                                "tax_amount": component.tax_amount.amount,
-                                "currency": currency.code,
-                                "minor_units": currency.minor_units,
-                                "source_fingerprint": result.source_fingerprint,
-                                "result_fingerprint": result.result_fingerprint,
-                                "determined_at": result.determined_at,
-                            },
-                        )
+                    _frozen_component_row(
+                        scope=scope,
+                        plane=plane,
+                        document=document,
+                        obligation_id=obligation.id,
+                        result=result,
+                        component=component,
+                        origin={"origin": "issue"},
                     )
                 )
                 frozen += 1
     if frozen:
         db.flush()
     return frozen
+
+
+def freeze_issued_invoice_withholding(
+    db: Session, *, scope: Scope, command: FreezeIssuedInvoiceWithholding
+) -> tuple[Any, ...]:
+    """Freeze withholding for an issued invoice that has none frozen (tenant plane).
+
+    For an invoice issued before components were frozen, or imported as an open
+    item. The dotmac-tax determination is evaluated as of the invoice's issue
+    date; the election is its party classification. It writes the same
+    append-only component rows issuance writes and never touches the invoice.
+    Idempotent on ``command_id``; refused when components exist, for a credit
+    note or void invoice, when the determination is not as of the issue date, or
+    when the frozen withholding would exceed what is still outstanding.
+    """
+
+    if not isinstance(scope, TenantScope):
+        raise BillingRuleViolation(
+            "withholding_freeze_platform_unsupported",
+            "Tax evidence is tenant-only; the platform plane stays fail-closed",
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    for text, maximum in (
+        (command.command_id, 255),
+        (command.actor_ref, 255),
+        (command.reason, 2000),
+    ):
+        if not isinstance(text, str) or not text.strip() or len(text) > maximum:
+            raise BillingRuleViolation(
+                "withholding_freeze_evidence_required",
+                "freeze requires bounded command id, actor and reason",
+            )
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        document = _one(
+            session,
+            scope=scope,
+            model=plane.document,
+            row_id=command.document_id,
+            lock=True,
+        )
+        _require_credit_target(
+            session, scope=scope, document=document, account_id=account.id
+        )
+        _require_live_invoice_issuance(session, scope=scope, document=document)
+        existing = session.execute(
+            _where_scope(
+                select(plane.wht_component.id).where(
+                    plane.wht_component.document_id == document.id
+                ),
+                scope,
+                plane.wht_component,
+            )
+        ).first()
+        if existing is not None:
+            raise BillingRuleViolation(
+                "withholding_already_frozen",
+                "the invoice already has frozen withholding components",
+            )
+        evidence = command.evidence
+        currency = Currency(document.currency, document.minor_units)
+        try:
+            if evidence.purpose != "expected_withholding":
+                raise ValueError("freeze requires expected-withholding evidence")
+            validate_invoice_tax_evidence_versioned(
+                (evidence,),
+                scope=scope,
+                tax_amount=Money(Decimal(0), currency),
+                v2=isinstance(evidence, InvoiceTaxEvidenceV2),
+            )
+        except (ValueError, TypeError, DecimalException) as exc:
+            raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
+        result = evidence.determination
+        try:
+            issue_date = document.issued_at.astimezone(
+                ZoneInfo(document.timezone)
+            ).date()
+        except (ValueError, KeyError, ZoneInfoNotFoundError) as exc:
+            raise BillingRuleViolation(
+                "withholding_freeze_issue_date",
+                "the invoice issue date cannot be resolved in its timezone",
+            ) from exc
+        if result.occurred_on != issue_date:
+            raise BillingRuleViolation(
+                "withholding_freeze_not_as_of_issue",
+                "the Tax determination must be evaluated as of the invoice issue date",
+            )
+        elected = tuple(c for c in result.components if _is_elected_withholding(c))
+        if not elected:
+            raise BillingRuleViolation(
+                "withholding_not_elected",
+                "the determination has no elected withholding component",
+            )
+        if any(c.tax_amount.currency != currency for c in elected):
+            raise BillingRuleViolation(
+                "withholding_freeze_currency",
+                "withholding currency differs from the invoice",
+            )
+        total = sum((c.tax_amount.amount for c in elected), Decimal(0))
+        if total > _document_outstanding(session, scope=scope, document=document):
+            raise BillingRuleViolation(
+                "withholding_freeze_exceeds_outstanding",
+                "frozen withholding would exceed the invoice's outstanding receivable",
+            )
+        rows = [
+            _frozen_component_row(
+                scope=scope,
+                plane=plane,
+                document=document,
+                obligation_id=document.obligation_id,
+                result=result,
+                component=component,
+                origin={
+                    "origin": "late_freeze",
+                    "command_id": command.command_id,
+                    "actor_ref": command.actor_ref,
+                    "reason": command.reason,
+                },
+            )
+            for component in elected
+        ]
+        session.add_all(rows)
+        session.flush()
+        return {"component_ids": [str(row.id) for row in rows]}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.withholding.freeze",
+        key=command.command_id,
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    ids = [UUID(str(item)) for item in cast(list[str], outcome.result["component_ids"])]
+    return tuple(
+        db.execute(
+            _where_scope(
+                select(plane.wht_component)
+                .where(plane.wht_component.id.in_(ids))
+                .order_by(plane.wht_component.component_ref),
+                scope,
+                plane.wht_component,
+            )
+        ).scalars()
+    )
 
 
 def _undischarged_frozen_withholding(
@@ -6381,6 +6564,7 @@ __all__ = [
     "reverse_non_cash_credit_application",
     "reduce_non_cash_credit_grant",
     "accept_withholding_discharge",
+    "freeze_issued_invoice_withholding",
     "reverse_withholding_discharge",
     "accept_rated_obligation",
     "accept_settlement",

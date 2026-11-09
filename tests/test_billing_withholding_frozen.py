@@ -378,8 +378,9 @@ def test_foreign_key_validated_on_a_clean_database_and_history_stays_not_valid(
     scratch, monkeypatch
 ):
     """A discharge accepted before the freeze stays, NOT VALID and noted."""
-    from alembic import command as alembic_command
     from alembic.config import Config
+
+    from alembic import command as alembic_command
 
     admin_url, _, _ = scratch
     engine = billing.create_engine(admin_url)
@@ -461,3 +462,178 @@ def test_foreign_key_validated_on_a_clean_database_and_history_stays_not_valid(
                 )
             assert refused.value.code == "billing.withholding_not_elected"
             session.rollback()
+
+
+# --- governed late freeze (invoices issued before bi_0016 / imported) ---------
+
+
+def _as_of_issue(scope, *, amount: str = "5.00", on=None):
+    """A dotmac-tax expected-withholding determination as of the issue date."""
+    from datetime import date
+
+    item = _wht_evidence(scope, elected=True, amount=amount)
+    # billing._seed_invoice issues at NOW (Africa/Lagos date 2026-08-17).
+    return replace(
+        item,
+        determination=replace(item.determination, occurred_on=on or date(2026, 8, 17)),
+    )
+
+
+def _freeze_command(account_id, invoice_id, scope, evidence, command_id=None):
+    from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
+
+    return FreezeIssuedInvoiceWithholding(
+        scope,
+        account_id,
+        invoice_id,
+        command_id or f"freeze:{uuid4()}",
+        "finance-user:fixture",
+        "invoice issued before withholding was frozen",
+        evidence,
+    )
+
+
+def test_pre_freeze_invoice_is_frozen_then_discharged(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        # A legacy invoice: issued with no frozen component (like pre-bi_0016).
+        account, _, invoice = billing._seed_invoice(session, scope, suffix="late")
+        assert _components(session, invoice.id) == []
+        evidence = _as_of_issue(scope)
+        rows = freeze_issued_invoice_withholding(
+            session,
+            scope=scope,
+            command=_freeze_command(account.id, invoice.id, scope, evidence),
+        )
+        assert len(rows) == 1
+        assert rows[0].origin == "late_freeze"
+        assert rows[0].actor_ref == "finance-user:fixture"
+        assert rows[0].tax_amount == Decimal("5.00")
+        assert rows[0].tax_source_owner == "dotmac-tax"
+        assert rows[0].determination_ref == str(
+            evidence.determination.determination_set_id
+        )
+        # The normal discharge path now applies, unchanged.
+        row = accept_withholding_discharge(
+            session,
+            scope=scope,
+            command=_discharge(account, invoice.id, scope, evidence, accepted="5.00"),
+        )
+        assert row.amount_delta == Decimal("5.00")
+        session.rollback()
+
+
+def test_double_freeze_is_refused(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, _, invoice = billing._seed_invoice(session, scope, suffix="twice")
+        evidence = _as_of_issue(scope)
+        freeze_issued_invoice_withholding(
+            session,
+            scope=scope,
+            command=_freeze_command(account.id, invoice.id, scope, evidence),
+        )
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id, invoice.id, scope, _as_of_issue(scope)
+                ),
+            )
+        assert refused.value.code == "billing.withholding_already_frozen"
+        session.rollback()
+
+
+def test_freeze_above_outstanding_is_refused(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        # The seeded invoice is 120.00; a 130.00 withholding cannot be frozen.
+        account, _, invoice = billing._seed_invoice(session, scope, suffix="over")
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id, invoice.id, scope, _as_of_issue(scope, amount="130.00")
+                ),
+            )
+        assert refused.value.code == "billing.withholding_freeze_exceeds_outstanding"
+        assert _components(session, invoice.id) == []
+        session.rollback()
+
+
+def test_freeze_must_be_as_of_the_issue_date(scratch):
+    from datetime import date
+
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, _, invoice = billing._seed_invoice(session, scope, suffix="asof")
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id,
+                    invoice.id,
+                    scope,
+                    _as_of_issue(scope, on=date(2026, 9, 30)),
+                ),
+            )
+        assert refused.value.code == "billing.withholding_freeze_not_as_of_issue"
+        session.rollback()
+
+
+def test_replay_of_the_same_command_id_is_a_no_op(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, _, invoice = billing._seed_invoice(session, scope, suffix="replay")
+        command = _freeze_command(
+            account.id, invoice.id, scope, _as_of_issue(scope), "freeze:fixed-id"
+        )
+        first = freeze_issued_invoice_withholding(session, scope=scope, command=command)
+        again = freeze_issued_invoice_withholding(session, scope=scope, command=command)
+        assert [row.id for row in first] == [row.id for row in again]
+        assert len(_components(session, invoice.id)) == 1
+        session.rollback()
+
+
+def test_platform_plane_freeze_is_refused(scratch):
+    from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+    from dotmac_kernel.cache import PlatformScope
+
+    _, _, platform_url = scratch
+    scope = PlatformScope()
+    tenant_evidence = _as_of_issue(TenantScope(uuid4()))
+    with billing._session(platform_url, scope) as session:
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=FreezeIssuedInvoiceWithholding(
+                    scope,
+                    uuid4(),
+                    uuid4(),
+                    "freeze:platform",
+                    "finance-user:fixture",
+                    "platform stays fail-closed",
+                    tenant_evidence,
+                ),
+            )
+        assert refused.value.code == "billing.withholding_freeze_platform_unsupported"
