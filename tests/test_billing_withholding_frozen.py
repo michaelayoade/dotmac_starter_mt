@@ -378,9 +378,8 @@ def test_foreign_key_validated_on_a_clean_database_and_history_stays_not_valid(
     scratch, monkeypatch
 ):
     """A discharge accepted before the freeze stays, NOT VALID and noted."""
-    from alembic.config import Config
-
     from alembic import command as alembic_command
+    from alembic.config import Config
 
     admin_url, _, _ = scratch
     engine = billing.create_engine(admin_url)

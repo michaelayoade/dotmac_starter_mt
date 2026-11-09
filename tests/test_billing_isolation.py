@@ -265,9 +265,8 @@ def _scratch_database(
     admin_url = _url_for(superuser, name, user="app_admin")
     old_migration_url = os.environ.get("MIGRATION_DATABASE_URL")
     try:
-        from alembic.config import Config
-
         from alembic import command
+        from alembic.config import Config
 
         config = Config(str(REPO_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(REPO_ROOT / "alembic"))
@@ -2870,9 +2869,8 @@ def test_multiline_issue_rechecks_rated_totals_and_grouping(scratch, plane):
 def test_multiline_upgrade_backfills_historical_issued_lines_without_financial_edits(
     plane,
 ):
-    from alembic.config import Config
-
     from alembic import command as alembic_command
+    from alembic.config import Config
 
     selection = ModulePlane.TENANT if plane == "tenant" else ModulePlane.PLATFORM
     prefix = "" if plane == "tenant" else "platform_"

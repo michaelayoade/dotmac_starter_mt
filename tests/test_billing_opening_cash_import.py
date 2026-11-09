@@ -1545,6 +1545,8 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
             historical.setattr(
                 s, "_opening_document_applied", lambda *a, **k: Decimal(0)
             )
+            # bi6 predates the frozen withholding component table (bi_0016).
+            historical.setattr(s, "_require_frozen_withholding", lambda *a, **k: None)
             with b._session(url, scope) as session:
                 for name in (
                     "opening_import_receipts",
@@ -1572,8 +1574,7 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
                 s.accept_withholding_discharge(
                     session,
                     scope=scope,
-                    command=frozen_withholding_command(
-                        session,
+                    command=b._withholding_command(
                         account_id,
                         invoice.id,
                         scope=scope,

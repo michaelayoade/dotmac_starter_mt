@@ -236,7 +236,7 @@ def _create(platform: bool) -> None:
         $$ LANGUAGE plpgsql;
         CREATE TRIGGER {table}_admission BEFORE INSERT ON mod_billing.{table}
           FOR EACH ROW EXECUTE FUNCTION mod_billing.admit_{prefix}withholding_component();
-    """)
+    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
     # The discharge side: the cap guard and the foreign key.
     op.execute(f"""
         CREATE FUNCTION mod_billing.cap_{prefix}withholding_component() RETURNS trigger AS $$
@@ -276,7 +276,7 @@ def _create(platform: bool) -> None:
         $$ LANGUAGE plpgsql;
         CREATE TRIGGER {discharges}_component_cap BEFORE INSERT ON mod_billing.{discharges}
           FOR EACH ROW EXECUTE FUNCTION mod_billing.cap_{prefix}withholding_component();
-    """)
+    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
     local = ", ".join(
         [
             *scope_list,

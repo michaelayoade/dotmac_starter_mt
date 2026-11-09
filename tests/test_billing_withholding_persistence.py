@@ -14,9 +14,6 @@ from dataclasses import replace
 from decimal import Decimal
 
 import pytest
-from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from dotmac_billing import models
 from dotmac_billing.contracts import (
     WithholdingDischargeEffectV1,
@@ -28,6 +25,9 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from tests import test_billing_isolation as billing
 from tests.billing_frozen_fixtures import (
     withholding_command as frozen_withholding_command,
