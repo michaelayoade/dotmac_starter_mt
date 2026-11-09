@@ -82,7 +82,12 @@ PRECONDITIONS: Final[tuple[Precondition, ...]] = (
             "the assembly — the only party that legitimately depends on both "
             "Control and the Foundation"
         ),
-        evidence=("no ratified CP provider coordinate is composed into this lane"),
+        evidence=(
+            "CP composes the approved provider pair in source "
+            "(`compose_approved_foundation_v3_providers`, CP #261) and "
+            "Michael certified the source rows 2026-11-07; no CP provider "
+            "coordinate is installed into this lane's runner environment yet"
+        ),
         observable=True,
     ),
     Precondition(
@@ -93,7 +98,12 @@ PRECONDITIONS: Final[tuple[Precondition, ...]] = (
             "executes in — the isolated candidate venv, not the checkout."
         ),
         owner="the assembly's bindings distribution, installed by the supply chain",
-        evidence=f"zero declarations of {ENTRY_POINT_GROUP!r} exist fleet-wide",
+        evidence=(
+            f"one declaration of {ENTRY_POINT_GROUP!r} exists in source "
+            "(CP #262, `dotmac-control-plane`); none is installed into the "
+            "runner's isolated candidate venv yet, and its factory refuses "
+            "until runner-side observers exist"
+        ),
         observable=True,
     ),
     Precondition(
@@ -135,9 +145,10 @@ PRECONDITIONS: Final[tuple[Precondition, ...]] = (
         ),
         owner="the Foundation's release pipeline",
         evidence=(
-            "the verifying code lives in dotmac-deployment-foundation 0.4.0a1, "
-            "which has never been built and is unpublished (version.py; "
-            "docs/inventories/declared-publication-baseline.json)"
+            "the verifying code is on protected main but in no published "
+            "wheel: 0.4.0a1 was built once, drifted unrecorded and is a "
+            "spent identity (docs/inventories/spent-version-identities.json); "
+            "successor 0.4.0a2 is unallocated until the Gate 2 freeze"
         ),
         observable=True,
     ),

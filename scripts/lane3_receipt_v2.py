@@ -20,9 +20,12 @@ candidate nothing; it moves the release revision, like every other runner fix
 plan, grant, outcome    the trusted CP-rendered ``FoundationExecutionPlanV3``,
                         the ``ExecutionGrant`` only ``authorize_v3()`` issues,
                         and the ``DeploymentOutcome`` of executing that plan.
-                        NOT AVAILABLE in this lane yet: :func:`acquire_authority`
-                        and :func:`execute_authorized_plan` refuse, naming what
-                        must exist first
+                        The wiring exists (:func:`build_base_plan`,
+                        :func:`acquire_authority`,
+                        :func:`execute_authorized_plan`); the operational
+                        inputs — installed CP bindings and the signed pair
+                        document — do not reach this lane yet, so every
+                        route still refuses, naming what must exist first
 execution run           the Actions runtime's own coordinates, compared with the
                         pinned topology (:func:`execution_run_from_environment`)
                         AND with the run as the Actions API reports it, which the
@@ -63,7 +66,7 @@ import os
 import pathlib
 import sys
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -80,7 +83,9 @@ from lane3_execution import Lane3ExecutionTopology, TopologyRefused, load_topolo
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from dotmac_deployment_foundation.authorization import ExecutionGrant
+    from dotmac_deployment_foundation.engine.plan import DeploymentPlan
     from dotmac_deployment_foundation.engine.run import DeploymentOutcome
+    from dotmac_deployment_foundation.execution_plan import FoundationExecutionPlanV1
     from dotmac_deployment_foundation.execution_plan_v3 import (
         FoundationExecutionPlanV3,
     )
@@ -305,38 +310,288 @@ def write_receipt(receipt: RehearsalReceiptV2, path: pathlib.Path) -> str:
     return receipt.sha256_digest()
 
 
-def acquire_execution_plan() -> FoundationExecutionPlanV3:
-    """The trusted CP-rendered plan, and nothing else. Refuses: no provider yet.
+def _missing(*prefixes: str) -> list[str]:
+    return [p for p in PRECONDITIONS if p.startswith(prefixes)]
+
+
+class BasePlanBuild(NamedTuple):
+    """The two plans and the one effects instance retained for execution.
+
+    ``base_plan`` is the V1 execution document mirrored into V3;
+    ``deployment_plan`` is the distinct ordered plan ``Executor.run``
+    consumes. ``effects`` is the exact instance whose role observation
+    froze the base plan's prestate, so authorization and mutation cannot
+    silently swap observers.
+    """
+
+    base_plan: FoundationExecutionPlanV1
+    deployment_plan: DeploymentPlan
+    effects: Any
+
+
+def acquire_authority_bindings(*, entries: Any = None) -> Any:
+    """The one installed CP binding set Lane 3 may act through.
+
+    The runner acquires this once and hands the same object to the
+    base-plan build, the V3 mirror and the Executor drive. Discovery
+    failure, or a binding set with no V3 provider, is the lane's existing
+    unanswerable trusted-CP precondition; no host observation has happened
+    yet.
+    """
+    try:
+        from dotmac_deployment_foundation.execution_bindings import (
+            discover_bindings,
+        )
+
+        bindings = discover_bindings(entries=entries)
+    except Exception as exc:
+        raise AuthorityUnavailable(_missing("trusted_cp")) from exc
+    if bindings is None or getattr(bindings, "authorization_v3_provider", None) is None:
+        raise AuthorityUnavailable(_missing("trusted_cp"))
+    return bindings
+
+
+def _application_profile_digest() -> str:
+    """The installed application profile's digest, or ``""`` when undeclared.
+
+    This mirrors the CLI's report-only use: carry the digest into the rendered
+    plan for read-back comparison, without composing profile completeness into
+    Lane 3's authority decision.
+    """
+    from dotmac_deployment_foundation.application_profile import (
+        discover_profile,
+        profile_digest,
+    )
+
+    found = discover_profile()
+    if found is None:
+        return ""
+    return profile_digest(found.as_document())
+
+
+def _build_deployment_effects(
+    spec: Any, deploy_dir: Any, *, bindings: Any = None
+) -> Any:
+    """Construct the deployment effects the base plan observes through.
+
+    A bindings-declared factory wins. Otherwise this lane's compose-host
+    fixture uses Foundation's production ``ComposeHostEffects`` with the same
+    filesystem-backed tool pinning as the deployment CLI.
+    """
+    build_effects = getattr(bindings, "build_effects", None)
+    deploy_path = pathlib.Path(deploy_dir)
+    if callable(build_effects):
+        return build_effects(spec, deploy_path)
+
+    from dotmac_deployment_foundation.providers.compose_host import ComposeHostEffects
+    from dotmac_deployment_foundation.toolchain import DEFAULT_TOOLS, resolve_tool
+
+    tools = {
+        name: resolve_tool(default, what=f"{name}_bin")
+        for name, default in DEFAULT_TOOLS.items()
+    }
+    return ComposeHostEffects(
+        spec,
+        deploy_path,
+        docker_bin=tools["docker"],
+        git_bin=tools["git"],
+    )
+
+
+def build_base_plan(
+    spec: Any = None,
+    *,
+    target: str | None = None,
+    deploy_dir: Any = None,
+    effects: Any = None,
+    bindings: Any = None,
+    previous_image: str = "",
+    skip_backup: bool = False,
+    skip_backup_reason: str = "",
+) -> BasePlanBuild:
+    """Build the deployment plan and render its V1 execution document.
+
+    The returned triple keeps the two distinct plans together with the one
+    effects instance whose ``observe_roles`` supplied the prestate. The
+    runner can therefore authorize the mirrored V3 plan and later execute
+    the underlying deployment plan through that same instance, rather than
+    silently swapping observers between authorization and mutation.
+
+    A failure to construct the effects, build the deployment plan, observe
+    the incumbent roles or render the base plan is a ``ReceiptRefused``:
+    this read-only prestate step happens before authorization and lease, so
+    the runner maps it to ``precondition_unfit`` with no mutation attempted.
+    """
+    if spec is None or not target or deploy_dir is None:
+        raise AuthorityUnavailable(_missing("trusted_cp"))
+
+    from dotmac_deployment_foundation.engine.plan import build_plan
+    from dotmac_deployment_foundation.execution_plan import (
+        HostPrestateV1,
+        render_execution_plan,
+    )
+
+    try:
+        if effects is None:
+            effects = _build_deployment_effects(spec, deploy_dir, bindings=bindings)
+
+        deployment_plan = build_plan(
+            spec,
+            previous_image=previous_image,
+            skip_backup=skip_backup,
+            skip_backup_reason=skip_backup_reason,
+        )
+        base_plan = render_execution_plan(
+            spec,
+            deployment_plan,
+            target=target,
+            operation="deploy",
+            descriptor_digest=str(spec.to_canonical_document().sha256_digest()),
+            prestate=HostPrestateV1.from_observations(effects.observe_roles()),
+            application_profile_digest=_application_profile_digest(),
+        )
+    except Exception as exc:
+        raise ReceiptRefused(
+            "the V1 base plan could not be rendered from the deployment "
+            f"plan and observed host prestate: {exc}"
+        ) from exc
+    return BasePlanBuild(
+        base_plan=base_plan,
+        deployment_plan=deployment_plan,
+        effects=effects,
+    )
+
+
+def acquire_execution_plan(
+    base_plan: Any = None,
+    *,
+    bindings: Any = None,
+    entries: Any = None,
+) -> FoundationExecutionPlanV3:
+    """The trusted CP-rendered plan, and nothing else.
 
     The ONE source of the plan the grant is issued against. The runner asks
     this first and hands the plan to ``establish_authorization``, so the grant
     and the receipt name the same plan by construction rather than by a
     comparison someone could forget.
+
+    Rendering delegates to `lane3_plan_v3`'s public-call mirror over the
+    DISCOVERED bindings: the plan's host facts come from the CP provider's
+    own observation, never from receipt or dispatch fields. With no base
+    plan, no bindings, or no V3 provider installed, this refuses exactly
+    as before — the wiring makes authority representable, never weaker.
     """
-    raise AuthorityUnavailable([p for p in PRECONDITIONS if p.startswith("trusted_cp")])
+    if base_plan is None:
+        raise AuthorityUnavailable(_missing("trusted_cp"))
+    if bindings is None:
+        bindings = acquire_authority_bindings(entries=entries)
+    if getattr(bindings, "authorization_v3_provider", None) is None:
+        raise AuthorityUnavailable(_missing("trusted_cp"))
+    import lane3_plan_v3
+
+    try:
+        return lane3_plan_v3.render_local_execution_plan_v3(
+            base_plan, bindings=bindings
+        )
+    except Exception as exc:
+        raise AuthorityUnavailable(_missing("trusted_cp")) from exc
 
 
-def acquire_authority() -> tuple[FoundationExecutionPlanV3, ExecutionGrant]:
-    """The trusted plan and its grant. Refuses: no provider exists yet."""
-    raise AuthorityUnavailable(
-        [p for p in PRECONDITIONS if p.startswith(("trusted_cp", "control_v2"))]
-    )
+def acquire_authority(
+    *,
+    descriptor_digest: str | None = None,
+    target: str | None = None,
+    authorization_document: str | pathlib.Path | None = None,
+    base_plan: Any = None,
+    bindings: Any = None,
+    entries: Any = None,
+) -> tuple[FoundationExecutionPlanV3, ExecutionGrant]:
+    """The trusted plan and its grant, through the lane's ONLY grant route.
+
+    Composes `acquire_execution_plan` with
+    `lane3_authorization.establish_authorization` — it adds no second
+    route to a grant and accepts no run id, digest, clock or verifier
+    from the caller. Missing inputs refuse with the same preconditions
+    as before; a determinate authorization violation surfaces as
+    `ReceiptRefused`, an unanswerable environment as
+    `AuthorityUnavailable`.
+    """
+    if (
+        not descriptor_digest
+        or not target
+        or authorization_document is None
+        or base_plan is None
+    ):
+        raise AuthorityUnavailable(_missing("trusted_cp", "control_v2"))
+    plan = acquire_execution_plan(base_plan, bindings=bindings, entries=entries)
+    import lane3_authorization
+
+    try:
+        grant = lane3_authorization.establish_authorization(
+            descriptor_digest=descriptor_digest,
+            target=target,
+            authorization_document=authorization_document,
+            execution_plan=plan,
+            entries=entries,
+        )
+    except lane3_authorization.AuthorizationUnverifiable as exc:
+        if exc.standing is lane3_authorization.Standing.UNATTESTABLE:
+            raise ReceiptRefused(exc.reason) from exc
+        raise AuthorityUnavailable(_missing("control_v2")) from exc
+    return plan, grant
 
 
 def execute_authorized_plan(
-    plan: FoundationExecutionPlanV3, grant: ExecutionGrant
+    plan: FoundationExecutionPlanV3,
+    grant: ExecutionGrant,
+    *,
+    spec: Any = None,
+    deployment_plan: Any = None,
+    effects: Any = None,
+    exposure_effects: Any = None,
+    bindings: Any = None,
+    lock_dir: Any = None,
 ) -> DeploymentOutcome:
-    """Drive the Executor under ``grant``. Refuses until host-source admission exists.
+    """Drive the Executor under ``grant``, in process (Q1, 2026-10-06).
 
-    Q1's answer fixes the shape: ``Executor(spec, effects, grant,
-    execution_plan=..., admission_provider=..., exposure_effects=...)`` under
-    ``deployment_lock``, then ``.run(plan, lock=held)`` (and ``.rollback`` for
-    item 8). ``Executor.run`` verifies the host source first, so without an
-    admission provider that can attest there is nothing to drive.
+    Two distinct plans, never conflated: ``plan`` is the authorized
+    ``FoundationExecutionPlanV3`` the Executor is constructed with;
+    ``deployment_plan`` is the `DeploymentPlan` ``Executor.run``
+    executes. Admission comes only from the discovered bindings'
+    `deployment_admission_provider`; absent one, the Lane 3 refusing
+    provider preserves today's unconditional refusal. Without the
+    spec/deployment-plan/effects inputs there is nothing to drive, and
+    this refuses exactly as before.
     """
-    raise AuthorityUnavailable(
-        [p for p in PRECONDITIONS if p.startswith("executor_drive")]
+    if spec is None or deployment_plan is None or effects is None:
+        raise AuthorityUnavailable(_missing("executor_drive"))
+    from dotmac_deployment_foundation.engine.lock import deployment_lock
+    from dotmac_deployment_foundation.engine.run import Executor
+    from lane3_host_source_admission import Lane3HostSourceAdmissionProvider
+
+    admission = (
+        getattr(bindings, "deployment_admission_provider", None)
+        if bindings is not None
+        else None
     )
+    executor = Executor(
+        spec,
+        effects,
+        grant,
+        evidence_policy=getattr(bindings, "evidence_policy", None),
+        evidence_verifier=getattr(bindings, "evidence_verifier", None),
+        admission_provider=admission or Lane3HostSourceAdmissionProvider(),
+        recovery_verifier=getattr(bindings, "recovery_verifier", None),
+        exposure_effects=exposure_effects,
+        execution_plan=plan,
+    )
+    lock_kwargs = {} if lock_dir is None else {"directory": lock_dir}
+    with deployment_lock(
+        spec.product,
+        label=f"lane3 rehearsal {deployment_plan.image_digest}",
+        **lock_kwargs,
+    ) as held:
+        return executor.run(deployment_plan, lock=held)
 
 
 def main(

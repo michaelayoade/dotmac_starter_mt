@@ -15,6 +15,15 @@ if TYPE_CHECKING:
     from .progress_contracts import CompletionResult, ScoreFact
 
 
+LAB_RESULT_CAPABILITY = (
+    "mod_learning.record_lab_result_v1("
+    "pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, "
+    "pg_catalog.jsonb, pg_catalog.float8, pg_catalog.float8, "
+    "pg_catalog.float8, pg_catalog.bool, pg_catalog.jsonb)"
+)
+"""Identity signature of the lr_0011 SQL lab ledger writer."""
+
+
 class Command(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

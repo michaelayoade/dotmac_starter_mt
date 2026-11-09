@@ -401,3 +401,32 @@ after the freeze costs one of three different prices.
 readiness.** The cutover blocker closes only when the producer, private
 delivery, runner capability and protected execution can all satisfy that
 contract.
+
+
+## Proposed reconciliation — 2026-11-07: publication gate and October pivot
+
+**Proposal only, not an execution decision.** The historical Gate-0 E and
+broker/coordinator sequencing above conflicts with the adopted October pivot.
+Do not restart that stopped programme from this roadmap. The
+[publication-gate ruling packet](inventories/foundation-publication-gate-ruling-20261107.md)
+presents the replacement direction to Michael and preserves each publication
+and behavioral guarantee. The present source oracle still refuses; no new
+permission follows from this appendix. Allocation waits for the ruling,
+pre-freeze source certification and candidate-independent readiness.
+
+The old "runner emits v1" account is superseded by current source: the runner
+assembles v2 receipts, but trusted plan/authority/executor acquisition refuses,
+so there is no positive rehearsal evidence. CP has a V3 provider seam and an
+approval refusal, not a wired admitted execution path. Treat the source-backed
+worksheet in the packet as open until Michael certifies it. These observations
+are at Starter f6a3b9f0 and CP bee5def1; refresh them before implementation.
+
+
+### Direction decision — 2026-11-07
+
+Michael approved the adopted-path direction at PR #985 revision
+`3010599da0b06d8700908493b55d16f589fe1ab8`, as recorded in ADR-0070's dated
+ratification and the linked ruling packet. This supersedes the pending-direction
+status above; all certification, implementation/admission, candidate lifecycle
+and operational gates remain. Do not restart the retired topology or treat
+this decision as a successful rehearsal or permission to allocate a version.

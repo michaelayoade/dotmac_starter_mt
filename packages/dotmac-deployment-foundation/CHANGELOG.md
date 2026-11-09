@@ -2,6 +2,24 @@
 
 ## Unreleased — successor not allocated
 
+### Added: `deployment_admission_provider` execution binding
+
+`ExecutionBindings` gains an optional `deployment_admission_provider`
+(the assembly's `HostSourceAdmissionProvider`, fixed at installation and
+discovery like every other binding — never request-selected). The CLI's
+`deploy`/`rollback` executor constructions select exactly that provider
+when declared and keep `RefusingHostSourceAdmissionProvider` otherwise,
+so the unconditional refusal stands wherever no assembly is wired.
+Recovery execution deliberately does not read the field: it keeps its
+literal refusing provider until it has a grant/consumption contract.
+The constructor-seam architecture guard is narrowed to admit exactly
+this one selection shape at `Executor` sites only, with planted-bypass
+sensitivity tests for the recovery site and request-value shapes. This
+makes the deployment ADMIT representable from the installed CLI for the
+first time; it admits nothing by itself — no distribution declares the
+provider yet, and `Executor.rollback` still refuses
+`execution_plan.rollback_target_unbound` by design.
+
 ### Changed (breaking for re-render): the collector config is mounted as a directory
 
 The rendered `otel-collector` service bind-mounted a SINGLE FILE

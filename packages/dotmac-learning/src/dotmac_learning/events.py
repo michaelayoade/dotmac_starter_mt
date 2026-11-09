@@ -172,6 +172,26 @@ def emit(
         return EventEmission("failed")
 
 
+def emission_for(db: Session, status: str, event_id: UUID | None) -> EventEmission:
+    """Rebuild the append outcome a SQL writer reported for one event.
+
+    SQL capabilities (lr_0011/lr_0012) append events themselves and
+    return only the outcome status and stored event id; this folds that
+    pair back into the detached ``EventEmission`` the Python surfaces
+    return, reading the row the capability wrote in this transaction.
+    """
+    if status == "recorded":
+        if event_id is None:
+            raise RuntimeError("recorded learning event has no event id")
+        event = db.get(LearningEvent, event_id)
+        if event is None:
+            raise RuntimeError("recorded learning event is unavailable")
+        return EventEmission("recorded", _fact(event))
+    if status == "suppressed":
+        return EventEmission("suppressed")
+    return EventEmission("failed")
+
+
 def last_activity_at(
     db: Session, *, tenant_id: UUID, person_id: UUID
 ) -> datetime | None:

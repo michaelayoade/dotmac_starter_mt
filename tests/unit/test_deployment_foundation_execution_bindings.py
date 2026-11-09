@@ -298,3 +298,55 @@ def test_verifier_only_bindings_cannot_be_selected_as_a_provider(
     args = argparse.Namespace(provider="acme-host", deploy_dir=str(tmp_path))
     with pytest.raises(PreconditionFailed, match="no effects factory"):
         _build_effects(spec, args, bindings=_bindings(build_effects=None))
+
+
+# ── deployment admission provider: discovered, deployment-only, refusing default ──
+
+
+class _AdmissionProvider:
+    def admit_host_source(self) -> Any:
+        raise AssertionError("selection must not call the provider")
+
+
+def test_bindings_accept_a_deployment_admission_provider() -> None:
+    provider = _AdmissionProvider()
+    bindings = _bindings(deployment_admission_provider=provider)
+    assert bindings.deployment_admission_provider is provider
+
+
+def test_a_non_provider_deployment_admission_value_is_refused() -> None:
+    with pytest.raises(SpecError, match="deployment_admission_provider"):
+        _bindings(deployment_admission_provider=object())
+
+
+def test_provider_only_bindings_carry_an_injectable() -> None:
+    bindings = ExecutionBindings(
+        provider="acme-host",
+        deployment_admission_provider=_AdmissionProvider(),
+    )
+    assert bindings.deployment_admission_provider is not None
+
+
+def test_cli_selection_returns_the_discovered_provider_exactly() -> None:
+    from dotmac_deployment_foundation.cli import _deployment_admission_provider
+
+    provider = _AdmissionProvider()
+    selected = _deployment_admission_provider(
+        _bindings(deployment_admission_provider=provider)
+    )
+    assert selected is provider
+
+
+def test_cli_selection_refuses_without_a_declared_provider() -> None:
+    from dotmac_deployment_foundation.cli import _deployment_admission_provider
+    from dotmac_deployment_foundation.host_source_admission import (
+        RefusingHostSourceAdmissionProvider,
+    )
+
+    assert isinstance(
+        _deployment_admission_provider(None), RefusingHostSourceAdmissionProvider
+    )
+    assert isinstance(
+        _deployment_admission_provider(_bindings()),
+        RefusingHostSourceAdmissionProvider,
+    )
