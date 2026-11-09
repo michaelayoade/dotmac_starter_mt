@@ -36,8 +36,12 @@ def main() -> None:
     )
     for directory in directories:
         prefix = "packages/" + directory + "/"
-        metadata = tomllib.loads(git("show", revision + ":" + prefix + "pyproject.toml"))
-        extraction = tomllib.loads(git("show", revision + ":" + prefix + "EXTRACTION.toml"))
+        metadata = tomllib.loads(
+            git("show", revision + ":" + prefix + "pyproject.toml")
+        )
+        extraction = tomllib.loads(
+            git("show", revision + ":" + prefix + "EXTRACTION.toml")
+        )
         poetry = metadata["tool"]["poetry"]
         package_paths = sorted(path for path in paths if path.startswith(prefix))
         packages.append(
@@ -45,13 +49,17 @@ def main() -> None:
                 "directory": prefix.rstrip("/"),
                 "distribution": poetry["name"],
                 "version": poetry["version"],
-                "source_tree": git("rev-parse", revision + ":" + prefix.rstrip("/")).strip(),
+                "source_tree": git(
+                    "rev-parse", revision + ":" + prefix.rstrip("/")
+                ).strip(),
                 "tracked_files": len(package_paths),
                 "classification": extraction.get("classification"),
                 "engineering_status": extraction.get("status"),
                 "source_mode": extraction.get("source_mode"),
                 "functional_owner": extraction.get("owner"),
-                "declared_source_repositories": extraction.get("source_repositories", []),
+                "declared_source_repositories": extraction.get(
+                    "source_repositories", []
+                ),
                 "declared_source_revisions": extraction.get("source_revisions", []),
                 "declared_source_paths": extraction.get("source_paths", []),
                 "included_notices": [
@@ -69,7 +77,9 @@ def main() -> None:
             }
         )
         for path in package_paths:
-            if Path(path).suffix not in {".py", ".rs", ".js", ".css", ".html", ".c", ".h"}:
+            if Path(path).suffix not in {
+                ".py", ".rs", ".js", ".css", ".html", ".c", ".h"
+            }:
                 continue
             content = git("show", revision + ":" + path)
             for number, line in enumerate(content.splitlines(), 1):
@@ -102,7 +112,9 @@ def main() -> None:
     (output / "starter-public-provenance-leads.txt").write_text(
         "\n".join(leads) + "\n", encoding="utf-8", newline="\n"
     )
-    print(f"Recorded {len(packages)} packages at {revision}; {len(leads)} provenance leads")
+    print(
+        f"Recorded {len(packages)} packages at {revision}; {len(leads)} provenance leads"
+    )
 
 
 if __name__ == "__main__":
