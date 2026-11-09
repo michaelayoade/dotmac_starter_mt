@@ -60,6 +60,35 @@ for module in modules:
 exports.write_text(json.dumps(contract, indent=2) + "\n")
 PY
 
+# These optional presentation slices have no callers in the RC1 assembly.
+# Keep the empty-state component pending its separate provenance review.
+python3 - <<'PY'
+import ast
+from pathlib import Path
+
+ui = Path("packages/dotmac-ui/src/dotmac_ui")
+excluded = {
+    "MAP_FRAME", "DASHBOARD_GRID", "DASHBOARD_PANEL", "METRIC_CARD",
+    "NOTICE_BANNER", "DASHBOARD_LINE_CHART", "NOTIFICATION_TOAST",
+}
+components = ui / "components.py"
+source = components.read_text()
+removed = set()
+for node in ast.parse(source).body:
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        if node.target.id in excluded:
+            removed.update(range(node.lineno, node.end_lineno + 1))
+for path in (components, ui / "__init__.py"):
+    text = path.read_text()
+    path.write_text("".join(
+        line for number, line in enumerate(text.splitlines(keepends=True), 1)
+        if (path != components or number not in removed)
+        and line.strip().rstrip(",").strip('"') not in excluded
+    ))
+for name in excluded:
+    (ui / "templates/dotmac_ui/components" / (name.lower() + ".html")).unlink()
+PY
+
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$destination.tar" .
 tar -tf "$destination.tar" | LC_ALL=C sort > "$destination.files"
 sha256sum "$destination.tar"

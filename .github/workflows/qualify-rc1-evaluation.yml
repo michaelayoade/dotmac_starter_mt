@@ -74,3 +74,11 @@ jobs:
               --data-binary @- http://127.0.0.1:8000/platform/auth/login |
             jq -e '.access_token | strings | length > 0' >/dev/null
           echo 'RC1 clean install and first platform login passed.'
+      - name: Retain tested candidate for clearance review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: evaluation-clearance-review
+          path: |
+            ${{ runner.temp }}/evaluation.tar
+            ${{ runner.temp }}/evaluation.files
+          if-no-files-found: error
