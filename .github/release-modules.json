@@ -3166,6 +3166,7 @@
           "dotmac_subscriptions/migrations/versions/su_0003_billing_treatments.py",
           "dotmac_subscriptions/migrations/versions/su_0004_catalog_price_line.py",
           "dotmac_subscriptions/migrations/versions/su_0005_line_coverage_overlap.py",
+          "dotmac_subscriptions/migrations/versions/su_0006_pending_validity.py",
           "dotmac_subscriptions/models.py",
           "dotmac_subscriptions/py.typed",
           "dotmac_subscriptions/service.py",
