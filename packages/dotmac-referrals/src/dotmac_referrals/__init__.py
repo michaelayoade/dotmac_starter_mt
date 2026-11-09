@@ -1,7 +1,9 @@
 """Public typed surface for ``dotmac-referrals``."""
 
 from dotmac_referrals.contracts import (
+    SERVICE_LOCATION_REF_PATTERN,
     CaptureReferral,
+    CaptureReferralV2,
     ContractError,
     CreateProgramme,
     IssueCode,
@@ -14,15 +16,18 @@ from dotmac_referrals.service import (
     NotFound,
     ReferralError,
     capture_referral,
+    capture_referral_v2,
     create_programme,
     issue_code,
     record_conversion,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
+    "SERVICE_LOCATION_REF_PATTERN",
     "CaptureReferral",
+    "CaptureReferralV2",
     "Conflict",
     "ContractError",
     "CreateProgramme",
@@ -32,6 +37,7 @@ __all__ = [
     "ReferralError",
     "__version__",
     "capture_referral",
+    "capture_referral_v2",
     "create_programme",
     "issue_code",
     "module",
