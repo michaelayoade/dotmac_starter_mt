@@ -47,6 +47,8 @@ from dotmac_document_rendering.contracts_v2 import (
 DATA_ONLY_RESOURCE_POLICY: Final = "data-only"
 LOGO_MAX_BYTES: Final = 256 * 1024
 LOGO_MEDIA_TYPES: Final = frozenset({"image/png", "image/jpeg"})
+# A small file can still declare enormous dimensions that exhaust a decoder.
+LOGO_MAX_DIMENSION: Final = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +241,7 @@ class PdfEngineV3(Protocol):
 __all__ = [
     "DATA_ONLY_RESOURCE_POLICY",
     "LOGO_MAX_BYTES",
+    "LOGO_MAX_DIMENSION",
     "LOGO_MEDIA_TYPES",
     "DocumentProjectionV3",
     "DocumentRendererV3",
