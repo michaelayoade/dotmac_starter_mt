@@ -1525,6 +1525,7 @@ decision, and a coordinate is not a consequence. Products own consequences.
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Position observations and projections | `dotmac-positioning` (`mod_pos`, tenant plane only) | Owns no vehicle lifecycle, work-order lifecycle, attendance consequence, provider transport or map presentation |
+| Neutral retention hold on an observation (opaque holder reference, honoured by prune) | `dotmac-positioning` (`mod_pos.observation_holds`, 0.2.0a2) | Holds carry no subject, address, decision or consequence; the holder owns what its reference means (ADR-0039) |
 | A durable unit's AUTHORITATIVE location | `dotmac-assets` | Reads no observation; positioning never overwrites it — a product asks the asset owner to move it when policy permits |
 | Subject links, applicability, policy and every business consequence — geofence action, SLA, dispatch, billing | the adopting product (Sub is cutover 1, ERP cutover 2) | Imports no positioning persistence; links a local subject to an opaque tracked-unit id |
 | Static plant, GIS and map coordinates | `dotmac-fiber-plant`, `dotmac-network-inventory`, `dotmac-network-topology` | Carrying a coordinate does not make state position evidence; these are fixed infrastructure, not tracked units |

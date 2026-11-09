@@ -34,3 +34,13 @@ Source and purpose codes are trimmed and normalized to lowercase. Opaque source
 and context references are trimmed but preserve case. Changing these invariants
 is a versioned storage/contract change; operational thresholds and business
 meaning remain caller-owned inputs.
+
+## Version 0.2.0a2
+
+Adds `po_0002_observation_holds` (table `mod_pos.observation_holds`) and the
+`place_observation_hold`, `release_observation_hold` and
+`list_observation_holds` operations. Additive: released `po_0001` bytes and
+every existing signature are unchanged, and `prune_observations` behaves as
+before when no hold exists. The hold reference is an open product input of 1 to
+128 characters, trimmed with its case preserved, and is not centrally
+enumerated.

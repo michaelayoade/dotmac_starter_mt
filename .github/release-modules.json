@@ -2699,7 +2699,8 @@
           "dotmac_positioning/models.py",
           "dotmac_positioning/service.py",
           "dotmac_positioning/migrations/__init__.py",
-          "dotmac_positioning/migrations/versions/po_0001_positioning.py"
+          "dotmac_positioning/migrations/versions/po_0001_positioning.py",
+          "dotmac_positioning/migrations/versions/po_0002_observation_holds.py"
         ],
         "forbidden_prefixes": [
           "app/",
