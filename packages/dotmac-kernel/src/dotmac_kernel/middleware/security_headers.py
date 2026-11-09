@@ -49,7 +49,11 @@ from collections.abc import Iterable
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from dotmac_kernel.web_surfaces import BrowserSecurityRequirement
+from dotmac_kernel.web_surfaces import (
+    _BROWSER_DOCUMENT_CONTEXT,
+    BrowserSecurityRequirement,
+    _ResolvedBrowserDocumentPolicy,
+)
 
 _CSP_BASELINE: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("default-src", ("'self'",)),
@@ -167,6 +171,33 @@ def _validate_content_security_policy_override(
             )
 
 
+def _compile_browser_document_policies(
+    baseline: str,
+    policies: tuple[_ResolvedBrowserDocumentPolicy, ...],
+) -> tuple[tuple[_ResolvedBrowserDocumentPolicy, str], ...]:
+    if policies and _parse_content_security_policy(baseline)["script-src"] != (
+        "'self'",
+    ):
+        raise ValueError(
+            "browser document policies require global script-src exactly 'self'"
+        )
+    result = []
+    for binding in policies:
+        sources = " ".join(
+            f"'sha256-{value.sha256}'" for value in binding.declaration.inline_scripts
+        )
+        # Preserve all other directive bytes, including a product's stricter
+        # image policy. Hashes replace self; they never join the global union.
+        segments = baseline.split(";")
+        for index, segment in enumerate(segments):
+            if segment.split()[0:1] and segment.split()[0].lower() == "script-src":
+                leading = segment[: len(segment) - len(segment.lstrip())]
+                trailing = segment[len(segment.rstrip()) :]
+                segments[index] = f"{leading}script-src {sources}{trailing}"
+        result.append((binding, ";".join(segments)))
+    return tuple(result)
+
+
 def _is_secure_request(request: Request) -> bool:
     """Same signal `CSRFMiddleware`/auth cookies use: direct TLS or a
     trusted proxy's x-forwarded-proto."""
@@ -183,6 +214,9 @@ class SecurityHeadersMiddleware:
         enabled: bool = True,
         content_security_policy: str = "",
         browser_security_requirements: Iterable[BrowserSecurityRequirement] = (),
+        browser_document_policies: tuple[
+            tuple[_ResolvedBrowserDocumentPolicy, str], ...
+        ] = (),
         cross_origin_opener_policy: str = "",
         cross_origin_resource_policy: str = "",
     ) -> None:
@@ -195,6 +229,7 @@ class SecurityHeadersMiddleware:
         self.csp = content_security_policy or compose_content_security_policy(
             requirements
         )
+        self.browser_document_policies = tuple(browser_document_policies)
         self.cross_origin_opener_policy = cross_origin_opener_policy
         self.cross_origin_resource_policy = cross_origin_resource_policy
 
@@ -208,7 +243,49 @@ class SecurityHeadersMiddleware:
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
+                original_headers = list(message.get("headers", []))
+                headers = list(original_headers)
+                downstream_csp = [
+                    value
+                    for name, value in original_headers
+                    if name.lower() == b"content-security-policy"
+                ]
+                csp = self.csp
+                context = scope.get(_BROWSER_DOCUMENT_CONTEXT)
+                content_types = [
+                    value.decode("latin-1").split(";", 1)[0].strip().lower()
+                    for name, value in original_headers
+                    if name.lower() == b"content-type"
+                ]
+                if (
+                    scope.get("method") == "GET"
+                    and message.get("status") == 200
+                    and content_types == ["text/html"]
+                    and isinstance(context, tuple)
+                    and len(context) == 2
+                    and context[1] is scope
+                ):
+                    selected = next(
+                        (
+                            policy
+                            for binding, policy in self.browser_document_policies
+                            if context[0] is binding
+                        ),
+                        None,
+                    )
+                    # Never remove a downstream restriction to enable a grant.
+                    # Only byte-identical copies of our selected field can be
+                    # collapsed. Every conflict retains the existing intersection
+                    # of downstream policy fields with the global baseline.
+                    if selected is not None and all(
+                        value == selected.encode() for value in downstream_csp
+                    ):
+                        csp = selected
+                        headers = [
+                            (name, value)
+                            for name, value in original_headers
+                            if name.lower() != b"content-security-policy"
+                        ]
                 headers.extend(
                     [
                         (b"x-content-type-options", b"nosniff"),
@@ -221,7 +298,7 @@ class SecurityHeadersMiddleware:
                             b"permissions-policy",
                             b"camera=(), geolocation=(), microphone=()",
                         ),
-                        (b"content-security-policy", self.csp.encode()),
+                        (b"content-security-policy", csp.encode()),
                     ]
                 )
                 if self.cross_origin_opener_policy:
