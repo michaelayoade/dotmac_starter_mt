@@ -78,7 +78,13 @@ def main() -> None:
         )
         for path in package_paths:
             if Path(path).suffix not in {
-                ".py", ".rs", ".js", ".css", ".html", ".c", ".h"
+                ".py",
+                ".rs",
+                ".js",
+                ".css",
+                ".html",
+                ".c",
+                ".h",
             }:
                 continue
             content = git("show", revision + ":" + path)
@@ -113,7 +119,8 @@ def main() -> None:
         "\n".join(leads) + "\n", encoding="utf-8", newline="\n"
     )
     print(
-        f"Recorded {len(packages)} packages at {revision}; {len(leads)} provenance leads"
+        f"Recorded {len(packages)} packages at {revision}; "
+        f"{len(leads)} provenance leads"
     )
 
 
