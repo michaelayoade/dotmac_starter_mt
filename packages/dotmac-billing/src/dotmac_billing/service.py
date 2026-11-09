@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, DecimalException, localcontext
 from enum import Enum
 from functools import wraps
+from itertools import pairwise
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 from uuid import UUID, uuid4
 
@@ -42,6 +43,7 @@ from dotmac_billing.commands import (
     ApplyNonCashCredit,
     CreateDraftDocument,
     CreateMultiLineDraftDocument,
+    CreateMultiPeriodDraftDocumentV1,
     DeallocationCommand,
     DraftDocumentLine,
     GrantNonCashCredit,
@@ -74,10 +76,13 @@ from dotmac_billing.contracts import (
     DueDateBasisStatus,
     DueDateBasisV1,
     FinancialState,
+    GetInvoiceServicePeriodsV1,
     InvoiceDocumentFactV1,
     InvoiceDocumentFactV2,
     InvoiceDocumentFactV3,
     InvoiceLineFactV1,
+    InvoiceServicePeriodFactV1,
+    InvoiceServicePeriodsV1,
     IssuedRatedInvoiceV1,
     IssueRatedInvoiceV1,
     NonCashCreditEffectV1,
@@ -94,6 +99,12 @@ from dotmac_billing.contracts import (
     RecordDocumentArtifactV1,
     RegisteredIdentifierSnapshotV1,
     RepairDocumentArtifactV1,
+    ServiceChargeComponentV1,
+    ServiceChargeConflictV1,
+    ServiceChargeDocumentFactV1,
+    ServiceChargePeriodV1,
+    ServiceClaimDocumentPhaseV1,
+    ServiceCoverageIntervalV1,
     ServicePeriodEvidenceV1,
     ServicePeriodStatus,
     WithholdingDischargeEffectV1,
@@ -1048,6 +1059,24 @@ def issue_rated_invoice(
     )
 
 
+def _extend_line_amount(unit_amount: Decimal, quantity: Decimal) -> Decimal:
+    with localcontext() as context:
+        context.prec = 60
+        return unit_amount * quantity
+
+
+def quote_catalogue_line_amount_v1(unit_amount: Money, quantity: Decimal) -> Money:
+    """Read-only commercial extension, sharing native line admission arithmetic."""
+    if not quantity.is_finite() or quantity <= 0 or unit_amount.amount < 0:
+        raise BillingRuleViolation(
+            "invalid_line_quantity",
+            "Catalogue line quantity and price must be nonnegative exact money.",
+        )
+    return Money(
+        _extend_line_amount(unit_amount.amount, quantity), unit_amount.currency
+    )
+
+
 def _require_line_input(line: DraftDocumentLine, obligation: _ObligationRow) -> None:
     quantity = line.quantity
     if (
@@ -1075,9 +1104,7 @@ def _require_line_input(line: DraftDocumentLine, obligation: _ObligationRow) -> 
         raise BillingRuleViolation(
             "line_currency_mismatch", "line money must match its obligation"
         )
-    with localcontext() as context:
-        context.prec = 60  # Numeric(20,6) operands multiply without context rounding.
-        product = amount.amount * quantity
+    product = _extend_line_amount(amount.amount, quantity)
     if (
         not amount.amount.is_finite()
         or amount.amount < 0
@@ -1112,6 +1139,242 @@ def _require_homogeneous(obligations: tuple[_ObligationRow, ...]) -> None:
         )
 
 
+def service_charge_period_v1(
+    *,
+    service_ref: str | None,
+    component: ServiceChargeComponentV1,
+    component_id: str,
+    line_start: datetime | str | None,
+    line_end: datetime | str | None,
+    header_start: datetime | None,
+    header_end: datetime | None,
+    catalogue_claim: bool,
+    pending_capped_renewal: bool,
+) -> ServiceChargePeriodV1 | None:
+    """Validate explicit financial period evidence, preserving unknown legacy facts."""
+    if service_ref is None:
+        if catalogue_claim and component is ServiceChargeComponentV1.base:
+            raise BillingRuleViolation(
+                "period_invalid", "Service period requires a service identity."
+            )
+        return None
+    pending = pending_capped_renewal
+    if catalogue_claim and pending and ((line_start is None) != (line_end is None)):
+        raise BillingRuleViolation(
+            "period_invalid", "A renewal needs no dates or a complete activated cycle."
+        )
+    if pending and line_start is not None and line_end is not None:
+        pending = False
+
+    def instant(value: datetime | str | None, strict: bool) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            result = (
+                value if isinstance(value, datetime) else datetime.fromisoformat(value)
+            )
+            if result.tzinfo is None or result.utcoffset() is None:
+                if strict:
+                    raise ValueError("timezone required")
+                result = result.replace(tzinfo=UTC)
+            return result.astimezone(UTC)
+        except ValueError:
+            if strict:
+                raise BillingRuleViolation(
+                    "period_invalid",
+                    "Service period dates need valid timezone-aware instants.",
+                ) from None
+            return None
+
+    if line_start is not None or line_end is not None:
+        start, end = (
+            instant(line_start, catalogue_claim),
+            instant(line_end, catalogue_claim),
+        )
+    elif pending:
+        start, end = None, None
+    else:
+        start, end = instant(header_start, False), instant(header_end, False)
+    if (
+        catalogue_claim
+        and component is ServiceChargeComponentV1.base
+        and not pending
+        and (
+            start is None
+            or end is None
+            or end <= start
+            or line_start is None
+            or line_end is None
+        )
+    ):
+        raise BillingRuleViolation(
+            "period_invalid",
+            "Choose a complete positive service period with exact line dates.",
+        )
+    if start is not None and end is not None and end <= start:
+        start, end = None, None
+    return ServiceChargePeriodV1(
+        service_ref, component, component_id, start, end, catalogue_claim, pending
+    )
+
+
+def service_charge_periods_overlap_v1(
+    left: ServiceChargePeriodV1, right: ServiceChargePeriodV1
+) -> bool:
+    """Half-open service/component identity, including undated renewal intent."""
+    if (left.service_ref, left.component, left.component_id) != (
+        right.service_ref,
+        right.component,
+        right.component_id,
+    ):
+        return False
+    if left.pending_capped_renewal or right.pending_capped_renewal:
+        return True
+    if (
+        left.starts_at is None
+        or left.ends_at is None
+        or right.starts_at is None
+        or right.ends_at is None
+    ):
+        return True
+    return _service_intervals_overlap(
+        left.starts_at, left.ends_at, right.starts_at, right.ends_at
+    )
+
+
+def _service_intervals_overlap(
+    left_start: datetime, left_end: datetime, right_start: datetime, right_end: datetime
+) -> bool:
+    return left_start < right_end and left_end > right_start
+
+
+def resolve_service_charge_conflict_v1(
+    candidate: ServiceChargePeriodV1,
+    *,
+    documents: tuple[ServiceChargeDocumentFactV1, ...],
+    coverage: tuple[ServiceCoverageIntervalV1, ...] = (),
+    unresolved_purchase: bool = False,
+) -> ServiceChargeConflictV1 | None:
+    """One policy for draft/open period claims and non-invoice coverage facts.
+
+    Closed means the document owner proved discharge or terminal closure. It
+    never means a caller inferred cash, coverage or entitlement from a status.
+    Capped renewal buys fresh quota and can overlap a closed prior cycle; one
+    unresolved request still reserves the service. Coverage does not prove cash.
+    """
+    for document in documents:
+        other = document.charge
+        if not (candidate.catalogue_claim or other.catalogue_claim):
+            continue
+        if (
+            candidate.pending_capped_renewal or other.pending_capped_renewal
+        ) and document.phase is ServiceClaimDocumentPhaseV1.closed:
+            continue
+        if service_charge_periods_overlap_v1(candidate, other):
+            return ServiceChargeConflictV1(
+                "period_reserved",
+                document.document_ref,
+                document.document_number,
+                document.phase is ServiceClaimDocumentPhaseV1.draft,
+            )
+    if (
+        not candidate.catalogue_claim
+        or candidate.component is not ServiceChargeComponentV1.base
+    ):
+        return None
+    if unresolved_purchase:
+        return ServiceChargeConflictV1("period_purchase_pending")
+    if (
+        not candidate.pending_capped_renewal
+        and candidate.starts_at is not None
+        and candidate.ends_at is not None
+    ):
+        for interval in coverage:
+            if _service_intervals_overlap(
+                candidate.starts_at,
+                candidate.ends_at,
+                interval.starts_at,
+                interval.ends_at,
+            ):
+                return ServiceChargeConflictV1(
+                    "period_covered",
+                    interval.source_document_ref,
+                    coverage_source=interval.source_kind,
+                )
+    return None
+
+
+def _require_multi_period(obligations: tuple[_ObligationRow, ...]) -> None:
+    """Explicit line periods/services with one document financial identity.
+
+    Non-periodic charges must declare NOT_APPLICABLE; missing monthly evidence
+    is never converted into a periodless line merely to bypass admission.
+    """
+    if not obligations:
+        raise BillingRuleViolation(
+            "multiperiod_lines_missing", "at least one explicit line is required"
+        )
+    attributes = (
+        "billing_account_id",
+        "currency",
+        "minor_units",
+        "subject_ref",
+        "collection_timing",
+    )
+    anchor = obligations[0]
+    if any(
+        any(getattr(row, attr) != getattr(anchor, attr) for attr in attributes)
+        for row in obligations
+    ):
+        raise BillingRuleViolation(
+            "heterogeneous_document", "lines must share one financial basis"
+        )
+    intervals: dict[str, list[_ObligationRow]] = {}
+    for row in obligations:
+        start, end = row.period_start, row.period_end
+        if row.service_ref is not None and not row.service_ref.strip():
+            raise BillingRuleViolation(
+                "multiperiod_service_invalid", "service reference cannot be blank"
+            )
+        if row.service_period_status == ServicePeriodStatus.NOT_APPLICABLE.value:
+            if start is not None or end is not None:
+                raise BillingRuleViolation(
+                    "multiperiod_evidence_invalid",
+                    "non-periodic charges cannot carry period dates",
+                )
+            continue
+        if (
+            row.service_period_status != ServicePeriodStatus.VERIFIED.value
+            or not row.service_ref
+            or start is None
+            or end is None
+            or start.tzinfo is None
+            or start.utcoffset() is None
+            or end.tzinfo is None
+            or end.utcoffset() is None
+            or end <= start
+        ):
+            raise BillingRuleViolation(
+                "multiperiod_evidence_invalid",
+                "service lines require verified positive timezone-aware boundaries",
+            )
+        intervals.setdefault(row.service_ref, []).append(row)
+    for rows in intervals.values():
+        ordered = sorted(rows, key=lambda row: cast(datetime, row.period_start))
+        if any(
+            _service_intervals_overlap(
+                cast(datetime, left.period_start),
+                cast(datetime, left.period_end),
+                cast(datetime, right.period_start),
+                cast(datetime, right.period_end),
+            )
+            for left, right in pairwise(ordered)
+        ):
+            raise BillingRuleViolation(
+                "multiperiod_overlap", "periods for the same service must not overlap"
+            )
+
+
 def _require_undocumented(
     db: Session, *, scope: Scope, plane: _PlaneModels, obligation_id: UUID
 ) -> None:
@@ -1141,6 +1404,30 @@ def _require_undocumented(
 def create_multi_line_draft_document(
     db: Session, *, scope: Scope, command: CreateMultiLineDraftDocument
 ) -> _DocumentRow:
+    """Original homogeneous authoring contract, unchanged."""
+    return _create_multi_line_draft(
+        db, scope=scope, command=command, multi_period=False
+    )
+
+
+def create_multi_period_draft_document_v1(
+    db: Session, *, scope: Scope, command: CreateMultiPeriodDraftDocumentV1
+) -> _DocumentRow:
+    """Draft explicit service intervals without inventing paid-period attribution."""
+    if type(command) is not CreateMultiPeriodDraftDocumentV1:
+        raise BillingRuleViolation(
+            "multiperiod_command_required", "explicit V1 multi-period command required"
+        )
+    return _create_multi_line_draft(db, scope=scope, command=command, multi_period=True)
+
+
+def _create_multi_line_draft(
+    db: Session,
+    *,
+    scope: Scope,
+    command: CreateMultiLineDraftDocument,
+    multi_period: bool,
+) -> _DocumentRow:
     plane = _models(scope)
     account = _one(
         db,
@@ -1152,7 +1439,9 @@ def create_multi_line_draft_document(
     offered = fingerprint_of(asdict(command))
 
     def operation(session: Session) -> dict[str, object]:
-        if not command.idempotency_key.strip() or len(command.lines) < 2:
+        if not command.idempotency_key.strip() or len(command.lines) < (
+            1 if multi_period else 2
+        ):
             raise BillingRuleViolation(
                 "empty_document",
                 "multiline draft requires an idempotency key and at least two lines",
@@ -1166,7 +1455,7 @@ def create_multi_line_draft_document(
             _one(session, scope=scope, model=plane.obligation, row_id=key)
             for key in ids
         )
-        _require_homogeneous(obligations)
+        (_require_multi_period if multi_period else _require_homogeneous)(obligations)
         for line, row in zip(command.lines, obligations, strict=True):
             if row.billing_account_id != account.id:
                 raise BillingRuleViolation(
@@ -1202,7 +1491,9 @@ def create_multi_line_draft_document(
                     "id": document_id,
                     "billing_account_id": account.id,
                     "obligation_id": anchor.id,
-                    "authoring_mode": "explicit_multiline",
+                    "authoring_mode": "explicit_multiperiod"
+                    if multi_period
+                    else "explicit_multiline",
                     "document_kind": "invoice",
                     "credits_document_id": None,
                     "lifecycle": "draft",
@@ -1272,7 +1563,9 @@ def create_multi_line_draft_document(
     outcome = _idempotent(
         db,
         scope=scope,
-        operation_scope="billing.document.multiline_draft",
+        operation_scope="billing.document.multiperiod_draft.v1"
+        if multi_period
+        else "billing.document.multiline_draft",
         key=command.idempotency_key,
         fingerprint=offered,
         operation=operation,
@@ -1302,8 +1595,10 @@ def _validate_invoice_lines(
             )
         ).scalars()
     )
-    explicit = document.authoring_mode == "explicit_multiline"
-    if explicit and len(lines) < 2:
+    explicit = document.authoring_mode in {"explicit_multiline", "explicit_multiperiod"}
+    if explicit and len(lines) < (
+        1 if document.authoring_mode == "explicit_multiperiod" else 2
+    ):
         raise BillingRuleViolation(
             "multiline_lines_missing",
             "explicit multiline invoice requires at least two lines",
@@ -1316,7 +1611,11 @@ def _validate_invoice_lines(
         _one(db, scope=scope, model=plane.obligation, row_id=line.obligation_id)
         for line in lines
     )
-    _require_homogeneous(obligations)
+    (
+        _require_multi_period
+        if document.authoring_mode == "explicit_multiperiod"
+        else _require_homogeneous
+    )(obligations)
     if tuple(line.line_number for line in lines) != tuple(range(1, len(lines) + 1)):
         raise BillingRuleViolation(
             "invalid_line_order", "invoice line numbers must be contiguous"
@@ -1460,11 +1759,39 @@ def _receivable_exposure(
         financial_state = "partially_resolved"
     else:
         financial_state = "open"
-    service_period = ServicePeriodEvidenceV1(
-        status=ServicePeriodStatus(obligation.service_period_status),
-        starts_at=obligation.period_start,
-        ends_at=obligation.period_end,
+    # Exact line periods remain distinct; an aggregate financial balance
+    # cannot attribute partial settlement to the anchor's first month.
+    service_period = (
+        ServicePeriodEvidenceV1(status=ServicePeriodStatus.UNKNOWN_UNVERIFIED)
+        if document.authoring_mode == "explicit_multiperiod"
+        else ServicePeriodEvidenceV1(
+            status=ServicePeriodStatus(obligation.service_period_status),
+            starts_at=obligation.period_start,
+            ends_at=obligation.period_end,
+        )
     )
+    service_ref = obligation.service_ref
+    if document.authoring_mode == "explicit_multiperiod":
+        refs = tuple(
+            db.execute(
+                _where_scope(
+                    _where_scope(
+                        select(plane.obligation.service_ref)
+                        .select_from(plane.line)
+                        .join(
+                            plane.obligation,
+                            plane.obligation.id == plane.line.obligation_id,
+                        )
+                        .where(plane.line.document_id == document.id),
+                        scope,
+                        plane.line,
+                    ),
+                    scope,
+                    plane.obligation,
+                )
+            ).scalars()
+        )
+        service_ref = refs[0] if refs and all(ref == refs[0] for ref in refs) else None
     due_date_basis = _due_date_basis(document.due_date_basis)
     collectible = _money(outstanding, document.currency, document.minor_units)
     payload = {
@@ -1473,7 +1800,7 @@ def _receivable_exposure(
         "exposure_ref": f"document:{document.id}",
         "billing_account_id": document.billing_account_id,
         "subject_ref": obligation.subject_ref,
-        "service_ref": obligation.service_ref,
+        "service_ref": service_ref,
         "collection_timing": obligation.collection_timing,
         "source_version": source_version,
         "posting_group_watermark": posting_group_watermark,
@@ -1495,7 +1822,7 @@ def _receivable_exposure(
         exposure_ref=f"document:{document.id}",
         billing_account_id=document.billing_account_id,
         subject_ref=obligation.subject_ref,
-        service_ref=obligation.service_ref,
+        service_ref=service_ref,
         collection_timing=cast(CollectionTiming, obligation.collection_timing),
         source_version=source_version,
         posting_group_watermark=posting_group_watermark,
@@ -1711,7 +2038,7 @@ def _document_financial_snapshots(
     )
     if (
         document.document_kind == "invoice"
-        and document.authoring_mode == "explicit_multiline"
+        and document.authoring_mode in {"explicit_multiline", "explicit_multiperiod"}
         and any(row.document_id == document.id for row in taxes)
     ):
         raise BillingRuleViolation(
@@ -5800,36 +6127,39 @@ def repair_document_artifact(
 
 
 __all__ = [
-    "issue_rated_invoice",
-    "provision_opening_window",
-    "seal_opening_window",
-    "import_opening_account",
-    "record_opening_cash_refund",
-    "correct_opening_cash_refund",
-    "reverse_cash_credit_draw",
-    "reverse_opening_account_import",
-    "grant_non_cash_credit",
-    "apply_non_cash_credit",
-    "reverse_non_cash_credit_application",
-    "reduce_non_cash_credit_grant",
-    "accept_withholding_discharge",
-    "reverse_withholding_discharge",
+    "service_charge_period_v1",
+    "service_charge_periods_overlap_v1",
+    "resolve_service_charge_conflict_v1",
     "accept_rated_obligation",
     "accept_settlement",
+    "accept_withholding_discharge",
     "allocate_settlement",
     "apply_available_credit",
+    "apply_non_cash_credit",
+    "correct_opening_cash_refund",
     "create_billing_account",
     "create_draft_document",
     "create_multi_line_draft_document",
     "deallocate_settlement",
+    "grant_non_cash_credit",
+    "import_opening_account",
     "issue_credit_note",
     "issue_document",
+    "issue_rated_invoice",
+    "provision_opening_window",
     "reallocate_settlement",
     "rebuild_receivable_position",
     "record_document_artifact",
-    "repair_document_artifact",
+    "record_opening_cash_refund",
+    "reduce_non_cash_credit_grant",
     "refund_settlement",
+    "repair_document_artifact",
+    "reverse_cash_credit_draw",
+    "reverse_non_cash_credit_application",
+    "reverse_opening_account_import",
     "reverse_posting_group",
+    "reverse_withholding_discharge",
+    "seal_opening_window",
     "void_document",
 ]
 
@@ -8141,4 +8471,107 @@ def reverse_opening_account_import_v2(
     )
     return get_opening_import_receipt_v2(
         db, scope=scope, receipt_id=UUID(str(outcome.result["receipt_id"]))
+    )
+
+
+def get_invoice_service_periods_v1(
+    db: Session, *, scope: Scope, request: GetInvoiceServicePeriodsV1
+) -> InvoiceServicePeriodsV1:
+    """Return original issued evidence; never map a partial payment to a month.
+
+    Scalar reads bypass mutable identity-map instances. Rated obligations and
+    issued line identities are immutable under the existing database guards.
+    The result describes original issuance, including after correction/void.
+    """
+    if scope != request.scope:
+        raise BillingRuleViolation("scope_mismatch", "query scope mismatch")
+    plane = _models(scope)
+    with db.no_autoflush:
+        header = db.execute(
+            _where_scope(
+                select(
+                    plane.document.document_kind,
+                    plane.document.issued_at,
+                    plane.document.billing_account_id,
+                ).where(plane.document.id == request.invoice_id),
+                scope,
+                plane.document,
+            )
+        ).one_or_none()
+        if (
+            header is None
+            or header.document_kind != "invoice"
+            or header.issued_at is None
+        ):
+            raise BillingRuleViolation(
+                "issued_invoice_required", "period facts require an issued invoice"
+            )
+        statement = (
+            select(
+                plane.line.id.label("line_id"),
+                plane.line.line_number,
+                plane.line.obligation_id,
+                plane.obligation.service_ref,
+                plane.obligation.service_period_status,
+                plane.obligation.period_start,
+                plane.obligation.period_end,
+                plane.line.total_amount,
+                plane.line.currency,
+                plane.line.minor_units,
+            )
+            .select_from(plane.line)
+            .join(plane.obligation, plane.obligation.id == plane.line.obligation_id)
+            .where(
+                plane.line.document_id == request.invoice_id,
+                plane.line.billing_account_id == header.billing_account_id,
+                plane.obligation.billing_account_id == header.billing_account_id,
+            )
+            .order_by(plane.line.line_number)
+        )
+        statement = _where_scope(
+            _where_scope(statement, scope, plane.line), scope, plane.obligation
+        )
+        rows = db.execute(statement).all()
+    facts = []
+    for row in rows:
+        if row.service_period_status not in {
+            ServicePeriodStatus.VERIFIED.value,
+            ServicePeriodStatus.NOT_APPLICABLE.value,
+        }:
+            raise BillingRuleViolation(
+                "period_evidence_unverified", "issued line period is unverified"
+            )
+        facts.append(
+            InvoiceServicePeriodFactV1(
+                line_id=row.line_id,
+                line_number=row.line_number,
+                obligation_id=row.obligation_id,
+                service_ref=row.service_ref,
+                period=ServicePeriodEvidenceV1(
+                    status=ServicePeriodStatus(row.service_period_status),
+                    starts_at=row.period_start,
+                    ends_at=row.period_end,
+                ),
+                total_amount=_money(row.total_amount, row.currency, row.minor_units),
+            )
+        )
+    if not facts:
+        raise BillingRuleViolation(
+            "period_evidence_missing", "invoice has no rated service lines"
+        )
+    return InvoiceServicePeriodsV1(
+        scope=scope,
+        billing_account_id=header.billing_account_id,
+        invoice_id=request.invoice_id,
+        periods=tuple(facts),
+        fingerprint=fingerprint_of(
+            _wire_value(
+                {
+                    "scope": scope,
+                    "invoice_id": request.invoice_id,
+                    "billing_account_id": header.billing_account_id,
+                    "periods": tuple(facts),
+                }
+            )
+        ),
     )

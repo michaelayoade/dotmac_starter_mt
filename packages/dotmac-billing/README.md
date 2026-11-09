@@ -403,3 +403,28 @@ staging acceptance on Seabone remains required before any separately authorized
 production authority change. These gates activate no policy or writer. The native
 accepted-proof capability remains bounded to one pristine invoice proof lane;
 this release train does not complete the broader legacy billing cutover.
+
+
+## Candidate multi-period invoices
+
+`CreateMultiPeriodDraftDocumentV1` and `create_multi_period_draft_document_v1`
+explicitly admit distinct verified nonoverlapping periods and explicit non-periodic items.
+The original `CreateMultiLineDraftDocument` remains homogeneous. The candidate
+requires migration bi13. `get_invoice_service_periods_v1` returns original
+issued line-period facts; financial settlement remains document-grained.
+Unknown aggregate period evidence must never be interpreted as unpaid service.
+The caller still owns preventing duplicate economic periods across different
+obligation sources and its root transaction. No package has been published by
+this source change.
+
+The a12.dev0 source candidate also exports immutable service charge component,
+period, document-phase and coverage facts through `dotmac_billing`.
+`service_charge_period_v1`, `service_charge_periods_overlap_v1` and
+`resolve_service_charge_conflict_v1` share the qualifying duplicate-period and
+capped-renewal policy. Products supply observed facts and own duplicate claims
+across obligation sources; coverage is not proof of cash.
+`GetBillingAccountByExternalRefV1` / `get_billing_account_by_external_ref_v1`
+and `GetCurrentInvoiceReceivableV1` / `get_current_invoice_receivable_v1` expose
+scoped current observations. `WithholdingCashRequirementV1` quotes required cash
+from Tax-owned withholding amounts without recording a discharge or settlement.
+All remain source candidates pending publication and qualified adoption.

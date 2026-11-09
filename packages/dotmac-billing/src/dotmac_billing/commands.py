@@ -90,6 +90,11 @@ class CreateMultiLineDraftDocument:
 
 
 @dataclass(frozen=True, slots=True)
+class CreateMultiPeriodDraftDocumentV1(CreateMultiLineDraftDocument):
+    """Opt in to explicit line periods/services; payments remain document-grained."""
+
+
+@dataclass(frozen=True, slots=True)
 class IssueDocument:
     document_id: UUID
     series_code: str

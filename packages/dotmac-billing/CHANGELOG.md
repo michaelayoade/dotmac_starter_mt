@@ -2,6 +2,19 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a12.dev0 — UNRELEASED DEVELOPMENT CANDIDATE
+
+- Add explicit versioned multi-period document authoring for one service with
+  verified nonoverlapping intervals and explicit non-periodic one-time lines,
+  retaining old multiline homogeneity.
+- Add bi13 authoring-mode admission and downgrade refusal with existing rows.
+- Publish original immutable line-to-period query facts without assigning
+  document-level partial settlement to individual months. Aggregate exposure
+  does not falsely claim the first month represents every line.
+- Source preparation only: no tag, package publication, consumer pin or
+  production activation. Separate a11 development is not incorporated here.
+
+
 ## 0.1.0a10 — UNRELEASED
 
 - Retain complete public Tax V2 dependency evidence and opaque `rv2:` seals,

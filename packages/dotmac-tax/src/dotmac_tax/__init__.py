@@ -23,6 +23,11 @@ from dotmac_tax._policy_query_contracts import (
     TaxRuleHistorySupersessionV1,
 )
 from dotmac_tax.contracts import (
+    LegacyCommercialTaxAmountsV1,
+    LegacyCommercialTaxDecisionV1,
+    LegacyCommercialTaxFactsV1,
+    LegacyCommercialTaxSourceV1,
+    LegacyTaxRateFactV1,
     StatutoryReportBoxInput,
     TaxAuthorityInput,
     TaxAuthorityV1,
@@ -66,7 +71,9 @@ from dotmac_tax.service import (
     TaxRuleViolation,
     accept_tax_return,
     amend_tax_return,
+    apply_legacy_catalogue_price_basis_v1,
     approve_tax_return,
+    calculate_legacy_commercial_tax_amount_v1,
     create_filing_obligation,
     create_statutory_report_definition,
     create_tax_authority,
@@ -99,7 +106,9 @@ from dotmac_tax.service import (
     preview_tax_policy_v2,
     publish_tax_rule,
     publish_tax_subject_classification,
+    quote_legacy_commercial_amounts_v1,
     reject_tax_return,
+    resolve_legacy_commercial_tax_v1,
     supersede_tax_rule,
     supersede_tax_rule_v2,
     update_tax_authority,
@@ -110,6 +119,15 @@ from dotmac_tax.service import (
 __version__ = "0.1.0a7"
 
 __all__ = [
+    "LegacyCommercialTaxAmountsV1",
+    "LegacyCommercialTaxDecisionV1",
+    "LegacyCommercialTaxFactsV1",
+    "LegacyCommercialTaxSourceV1",
+    "LegacyTaxRateFactV1",
+    "apply_legacy_catalogue_price_basis_v1",
+    "calculate_legacy_commercial_tax_amount_v1",
+    "quote_legacy_commercial_amounts_v1",
+    "resolve_legacy_commercial_tax_v1",
     "get_tax_determination_set_v2",
     "ListTaxRuleHistoryV2",
     "TaxRuleHistoryEntryV2",

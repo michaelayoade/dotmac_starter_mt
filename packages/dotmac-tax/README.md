@@ -162,3 +162,19 @@ staging acceptance on Seabone remains required before any separately authorized
 production authority change. These gates activate no policy or writer. The native
 accepted-proof capability remains bounded to one pristine invoice proof lane;
 this release train does not complete the broader legacy billing cutover.
+
+## Legacy commercial compatibility — unpublished a7 source
+
+The candidate exposes `LegacyTaxRateFactV1`, `LegacyCommercialTaxFactsV1`,
+`LegacyCommercialTaxDecisionV1`, `LegacyCommercialTaxSourceV1` and
+`LegacyCommercialTaxAmountsV1` through the `dotmac_tax` root facade.
+`resolve_legacy_commercial_tax_v1` selects observed legacy policy and
+`apply_legacy_catalogue_price_basis_v1` applies catalogue price basis.
+`calculate_legacy_commercial_tax_amount_v1` preserves signed legacy arithmetic;
+`quote_legacy_commercial_amounts_v1` returns exact `Money` for nonnegative
+quotes. Their explicit `legacy_commercial_compatibility.v1` provenance cannot
+serve as sealed statutory determination evidence. This compatibility PORT-DELTA
+qualifies Sub customer-policy, service-address/account rate and catalogue VAT
+precedence already inventoried in the dossier. Candidate source callers are
+not adoption proof: Sub retains its released a4 pin until verified publication
+and a separately qualified upgrade. No production authority transfer is claimed.

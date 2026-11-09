@@ -232,6 +232,7 @@ class BillingDocument(Base, _TenantRow, _DocumentColumns):
     __table_args__ = (
         CheckConstraint(
             "authoring_mode IN ('legacy_single', 'explicit_multiline', "
+            "'explicit_multiperiod', "
             "'imported_open_item')",
             name="ck_documents_authoring_mode",
         ),
@@ -283,6 +284,7 @@ class PlatformBillingDocument(Base, _DocumentColumns):
     __table_args__ = (
         CheckConstraint(
             "authoring_mode IN ('legacy_single', 'explicit_multiline', "
+            "'explicit_multiperiod', "
             "'imported_open_item')",
             name="ck_platform_documents_authoring_mode",
         ),

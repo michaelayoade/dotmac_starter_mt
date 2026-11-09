@@ -5,10 +5,68 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import ClassVar, Literal
 from uuid import UUID
 
 from dotmac_kernel.money import Currency, Money
+
+
+class LegacyCommercialTaxSourceV1(StrEnum):
+    customer_vat_exemption = "customer_vat_exemption"
+    service_address_tax_rate = "service_address_tax_rate"
+    account_tax_rate = "account_tax_rate"
+    catalog_vat_percent = "catalog_vat_percent"
+    catalog_taxable_default = "catalog_taxable_default"
+    catalog_offer_exempt = "catalog_offer_exempt"
+    configured_default = "configured_default"
+    unconfigured = "unconfigured"
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyTaxRateFactV1:
+    rate_id: UUID
+    percent: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyCommercialTaxFactsV1:
+    """Observed compatibility facts, never a native Tax determination."""
+
+    vat_exempt: bool
+    policy_version: int
+    address_rate_id: UUID | None
+    account_rate_id: UUID | None
+    offer_present: bool
+    offer_with_vat: bool
+    offer_vat_percent: Decimal | None
+    default_rate_id: UUID | None
+    tax_application: Literal["exclusive", "inclusive", "exempt"]
+    active_rates: tuple[LegacyTaxRateFactV1, ...]
+    explicit_price_exempt: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyCommercialTaxDecisionV1:
+    tax_rate_id: UUID | None
+    tax_rate_percent: Decimal | None
+    tax_application: Literal["exclusive", "inclusive", "exempt"]
+    source: LegacyCommercialTaxSourceV1
+    customer_tax_policy_version: int
+    provenance: Literal["legacy_commercial_compatibility.v1"] = (
+        "legacy_commercial_compatibility.v1"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyCommercialTaxAmountsV1:
+    line_amount: Money
+    tax_amount: Money
+    invoice_total: Money
+    provenance: Literal["legacy_commercial_compatibility.v1"] = (
+        "legacy_commercial_compatibility.v1"
+    )
+
 
 _REPORTABLE_ZERO_TREATMENTS = frozenset({"zero_rated", "exempt", "out_of_scope"})
 _KNOWN_TREATMENTS = _REPORTABLE_ZERO_TREATMENTS | {"standard_rated"}
@@ -552,6 +610,11 @@ class StatutoryReportBoxInput:
 
 
 __all__ = [
+    "LegacyCommercialTaxAmountsV1",
+    "LegacyCommercialTaxDecisionV1",
+    "LegacyCommercialTaxFactsV1",
+    "LegacyCommercialTaxSourceV1",
+    "LegacyTaxRateFactV1",
     "StatutoryReportBoxInput",
     "TaxAuthorityInput",
     "TaxAuthorityV1",
@@ -560,10 +623,10 @@ __all__ = [
     "TaxDeterminationLineV1",
     "TaxDeterminationSetV1",
     "TaxFact",
-    "TaxPolicyPreviewV1",
-    "TaxPolicyPreviewComponentV1",
     "TaxJurisdictionInput",
     "TaxJurisdictionV1",
+    "TaxPolicyPreviewComponentV1",
+    "TaxPolicyPreviewV1",
     "TaxRuleBandInput",
     "TaxRuleBandV1",
     "TaxRuleInput",
@@ -629,11 +692,8 @@ class TaxBaseDependencyPolicyV1:
             raise ValueError("dependency prior signature is required")
         if self.selection not in {"all_prior", "tax_code_ids"}:
             raise ValueError("unknown dependency selection")
-        if (
-            self.selection == "all_prior"
-            and codes
-            or self.selection == "tax_code_ids"
-            and not codes
+        if (self.selection == "all_prior" and codes) or (
+            self.selection == "tax_code_ids" and not codes
         ):
             raise ValueError(
                 "selected-code policy requires codes; all-prior forbids codes"
@@ -844,18 +904,18 @@ class TaxPolicyPreviewV2(TaxPolicyPreviewV1):
 
 
 __all__ += [
-    "TaxCommercialSourceV1",
-    "TaxFactSignatureV1",
     "TaxBaseDependencyPolicyV1",
-    "TaxRuleInputV2",
-    "TaxRuleV2",
-    "TaxRuleSupersessionInputV2",
-    "TaxRuleSupersessionV2",
-    "TaxPriorResultReferenceV1",
-    "TaxFactV2",
+    "TaxCommercialSourceV1",
     "TaxDependencyComponentV1",
     "TaxDeterminationComponentV2",
     "TaxDeterminationSetV2",
+    "TaxFactSignatureV1",
+    "TaxFactV2",
     "TaxPolicyPreviewComponentV2",
     "TaxPolicyPreviewV2",
+    "TaxPriorResultReferenceV1",
+    "TaxRuleInputV2",
+    "TaxRuleSupersessionInputV2",
+    "TaxRuleSupersessionV2",
+    "TaxRuleV2",
 ]

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import ClassVar, Literal, Protocol
 from uuid import UUID
 
@@ -30,6 +30,120 @@ SETTLEMENT_CONTRACT = "billing.settlement.accept.v1"
 RECEIVABLE_POSITION_CONTRACT = "billing.receivable.position.v1"
 RECEIVABLE_EXPOSURE_CONTRACT = "billing.receivable.exposure.v1"
 DOCUMENT_FACT_CONTRACT = "billing.invoice.document.fact.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class WithholdingCashRequirementV1:
+    """Billing-owned cash requirement from a Tax-owned withholding amount.
+
+    A quote is not accepted withholding, cash, credit, or a posting.
+    """
+
+    invoice_total: Money
+    withholding_amount: Money
+    cash_required: Money = field(init=False)
+
+    def __post_init__(self) -> None:
+        total, withheld = self.invoice_total, self.withholding_amount
+        if (
+            type(total) is not Money
+            or type(withheld) is not Money
+            or total.currency != withheld.currency
+            or total.amount <= 0
+            or withheld.amount <= 0
+            or withheld.amount >= total.amount
+        ):
+            raise BillingRuleViolation(
+                "withholding_quote_invalid",
+                "withholding must leave positive exact cash",
+            )
+        from decimal import localcontext
+
+        from dotmac_billing._opening_values import cash_decimal_context
+
+        with localcontext(cash_decimal_context()):
+            object.__setattr__(
+                self,
+                "cash_required",
+                Money(total.amount - withheld.amount, total.currency),
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class GetBillingAccountByExternalRefV1:
+    scope: Scope
+    external_account_ref: str
+    currency: Currency
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.scope, TenantScope | PlatformScope)
+            or not isinstance(self.external_account_ref, str)
+            or not self.external_account_ref.strip()
+            or len(self.external_account_ref) > 255
+            or type(self.currency) is not Currency
+        ):
+            raise BillingRuleViolation(
+                "account_lookup_invalid",
+                "Account lookup requires scoped exact identity.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class GetCurrentInvoiceReceivableV1:
+    scope: Scope
+    document_id: UUID
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, TenantScope | PlatformScope) or not isinstance(
+            self.document_id, UUID
+        ):
+            raise BillingRuleViolation(
+                "invoice_lookup_invalid",
+                "Invoice lookup requires scoped UUID identity.",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentInvoiceReceivableV1:
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    source_version: int
+    fact_version: int
+    subtotal: Money
+    tax_total: Money
+    invoice_total: Money
+    outstanding: Money
+    cash_applied: Money
+    withholding_applied: Money
+    active: bool
+    settlement_effective_at: datetime | None = None
+    cash_allocation_ids: tuple[UUID, ...] = ()
+    withholding_discharge_ids: tuple[UUID, ...] = ()
+    opening_cash_effect_ids: tuple[UUID, ...] = ()
+    cash_and_withholding_settled: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        from decimal import localcontext
+
+        from dotmac_billing._opening_values import cash_decimal_context
+
+        with localcontext(cash_decimal_context()):
+            object.__setattr__(
+                self,
+                "cash_and_withholding_settled",
+                bool(
+                    self.active
+                    and self.cash_applied.amount > 0
+                    and self.withholding_applied.amount >= 0
+                    and self.outstanding.amount == 0
+                    and self.cash_applied.amount + self.withholding_applied.amount
+                    == self.invoice_total.amount
+                ),
+            )
+
+
 DOCUMENT_FACT_V2_CONTRACT = "billing.invoice.document.fact.v2"
 DOCUMENT_FACT_V3_CONTRACT = "billing.invoice.document.fact.v3"
 ACCOUNTING_FACT_CONTRACT = "billing.accounting.fact.v1"
@@ -1385,83 +1499,96 @@ class AccountingFactV3:
 
 
 __all__ = [
-    "DOCUMENT_FACT_V3_CONTRACT",
-    "AcceptRatedObligationV3",
-    "IssueRatedInvoiceV3",
-    "InvoiceDocumentFactV3",
-    "StoredInvoiceDocumentFactV3",
-    "WithholdingTaxEvidenceV2",
-    "IssueRatedInvoiceV1",
-    "IssuedRatedInvoiceV1",
-    "ObligationSourceRegistry",
-    "BillingAccountObservationV1",
-    "GetBillingAccountObservationV1",
-    "GetCurrentReceivablePositionV1",
-    "CurrentReceivablePositionV1",
-    "GetCurrentCashCreditDrawV1",
-    "CurrentCashCreditDrawV1",
-    "CashCreditDrawState",
-    "GetCurrentSettlementAllocationV1",
-    "CurrentSettlementAllocationV1",
-    "ACCOUNTING_FACT_V3_CONTRACT",
-    "RECEIVABLE_POSITION_V2_CONTRACT",
-    "NonCashCreditEffectKind",
-    "NonCashCreditPolicyParameterV1",
-    "NonCashCreditClassificationV1",
-    "NonCashCreditGrantV1",
-    "NonCashCreditEffectV1",
-    "ReceivablePositionV2",
-    "AccountingFactV3",
+    "ServiceChargeComponentV1",
+    "ServiceClaimDocumentPhaseV1",
+    "ServiceChargePeriodV1",
+    "ServiceChargeDocumentFactV1",
+    "ServiceCoverageIntervalV1",
+    "ServiceChargeConflictV1",
+    "WithholdingCashRequirementV1",
+    "GetBillingAccountByExternalRefV1",
+    "GetCurrentInvoiceReceivableV1",
+    "CurrentInvoiceReceivableV1",
     "ACCOUNTING_FACT_CONTRACT",
     "ACCOUNTING_FACT_V2_CONTRACT",
-    "AccountingFactV2",
-    "WithholdingTaxLineV1",
-    "WithholdingTaxEvidenceV1",
-    "WithholdingCertificateObservationV1",
-    "WithholdingDischargeEffectV1",
+    "ACCOUNTING_FACT_V3_CONTRACT",
     "ARTIFACT_COMMAND_CONTRACT",
     "ARTIFACT_REPAIR_CONTRACT",
     "DOCUMENT_FACT_CONTRACT",
     "DOCUMENT_FACT_V2_CONTRACT",
-    "AcceptRatedObligationV2",
-    "IssueRatedInvoiceV2",
-    "InvoiceDocumentFactV2",
-    "StoredInvoiceDocumentFactV2",
+    "DOCUMENT_FACT_V3_CONTRACT",
     "OBLIGATION_ACCEPT_CONTRACT",
     "RECEIVABLE_EXPOSURE_CONTRACT",
     "RECEIVABLE_POSITION_CONTRACT",
+    "RECEIVABLE_POSITION_V2_CONTRACT",
     "SETTLEMENT_CONTRACT",
     "AcceptRatedObligationV1",
+    "AcceptRatedObligationV2",
+    "AcceptRatedObligationV3",
     "AcceptSettlementV1",
     "AccountingAllocationEffectV1",
     "AccountingEffectV1",
     "AccountingFactV1",
+    "AccountingFactV2",
+    "AccountingFactV3",
     "AppliedFxSnapshotV1",
     "AppliedTaxSnapshotV1",
+    "BillingAccountObservationV1",
+    "CashCreditDrawState",
+    "CurrentCashCreditDrawV1",
+    "CurrentReceivablePositionV1",
+    "CurrentSettlementAllocationV1",
+    "DiscountSnapshotV1",
     "DueDateBasisStatus",
     "DueDateBasisV1",
-    "DiscountSnapshotV1",
-    "GetInvoiceDocumentFactV1",
-    "InvoiceLineFactV1",
-    "InvoiceDocumentFactV1",
     "FinancialState",
-    "PositionCompleteness",
-    "PositionProjectionMode",
-    "ReceivableSourceAuthority",
+    "GetBillingAccountObservationV1",
+    "GetCurrentCashCreditDrawV1",
+    "GetCurrentReceivablePositionV1",
+    "GetCurrentSettlementAllocationV1",
+    "GetInvoiceDocumentFactV1",
+    "GetInvoiceServicePeriodsV1",
+    "InvoiceDocumentFactV1",
+    "InvoiceDocumentFactV2",
+    "InvoiceDocumentFactV3",
+    "InvoiceLineFactV1",
+    "InvoiceServicePeriodFactV1",
+    "InvoiceServicePeriodsV1",
+    "IssueRatedInvoiceV1",
+    "IssueRatedInvoiceV2",
+    "IssueRatedInvoiceV3",
+    "IssuedRatedInvoiceV1",
+    "NonCashCreditClassificationV1",
+    "NonCashCreditEffectKind",
+    "NonCashCreditEffectV1",
+    "NonCashCreditGrantV1",
+    "NonCashCreditPolicyParameterV1",
+    "ObligationSourceRegistry",
     "PartyDocumentSnapshotV1",
     "PartyTaxIdentitySnapshotV1",
     "PaymentInstructionsSnapshotV1",
+    "PositionCompleteness",
+    "PositionProjectionMode",
     "PostalAddressSnapshotV1",
     "PresentationAssetReferenceV1",
     "ReceivableExposureV1",
     "ReceivablePositionV1",
-    "RepairDocumentArtifactV1",
-    "RegisteredIdentifierSnapshotV1",
+    "ReceivablePositionV2",
+    "ReceivableSourceAuthority",
     "RecordDocumentArtifactV1",
+    "RegisteredIdentifierSnapshotV1",
+    "RepairDocumentArtifactV1",
     "ServicePeriodEvidenceV1",
     "ServicePeriodStatus",
     "SettlementFundingLane",
     "StoredInvoiceDocumentFactV1",
+    "StoredInvoiceDocumentFactV2",
+    "StoredInvoiceDocumentFactV3",
+    "WithholdingCertificateObservationV1",
+    "WithholdingDischargeEffectV1",
+    "WithholdingTaxEvidenceV1",
+    "WithholdingTaxEvidenceV2",
+    "WithholdingTaxLineV1",
 ]
 
 
@@ -1573,3 +1700,96 @@ class WithholdingTaxEvidenceV2(WithholdingTaxEvidenceV1):
             )
         ):
             raise ValueError("withholding evidence differs from retained Tax V2 result")
+
+
+@dataclass(frozen=True, slots=True)
+class GetInvoiceServicePeriodsV1:
+    """Read original issued line-to-period evidence, without payment inference."""
+
+    scope: Scope
+    invoice_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceServicePeriodFactV1:
+    line_id: UUID
+    line_number: int
+    obligation_id: UUID
+    service_ref: str | None
+    period: ServicePeriodEvidenceV1
+    total_amount: Money
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceServicePeriodsV1:
+    scope: Scope
+    billing_account_id: UUID
+    invoice_id: UUID
+    periods: tuple[InvoiceServicePeriodFactV1, ...]
+    fingerprint: str
+    settlement_grain: Literal["document"] = "document"
+
+
+class ServiceChargeComponentV1(StrEnum):
+    base = "base_subscription"
+    addon = "recurring_addon"
+    other = "other"
+
+
+class ServiceClaimDocumentPhaseV1(StrEnum):
+    draft = "draft"
+    open = "open"
+    closed = "closed"
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceChargePeriodV1:
+    service_ref: str
+    component: ServiceChargeComponentV1
+    component_id: str
+    starts_at: datetime | None
+    ends_at: datetime | None
+    catalogue_claim: bool = False
+    pending_capped_renewal: bool = False
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.service_ref, str)
+            or not self.service_ref.strip()
+            or not isinstance(self.component, ServiceChargeComponentV1)
+        ):
+            raise BillingRuleViolation(
+                "period_invalid", "Service charge identity is invalid."
+            )
+        if any(
+            value is not None and (value.tzinfo is None or value.utcoffset() is None)
+            for value in (self.starts_at, self.ends_at)
+        ):
+            raise BillingRuleViolation(
+                "period_invalid", "Service period instants require a timezone."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceChargeDocumentFactV1:
+    document_ref: str
+    document_number: str | None
+    phase: ServiceClaimDocumentPhaseV1
+    charge: ServiceChargePeriodV1
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceCoverageIntervalV1:
+    starts_at: datetime
+    ends_at: datetime
+    source_document_ref: str | None = None
+    source_kind: Literal["coverage", "extension"] = "coverage"
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceChargeConflictV1:
+    reason: Literal["period_reserved", "period_purchase_pending", "period_covered"]
+    document_ref: str | None = None
+    document_number: str | None = None
+    draft: bool = False
+    coverage_source: Literal["coverage", "extension"] | None = None

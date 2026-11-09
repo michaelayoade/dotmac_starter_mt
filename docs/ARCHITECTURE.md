@@ -4612,3 +4612,24 @@ Four Academy DML delegates, actual command authority/profile/self-effect tests,
 installed qualification and full writer retirement remain OPEN. See
 `docs/inventories/external-identity-sources.md` for the exact inspected caller and
 writer census. Source AST/pinned Ruff are not runtime or release evidence.
+
+
+### Candidate explicit multi-period invoice authoring
+
+The versioned `dotmac-billing` command `CreateMultiPeriodDraftDocumentV1`
+selects `explicit_multiperiod` document mode (bi13). The existing multiline
+command retains its homogeneous-service-period contract. The new mode admits
+one account/currency/subject/timing identity with verified service intervals
+and explicitly non-periodic one-time lines, and revalidates this evidence when issuing. Products own catalogue
+selection and preventing the same economic period from entering different
+obligations; Billing still prevents an obligation from entering two documents.
+
+`get_invoice_service_periods_v1` publishes the original immutable issued
+line/obligation/period associations. Its fingerprint binds exact line evidence.
+It is not a financial position query and does not assign a partial settlement
+to a service month. Multi-period aggregate receivable exposure keeps its
+financial amount and common service identity but reports its single-period
+slot as `unknown_unverified`; consumers must use original line-period facts
+for documentary identity and must not treat that aggregate as period funding.
+Existing document fact V1/V2/V3 bytes and historical exposure interpretations
+are unchanged. This candidate is not a publication or a consumer-pin change.

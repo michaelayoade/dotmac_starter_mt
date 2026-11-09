@@ -24,10 +24,13 @@ from dotmac_billing.contracts import (
     AccountingFactV1,
     BillingAccountObservationV1,
     CurrentCashCreditDrawV1,
+    CurrentInvoiceReceivableV1,
     CurrentReceivablePositionV1,
     CurrentSettlementAllocationV1,
+    GetBillingAccountByExternalRefV1,
     GetBillingAccountObservationV1,
     GetCurrentCashCreditDrawV1,
+    GetCurrentInvoiceReceivableV1,
     GetCurrentReceivablePositionV1,
     GetCurrentSettlementAllocationV1,
     GetInvoiceDocumentFactV1,
@@ -439,6 +442,8 @@ def _get_invoice_document_fact(
 
 
 __all__ = [
+    "get_billing_account_by_external_ref_v1",
+    "get_current_invoice_receivable_v1",
     "get_invoice_document_fact_v3",
     "get_accounting_fact_v1",
     "get_allocation_accounting_fact_v1",
@@ -1282,3 +1287,172 @@ def get_invoice_document_fact_v3(
     return _get_invoice_document_fact(
         db, scope=scope, request=request, v2=True, v3=True
     )
+
+
+def get_billing_account_by_external_ref_v1(
+    db: Session, *, scope: Scope, request: GetBillingAccountByExternalRefV1
+) -> BillingAccountObservationV1 | None:
+    """Resolve the assembly's existing account without creating an empty one."""
+    from dotmac_billing.opening_queries import _scoped, _table
+
+    if type(request) is not GetBillingAccountByExternalRefV1 or request.scope != scope:
+        raise BillingRuleViolation(
+            "scope_mismatch", "account lookup requires explicit matching scope"
+        )
+    if not request.external_account_ref.strip():
+        raise BillingRuleViolation(
+            "account_ref_invalid", "account reference is required"
+        )
+    table = _table(scope, "billing_accounts")
+    with db.no_autoflush:
+        row = db.execute(
+            _scoped(
+                select(table.c.id).where(
+                    table.c.external_account_ref == request.external_account_ref,
+                    table.c.currency == request.currency.code,
+                    table.c.minor_units == request.currency.minor_units,
+                ),
+                scope,
+                table,
+            )
+        ).one_or_none()
+    if row is None:
+        return None
+    return get_billing_account_observation(
+        db, scope=scope, request=GetBillingAccountObservationV1(scope, row.id)
+    )
+
+
+def get_current_invoice_receivable_v1(
+    db: Session, *, scope: Scope, request: GetCurrentInvoiceReceivableV1
+) -> CurrentInvoiceReceivableV1:
+    """Read the actual latest invoice backing and owner document fact."""
+    from sqlalchemy import func
+
+    from dotmac_billing._receivable_backing import resolve_receivable_backing
+    from dotmac_billing.opening_queries import _scoped, _table
+
+    if type(request) is not GetCurrentInvoiceReceivableV1 or request.scope != scope:
+        raise BillingRuleViolation(
+            "scope_mismatch", "invoice observation requires matching scope"
+        )
+    request.__post_init__()
+    documents = _table(scope, "documents")
+    facts = _table(scope, "invoice_document_facts")
+    with db.no_autoflush, localcontext(cash_decimal_context()):
+        identity = db.execute(
+            _scoped(
+                select(
+                    documents.c.billing_account_id,
+                    documents.c.currency,
+                    documents.c.minor_units,
+                ).where(documents.c.id == request.document_id),
+                scope,
+                documents,
+            )
+        ).one_or_none()
+        if identity is None:
+            raise BillingRuleViolation(
+                "invoice_not_found", "invoice identity is unavailable"
+            )
+        # The same account fence used by all money writers keeps the fact,
+        # backing, cash/WHT quantities and effect instants one observation.
+        get_current_receivable_position(
+            db,
+            scope=scope,
+            request=GetCurrentReceivablePositionV1(
+                scope,
+                identity.billing_account_id,
+                Currency(identity.currency, identity.minor_units),
+            ),
+        )
+        version = db.execute(
+            _scoped(
+                select(func.max(facts.c.fact_version)).where(
+                    facts.c.document_id == request.document_id
+                ),
+                scope,
+                facts,
+            )
+        ).scalar_one()
+        if version is None:
+            raise BillingRuleViolation(
+                "invoice_fact_missing", "issued invoice has no canonical document fact"
+            )
+        fact = get_invoice_document_fact_v3(
+            db,
+            scope=scope,
+            request=GetInvoiceDocumentFactV1(scope, request.document_id, version),
+        ).fact
+        backing = resolve_receivable_backing(
+            db, scope=scope, document_id=request.document_id
+        )
+        account_id = db.execute(
+            _scoped(
+                select(documents.c.billing_account_id).where(
+                    documents.c.id == request.document_id
+                ),
+                scope,
+                documents,
+            )
+        ).scalar_one()
+
+        def applied(name: str) -> Money:
+            table = _table(scope, name)
+            amount = db.execute(
+                _scoped(
+                    select(func.coalesce(func.sum(table.c.amount_delta), 0)).where(
+                        table.c.document_id == request.document_id
+                    ),
+                    scope,
+                    table,
+                )
+            ).scalar_one()
+            return Money(amount, fact.grand_total.currency)
+
+        groups = _table(scope, "posting_groups")
+        source_ids: dict[str, tuple[UUID, ...]] = {}
+        instants = []
+        for name in (
+            "allocation_effects",
+            "withholding_discharges",
+            "opening_cash_effects",
+        ):
+            source = _table(scope, name)
+            rows = db.execute(
+                _scoped(
+                    _scoped(
+                        select(source.c.id, groups.c.occurred_at)
+                        .join(groups, groups.c.id == source.c.posting_group_id)
+                        .where(source.c.document_id == request.document_id),
+                        scope,
+                        source,
+                    ),
+                    scope,
+                    groups,
+                )
+            ).all()
+            source_ids[name] = tuple(sorted((row.id for row in rows), key=str))
+            instants.extend(row.occurred_at for row in rows)
+        return CurrentInvoiceReceivableV1(
+            scope,
+            account_id,
+            request.document_id,
+            backing.source_version,
+            version,
+            fact.subtotal,
+            fact.tax_total,
+            fact.grand_total,
+            Money(backing.remaining, fact.grand_total.currency),
+            Money(
+                applied("allocation_effects").amount
+                - applied("opening_cash_effects").amount,
+                fact.grand_total.currency,
+            ),
+            applied("withholding_discharges"),
+            backing.active,
+            max(instants) if instants else None,
+            source_ids["allocation_effects"],
+            source_ids["withholding_discharges"],
+            source_ids["opening_cash_effects"],
+        )

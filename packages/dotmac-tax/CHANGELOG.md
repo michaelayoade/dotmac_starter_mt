@@ -2,6 +2,12 @@
 
 ## 0.1.0a7 — source preparation, unpublished
 
+- Add explicit `legacy_commercial_compatibility.v1` read-only catalogue VAT
+  policy and exact-Money amount quotes for qualifying product adoption. These
+  functions do not publish statutory rules or mint Tax determination evidence.
+  Released a4 consumers retain their incumbent compatibility resolver until a
+  separately qualified package upgrade; this source preparation is not adoption.
+
 - Add V2 commercial source facts and prior sealed result references. Tax policy
   selects all prior components or explicit code identities from exactly one
   complete result matching its authored fact signature.

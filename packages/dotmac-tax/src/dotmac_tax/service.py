@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import cast
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.money import Currency, Money
@@ -30,6 +30,10 @@ from dotmac_tax._dependencies import (
     select_dependency_components,
 )
 from dotmac_tax.contracts import (
+    LegacyCommercialTaxAmountsV1,
+    LegacyCommercialTaxDecisionV1,
+    LegacyCommercialTaxFactsV1,
+    LegacyCommercialTaxSourceV1,
     StatutoryReportBoxInput,
     TaxAuthorityInput,
     TaxAuthorityV1,
@@ -105,6 +109,131 @@ class _ApplicableTaxRule:
     supply_classification: TaxSubjectClassification | None
     place_classification: TaxSubjectClassification | None
     tax_code: str
+
+
+def resolve_legacy_commercial_tax_v1(
+    facts: LegacyCommercialTaxFactsV1,
+) -> LegacyCommercialTaxDecisionV1:
+    """One compatibility precedence policy for subscriptions and one-time sales.
+
+    This does not select statutory policy or mint Tax determination evidence.
+    Native financial writers must use the actual published Tax policy API.
+    """
+    source = LegacyCommercialTaxSourceV1.unconfigured
+    rates = {row.rate_id: row for row in facts.active_rates}
+    rate_id = None
+    if facts.vat_exempt:
+        source = LegacyCommercialTaxSourceV1.customer_vat_exemption
+    elif facts.explicit_price_exempt:
+        source = LegacyCommercialTaxSourceV1.catalog_offer_exempt
+    elif facts.address_rate_id in rates:
+        rate_id, source = (
+            facts.address_rate_id,
+            LegacyCommercialTaxSourceV1.service_address_tax_rate,
+        )
+    elif facts.account_rate_id in rates:
+        rate_id, source = (
+            facts.account_rate_id,
+            LegacyCommercialTaxSourceV1.account_tax_rate,
+        )
+    elif not facts.offer_present:
+        rate_id = facts.default_rate_id
+        source = LegacyCommercialTaxSourceV1.configured_default if rate_id else source
+    else:
+        percent = facts.offer_vat_percent or Decimal("0")
+        candidates = {
+            percent,
+            percent / Decimal("100") if percent > 1 else percent * 100,
+        }
+        rate_id = next(
+            (
+                row.rate_id
+                for row in facts.active_rates
+                if percent > 0 and row.percent in candidates
+            ),
+            None,
+        )
+        if rate_id:
+            source = LegacyCommercialTaxSourceV1.catalog_vat_percent
+        elif facts.offer_with_vat or percent > 0:
+            rate_id = facts.default_rate_id
+            source = (
+                LegacyCommercialTaxSourceV1.catalog_taxable_default
+                if rate_id
+                else source
+            )
+        else:
+            source = LegacyCommercialTaxSourceV1.catalog_offer_exempt
+    rate = rates.get(rate_id) if rate_id is not None else None
+    return LegacyCommercialTaxDecisionV1(
+        rate.rate_id if rate else None,
+        rate.percent if rate else None,
+        facts.tax_application if rate else "exempt",
+        source,
+        facts.policy_version,
+    )
+
+
+def apply_legacy_catalogue_price_basis_v1(
+    decision: LegacyCommercialTaxDecisionV1,
+    price_basis: Literal["exclusive", "inclusive", "exempt"],
+) -> LegacyCommercialTaxDecisionV1:
+    if price_basis not in {"exclusive", "inclusive", "exempt"}:
+        raise TaxRuleViolation("Unsupported catalogue price basis")
+    exempt = (
+        decision.tax_rate_id is None
+        or decision.tax_application == "exempt"
+        or price_basis == "exempt"
+    )
+    return LegacyCommercialTaxDecisionV1(
+        None if exempt else decision.tax_rate_id,
+        None if exempt else decision.tax_rate_percent,
+        "exempt" if exempt else price_basis,
+        decision.source,
+        decision.customer_tax_policy_version,
+    )
+
+
+def _percentage_tax_basis(
+    base: Decimal, rate: Decimal, inclusive: bool
+) -> tuple[Decimal, Decimal]:
+    taxable = base / (Decimal(1) + rate) if inclusive else base
+    return taxable, base - taxable if inclusive else base * rate
+
+
+def calculate_legacy_commercial_tax_amount_v1(
+    amount: Decimal,
+    rate_percent: Decimal,
+    application: Literal["exclusive", "inclusive", "exempt"],
+    minor_units: int = 2,
+) -> Decimal:
+    """Signed compatibility arithmetic over the native Tax percentage primitive."""
+    base = _round(amount, minor_units)
+    if application == "exempt" or rate_percent <= 0:
+        return _round(Decimal("0"), minor_units)
+    _, tax = _percentage_tax_basis(
+        base, rate_percent / Decimal("100"), application == "inclusive"
+    )
+    return _round(tax, minor_units)
+
+
+def quote_legacy_commercial_amounts_v1(
+    amount: Money,
+    rate_percent: Decimal,
+    application: Literal["exclusive", "inclusive", "exempt"],
+) -> LegacyCommercialTaxAmountsV1:
+    """Compatibility-only price quote, never native determination evidence."""
+    if not rate_percent.is_finite() or rate_percent < 0 or amount.amount < 0:
+        raise TaxRuleViolation("Catalogue quote requires finite nonnegative amounts.")
+    tax = Money(
+        calculate_legacy_commercial_tax_amount_v1(
+            amount.amount, rate_percent, application, amount.currency.minor_units
+        ),
+        amount.currency,
+    )
+    return LegacyCommercialTaxAmountsV1(
+        amount, tax, amount.add(tax) if application == "exclusive" else amount
+    )
 
 
 def _clean(value: str, label: str) -> str:
@@ -213,8 +342,7 @@ def _exact_policy_money(amount: Decimal, *, currency: Currency) -> Money:
     value = Money(amount=amount, currency=currency)
     if value.amount != amount:
         raise TaxConflict(
-            "persisted fixed tax amount exceeds the jurisdiction currency's "
-            "minor units"
+            "persisted fixed tax amount exceeds the jurisdiction currency's minor units"
         )
     return value
 
@@ -2391,12 +2519,7 @@ def _calculate_rule(
     if rule.calculation_method == "percentage":
         if rule.rate is None:
             raise TaxRuleViolation("percentage tax rule has no rate")
-        if rule.inclusive:
-            taxable = base / (Decimal(1) + rule.rate)
-            tax_amount = base - taxable
-            base = taxable
-        else:
-            tax_amount = base * rule.rate
+        base, tax_amount = _percentage_tax_basis(base, rule.rate, rule.inclusive)
         tax_amount = _round(tax_amount, minor_units)
         base = _round(base, minor_units)
         line_values.append((base, rule.rate, tax_amount))
@@ -3372,6 +3495,10 @@ def amend_tax_return(
 
 
 __all__ = [
+    "apply_legacy_catalogue_price_basis_v1",
+    "calculate_legacy_commercial_tax_amount_v1",
+    "quote_legacy_commercial_amounts_v1",
+    "resolve_legacy_commercial_tax_v1",
     "TaxConflict",
     "TaxNotFound",
     "TaxRuleViolation",
@@ -3403,11 +3530,11 @@ __all__ = [
     "get_tax_rule",
     "get_tax_subject_classification",
     "prepare_tax_return",
-    "publish_tax_rule",
-    "supersede_tax_rule",
     "preview_tax_policy",
+    "publish_tax_rule",
     "publish_tax_subject_classification",
     "reject_tax_return",
+    "supersede_tax_rule",
     "update_tax_authority",
     "update_tax_code",
     "update_tax_jurisdiction",
@@ -3612,9 +3739,9 @@ def preview_tax_policy_v2(
 
 
 __all__ += [
-    "get_tax_determination_set_v2",
     "determine_tax_set_v2",
-    "preview_tax_policy_v2",
     "ensure_tax_rule_v2_in_transaction",
+    "get_tax_determination_set_v2",
+    "preview_tax_policy_v2",
     "supersede_tax_rule_v2",
 ]
