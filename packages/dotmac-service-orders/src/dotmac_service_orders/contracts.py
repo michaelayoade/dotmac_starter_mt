@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -72,6 +73,41 @@ class OpenServiceOrder:
     service_reference: str | None = None
 
 
+# A service-location ref is an OPAQUE token owned by the composing product. The
+# closed character set (no whitespace, commas or slashes) means address text and
+# coordinate pairs cannot be written into it; the module never learns what the
+# token resolves to, and holds no address or coordinate field (ADR-0039).
+SERVICE_LOCATION_REF_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\-]{0,159}")
+
+# Order types that act on a place the customer is served at. Every other type
+# must be opened through V1, which this module leaves unchanged.
+LOCATION_REQUIRED_ORDER_TYPES = frozenset(
+    {
+        ServiceOrderType.NEW_INSTALL,
+        ServiceOrderType.RECONNECT,
+        ServiceOrderType.CHANGE_SERVICE,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OpenServiceOrderV2:
+    """Open command V2: an install, reconnect or change order names its place.
+
+    `service_location_ref` is required and opaque. The composing product is the
+    only holder of address text and the promoted pin, and of the qualification
+    warrant that justified promoting it; this module stores the ref alone.
+    """
+
+    customer_reference: str
+    order_type: ServiceOrderType
+    request_key: str
+    service_location_ref: str
+    commercial_order_reference: str | None = None
+    specification_reference: str | None = None
+    service_reference: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class ReadinessCheck:
     kind: ReadinessCheckKind
@@ -104,7 +140,10 @@ __all__ = [
     "Conflict",
     "ConfirmActivation",
     "DecideReadiness",
+    "LOCATION_REQUIRED_ORDER_TYPES",
+    "SERVICE_LOCATION_REF_PATTERN",
     "OpenServiceOrder",
+    "OpenServiceOrderV2",
     "ReadinessCheck",
     "ReadinessCheckKind",
     "ReadinessCheckResult",

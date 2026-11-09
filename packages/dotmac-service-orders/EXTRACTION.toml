@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Service-delivery orders and the activation-readiness decision"
-contract = "Own the service-delivery order lifecycle and the append-only readiness decision made from normalized delivery observations. Commercial identifiers, customer identity, specification and service references are opaque. NOT commercial order capture, fulfillment saga mechanics, field work execution, realized service lifecycle, provisioning transport, addressing or network enforcement."
+contract = "Own the service-delivery order lifecycle and the append-only readiness decision made from normalized delivery observations. Commercial identifiers, customer identity, specification, service and service-location references are opaque; an install, reconnect or change order must name its opaque service-location reference (open V2). NOT commercial order capture, fulfillment saga mechanics, field work execution, realized service lifecycle, provisioning transport, addressing or network enforcement."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_sub:9493ee4eef737f18b4813899a2d8f0537ed6d5c7",

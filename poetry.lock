@@ -2053,7 +2053,7 @@ url = "packages/dotmac-service-changes"
 
 [[package]]
 name = "dotmac-service-orders"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Service-delivery orders and activation-readiness decisions"
 optional = false
 python-versions = ">=3.11,<3.14"

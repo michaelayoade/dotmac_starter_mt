@@ -24,10 +24,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_service_orders.contracts import (
+    LOCATION_REQUIRED_ORDER_TYPES,
+    SERVICE_LOCATION_REF_PATTERN,
     ConfirmActivation,
     Conflict,
     DecideReadiness,
     OpenServiceOrder,
+    OpenServiceOrderV2,
     ReadinessCheck,
     ReadinessCheckKind,
     ReadinessCheckResult,
@@ -158,6 +161,66 @@ def open_service_order(
         commercial_order_reference=command.commercial_order_reference,
         specification_reference=command.specification_reference,
         service_reference=command.service_reference,
+        request_key=request_key,
+        order_type=command.order_type,
+        status=ServiceOrderStatus.DRAFT,
+        opened_at=datetime.now(UTC),
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _location_ref(value: str) -> str:
+    ref = value.strip()
+    if SERVICE_LOCATION_REF_PATTERN.fullmatch(ref) is None:
+        raise ValueError(
+            "service location ref must be an opaque token of 1 to 160 letters, "
+            "digits, '.', '_', ':' or '-'"
+        )
+    return ref
+
+
+def open_service_order_v2(
+    db: Session, *, scope: TenantScope, command: OpenServiceOrderV2
+) -> ServiceOrder:
+    """Open an install, reconnect or change order bound to a service location.
+
+    Idempotent on `request_key`, like V1, and additionally refuses a replay that
+    names a different location. The ref is opaque: this module neither resolves
+    nor verifies it, and holds no address or coordinates. Other order types are
+    refused here and opened through V1.
+    """
+    tenant_id = _tenant(scope)
+    if command.order_type not in LOCATION_REQUIRED_ORDER_TYPES:
+        raise Conflict(
+            "open V2 covers install, reconnect and change orders; "
+            f"{command.order_type.value} orders are opened through V1"
+        )
+    location_ref = _location_ref(command.service_location_ref)
+    request_key = _required(command.request_key, "request key")
+    customer_reference = _required(command.customer_reference, "customer reference")
+    existing = db.scalar(
+        select(ServiceOrder).where(
+            ServiceOrder.tenant_id == tenant_id,
+            ServiceOrder.request_key == request_key,
+        )
+    )
+    if existing is not None:
+        if existing.order_type != command.order_type:
+            raise Conflict("request key was reused for a different order type")
+        if existing.customer_reference != customer_reference:
+            raise Conflict("request key was reused for a different customer")
+        if existing.service_location_ref != location_ref:
+            raise Conflict("request key was reused for a different service location")
+        return existing
+    row = ServiceOrder(
+        tenant_id=tenant_id,
+        customer_reference=customer_reference,
+        commercial_order_reference=command.commercial_order_reference,
+        specification_reference=command.specification_reference,
+        service_reference=command.service_reference,
+        service_location_ref=location_ref,
         request_key=request_key,
         order_type=command.order_type,
         status=ServiceOrderStatus.DRAFT,
@@ -326,5 +389,6 @@ __all__ = [
     "decide_readiness",
     "latest_readiness",
     "open_service_order",
+    "open_service_order_v2",
     "submit_service_order",
 ]

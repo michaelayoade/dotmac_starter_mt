@@ -15,6 +15,7 @@ from dotmac_service_orders.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/so_0001_service_delivery_orders.py"
+LOCATION_MIGRATION = ROOT / "migrations/versions/so_0002_service_location_ref.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -127,3 +128,55 @@ def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
         bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
     assert report.ok, report.violations
+
+
+def test_location_is_an_opaque_ref_with_no_address_or_coordinate_column() -> None:
+    columns = set()
+    for name in module.tables:
+        columns |= set(models.metadata_table(name).c.keys())
+    assert "service_location_ref" in columns
+    forbidden = {
+        "address",
+        "address_line",
+        "street",
+        "city",
+        "postal_code",
+        "latitude",
+        "longitude",
+        "lat",
+        "lon",
+        "lng",
+        "coordinates",
+        "geom",
+        "pin",
+    }
+    assert not forbidden & columns
+    assert models.ServiceOrder.__table__.c.service_location_ref.nullable is True
+
+
+def test_location_migration_is_a_backward_compatible_child_of_the_root() -> None:
+    source = LOCATION_MIGRATION.read_text(encoding="utf-8")
+    assert 'revision = "so_0002_service_location_ref"' in source
+    assert 'down_revision = "so_0001_service_delivery_orders"' in source
+    assert "branch_labels = None" in source
+    assert "nullable=True" in source
+    assert "op.add_column(" in source
+    assert "op.drop_column(" in source
+
+    from dotmac_kernel.migrations.gate import run_gate
+
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    report = run_gate(
+        [module],
+        [
+            REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
+            REPO_ROOT / "alembic/versions",
+            MIGRATION.parent,
+        ],
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+    )
+    assert report.ok, report.violations
+    assert report.attribution["so_0002_service_location_ref"]["owner"] == (
+        "service_orders"
+    )

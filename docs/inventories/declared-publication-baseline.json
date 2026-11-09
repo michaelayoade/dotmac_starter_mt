@@ -147,6 +147,11 @@
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
     },
+    "dotmac-service-orders": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 is the last published and tagged version (dotmac-service-orders-v0.1.0a1) and its released so_0001 bytes are unchanged. 0.1.0a2 adds so_0002_service_location_ref and the V2 open command that requires an opaque service-location ref for install, reconnect and change orders; V1 is unchanged. The module holds the opaque token only, never address text or coordinates (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.1.0a2 publication, never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",

@@ -11,10 +11,12 @@ from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.models import Tenant
 from dotmac_service_orders import models
 from dotmac_service_orders.contracts import (
+    LOCATION_REQUIRED_ORDER_TYPES,
     ConfirmActivation,
     Conflict,
     DecideReadiness,
     OpenServiceOrder,
+    OpenServiceOrderV2,
     ReadinessCheck,
     ReadinessCheckKind,
     ReadinessCheckResult,
@@ -29,6 +31,7 @@ from dotmac_service_orders.service import (
     decide_readiness,
     latest_readiness,
     open_service_order,
+    open_service_order_v2,
     submit_service_order,
 )
 from sqlalchemy import create_engine
@@ -353,3 +356,135 @@ def test_another_tenants_order_is_not_visible(db: Session) -> None:
                 checks=(_check(ReadinessCheckKind.DELIVERY_RUN),),
             ),
         )
+
+
+def _v2(
+    order_type: ServiceOrderType = ServiceOrderType.NEW_INSTALL,
+    *,
+    key: str = "req-v2",
+    location: str = "loc:site-0001",
+    customer: str = "customer:1",
+) -> OpenServiceOrderV2:
+    return OpenServiceOrderV2(
+        customer_reference=customer,
+        order_type=order_type,
+        request_key=key,
+        service_location_ref=location,
+    )
+
+
+@pytest.mark.parametrize(
+    "order_type",
+    [
+        ServiceOrderType.NEW_INSTALL,
+        ServiceOrderType.RECONNECT,
+        ServiceOrderType.CHANGE_SERVICE,
+    ],
+)
+def test_v2_open_stores_the_opaque_location_for_install_reconnect_and_change(
+    db: Session, order_type: ServiceOrderType
+) -> None:
+    scope = TenantScope(TENANT_A)
+    order = open_service_order_v2(
+        db, scope=scope, command=_v2(order_type, key=f"req-{order_type.value}")
+    )
+
+    assert order.service_location_ref == "loc:site-0001"
+    assert order.order_type is order_type
+    assert order.status is ServiceOrderStatus.DRAFT
+    # The rest of the lifecycle is unchanged by V2.
+    submit_service_order(db, scope=scope, service_order_id=order.id)
+    assert begin_delivery(db, scope=scope, service_order_id=order.id).status is (
+        ServiceOrderStatus.IN_DELIVERY
+    )
+
+
+def test_v2_open_requires_a_location_for_every_covered_type() -> None:
+    # The location is a required constructor argument, not an optional field.
+    with pytest.raises(TypeError):
+        OpenServiceOrderV2(  # type: ignore[call-arg]
+            customer_reference="customer:1",
+            order_type=ServiceOrderType.NEW_INSTALL,
+            request_key="req",
+        )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "   ",
+        "12 Example Street, Town",
+        "9.0765,7.3986",
+        "9.0765 7.3986",
+        "../loc",
+        "-leading",
+        "x" * 161,
+    ],
+)
+def test_v2_open_refuses_a_location_that_is_not_an_opaque_token(
+    db: Session, bad: str
+) -> None:
+    with pytest.raises(ValueError, match="service location ref"):
+        open_service_order_v2(
+            db, scope=TenantScope(TENANT_A), command=_v2(location=bad)
+        )
+
+
+@pytest.mark.parametrize(
+    "order_type",
+    sorted(set(ServiceOrderType) - LOCATION_REQUIRED_ORDER_TYPES, key=str),
+)
+def test_v2_open_refuses_other_order_types(
+    db: Session, order_type: ServiceOrderType
+) -> None:
+    with pytest.raises(Conflict, match="V1"):
+        open_service_order_v2(db, scope=TenantScope(TENANT_A), command=_v2(order_type))
+
+
+def test_v2_open_is_idempotent_and_refuses_a_replay_for_another_place(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    first = open_service_order_v2(db, scope=scope, command=_v2())
+    again = open_service_order_v2(
+        db, scope=scope, command=_v2(location=" loc:site-0001 ")
+    )
+    assert first.id == again.id
+
+    with pytest.raises(Conflict, match="service location"):
+        open_service_order_v2(db, scope=scope, command=_v2(location="loc:site-0002"))
+    with pytest.raises(Conflict, match="order type"):
+        open_service_order_v2(db, scope=scope, command=_v2(ServiceOrderType.RECONNECT))
+    with pytest.raises(Conflict, match="customer"):
+        open_service_order_v2(db, scope=scope, command=_v2(customer="customer:2"))
+
+
+def test_v1_open_is_unchanged_and_carries_no_location(db: Session) -> None:
+    scope = TenantScope(TENANT_A)
+    order = open_service_order(
+        db,
+        scope=scope,
+        command=OpenServiceOrder(
+            customer_reference="customer:1",
+            order_type=ServiceOrderType.UPGRADE,
+            request_key="req-v1",
+        ),
+    )
+    assert order.service_location_ref is None
+    assert tuple(OpenServiceOrder.__slots__) == (
+        "customer_reference",
+        "order_type",
+        "request_key",
+        "commercial_order_reference",
+        "specification_reference",
+        "service_reference",
+    )
+
+
+def test_v2_orders_are_tenant_scoped(db: Session) -> None:
+    open_service_order_v2(db, scope=TenantScope(TENANT_A), command=_v2())
+    other = open_service_order_v2(db, scope=TenantScope(TENANT_B), command=_v2())
+
+    assert other.tenant_id == TENANT_B
+    assert other.service_location_ref == "loc:site-0001"
