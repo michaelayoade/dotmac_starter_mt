@@ -1,5 +1,21 @@
 # Changelog — dotmac-files
 
+## 0.1.0a8 — allocated source candidate, not yet published
+
+- Add a scoped, verified read. `verified_read_target` is the database phase:
+  it refuses anything but a UUID or canonical hyphenated UUID text before any
+  query (paths, URLs, URNs and other alternate forms are `InvalidFileRef`) and
+  loads only from the requested scope. `read_verified` is the persistence-free
+  provider phase: the target must carry the requested scope and the exact
+  trusted `<scope prefix><file id>` key (`ForeignScopeFile` otherwise); at most
+  `limit + 1` bytes are ever requested, so an oversize object is refused
+  without being buffered (`ReadLimitExceeded`); the bytes must equal the
+  recorded size and sha256 and their content-detected media type must equal the
+  recorded type (`IntegrityMismatch`), and may be constrained to
+  `allowed_media_types` (`ReadTypeNotAllowed`). Returns `VerifiedFile`.
+  Authorization stays with the domain. Additive: no migration, no change to
+  upload, download, deletion or reconciliation.
+
 ## 0.1.0a7 — allocated source candidate, not yet published
 
 - Recognise HEIC/HEIF photos and RTF documents by content signature:

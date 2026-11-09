@@ -57,6 +57,19 @@ adapters used by the future `dotmac-imports` module. Column mapping,
 row validation, dry-run/apply, duplicate policy, and domain mutations belong to
 the importing domain.
 
+## Scoped verified read
+
+`verified_read_target(db, scope=..., file_ref=...)` then
+`read_verified(provider, scope=..., target=..., limit=...)` return the stored
+bytes only when they are provably the row's file. The reference must be a UUID
+or its canonical hyphenated text; any path-like or alternate form is refused
+before a query. The target must be in the same explicit scope with the exact
+trusted key. The provider is asked for at most `limit + 1` bytes, then size,
+sha256 and the content-detected media type are compared with the row. This is a
+read primitive for domains (for example a frozen logo for document rendering);
+who may read a file remains the domain's decision. As with download, end the
+database transaction before the provider phase.
+
 ## Transaction boundary
 
 Object stores cannot join a PostgreSQL transaction. Upload therefore writes an
