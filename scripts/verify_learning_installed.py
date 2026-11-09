@@ -302,7 +302,7 @@ def migrate(admin, receipt: dict) -> None:
     from alembic.script import ScriptDirectory
 
     bindings = tuple(
-        PrerequisiteBinding(name, "0030_credential_tenant_key", "kernel")
+        PrerequisiteBinding(name, "0031_rate_limit_buckets", "kernel")
         for name in module.requires
     )
     install_module_plane_selections(())

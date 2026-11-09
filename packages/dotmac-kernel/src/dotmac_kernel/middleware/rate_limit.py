@@ -62,6 +62,7 @@ from dotmac_kernel.request_evidence import UNSET_EVIDENCE, current_evidence
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+    from sqlalchemy.sql.dml import ReturningInsert
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,44 @@ def _platform_session() -> AbstractContextManager[Session]:
     return resolve_database_runtime().platform_session()
 
 
+def _postgresql_upsert(
+    key_hash: str, window_start: datetime, expires_at: datetime
+) -> ReturningInsert[tuple[int]]:
+    return (
+        postgresql.insert(RateLimitBucket)
+        .values(
+            key_hash=key_hash,
+            window_start=window_start,
+            hit_count=1,
+            expires_at=expires_at,
+        )
+        .on_conflict_do_update(
+            index_elements=["key_hash", "window_start"],
+            set_={"hit_count": RateLimitBucket.hit_count + 1},
+        )
+        .returning(RateLimitBucket.hit_count)
+    )
+
+
+def _sqlite_upsert(
+    key_hash: str, window_start: datetime, expires_at: datetime
+) -> ReturningInsert[tuple[int]]:
+    return (
+        sqlite.insert(RateLimitBucket)
+        .values(
+            key_hash=key_hash,
+            window_start=window_start,
+            hit_count=1,
+            expires_at=expires_at,
+        )
+        .on_conflict_do_update(
+            index_elements=["key_hash", "window_start"],
+            set_={"hit_count": RateLimitBucket.hit_count + 1},
+        )
+        .returning(RateLimitBucket.hit_count)
+    )
+
+
 class PostgresRateLimitStore:
     """Shared fixed-window store in the kernel `rate_limit_buckets` table.
 
@@ -265,23 +304,13 @@ class PostgresRateLimitStore:
         with self._session_provider() as db:
             dialect = db.get_bind().dialect.name
             if dialect == "postgresql":
-                insert = postgresql.insert
+                statement = _postgresql_upsert(key_hash, window_start, expires_at)
             elif dialect == "sqlite":
-                insert = sqlite.insert
+                statement = _sqlite_upsert(key_hash, window_start, expires_at)
             else:
                 raise RuntimeError(
                     f"PostgresRateLimitStore does not support dialect {dialect!r}"
                 )
-            statement = insert(RateLimitBucket).values(
-                key_hash=key_hash,
-                window_start=window_start,
-                hit_count=1,
-                expires_at=expires_at,
-            )
-            statement = statement.on_conflict_do_update(
-                index_elements=["key_hash", "window_start"],
-                set_={"hit_count": RateLimitBucket.hit_count + 1},
-            ).returning(RateLimitBucket.hit_count)
             count = int(db.execute(statement).scalar_one())
             self._calls += 1
             if self._calls % self._prune_every == 0:
@@ -319,7 +348,10 @@ def build_anonymous_rate_limit(
     if policy is None:
         return None
     kind = s.anonymous_rate_limit_store.strip().lower()
-    assert kind in ANONYMOUS_RATE_LIMIT_STORES
+    if kind not in ANONYMOUS_RATE_LIMIT_STORES:
+        raise AnonymousRateLimitStoreError(
+            f"unknown anonymous rate-limit store {kind!r}"
+        )
     store: RateLimitStore = (
         PostgresRateLimitStore()
         if kind == "postgres"
@@ -421,7 +453,10 @@ class RateLimitMiddleware:
     ) -> JSONResponse | None:
         """Count one anonymous hit; a response to send instead when refused."""
         policy, store = self.anonymous_policy, self.anonymous_store
-        assert policy is not None and store is not None
+        if policy is None or store is None:
+            raise AnonymousRateLimitStoreError(
+                "anonymous rate limit invoked without a policy and store"
+            )
         key = _anonymous_rate_limit_key(request, rule)
         try:
             if getattr(store, "shared", False):
