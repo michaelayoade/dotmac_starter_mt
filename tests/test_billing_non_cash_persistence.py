@@ -17,6 +17,8 @@ from threading import Event, Thread
 from uuid import uuid4
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from dotmac_billing import models
 from dotmac_billing.service import grant_non_cash_credit
 from dotmac_kernel.cache import TenantScope
@@ -31,11 +33,12 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from tests import test_billing_isolation as billing
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as predecessor
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 
 REVISION = "bi_0005_non_cash_credit"
 MIGRATION = billing.BILLING_VERSIONS / f"{REVISION}.py"
@@ -623,7 +626,8 @@ def test_sql_application_cannot_ignore_withholding_or_invoice_restriction(
         accept_withholding_discharge(
             session,
             scope=scope,
-            command=billing._withholding_command(
+            command=frozen_withholding_command(
+                session,
                 account,
                 invoice,
                 scope=scope,
@@ -953,7 +957,8 @@ def test_later_resolution_cannot_overdraw_invoice_masked_by_second_invoice(
             accepted = accept_withholding_discharge(
                 session,
                 scope=scope,
-                command=billing._withholding_command(
+                command=frozen_withholding_command(
+                    session,
                     account,
                     invoice,
                     scope=scope,
@@ -1161,8 +1166,7 @@ def test_populated_downgrade_refuses_globally_without_dropping_guards(scratch, p
         before = predecessor._catalog(connection)
         connection.execute(
             text(
-                "SET LOCAL lock_timeout = '137ms'; "
-                "SET LOCAL statement_timeout = '19s'"
+                "SET LOCAL lock_timeout = '137ms'; SET LOCAL statement_timeout = '19s'"
             )
         )
         with _migration(

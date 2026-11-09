@@ -31,6 +31,9 @@ from dotmac_kernel.idempotency import IdempotencyConflict
 from sqlalchemy import select
 
 from tests import test_billing_isolation as b
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +103,8 @@ def test_source_specific_credit_retention_application_and_exact_replay(scratch, 
         accept_withholding_discharge(
             db,
             scope=scope,
-            command=b._withholding_command(
+            command=frozen_withholding_command(
+                db,
                 account.id,
                 invoice.id,
                 scope=scope,

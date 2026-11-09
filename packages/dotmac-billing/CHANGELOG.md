@@ -37,6 +37,23 @@ chain after `bi_0014_opening_variance_ledger`.
   repaired) and a BEFORE INSERT guard that keeps each component's net accepted
   amount within `[0, frozen amount]`. The one-acceptance-per-component unique
   index and permanent source claim are unchanged.
+- B2: add `freeze_issued_invoice_withholding` (`FreezeIssuedInvoiceWithholding`),
+  the governed command for an issued invoice that has no frozen components
+  (issued before bi_0016, or imported as an open item). It takes the
+  dotmac-tax expected-withholding determination evaluated as of the invoice's
+  issue date (election = its party classification; no caller-supplied amounts)
+  and writes the same append-only component rows issuance writes
+  (`origin = 'late_freeze'`, with command id, actor, reason and the
+  determination reference); it never mutates the invoice. Idempotent on
+  `command_id`; refused when components exist, for a credit note, void or
+  non-live invoice, when the determination is not as of the issue date, or when
+  the frozen total would exceed the outstanding receivable. Tenant plane only;
+  the platform plane stays fail-closed (`withholding_freeze_platform_unsupported`).
+  The component's `obligation_id` is optional for this origin (imported items
+  have no rated obligation). Afterwards the discharge foreign key, cap guard and
+  credit-draw cap apply unchanged. Opening-import hook: the import caller (an
+  assembly or the opening lane) invokes this same function for each imported
+  open invoice after admission; no opening-lane code is changed here.
 - B2: `apply_available_credit` may draw at most the invoice's outstanding
   receivable less its undischarged frozen withholding
   (`credit_exceeds_non_withholding_room`), so credit is drawn before the

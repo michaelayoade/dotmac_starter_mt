@@ -11,6 +11,7 @@ from dotmac_billing.authority import (
 from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
     ApplyNonCashCredit,
+    FreezeIssuedInvoiceWithholding,
     GrantNonCashCredit,
     NumberingProvider,
     ReduceNonCashCreditGrant,
@@ -625,6 +626,7 @@ __all__ = [
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
     "AcceptWithholdingDischarge",
+    "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
     "AccountingFactV2",
     "WithholdingTaxEvidenceV1",

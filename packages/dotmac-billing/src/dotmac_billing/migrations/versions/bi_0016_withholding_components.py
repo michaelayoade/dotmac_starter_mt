@@ -23,6 +23,12 @@ VALID`` (every new row is enforced) and ``VALIDATE`` is attempted; if history
 violates it the constraint stays ``NOT VALID`` with a comment naming the manual
 exceptions review. No row is backfilled, repaired or rewritten.
 
+A row is written either at issue (``origin = 'issue'``, bound to its rated
+obligation) or by the governed late-freeze command for an invoice issued before
+this migration or imported as an open item (``origin = 'late_freeze'``, carrying
+the command id, actor and reason; the obligation may be absent). Both are the
+same append-only structure.
+
 The online role needs SELECT and INSERT on the new table (the issuing path).
 No downgrade.
 """
@@ -80,7 +86,11 @@ def _elements(platform: bool) -> tuple[SchemaItem, ...]:
         *(sa.Column(key, sa.Uuid(), nullable=False) for key in scope),
         sa.Column("billing_account_id", sa.Uuid(), nullable=False),
         sa.Column("document_id", sa.Uuid(), nullable=False),
-        sa.Column("obligation_id", sa.Uuid(), nullable=False),
+        sa.Column("obligation_id", sa.Uuid()),
+        sa.Column("origin", sa.String(16), nullable=False),
+        sa.Column("command_id", sa.String(255)),
+        sa.Column("actor_ref", sa.String(255)),
+        sa.Column("reason", sa.Text()),
         sa.Column("tax_source_owner", sa.String(120), nullable=False),
         sa.Column("determination_ref", sa.String(255), nullable=False),
         sa.Column("component_ref", sa.String(255), nullable=False),
@@ -148,6 +158,13 @@ def _elements(platform: bool) -> tuple[SchemaItem, ...]:
         ),
         sa.CheckConstraint(
             "tax_amount > 0 AND base_amount >= 0", name=f"ck_{table}_amount"
+        ),
+        sa.CheckConstraint(
+            "(origin = 'issue' AND obligation_id IS NOT NULL "
+            "AND command_id IS NULL AND actor_ref IS NULL AND reason IS NULL) "
+            "OR (origin = 'late_freeze' AND command_id IS NOT NULL "
+            "AND actor_ref IS NOT NULL AND reason IS NOT NULL)",
+            name=f"ck_{table}_origin",
         ),
         sa.CheckConstraint(
             "currency = upper(currency) AND length(currency) = 3 "

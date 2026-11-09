@@ -46,6 +46,9 @@ from tests import billing_opening_variance_fixtures as variance_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 from tests.unit import test_billing_opening_receivable_contracts as evidence
 
@@ -818,7 +821,8 @@ def test_withholding_noncash_credit_and_credit_note_room_and_owner_inverses(
         cash._seal_window(db, scope)
         basis = _bases(db, scope, receipt)[0]
         # Historical WHT is documentary; only this new discharge consumes room.
-        wht_cmd = b._withholding_command(
+        wht_cmd = frozen_withholding_command(
+            db,
             account,
             basis.document_id,
             scope=scope,
@@ -931,7 +935,8 @@ def test_one_outer_transaction_preserves_each_draws_historical_source_version(
         wht = s.accept_withholding_discharge(
             db,
             scope=scope,
-            command=b._withholding_command(
+            command=frozen_withholding_command(
+                db,
                 account,
                 basis.document_id,
                 scope=scope,
@@ -1193,7 +1198,8 @@ def test_full_unwind_requires_all_owner_inverses_and_never_releases_natural_clai
         wht = s.accept_withholding_discharge(
             db,
             scope=scope,
-            command=b._withholding_command(
+            command=frozen_withholding_command(
+                db,
                 account,
                 second.document_id,
                 scope=scope,
@@ -2112,7 +2118,8 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                 original_wht = s.accept_withholding_discharge(
                     db,
                     scope=scope,
-                    command=b._withholding_command(
+                    command=frozen_withholding_command(
+                        db,
                         account,
                         invoice.id,
                         scope=scope,
@@ -2143,7 +2150,8 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                 s.accept_withholding_discharge(
                     db,
                     scope=scope,
-                    command=b._withholding_command(
+                    command=frozen_withholding_command(
+                        db,
                         account,
                         invoice.id,
                         scope=scope,

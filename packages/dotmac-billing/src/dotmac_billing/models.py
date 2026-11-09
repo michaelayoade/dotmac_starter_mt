@@ -1768,7 +1768,11 @@ class _WithholdingComponentColumns(_EvidenceTime):
     id: Mapped[UUID] = uuid_pk()
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
-    obligation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    obligation_id: Mapped[UUID | None] = mapped_column(Uuid())
+    origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    command_id: Mapped[str | None] = mapped_column(String(255))
+    actor_ref: Mapped[str | None] = mapped_column(String(255))
+    reason: Mapped[str | None] = mapped_column(Text)
     tax_source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
     determination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     component_ref: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -1841,6 +1845,13 @@ def _withholding_component_constraints(*, tenant: bool) -> tuple[object, ...]:
         ),
         CheckConstraint(
             "tax_amount > 0 AND base_amount >= 0", name=f"ck_{table}_amount"
+        ),
+        CheckConstraint(
+            "(origin = 'issue' AND obligation_id IS NOT NULL "
+            "AND command_id IS NULL AND actor_ref IS NULL AND reason IS NULL) "
+            "OR (origin = 'late_freeze' AND command_id IS NOT NULL "
+            "AND actor_ref IS NOT NULL AND reason IS NOT NULL)",
+            name=f"ck_{table}_origin",
         ),
         CheckConstraint(
             "currency = upper(currency) AND length(currency) = 3 "

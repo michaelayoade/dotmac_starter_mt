@@ -30,6 +30,8 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV2,
 )
 from dotmac_billing.opening_variance_contracts import OpeningVarianceResolutionRefV1
+from dotmac_billing.tax_dependency_evidence import InvoiceTaxEvidenceV2
+from dotmac_billing.tax_evidence import InvoiceTaxEvidenceV1
 
 
 class NumberingProvider(Protocol):
@@ -207,6 +209,25 @@ class AcceptWithholdingDischarge:
 
 
 @dataclass(frozen=True, slots=True)
+class FreezeIssuedInvoiceWithholding:
+    """Freeze withholding for an issued invoice that has no frozen components.
+
+    ``evidence`` is the dotmac-tax determination evaluated as of the invoice's
+    issue date (purpose ``expected_withholding``); the election is its party
+    classification. There are no caller-supplied amounts. Idempotent on
+    ``command_id``.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    command_id: str
+    actor_ref: str
+    reason: str
+    evidence: InvoiceTaxEvidenceV1 | InvoiceTaxEvidenceV2
+
+
+@dataclass(frozen=True, slots=True)
 class ReverseWithholdingDischarge:
     scope: Scope
     discharge_id: UUID
@@ -286,6 +307,7 @@ __all__ = [
     "ReverseNonCashCreditApplication",
     "ReduceNonCashCreditGrant",
     "AcceptWithholdingDischarge",
+    "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
     "AllocationCommand",
     "ApplyAvailableCreditCommand",
