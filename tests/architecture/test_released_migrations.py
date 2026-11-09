@@ -8336,8 +8336,14 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-service-changes": frozenset(),
     "dotmac-subscriptions": frozenset(),
     # `bi_0013` adds the sealed hold list guards and post-seal hold admission
-    # audit table; still editable until billing 0.1.0a11 is tagged.
-    "dotmac-billing": frozenset({"bi_0013_opening_hold_admission.py"}),
+    # audit table; `bi_0014` the opening variance ledger (ST-4c). Both are still
+    # editable until billing 0.1.0a11 is tagged.
+    "dotmac-billing": frozenset(
+        {
+            "bi_0013_opening_hold_admission.py",
+            "bi_0014_opening_variance_ledger.py",
+        }
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
