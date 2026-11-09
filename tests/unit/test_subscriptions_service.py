@@ -55,7 +55,7 @@ from dotmac_subscriptions.models import (
     PlatformSubscriptionContractLine,
     PlatformSubscriptionContractVersion,
 )
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 NOW = datetime(2026, 8, 18, tzinfo=UTC)
@@ -209,6 +209,7 @@ def _contract_command(
                 unit_price=ExactAmount(Decimal("100.00"), "EUR", 2),
                 offer_version_id=offer_version_id,
                 offer_version=1,
+                price_key="access",
                 entitlement_codes=("service.standard",),
             ),
         ),
@@ -249,6 +250,7 @@ def test_contract_priced_offer_has_no_fake_reference_price_and_line_stays_positi
         command.lines[0],
         charge_model_code="dedicated_negotiated",
         product_link_ref="product:access:dedicated",
+        price_key=None,
     )
     zero_line = replace(
         command,
@@ -324,6 +326,7 @@ def test_publish_contract_rate_and_replay_share_one_transactional_path(
                 unit_price=ExactAmount(Decimal("100.00"), "EUR", 2),
                 offer_version_id=offer_version_id,
                 offer_version=1,
+                price_key="access",
                 entitlement_codes=("service.standard",),
             ),
         ),
@@ -810,3 +813,87 @@ def test_occurrence_generation_requires_an_existing_contract_version(
             registry=registry,
             timer=FakeTimer(),
         )
+
+
+def _only_line(command: RecordSubscriptionContractVersionCommand) -> ContractLineInput:
+    return command.lines[0]
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    (
+        ({"price_key": None}, "contracts.catalog_price_key_required"),
+        ({"price_key": "no-such-key"}, "contracts.catalog_price_not_found"),
+        (
+            {"unit_price": ExactAmount(Decimal("99.99"), "EUR", 2)},
+            "contracts.catalog_price_mismatch",
+        ),
+        (
+            {"unit_price": ExactAmount(Decimal("100.000"), "EUR", 3)},
+            "contracts.catalog_price_mismatch",
+        ),
+    ),
+    ids=("missing-key", "unknown-key", "different-amount", "different-scale"),
+)
+def test_a_catalog_price_line_must_equal_the_published_offer_price(
+    db: Session,
+    registry: SubscriptionVocabularyRegistry,
+    change: dict[str, object],
+    code: str,
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    command = _contract_command(offer_version_id)
+    bad = replace(command, lines=(replace(_only_line(command), **change),))
+    with pytest.raises(SubscriptionDataError) as refused:
+        record_contract_version(db, bad, registry=registry, timer=FakeTimer())
+    assert refused.value.code == f"subscriptions.{code}"
+    assert (
+        db.scalar(select(func.count()).select_from(PlatformSubscriptionContract)) == 0
+    )
+
+
+def test_a_catalog_price_line_with_the_published_price_is_recorded_with_its_key(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    offer_version_id, _ = _publish(db, registry)
+    result = record_contract_version(
+        db,
+        _contract_command(offer_version_id),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+    stored = db.scalars(select(PlatformSubscriptionContractLine)).one()
+    assert stored.contract_line_key == result.line_keys[0]
+    assert stored.price_key == "access"
+
+
+def test_a_contract_priced_line_cannot_name_a_catalogue_price(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    _, template = _publish(db, registry)
+    published = publish_offer_version(
+        db,
+        replace(
+            template,
+            offer_id=None,
+            offer_code="access.negotiated",
+            offer_name="Negotiated access",
+            charge_model_code="dedicated_negotiated",
+            pricing_mode=OfferPricingMode.contract_price,
+            prices=(),
+            source_id=uuid4(),
+            command_id=uuid4(),
+        ),
+        registry=registry,
+    )
+    command = _contract_command(published.offer_version_id)
+    line = replace(_only_line(command), charge_model_code="dedicated_negotiated")
+    assert line.price_key == "access"
+    with pytest.raises(SubscriptionDataError) as refused:
+        record_contract_version(
+            db,
+            replace(command, lines=(line,)),
+            registry=registry,
+            timer=FakeTimer(),
+        )
+    assert refused.value.code == "subscriptions.contracts.price_key_not_allowed"

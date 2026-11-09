@@ -82,6 +82,10 @@ class ContractLineInput:
     offer_version_id: UUID
     offer_version: int
     entitlement_codes: tuple[str, ...] = ()
+    #: Names the published ``OfferVersionPrice`` a ``catalog_price`` offer
+    #: version's line copies. Required for a catalog-priced offer version and
+    #: refused for a contract-priced one (the line is then the only price).
+    price_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

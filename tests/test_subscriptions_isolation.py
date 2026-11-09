@@ -503,7 +503,7 @@ def _run_platform_occurrence_race(
                 "(id, offer_id, version, charge_model_code, pricing_mode, state, "
                 "effective_from, source_code, "
                 "source_id, source_version, command_id, content_digest) VALUES "
-                "(:id, :offer_id, 1, 'recurring_access', 'catalog_price', "
+                "(:id, :offer_id, 1, 'recurring_access', 'contract_price', "
                 "'published', :starts_at, 'order_line', "
                 ":source_id, 1, :command_id, :digest)"
             ),
@@ -522,6 +522,12 @@ def _run_platform_occurrence_race(
                     "ALTER TABLE "
                     "mod_subscriptions.platform_recurring_charge_occurrences "
                     "DROP CONSTRAINT uq_platform_occurrences_natural_identity"
+                )
+            )
+            conn.execute(
+                text(
+                    "DROP TRIGGER platform_occurrences_coverage_overlap ON "
+                    "mod_subscriptions.platform_recurring_charge_occurrences"
                 )
             )
         conn.execute(
@@ -899,6 +905,7 @@ def test_recording_a_contract_version_does_not_depend_on_autoflush(
                             unit_price=price,
                             offer_version_id=offer.offer_version_id,
                             offer_version=1,
+                            price_key="monthly",
                             entitlement_codes=(),
                         ),
                     ),
@@ -995,8 +1002,8 @@ def _seed_tenant_line(admin_url: str, tenant_id: uuid.UUID) -> dict[str, uuid.UU
                 "(id, tenant_id, offer_id, version, charge_model_code, pricing_mode, "
                 "state, effective_from, source_code, source_id, source_version, "
                 "command_id, content_digest) "
-                "VALUES (:id, :tenant, :offer, 1, 'recurring_access', 'catalog_price', "
-                "'published', :start, 'seed', gen_random_uuid(), 1, "
+                "VALUES (:id, :tenant, :offer, 1, 'recurring_access', "
+                "'contract_price', 'published', :start, 'seed', gen_random_uuid(), 1, "
                 "gen_random_uuid(), :digest)"
             ),
             {

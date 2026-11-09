@@ -145,6 +145,9 @@ class _ContractLineColumns:
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     scale: Mapped[int] = mapped_column(Integer, nullable=False)
     offer_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Names the published OfferVersionPrice a catalog_price line copies. NULL
+    # only for a contract_price line (su_0004 enforces both directions).
+    price_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     entitlement_codes: Mapped[list[str]] = mapped_column(
         _JSON, nullable=False, default=list
     )
@@ -475,6 +478,16 @@ class SubscriptionContractLine(Base, _ContractLineColumns):
             name="fk_contract_lines_offer_version",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "offer_version_id", "price_key"],
+            [
+                f"{SCHEMA}.offer_version_prices.tenant_id",
+                f"{SCHEMA}.offer_version_prices.offer_version_id",
+                f"{SCHEMA}.offer_version_prices.price_key",
+            ],
+            name="fk_contract_lines_catalog_price",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "tenant_id",
             "contract_version_id",
@@ -588,6 +601,18 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
             "period_start",
         ),
         Index("ix_occurrences_unacknowledged", "tenant_id", "output_acknowledged_at"),
+        # At most one successor per occurrence, as Billing's obligation
+        # correction. The coverage-overlap trigger itself is migration-owned.
+        UniqueConstraint(
+            "tenant_id", "corrects_occurrence_id", name="uq_occurrences_correction"
+        ),
+        Index(
+            "ix_occurrences_line_coverage",
+            "tenant_id",
+            "contract_id",
+            "contract_line_key",
+            "rating_coverage_start",
+        ),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -911,6 +936,15 @@ class PlatformSubscriptionContractVersion(Base, _ContractVersionColumns):
 class PlatformSubscriptionContractLine(Base, _ContractLineColumns):
     __tablename__ = "platform_subscription_contract_lines"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["offer_version_id", "price_key"],
+            [
+                f"{SCHEMA}.platform_offer_version_prices.offer_version_id",
+                f"{SCHEMA}.platform_offer_version_prices.price_key",
+            ],
+            name="fk_platform_contract_lines_catalog_price",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "contract_version_id",
             "contract_line_key",
@@ -1009,6 +1043,15 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
             "ix_platform_occurrences_contract", "contract_version_id", "period_start"
         ),
         Index("ix_platform_occurrences_unacknowledged", "output_acknowledged_at"),
+        UniqueConstraint(
+            "corrects_occurrence_id", name="uq_platform_occurrences_correction"
+        ),
+        Index(
+            "ix_platform_occurrences_line_coverage",
+            "contract_id",
+            "contract_line_key",
+            "rating_coverage_start",
+        ),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()

@@ -24,6 +24,15 @@ wire versions carried both in their type name and `contract_version` field:
   suppression or accounting posting — an adopter maps it to those decisions in
   its own owners. Same versioning rule.
 
+**Breaking in `0.1.0a4`:** `ContractLineInput.price_key` names the published
+`OfferVersionPrice` a catalog-priced line copies. It is REQUIRED for a
+`catalog_price` offer version (no deprecation period) and refused for a
+`contract_price` one; the service and, independently, `su_0004` refuse a line
+that does not equal that price. `su_0005` additionally refuses a second
+non-cancelled occurrence whose rating coverage overlaps another on the same
+contract line (a correction may overlap its own correction chain). It needs no
+PostgreSQL extension.
+
 `BillingCadence`, `Interval`, `ExactAmount`, command/result dataclasses, domain
 errors, link helpers, publisher protocols/fakes, `DurableTimerPort`, and the
 query/service names in `__all__` are supported for the current pre-release

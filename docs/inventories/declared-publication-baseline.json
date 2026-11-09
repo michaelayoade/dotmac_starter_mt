@@ -147,6 +147,11 @@
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
     },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a4",
+      "reason": "DECLARED BY THE CATALOG-PRICE AND PERIOD-EXCLUSION SLICE (S1), NOT YET RELEASED. a3 IS published (peeled tag dotmac-subscriptions-v0.1.0a3). a4 adds su_0004 (a catalog_price contract line names and equals its published offer price: nullable price_key, composite FK, INSERT trigger) and su_0005 (a coverage-overlap trigger: one contract line is never charged twice for an instant). It adds ContractLineInput.price_key, which catalog-priced lines must now supply (breaking). No adopter pins a4. Remove this row in the a4 release-record change; never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-usage": {
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named intended consumer. Publication makes an immutable artifact available for the separately governed history backfill, dedupe proof and aggregate shadow; it does not compose the module, move usage authority, or retire Sub's writer. Raw AAA, rating, billing and accounting remain separate. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",

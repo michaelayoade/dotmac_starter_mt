@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.0a4
+
+- **Breaking:** require a `catalog_price` contract line to name `(offer_version, price_key)` and
+  equal that published `OfferVersionPrice` (charge model, amount, currency,
+  scale). `ContractLineInput` gains an optional `price_key`: required for a
+  catalog-priced offer version, refused for a contract-priced one. `price_key` is required with no
+  deprecation period: a caller that built catalog-priced lines without a key
+  now fails. `price_key` is now part of the contract-version replay
+  fingerprint. `record_contract_version` refuses a mismatch with
+  `contracts.catalog_price_key_required`, `contracts.catalog_price_not_found`,
+  `contracts.catalog_price_mismatch` or `contracts.price_key_not_allowed`.
+- `su_0004_catalog_price_line` repeats the rule in PostgreSQL on both planes: a
+  nullable `price_key` column, a composite foreign key to the price it names
+  (MATCH SIMPLE, so a contract-priced line is skipped) and an INSERT trigger for
+  the cross-table equality. Contract lines were already immutable. Existing
+  lines all have a NULL key, so the foreign key validates immediately; the
+  upgrade logs, and never repairs or backfills, the catalog-priced lines that
+  pre-date the rule (grandfathered; see
+  `docs/inventories/subscriptions-catalog-price-exceptions.md`).
+- `su_0005_line_coverage_overlap` refuses, on both planes, an occurrence whose
+  rating coverage `[rating_coverage_start, rating_coverage_end)` overlaps another
+  non-cancelled occurrence of the same (tenant, contract, contract line key), so
+  one contract line is never charged twice for an instant, including the same
+  coverage recorded under a new contract version. It is a BEFORE INSERT OR UPDATE
+  trigger on the su_0001 pattern (advisory lock, then `exclusion_violation`): no
+  extension, nothing in `public`, not deferrable, and it refuses to run under
+  REPEATABLE READ. A correction may overlap its own correction chain (Billing
+  reads a correction as a replacement) and a superseded occurrence stops
+  blocking; a correction must replace an occurrence of the same contract line,
+  and a new unique `(tenant, corrects_occurrence_id)` gives an occurrence at most
+  one successor. A trigger cannot be `NOT VALID`, so existing overlapping current
+  occurrences or duplicate corrections make the upgrade refuse before any DDL.
+- `su_0003` and earlier keep their released bytes.
+
 ## 0.1.0a3
 
 - Port `dotmac_sub`'s complimentary and sponsored billing treatment as a
