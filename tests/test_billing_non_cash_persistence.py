@@ -17,8 +17,6 @@ from threading import Event, Thread
 from uuid import uuid4
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from dotmac_billing import models
 from dotmac_billing.service import grant_non_cash_credit
 from dotmac_kernel.cache import TenantScope
@@ -33,6 +31,8 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from tests import test_billing_isolation as billing
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as predecessor

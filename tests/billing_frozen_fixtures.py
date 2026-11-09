@@ -19,6 +19,7 @@ frozen elected component) is supplied.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
@@ -27,7 +28,6 @@ from dotmac_billing import (
     TaxDeterminationComponentEvidenceV1,
     TaxDeterminationLineEvidenceV1,
     TaxDeterminationSetEvidenceV1,
-    models,
     service,
 )
 from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
@@ -37,7 +37,7 @@ from sqlalchemy import select
 
 
 def _determination(scope, tax, document) -> InvoiceTaxEvidenceV1:
-    zero = Money(0, tax.amount.currency)
+    zero = Money(Decimal(0), tax.amount.currency)
     gross = Money(tax.taxable_basis.amount + tax.amount.amount, tax.amount.currency)
     component = TaxDeterminationComponentEvidenceV1(
         determination_id=UUID(tax.component_ref),

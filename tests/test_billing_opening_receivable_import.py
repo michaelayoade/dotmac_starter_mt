@@ -2098,6 +2098,8 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
             historical.setattr(
                 s, "_require_historical_source_unclaimed", lambda *args, **kwargs: None
             )
+            # bi7 predates the frozen withholding component table (bi_0016).
+            historical.setattr(s, "_require_frozen_withholding", lambda *a, **k: None)
             with b._session(url, scope) as db:
                 account = cash._new_account(db, scope)
                 old_command = cash._command(db, scope, account)
@@ -2118,8 +2120,7 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                 original_wht = s.accept_withholding_discharge(
                     db,
                     scope=scope,
-                    command=frozen_withholding_command(
-                        db,
+                    command=b._withholding_command(
                         account,
                         invoice.id,
                         scope=scope,
@@ -2150,8 +2151,7 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
                 s.accept_withholding_discharge(
                     db,
                     scope=scope,
-                    command=frozen_withholding_command(
-                        db,
+                    command=b._withholding_command(
                         account,
                         invoice.id,
                         scope=scope,
@@ -2566,7 +2566,8 @@ def _source_case(db, scope, kind):
     account, _, invoice = b._seed_invoice(db, scope, suffix=str(uuid4()))
     owner, reference = "customer-care", f"source:{uuid4()}"
     if kind.startswith("withholding"):
-        command = b._withholding_command(
+        command = frozen_withholding_command(
+            db,
             account.id,
             invoice.id,
             scope=scope,

@@ -488,6 +488,7 @@ def test_genuine_bi0005_upgrade_preserves_all_history_and_backfills_exact_identi
             "opening_window_admissions",
             "opening_window_seals",
             "opening_hold_admissions",
+            "document_withholding_components",
             "opening_variances",
             "opening_variance_events",
             "opening_control_gaps",
