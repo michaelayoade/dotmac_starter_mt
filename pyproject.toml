@@ -144,6 +144,9 @@ dotmac-positioning = { path = "packages/dotmac-positioning", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
+# Stateless caller-transaction fence for human-triggered delivery resends.
+# Extracted from Academy; owns no tables, adopters inject their own.
+dotmac-delivery-resend = { path = "packages/dotmac-delivery-resend", develop = true }
 dotmac-billing = { path = "packages/dotmac-billing", develop = true }
 dotmac-collections = { path = "packages/dotmac-collections", develop = true }
 # Reusable recurring-commercial owner. Built and proven here; real adopters

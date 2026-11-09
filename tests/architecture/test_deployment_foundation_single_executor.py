@@ -157,6 +157,24 @@ def test_the_execute_surface_guard_does_not_bite_a_near_miss() -> None:
 #: place allowed to hold that shape.
 _MUTATORS = frozenset({"apply_compose", "replace_rules", "restore_chains"})
 
+#: The one transparent-delegation exemption to the module-level count below.
+#:
+#: `lane3_exposure_recording.py` implements the `ExposureEffects` protocol by
+#: forwarding each method once to the same-named inner method; it sequences
+#: nothing. That premise is machine-checked in
+#: `tests/unit/test_lane3_exposure_recording.py`, which asserts that every
+#: mutator call in the module is exactly one of these three `self._inner.*`
+#: delegations and that the module imports no executor or host seam. This is
+#: still an exact two-directional ratchet: another mutator, a renamed module,
+#: or a second delegation file fails here rather than being absorbed.
+_TRANSPARENT_EXPOSURE_DELEGATIONS: dict[str, set[str]] = {
+    "scripts/lane3_exposure_recording.py": {
+        "apply_compose",
+        "replace_rules",
+        "restore_chains",
+    },
+}
+
 
 def _modules_ordering_host_mutation() -> dict[str, set[str]]:
     """Every module whose own code calls more than one exposure mutator."""
@@ -185,6 +203,7 @@ def test_only_the_engine_orders_exposure_mutations() -> None:
     assert _modules_ordering_host_mutation() == {
         "packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation"
         "/engine/run.py": {"replace_rules", "restore_chains"},
+        **_TRANSPARENT_EXPOSURE_DELEGATIONS,
     }, (
         "a module other than the engine is sequencing host mutations again. "
         "That is how `ExposureTransaction` came to be a second executor: it "

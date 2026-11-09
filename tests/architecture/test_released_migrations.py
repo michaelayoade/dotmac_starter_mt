@@ -1883,6 +1883,33 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payments ──
+    "dotmac-payments-v0.1.0a4": (
+        "dotmac-payments",
+        "fd04ea3cd8bf9332f2d9a2324e1fe7ca70171361",
+        {
+            "pm_0001_payment_intents.py": (
+                "d3f253970bfb6ef1e98289bff1dc2853bf4964a995d406a92529527d3bdb55db"
+            ),
+            "pm_0002_money_precision.py": (
+                "6c16863cc542178b5b1ac17a5d431c8fbbc4e270dcd6d190d7d6c39652848ae8"
+            ),
+            "pm_0003_confirmation_immutable.py": (
+                "fc15f0e306afee6fc9b02970b0a3c4b2e9bb45d1fac9aa23095c699ac7b4bc41"
+            ),
+            "pm_0004_purchase_funding.py": (
+                "99700c868f5f09636429ebe2f46714439439ee48ea4dc3280163b64dbceccd72"
+            ),
+            "pm_0005_merchant_context.py": (
+                "34a48d78eb9edfee5e7063ef68825be6235f43be6eeb0156f6f1218d7c54b3c0"
+            ),
+            "pm_0006_cash_qualification.py": (
+                "c98f777ac89e3c8ef0b7a1f6b64c953248fb50352a364fbb0184c69c8d1f9e9c"
+            ),
+            "pm_0007_refund_outcomes.py": (
+                "37e99a855cb3820c5ff57b6c353f5709ff1c2ba40a531cd2da20244f72699022"
+            ),
+        },
+    ),
     "dotmac-payments-v0.1.0a3": (
         "dotmac-payments",
         "ec3c0398ad93912afc0a9dd4fa82098cc812d6dd",
@@ -1932,6 +1959,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-imports ──
+    "dotmac-imports-v0.2.0a2": (
+        "dotmac-imports",
+        "cda763663fd3e08f5876699b7771496eadf95536",
+        {
+            "im_0001_import_runs.py": (
+                "c6d6caa3765bf133da66f1c6fe9decb179a3a2a7638ec404e3bcae7dc4f5109a"
+            ),
+        },
+    ),
     "dotmac-imports-v0.2.0a1": (
         "dotmac-imports",
         "008ccaeaebda6855ba34b8e70740e3859954a37b",
@@ -2289,6 +2325,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-service-access-policy ──
+    "dotmac-service-access-policy-v0.1.0a2": (
+        "dotmac-service-access-policy",
+        "8e39eedbdf8608f2fbd3af40e98608ed7d32d8f0",
+        {
+            "sap_0001_access_policy.py": (
+                "7dc2cb8f39891bc2b963a77771cf33f8ce3f5c5d5010007a445af4ed7dccec54"
+            ),
+            "sap_0002_input_versions.py": (
+                "24e4c6ff07d25ef3bee1a23f0fe9fc9c056fa4a01a53f2c3369eba27c616b15e"
+            ),
+        },
+    ),
     "dotmac-service-access-policy-v0.1.0a1": (
         "dotmac-service-access-policy",
         "1029354b0619fa356cc43651c7f26a4ebaf0ac60",
@@ -8279,7 +8327,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     ),
     # `pm_0007` adds append-only refund instructions and cash outcomes; still
     # editable until `dotmac-payments` 0.1.0a4 is tagged.
-    "dotmac-payments": frozenset({"pm_0007_refund_outcomes.py"}),
+    "dotmac-payments": frozenset(),
     "dotmac-imports": frozenset(),
     # a5's availability/transfer lineage: still editable until the
     # protected release tags it and its digest is recorded above.
@@ -8301,7 +8349,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-sales": frozenset(),
     # `sap_0002` adds the source/policy version columns; still editable until
     # `dotmac-service-access-policy` 0.1.0a2 is tagged.
-    "dotmac-service-access-policy": frozenset({"sap_0002_input_versions.py"}),
+    "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
     "dotmac-template-studio": frozenset(),
     "dotmac-commercial-agreements": frozenset(),

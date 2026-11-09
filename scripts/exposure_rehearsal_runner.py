@@ -218,6 +218,10 @@ from lane3_authorization import (
     prepare_authorization,
 )
 from lane3_execution import TopologyRefused, load_topology
+from lane3_exposure_recording import (
+    ExposureCallRecord,
+    RecordingExposureEffects,
+)
 
 # `observed_foreign`, `provoke_apply_failure` and `seed_foreign_rules` are NOT
 # imported any more and are deliberately NOT deleted from `lane3_provocation`.
@@ -1013,6 +1017,12 @@ class TerminalContext:
     #: `probe_vantage_ref`, the parser's counts and the Fleet `host_id`. None
     #: until the record is read and bound, so a refusal before that claims none.
     vantage_topology: dict[str, object] | None = None
+    #: Private Executor-boundary exposure records for a later evidence join.
+    #: The sink exists before execution so a terminal path can still read it;
+    #: the runner's own snapshot and cleanup calls do not write here.
+    exposure_calls: list[ExposureCallRecord] = dataclasses.field(
+        default_factory=list, repr=False
+    )
     acts: list[CleanupAct] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
 
@@ -1610,7 +1620,9 @@ def run(
             deploy_dir=args.deploy_dir,
             bindings=bindings,
         )
-        execution_plan = receipt_v2.acquire_execution_plan(base_plan, bindings=bindings)
+        execution_plan = receipt_v2.acquire_execution_plan(
+            base_plan, bindings=bindings, spec=spec
+        )
         with vantage_topology_refusals(refused_as=PreconditionUnfit):
             if execution_plan.host_id != bound.host_id:
                 raise topology_source.TopologyBindingRefused("host_id")
@@ -1623,9 +1635,10 @@ def run(
         )
         if execution_plan.controller_ssh_fingerprint != str(controller_identity):
             raise PreconditionUnfit("the authorized plan does not name the controller")
-        # The current V2 renderer supplies no exposure reconciliation. Refuse
-        # before taking a lease or deploying a partial rehearsal. No exposure
-        # success can be inferred from ordinary deployment; no rules are seeded.
+        # The plan carries the descriptor-derived exposure families. If the
+        # descriptor derives none, refuse before taking a lease or deploying a
+        # partial rehearsal. No exposure success can be inferred from ordinary
+        # deployment; no rules are seeded.
         if not execution_plan.exposure_reconciliations:
             raise PreconditionUnfit(
                 "Lane 3 exposure rehearsal is blocked: the trusted plan has "
@@ -1661,6 +1674,10 @@ def run(
             runner=controller,
             timeout_seconds=args.timeout,
         )
+        # Only the object handed to the Executor is recorded. The raw effects
+        # retain the runner's pre-change snapshot and cleanup paths, so those
+        # observations cannot be mistaken for the transaction's boundaries.
+        executor_exposure = RecordingExposureEffects(effects, ctx.exposure_calls)
         ctx.vm_installation_id = read_installation_id(controller)
 
         # ── item 3, before anything mutates ─────────────────────────────────────
@@ -1711,7 +1728,7 @@ def run(
                 spec=spec,
                 deployment_plan=deployment_plan,
                 effects=deployment_effects,
-                exposure_effects=effects,
+                exposure_effects=executor_exposure,
                 bindings=bindings,
                 lock=held,
             )
