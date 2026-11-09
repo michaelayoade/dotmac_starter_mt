@@ -12,8 +12,8 @@ why production refuses the in-memory store for these routes.
 Platform catalog posture, like `platform_idempotency_records` (0018): NO
 `tenant_id`, NO RLS (a bucket is a shared counter written before any tenant
 session exists; the tenant is part of the hashed key), GRANTed to
-`platform_api`/`app_admin` and REVOKEd from `app_user`. `key_hash` is a SHA-256
-digest of the limiter key; the table never holds a client address in the clear.
+`platform_api`/`app_admin` and REVOKEd from `app_user`. `key_hash` is an HMAC-SHA256
+digest (deployment secret) of the limiter key; the table never holds a client address in the clear.
 Additive only: no existing table, row, grant or policy changes. Rows are
 transient (`expires_at`) and the store prunes them opportunistically.
 """

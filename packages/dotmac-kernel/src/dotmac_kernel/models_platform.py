@@ -125,7 +125,7 @@ class RateLimitBucket(Base):
     `platform_api`/`app_admin` and REVOKEd from `app_user` (migration 0031). The
     tenant is part of the hashed key, not a column: a bucket is the shared
     counter that makes N workers behave as one, written before any
-    tenant-scoped session exists. `key_hash` is the SHA-256 of the limiter key,
+    tenant-scoped session exists. `key_hash` is the HMAC-SHA256 of the limiter key,
     never the key -- the key contains the client address, and a counter table has
     no reason to retain it in the clear. Rows are transient (`expires_at`).
     """
