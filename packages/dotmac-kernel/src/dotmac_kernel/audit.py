@@ -92,6 +92,102 @@ class UnknownAuditActorTypeError(ValueError):
     """An actor type outside the contract's four kinds."""
 
 
+#: Keys an audit `details` document may never carry, at any depth. The trail is
+#: retained and widely readable; a position is neither, so a coordinate that
+#: reaches it is a disclosure that cannot be taken back. Matching is on the
+#: casefolded key, EXACTLY: `Latitude` and `LNG` are refused, `latency` and
+#: `geometry_version` are not. The list is deliberately short and literal --
+#: a fuzzy match would refuse legitimate keys and be bypassed by the first
+#: spelling nobody anticipated, so a producer that needs to record that a
+#: position was involved records the position's opaque reference, never its
+#: value. Extending this set is a contract change, not a call-site decision.
+AUDIT_FORBIDDEN_DETAIL_KEYS: frozenset[str] = frozenset(
+    {
+        "coordinates",
+        "geo",
+        "lat",
+        "latitude",
+        "lng",
+        "lon",
+        "longitude",
+        "point",
+    }
+)
+
+#: Deepest nesting the canary will inspect. Anything deeper is refused rather
+#: than skipped: an uninspected subtree is exactly where a coordinate would
+#: hide, and a self-referencing structure can never be serialized anyway.
+AUDIT_DETAILS_MAX_DEPTH = 32
+
+
+class AuditDetailsCoordinateError(ValueError):
+    """An audit `details` document carries a coordinate-like key.
+
+    `key_paths` names WHERE (`details.route.0.lat`), never the value: the value
+    is the thing being kept out of the trail, so it must not reappear in a log
+    line, traceback or API error either.
+    """
+
+    def __init__(self, key_paths: tuple[str, ...], *, reason: str | None = None):
+        self.key_paths = key_paths
+        shown = ", ".join(key_paths[:5]) + (", ..." if len(key_paths) > 5 else "")
+        super().__init__(
+            reason
+            or (
+                f"audit details carry coordinate-like key(s) at {shown}. The "
+                "audit trail refuses positions at any depth "
+                f"(forbidden keys: {sorted(AUDIT_FORBIDDEN_DETAIL_KEYS)}). "
+                "Record an opaque reference to the position instead; the "
+                "value stays with the module that owns it."
+            )
+        )
+
+
+def refuse_coordinate_details(details: object) -> None:
+    """Raise `AuditDetailsCoordinateError` if `details` holds a forbidden key.
+
+    Walks mappings, lists, tuples and sets at any depth up to
+    `AUDIT_DETAILS_MAX_DEPTH`. Pure: it reads, never mutates, and it collects
+    every offending path before raising so one run reports the whole defect.
+    """
+    found: list[str] = []
+    _scan_details(details, "details", 0, found)
+    if found:
+        raise AuditDetailsCoordinateError(tuple(found))
+
+
+def _scan_details(node: object, path: str, depth: int, found: list[str]) -> None:
+    if isinstance(node, dict):
+        children: list[tuple[str, object, bool]] = [
+            (str(key), value, isinstance(key, str) and _forbidden(key))
+            for key, value in node.items()
+        ]
+    elif isinstance(node, list | tuple | set | frozenset):
+        children = [(str(index), value, False) for index, value in enumerate(node)]
+    else:
+        return
+    for name, value, forbidden in children:
+        child_path = f"{path}.{name}"
+        if forbidden:
+            found.append(child_path)
+        if isinstance(value, dict | list | tuple | set | frozenset):
+            if depth + 1 >= AUDIT_DETAILS_MAX_DEPTH:
+                raise AuditDetailsCoordinateError(
+                    (child_path,),
+                    reason=(
+                        "audit details nest deeper than "
+                        f"{AUDIT_DETAILS_MAX_DEPTH} levels at {child_path}; "
+                        "the coordinate canary cannot inspect them and refuses "
+                        "rather than assume they are clean"
+                    ),
+                )
+            _scan_details(value, child_path, depth + 1, found)
+
+
+def _forbidden(key: str) -> bool:
+    return key.casefold() in AUDIT_FORBIDDEN_DETAIL_KEYS
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
@@ -255,6 +351,7 @@ def _current_audit_event_values(
 ) -> dict[str, object]:
     """Validate current-event vocabulary/identity/attribution before mutation."""
     active_audit_actions().require(action)
+    refuse_coordinate_details(details)
     resolved_type, resolved_id = resolve_audit_actor(
         actor_type=actor_type,
         actor_id=actor_id,
@@ -443,6 +540,7 @@ def write_platform_audit_event(
     contract as `write_audit_event`; the actor is a `PlatformAdmin` and the
     action must be declared by an installed manifest."""
     active_audit_actions().require(action)
+    refuse_coordinate_details(details)
     event = PlatformAuditEvent(
         actor_admin_id=actor_admin_id,
         action=action,
@@ -457,12 +555,16 @@ def write_platform_audit_event(
 
 __all__ = [
     "ACTOR_TYPES",
+    "AUDIT_DETAILS_MAX_DEPTH",
+    "AUDIT_FORBIDDEN_DETAIL_KEYS",
+    "AuditDetailsCoordinateError",
     "AuditEvent",
     "MissingAuditActorError",
     "PlatformAuditEvent",
     "UnattributedAuditEventError",
     "UnknownAuditActorTypeError",
     "resolve_audit_actor",
+    "refuse_coordinate_details",
     "resolve_event_attribution",
     "write_audit_event",
     "write_platform_audit_event",

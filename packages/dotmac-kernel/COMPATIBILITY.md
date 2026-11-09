@@ -1949,3 +1949,27 @@ failed-SAVEPOINT latch prevents a caller catching a post-DML primitive exception
 from releasing partial effects; rollback clears that scope, retaining earlier
 root work. Hosted tests also require a subsequent ordinary SAVEPOINT to release
 after recoverable failures, ruling out a falsely healthy but poisoned root.
+
+
+## Audit coordinate canary — 2026-11-09, source only
+
+`dotmac_kernel.audit` gains `AUDIT_FORBIDDEN_DETAIL_KEYS`,
+`AUDIT_DETAILS_MAX_DEPTH`, `AuditDetailsCoordinateError` (a `ValueError`) and
+`refuse_coordinate_details`. `write_audit_event` and
+`write_platform_audit_event` (and the private connection writer and offline
+history import, which share `_current_audit_event_values`) call it after the
+action-vocabulary check and before anything touches the session, so a refused
+write leaves no partial state.
+
+The forbidden key list is exactly `lat`, `lng`, `lon`, `latitude`, `longitude`,
+`coordinates`, `geo`, `point`, compared case-insensitively and in full: `latency`
+and `geometry_version` are not refused, and values are never inspected. Mappings,
+lists, tuples and sets are walked; nesting deeper than
+`AUDIT_DETAILS_MAX_DEPTH` (32) is refused because an uninspected subtree is where
+a coordinate would hide. The error carries `key_paths` and never a value.
+
+Adopter note: a product that records a position inside audit details now raises
+at the write. Record the opaque reference of the position (owned by the module
+that holds it) instead. Extending the key list is a contract change. The Starter
+census (every `app/` and `packages/*/src` audit write, by AST) found no producer.
+Source only: no version is allocated and no product adoption is qualified.
