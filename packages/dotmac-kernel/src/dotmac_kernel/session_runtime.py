@@ -475,6 +475,7 @@ class DatabaseRuntime:
             if cached is None:
                 engine = create_engine(
                     self._platform_engine.url,
+                    pool_pre_ping=True,
                     hide_parameters=True,
                     echo=False,
                     pool_size=pool_size,

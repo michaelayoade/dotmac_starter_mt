@@ -791,6 +791,7 @@ def test_dedicated_sessions_commit_on_their_own_pool_and_count(
     assert factory.kw["bind"].pool.size() == 4
     assert factory.kw["bind"].pool._max_overflow == 0
     assert factory.kw["bind"].pool.timeout() == 0.5
+    assert factory.kw["bind"].pool._pre_ping is True
     runtime.dispose_bounded_pools()
     assert runtime._bounded == {}
 
@@ -919,6 +920,31 @@ def test_a_rule_inside_a_mount_is_limited_at_runtime() -> None:
     client = TestClient(app, client=(UNTRUSTED_PEER, 5000))
     assert [client.post("/api/login").status_code for _ in range(3)] == [200, 429, 429]
     assert len(store.keys) == 1  # the blocked key never reached the store again
+
+
+def test_the_global_limiter_still_buckets_a_mount_as_one_route() -> None:
+    """Mount descent is for anonymous-rule matching only: the global key for any
+    route under a mount stays the mount's own prefix, as before."""
+    from dotmac_kernel.middleware.rate_limit import _path_bucket
+    from starlette.requests import Request
+
+    app = _table()
+
+    def bucket(path: str) -> str:
+        return _path_bucket(
+            Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": path,
+                    "headers": [],
+                    "app": app,
+                }
+            )
+        )
+
+    assert bucket("/api/login") == bucket("/api/docs") == "/api"
+    assert bucket("/auth/login") == "/auth/login"
 
 
 def test_create_app_in_production_refuses_anonymous_limits_without_request_evidence(

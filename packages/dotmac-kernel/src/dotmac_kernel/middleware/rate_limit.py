@@ -542,7 +542,7 @@ class RateLimitMiddleware:
                 await response(scope, receive, send)
                 return
 
-        template = _path_bucket(request) if self._needs_template() else None
+        template = _anonymous_template(request) if self._needs_template() else None
         if (
             self.anonymous_policy is not None
             and self.anonymous_store is not None
@@ -650,14 +650,25 @@ def _matched_template(
 def _path_bucket(request: Request) -> str:
     """Route TEMPLATE when one matches (bounded by the route table), else a
     fixed hash bucket (bounded by `_UNMATCHED_BUCKETS`) — never the raw
-    path."""
+    path. This is the GLOBAL limiter's bucketing and is deliberately unchanged:
+    a mount is one bucket, never one per route beneath it."""
     app = request.scope.get("app")
     if app is not None:
-        template = _matched_template(app.routes, request.scope)
-        if template is not None:
-            return template
+        for route in app.routes:
+            match, _ = route.matches(request.scope)
+            if match == Match.FULL:
+                return getattr(route, "path", request.url.path)
     digest = hashlib.sha256(request.url.path.encode()).digest()
     return f"unmatched:{digest[0] % _UNMATCHED_BUCKETS}"
+
+
+def _anonymous_template(request: Request) -> str | None:
+    """The full template (mount descent included) for ANONYMOUS-rule matching
+    only, or `None` when no route claims the request."""
+    app = request.scope.get("app")
+    if app is None:
+        return None
+    return _matched_template(app.routes, request.scope)
 
 
 def declared_route_templates(
