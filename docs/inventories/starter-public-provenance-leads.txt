@@ -1,0 +1,76 @@
+packages/dotmac-approvals/src/dotmac_approvals/contracts.py:155:     """Only the original requester may cancel (ported from ERP)."""
+packages/dotmac-approvals/src/dotmac_approvals/policy.py:106:     """Separation of duties, ported from ERP's `sod_rule` handling."""
+packages/dotmac-approvals/src/dotmac_approvals/service.py:415:     """Cancel a pending tenant request. Requester-only, ported from ERP."""
+packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements/ports.py:251:     Ported from the source's guard verbatim in intent: activation is
+packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements/service.py:3: Ported from `dotmac_vendor_control_plane:src/vendor_cp/contracts/service.py`
+packages/dotmac-connector-paystack/src/dotmac_connector_paystack/delivery.py:12: ambiguous one. ``ACTIONS_BY_CAPABILITY`` is ported from Sub's
+packages/dotmac-connector-paystack/src/dotmac_connector_paystack/operations.py:140: #: The longest provider identifier accepted as success EVIDENCE. Ported from
+packages/dotmac-connector-remita/src/dotmac_connector_remita/outbound.py:7: Ported from ``dotmac_erp:app/services/remita/client.py`` (the only file in the
+packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp/media.py:186:     Ported from Sub's `team_inbox_media` normalization. Parameters are dropped
+packages/dotmac-deployment-control/src/dotmac_deployment_control/ports.py:26: ## Two decisions ported from the reference, because both are counter-intuitive
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/authorization_v3.py:6: none of its fields may be copied from the receipt being checked.
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/backup.py:68: #: Re-exported from `spec`, which owns it now that a descriptor declares a
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/lock.py:3: Ported from `dotmac_sub:scripts/deploy.sh:117-140`, which took the lock after an
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/engine/run.py:2271:                 # Narrow on purpose, ported from `deploy.sh:378-400`. A blanket
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/execution_plan.py:140: # `EXECUTION_PLAN_WRONG_TYPE` is imported from `canonical_plan`, which owns both
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/image/audit.py:3: Ported from `dotmac_integrator:scripts/audit_image.sh:28-85`, which is the only
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/providers/compose_host.py:643:         Ported from `deploy.sh:set_env_value` (sed-in-place with a backup
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/providers/compose_host.py:2506:         always kept regardless of age or count — ported from
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/recovery_plan.py:226: # `RECOVERY_PLAN_WRONG_TYPE` is imported from `canonical_plan`, which owns
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/render/nginx.py:36: member is present (`handoff_contract_pattern`, ported from Sub's
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/render/nginx.py:126:     Ported from Sub's `assert_proxy_handoff_contract`: the deployment engine
+packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/target_identity_guard.py:453:     # ported from, in another repository. Provenance for a port, not a
+packages/dotmac-imports/src/dotmac_imports/contracts.py:62:     """The run lifecycle, ported from Sub's `ImportRunStatus`.
+packages/dotmac-imports/src/dotmac_imports/models.py:3: Ported from Sub's `import_runs` / `import_run_rows` with three deliberate
+packages/dotmac-imports/src/dotmac_imports/service.py:48: # Ported from Sub's `_CHUNK_COMMIT`. One call processes at most this many rows;
+packages/dotmac-imports/src/dotmac_imports/tabular.py:3: Ported from ERP's `finance/import_export/base.py` — its alias resolution,
+packages/dotmac-inbox-operations/src/dotmac_inbox_operations/models.py:212:     Ported from Sub's `inbox_conversation_queue_entries`. The position is a
+packages/dotmac-inbox-operations/src/dotmac_inbox_operations/models.py:281:     Ported from Sub's `inbox_team_round_robin_cursors`. Rotation that lives in
+packages/dotmac-integration/src/dotmac_integration/execution.py:3: Ported from `dotmac_sub`'s integration platform. Each mechanism has exactly ONE
+packages/dotmac-integration/src/dotmac_integration/idempotency.py:1: """At-most-once execution — ADAPTED from the kernel, never reimplemented.
+packages/dotmac-integration/src/dotmac_integration/lifecycle.py:3: Ported from `dotmac_sub`'s `installations.py`. This is the service the models
+packages/dotmac-integration/src/dotmac_integration/models.py:593:     #: Original engine context, never copied from payload or today's binding.
+packages/dotmac-integration/src/dotmac_integration/retention.py:413:     #: The accountable owner, copied from the policy AT PLACEMENT. Copied rather
+packages/dotmac-integration/src/dotmac_integration/retry.py:3: Ported from `dotmac_sub`'s delivery outcome handling, with one thing removed on
+packages/dotmac-integration/src/dotmac_integration/selection.py:35: Ported from `dotmac_sub`'s `require_enabled_capability_binding`, which already
+packages/dotmac-ipam/src/dotmac_ipam/migrations/versions/ip_0002_extracted.py:485:     # Recreate the 0.1 template shape (DDL copied from ip_0001, unmodified).
+packages/dotmac-kernel/src/dotmac_kernel/branding.py:11:   Ported from `dotmac_sub:app/services/branding_config.py::get_brand`,
+packages/dotmac-kernel/src/dotmac_kernel/branding.py:20:   Ported from `dotmac_starter:app/services/branding.py::get_branding`
+packages/dotmac-kernel/src/dotmac_kernel/branding.py:21:   (the DB-override merge), adapted from that single-tenant app's
+packages/dotmac-kernel/src/dotmac_kernel/consent.py:5: Ported from `dotmac_sub:app/services/communication_eligibility.py`, the fleet's
+packages/dotmac-kernel/src/dotmac_kernel/consent_models.py:6: Ported from `dotmac_sub:app/models/notification.py::CommunicationSuppression`,
+packages/dotmac-kernel/src/dotmac_kernel/crud.py:3: Ported from dotmac_sub:app/services/crud.py (org infrastructure source of
+packages/dotmac-kernel/src/dotmac_kernel/delivery_models.py:7: Ported from `dotmac_sub:app/models/notification.py::NotificationDelivery`, minus
+packages/dotmac-kernel/src/dotmac_kernel/migrations/verify.py:69: # form the inspector reports it. Ported from ERP's `20260813_tenant_projection`,
+packages/dotmac-kernel/src/dotmac_kernel/migrations/versions/20260807_0014_open_setting_domains.py:17: and none writes — so the RLS split below is copied from migration 0002/0013
+packages/dotmac-kernel/src/dotmac_kernel/migrations/versions/20260810_0019_communication_consent.py:4: this address on this channel?* Ported from Sub's `communication_suppressions`,
+packages/dotmac-kernel/src/dotmac_kernel/migrations/versions/20260814_0024_external_identity_bindings.py:7: Ported from ERP's `federated_identities` (`issuer`, `subject` → `person_id`,
+packages/dotmac-kernel/src/dotmac_kernel/modules.py:109: # The version recorded for a module adapted from a `FeatureManifest`, which
+packages/dotmac-kernel/src/dotmac_kernel/query.py:3: Ported from dotmac_sub:app/services/common.py (org infrastructure source of
+packages/dotmac-kernel/src/dotmac_kernel/request_evidence.py:16: ADR-0006's amendment requires shared behaviour be ported from a production
+packages/dotmac-kernel/src/dotmac_kernel/settings_resolver.py:1521:     the winner's row instead of propagating the error — ported from
+packages/dotmac-kernel/src/dotmac_kernel/static/css/src/main.css:16:    Ported from SUB:static/css/src/main.css. Fonts are loaded via the Google
+packages/dotmac-kernel/src/dotmac_kernel/static/js/components.js:8:  * Ported from ST:static/js/components.js — trimmed to the components this
+packages/dotmac-kernel/src/dotmac_kernel/templates/auth/login.html:2:   Admin portal login page. Ported from ST:templates/admin/login.html,
+packages/dotmac-kernel/src/dotmac_kernel/templates/components/table_macros.html:2:   Table/list UI macros. Ported from ST:templates/admin/components/
+packages/dotmac-kernel/src/dotmac_kernel/templates/components/topbar.html:7:   Ported from ST:templates/admin/components/topbar.html — the notification
+packages/dotmac-kernel/src/dotmac_kernel/templates/layouts/admin.html:11:   Ported from ST:templates/admin/base.html, adapted: our `templates/base.html`
+packages/dotmac-kernel/src/dotmac_kernel/templating.py:8: Ported from ST:app/templates.py (`_asset_version`/`_static_asset_url`);
+packages/dotmac-kernel/src/dotmac_kernel/templating.py:254:     Ported from ST:app/templates.py::_asset_version. A missing/unbuilt
+packages/dotmac-kernel/src/dotmac_kernel/web_deps.py:3: Ported from `ST:app/web/deps.py` (`require_web_auth` + `WebAuthRedirect`
+packages/dotmac-learning/src/dotmac_learning/reading.py:3: Ported from Academy 0968881 reading_progress.py, bookmarks.py and learn.py.
+packages/dotmac-learning/src/dotmac_learning/requirements/__init__.py:4: The legacy compiler needs the ORM-backed entitlements, so it is imported from
+packages/dotmac-learning/src/dotmac_learning/tracks.py:1: """Caller-transaction track management ported from Academy 096.
+packages/dotmac-licensing/src/dotmac_licensing/__init__.py:25: ported from the source, where it was the single most valuable line — is what
+packages/dotmac-licensing/src/dotmac_licensing/models.py:313:     #: Copied from the report and checked against the issuance before storing.
+packages/dotmac-operational-escalations/src/dotmac_operational_escalations/service.py:3: Ported from `dotmac_sub`'s `app/models/operational_escalation.py`. Two source
+packages/dotmac-payments/src/dotmac_payments/service.py:3: Ported from `dotmac_sub`'s `topup_intents`/`payments` path. What this module
+packages/dotmac-payroll/src/dotmac_payroll/totals.py:3: Ported from ERP's payroll entry totals and payment-item parity check. Net is
+packages/dotmac-service-changes/src/dotmac_service_changes/contracts.py:36:     """The linear execution chain, ported from Sub's `execution_state`.
+packages/dotmac-service-changes/src/dotmac_service_changes/service.py:3: Ported from `dotmac_sub`'s `SubscriptionChangeRequest` and its execution
+packages/dotmac-service-orders/src/dotmac_service_orders/service.py:3: Ported from `dotmac_sub`'s `app/services/provisioning_lifecycle.py`, with the
+packages/dotmac-subscriptions/src/dotmac_subscriptions/engine.py:1: """Persistence-free fixed-recurring rating behavior ported from Sub."""
+packages/dotmac-subscriptions/src/dotmac_subscriptions/migrations/versions/su_0003_billing_treatments.py:30: Ported from ``dotmac_sub`` ``alembic/versions/399_subscription_billing_treatments.py``.
+packages/dotmac-subscriptions/src/dotmac_subscriptions/treatments.py:226:     Ported from Sub's `_aligned_end`, expressed through the module's own
+packages/dotmac-subscriptions/src/dotmac_subscriptions/vocabulary.py:13: #: The seven product-neutral non-standard billing-treatment reasons ported from
+packages/dotmac-work-orders/src/dotmac_work_orders/lifecycle.py:1: """Persistence-free work-order execution lifecycle, ported from Sub."""

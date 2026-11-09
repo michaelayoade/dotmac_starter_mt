@@ -1,0 +1,77 @@
+Dotmac Starter Free Use License 1.0
+License identifier: LicenseRef-Dotmac-Free-Use-1.0
+Copyright (c) 2026 Michael Ayoade. All rights reserved except as granted below.
+
+1. Covered software and ownership
+
+This license covers code and documentation in this repository in which
+Michael Ayoade owns or controls the necessary rights, including all covered
+packages under packages/ and the Dotmac Sub and Dotmac ERP portions incorporated
+into them. Ownership is retained. The separate Sub, ERP and other product
+applications, trademarks and logos are not licensed by this grant.
+Third-party materials are governed by section 5, not relicensed by this text.
+
+2. Free use
+
+You receive a worldwide, nonexclusive, royalty-free license to download, copy,
+install, build, run and modify the covered software for development, testing,
+evaluation and production use, including operating hosted applications for
+your own organization and your customers. You may make private working and
+backup copies. Your customers may access your hosted applications. Delivering
+the client-side assets necessary for those applications to operate in a
+customer's browser is permitted. No access application, individual approval,
+license fee or obligation to submit a review is required.
+
+3. Redistribution restriction and GitHub exception
+
+Except as expressly permitted here, you may not redistribute, sell, sublicense,
+publish mirrors of, or supply covered Starter source, packages, libraries,
+container images or modified copies to another person, including customers.
+This also applies when Starter is bundled inside another downloadable or
+on-premise product. Hosting an application under section 2 is permitted.
+
+Viewing, copying and forking within GitHub are permitted to the extent required
+by GitHub's applicable Terms of Service and public-repository functionality.
+You may submit changes to the official Dotmac Starter repository through
+GitHub. These exceptions do not grant permission for off-platform distribution
+or for licensing covered Starter code under different terms. Keep this license
+and applicable notices in copies and forks. Recipients receive applicable
+rights directly under this license, not through a sublicense from you.
+
+4. Contributions
+
+Contributions you deliberately submit to this project are offered under this
+license unless a separate written agreement is accepted by the rights holder.
+Submit only material you have the right to contribute, identify third-party
+material and preserve its notices. You retain ownership of your original
+contributions; submission does not assign that ownership to Michael Ayoade.
+
+5. Third-party and pre-existing rights
+
+Third-party components, fonts, assets and dependencies retain their own
+copyrights and licenses. See THIRD_PARTY_NOTICES.md and component notices.
+Nothing here restricts rights granted by those licenses, GitHub's applicable
+Terms of Service, mandatory law, or any valid earlier license grant. This
+license does not retroactively withdraw those rights or authorize relabeling
+another person's code as Dotmac-owned. Preserve required notices and meet
+applicable third-party conditions.
+
+6. End of permission
+
+Permission under this license ends if you materially breach its conditions.
+On termination, stop using and delete covered copies and modifications, except
+where you hold independent rights under section 5. Termination does not end
+other people's valid permissions or independent third-party rights.
+
+7. Warranty and liability
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE
+COPYRIGHT HOLDERS AND CONTRIBUTORS ARE NOT LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE. SUPPORT, UPDATES
+AND FUTURE RELEASES ARE NOT PROMISED.
+
+This is a source-available license with a redistribution restriction. It is
+not an open-source license. A package's presence in the repository is not a
+claim that it is installed in every runtime or production-qualified.

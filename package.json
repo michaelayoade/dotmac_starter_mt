@@ -11,7 +11,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "SEE LICENSE IN LICENSE",
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.18",
     "autoprefixer": "^10.4.23",

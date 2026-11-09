@@ -1,0 +1,191 @@
+[
+  {
+    "file": "Outfit-400.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)"
+      },
+      {
+        "id": 1,
+        "text": "Outfit Thin"
+      },
+      {
+        "id": 5,
+        "text": "Version 1.100;gftools[0.9.27]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "Outfit-500.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)"
+      },
+      {
+        "id": 1,
+        "text": "Outfit Thin Medium"
+      },
+      {
+        "id": 5,
+        "text": "Version 1.100;gftools[0.9.27]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "Outfit-600.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)"
+      },
+      {
+        "id": 1,
+        "text": "Outfit Thin SemiBold"
+      },
+      {
+        "id": 5,
+        "text": "Version 1.100;gftools[0.9.27]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "Outfit-700.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)"
+      },
+      {
+        "id": 1,
+        "text": "Outfit Thin"
+      },
+      {
+        "id": 5,
+        "text": "Version 1.100;gftools[0.9.27]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "Outfit-800.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)"
+      },
+      {
+        "id": 1,
+        "text": "Outfit Thin ExtraBold"
+      },
+      {
+        "id": 5,
+        "text": "Version 1.100;gftools[0.9.27]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "PlusJakartaSans-400.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)"
+      },
+      {
+        "id": 1,
+        "text": "Plus Jakarta Sans"
+      },
+      {
+        "id": 5,
+        "text": "Version 2.071;gftools[0.9.30]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "PlusJakartaSans-500.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)"
+      },
+      {
+        "id": 1,
+        "text": "Plus Jakarta Sans Medium"
+      },
+      {
+        "id": 5,
+        "text": "Version 2.071;gftools[0.9.30]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "PlusJakartaSans-600.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)"
+      },
+      {
+        "id": 1,
+        "text": "Plus Jakarta Sans SemiBold"
+      },
+      {
+        "id": 5,
+        "text": "Version 2.071;gftools[0.9.30]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  },
+  {
+    "file": "PlusJakartaSans-700.woff2",
+    "records": [
+      {
+        "id": 0,
+        "text": "Copyright 2020 The Plus Jakarta Sans Project Authors (https://github.com/tokotype/PlusJakartaSans)"
+      },
+      {
+        "id": 1,
+        "text": "Plus Jakarta Sans"
+      },
+      {
+        "id": 5,
+        "text": "Version 2.071;gftools[0.9.30]"
+      },
+      {
+        "id": 14,
+        "text": "https://scripts.sil.org/OFL"
+      }
+    ]
+  }
+]

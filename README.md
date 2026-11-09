@@ -1,5 +1,14 @@
 # dotmac_starter_mt
 
+Dotmac Starter is publicly available under the [Dotmac Starter Free Use
+License](LICENSE). Testing, modification, production use and hosting customer
+applications are free. Other redistribution is prohibited, subject to the
+GitHub fork exception and independent third-party rights. This is
+source-available, not open source.
+
+[Get the complete package collection and send feedback](docs/PUBLIC_ACCESS.md).
+No access form, ChatGPT sign-in or individual approval is required.
+
 A multi-tenant FastAPI starter **template** — clone it, pick the features you
 need, register your own entities and settings, brand it, ship it. Tenant
 isolation is enforced at three layers:
@@ -614,4 +623,6 @@ a local `.env` file — see `.env.example` for every knob, including
 
 ## License
 
-TBD.
+See [LICENSE](LICENSE) for the free-use grant and redistribution restrictions,
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for independently licensed
+components. These terms do not withdraw valid earlier permissions.

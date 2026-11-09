@@ -1,0 +1,97 @@
+{
+  "review_date": "2026-11-09",
+  "source_revision": "0e322f0247129cdbf6480ddffc61383d6690b924",
+  "method": "SHA-256 comparison of bundled assets against exact versioned upstream downloads; font selection is the Google Fonts latin face for each declared family and weight",
+  "assets": [
+    {
+      "bundled_sha256": "71f028fd2349990b3f8aa643abe767e82e0f596be407ae66f0004ff164121bdb",
+      "license": "OFL-1.1",
+      "upstream_sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+      "upstream_url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/Outfit-400.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "fc9bff941def6d924a71632bd8a93190528872eae6414844f3c367ff948d92fd",
+      "license": "OFL-1.1",
+      "upstream_sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+      "upstream_url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/Outfit-500.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "8cfe15c2c6de6ef8efff3eedbd52a383ac9ef23d6c23f6cd9f9b838f5f37dc36",
+      "license": "OFL-1.1",
+      "upstream_sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+      "upstream_url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/Outfit-600.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "5d5e3734089a74707292ce8a3e186def34cd63e33879f9ac3689a8d8da9d0706",
+      "license": "OFL-1.1",
+      "upstream_sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+      "upstream_url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/Outfit-700.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "eabf8cb2c01d0345e2eb19a49d04e8f8d0d520b74959b173d5ea6c2dcb95e4cd",
+      "license": "OFL-1.1",
+      "upstream_sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+      "upstream_url": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/Outfit-800.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "221a4135d06a4b33abbd535e9a0da4e565d19545ddd9267c4e678a916d54d9b6",
+      "license": "OFL-1.1",
+      "upstream_sha256": "153fc85b70298beeb1d61a5f723331649e7f23bb77302a66e61cb3e2fbdb5e79",
+      "upstream_url": "https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/PlusJakartaSans-400.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "bad081c8dbc15aed6c5e4cde5461914f7b3bdc295b7a7aed177e4beddb79bffa",
+      "license": "OFL-1.1",
+      "upstream_sha256": "153fc85b70298beeb1d61a5f723331649e7f23bb77302a66e61cb3e2fbdb5e79",
+      "upstream_url": "https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/PlusJakartaSans-500.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "8872bb5c9111df9bd3162c2394aee6354d782b13408a4dd5bbf65c48207206e6",
+      "license": "OFL-1.1",
+      "upstream_sha256": "153fc85b70298beeb1d61a5f723331649e7f23bb77302a66e61cb3e2fbdb5e79",
+      "upstream_url": "https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/PlusJakartaSans-600.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "2050755bf475817c96ac7d914c7f07cc3c2d11ff4b3fb4747b8d41de584aad17",
+      "license": "OFL-1.1",
+      "upstream_sha256": "153fc85b70298beeb1d61a5f723331649e7f23bb77302a66e61cb3e2fbdb5e79",
+      "upstream_url": "https://fonts.gstatic.com/s/plusjakartasans/v12/LDIoaomQNQcsA88c7O9yZ4KMCoOg4Ko20yw.woff2",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/fonts/PlusJakartaSans-700.woff2",
+      "byte_identical": false
+    },
+    {
+      "bundled_sha256": "0fc57ba0e655504d282bb6ec1c3d89240cde9f2ce1c393d5b38a95c5bc6da875",
+      "license": "0BSD",
+      "upstream_sha256": "0fc57ba0e655504d282bb6ec1c3d89240cde9f2ce1c393d5b38a95c5bc6da875",
+      "upstream_url": "https://unpkg.com/htmx.org@2.0.0/dist/htmx.min.js",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/js/htmx.min.js",
+      "byte_identical": true
+    },
+    {
+      "bundled_sha256": "479eb97210387d26338858f5d0fb4de7fa68ec678f412067d614fa44a6a65d80",
+      "license": "MIT",
+      "upstream_sha256": "87df87078f7b3a880e91eef7fb0866f5086de52f9289bc96503608311810a7fc",
+      "upstream_url": "https://unpkg.com/@alpinejs/csp@3.15.8/dist/cdn.min.js",
+      "path": "packages/dotmac-kernel/src/dotmac_kernel/static/js/alpine.min.js",
+      "byte_identical": false,
+      "identical_after_crlf_normalization": true
+    }
+  ],
+  "font_metadata_evidence": "starter-public-font-metadata.json"
+}

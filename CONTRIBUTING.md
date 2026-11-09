@@ -1,5 +1,10 @@
 # Contributing
 
+Read the [license](LICENSE) before contributing. Submit changes under its
+contribution terms, identify externally sourced material and retain notices.
+Feedback through GitHub Issues does not require an access application or
+approval. Do not include secrets or customer data in reports.
+
 Human developer rules. Agents follow the same canon via `AGENTS.md`
 (the canonical hard-rules list — read it first; nothing here overrides it).
 
