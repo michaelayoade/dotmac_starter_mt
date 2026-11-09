@@ -81,12 +81,12 @@ existed. Two matching strings LOOKED like a binding while no authorization
 existed anywhere, so a fabricated run id and a locally computed digest drove the
 lane green — the exact failure "Foundation cannot self-authorize" names.
 
-`scripts/lane3_authorization.py` is now the single owner of that question, asked
-before the lease is taken and before the host is contacted. It refuses today,
-and the refusal is the honest state rather than a regression: no
-`AuthorizationVerifier` exists fleet-wide, so `establish_authorization` reports
-`unanswerable` and this runner exits `EXIT_INDETERMINATE` naming every
-precondition that would have to exist first. The document-digest flag is
+`scripts/lane3_authorization.py` owns this question. Startup discovery refuses
+before host contact if no installed V3 provider is available. With trusted
+bindings installed, genuine authorization follows read-only role prestate
+observation and V3 rendering, before the lease is taken. Missing authority
+reports `unanswerable` and exits `EXIT_INDETERMINATE`; a context holding inputs
+is never a grant. The document-digest flag is
 GONE rather than deprecated: an argument that names proof and supplies none is
 the defect itself, and the receipt's middle term now comes out of an attested
 receipt instead of off the command line.
@@ -171,7 +171,11 @@ from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
 from dotmac_deployment_foundation.digest import Digest
-from dotmac_deployment_foundation.engine.run import CommandResult
+from dotmac_deployment_foundation.engine.lock import deployment_lock
+from dotmac_deployment_foundation.engine.run import (
+    CommandResult,
+    bind_authorized_effects,
+)
 from dotmac_deployment_foundation.errors import (
     DeploymentFoundationError,
     PreconditionFailed,
@@ -211,8 +215,18 @@ from lane3_authorization import (
     AuthorizationUnverifiable,
     Standing,
     establish_authorization,
+    prepare_authorization,
 )
 from lane3_execution import TopologyRefused, load_topology
+from lane3_exposure_evidence import (
+    ExposureEvidenceRefused,
+    exposure_calls_digest,
+    serialize_exposure_calls,
+)
+from lane3_exposure_recording import (
+    ExposureCallRecord,
+    RecordingExposureEffects,
+)
 
 # `observed_foreign`, `provoke_apply_failure` and `seed_foreign_rules` are NOT
 # imported any more and are deliberately NOT deleted from `lane3_provocation`.
@@ -293,10 +307,11 @@ class ProbeRefused(DeploymentFoundationError):
 
 
 class PreconditionUnfit(DeploymentFoundationError):
-    """An input is unusable and the host was never touched. -> `precondition_unfit`.
+    """An input is unusable; no mutation attempted. -> `precondition_unfit`.
 
-    The second half of that sentence is load-bearing, and it is why the checks
-    that raise this were moved ahead of the first mutation — see `run`.
+    Owner-approved read-only role observation may precede this refusal. All
+    such preauthorization failures precede lease acquisition, so no terminal
+    release is written; the mutation boundary remains load-bearing in `run`.
     """
 
 
@@ -390,7 +405,7 @@ def classify_refusal(
 
     ## The modality stays conservative
 
-    `host_mutated` is set by `run` immediately before `transaction.run()`, so a
+    `host_mutated` is set by `run` immediately before the public Executor helper, so a
     `LockUnavailableError` from the lock that transaction takes BEFORE its first
     effect degrades a precondition too. That is the member's own modality — *may*
     have begun, not *did*.
@@ -481,6 +496,12 @@ def receipt_v2_refusals(
         raise AuthorizationUnverifiable(Standing.UNANSWERABLE, str(exc)) from exc
     except receipt_v2.ReceiptRefused as exc:
         raise refused_as(str(exc)) from exc
+    except AuthorizationUnverifiable as exc:
+        # Only the prelease call sites may name a determinate authority refusal
+        # as an unusable invocation. Missing authority keeps its status 2.
+        if refused_as is PreconditionUnfit and exc.standing is Standing.UNATTESTABLE:
+            raise PreconditionUnfit(str(exc)) from exc
+        raise
 
 
 @contextlib.contextmanager
@@ -1001,6 +1022,12 @@ class TerminalContext:
     #: `probe_vantage_ref`, the parser's counts and the Fleet `host_id`. None
     #: until the record is read and bound, so a refusal before that claims none.
     vantage_topology: dict[str, object] | None = None
+    #: Private Executor-boundary exposure records for a later evidence join.
+    #: The sink exists before execution so a terminal path can still read it;
+    #: the runner's own snapshot and cleanup calls do not write here.
+    exposure_calls: list[ExposureCallRecord] = dataclasses.field(
+        default_factory=list, repr=False
+    )
     acts: list[CleanupAct] = dataclasses.field(default_factory=list)
     notes: list[str] = dataclasses.field(default_factory=list)
 
@@ -1272,9 +1299,45 @@ def record_terminal(
                         f"the stored release could not be copied for upload: {exc}"
                     )
 
+    # The PRIVATE exposure records leave memory only when the launcher
+    # named a carrier for them, and only as the closed canonical document.
+    # The terminal evidence below stays value-free: count and digest, so
+    # a reader can bind the private bytes without the sidecar holding
+    # host rules of its own. A serialization refusal is noted, never a
+    # second verdict on the run.
+    exposure_calls_written = ""
+    exposure_calls_digest_value = ""
+    exposure_calls_out = getattr(args, "exposure_calls_out", "")
+    if exposure_calls_out:
+        try:
+            calls_out = pathlib.Path(exposure_calls_out)
+            calls_out.parent.mkdir(parents=True, exist_ok=True)
+            calls_partial = calls_out.parent / (
+                f".{calls_out.name}.{os.getpid()}.partial"
+            )
+            calls_partial.write_bytes(serialize_exposure_calls(ctx.exposure_calls))
+            os.replace(calls_partial, calls_out)
+        except (ExposureEvidenceRefused, OSError) as exc:
+            ctx.notes.append(f"exposure calls not written: {exc}")
+        else:
+            exposure_calls_written = str(calls_out)
+            ctx.notes.append(
+                f"exposure calls written {exposure_calls_written} "
+                f"({len(ctx.exposure_calls)} records)"
+            )
+    try:
+        exposure_calls_digest_value = exposure_calls_digest(ctx.exposure_calls)
+    except ExposureEvidenceRefused as exc:
+        ctx.notes.append(f"exposure calls do not serialize: {exc}")
+
     evidence = {
         "document": "lane3-terminal-evidence",
         "version": 1,
+        "exposure_calls": {
+            "count": len(ctx.exposure_calls),
+            "digest": exposure_calls_digest_value,
+            "path": exposure_calls_written,
+        },
         "target": str(args.target),
         "vantage_topology": ctx.vantage_topology,
         "authorization_run_id": str(args.authorization_run),
@@ -1543,98 +1606,27 @@ def run(
 
     descriptor = pathlib.Path(args.descriptor)
     fixture_bytes = descriptor.read_bytes()
-    spec = ProductDeploymentSpec.load(str(descriptor))
+    spec = ProductDeploymentSpec.loads(
+        fixture_bytes.decode("utf-8"), source=str(descriptor)
+    )
     descriptor_digest = spec.to_canonical_document().sha256_digest()
 
-    # ── the prestate, then authorization, which cannot be self-attested ────
-    #
-    # The V3 plan freezes the incumbent host roles, so the deployment effects
-    # must OBSERVE them before Control can authorize that exact plan. That
-    # read-only observation is the one host contact allowed before the grant
-    # and lease: it issues no effect, and `build_base_plan` turns an
-    # observation or render failure into a `ReceiptRefused`, mapped here to
-    # `PreconditionUnfit` because no mutation was attempted. Since no lease
-    # is in hand yet, no release is written and the host keeps whatever
-    # standing it already had.
-    #
-    # The discovered bindings, the underlying deployment plan and the exact
-    # observing effects instance are retained for the later Executor drive.
-    # Rediscovering the bindings or rebuilding the effects after
-    # authorization could substitute a different assembly or observer for
-    # the one whose prestate the plan froze.
-    #
-    # Authorization still precedes the lease and every mutation. This is
-    # deliberately not `if args.authorization_doc_digest == something`. The
-    # dispatch inputs are not parameters of `establish_authorization` at
-    # all, so there is no path through it that promotes caller-supplied text
-    # into permission by forgetting a comparison. The V3 authority path
-    # requires a trusted CP-rendered plan and a Control V2
-    # authorization+dispatch pair. With no such composition installed, the
-    # bindings acquisition refuses as UNANSWERABLE before any observation;
-    # with one installed, the grant is issued against the one mirrored plan
-    # below. V1 material is never upgraded by comparing descriptor or target
-    # text with itself.
+    # Resolve installation-fixed trust once and hold the exact Control pair.
+    # This context is not a grant. Read-only role prestate and V3 authorization
+    # precede the lease, as decided by the owner; only execution takes the lock.
+    # Remote targets require the trusted factory, never local-effects fallback.
     with receipt_v2_refusals(refused_as=PreconditionUnfit):
-        authority_bindings = receipt_v2.acquire_authority_bindings()
-        base_build = receipt_v2.build_base_plan(
-            spec,
-            target=args.target,
-            deploy_dir=args.deploy_dir,
-            bindings=authority_bindings,
+        prepared = prepare_authorization(
+            authorization_document=args.authorization_document,
+            require_build_effects=True,
         )
-        execution_plan = receipt_v2.acquire_execution_plan(
-            base_build.base_plan,
-            bindings=authority_bindings,
-        )
-    # The record was bound by the DISPATCHED host; the plan names the host it
-    # was rendered for. They must be one host, or the topology describes a
-    # machine the grant does not cover.
-    with vantage_topology_refusals(refused_as=PreconditionUnfit):
-        if execution_plan.host_id != bound.host_id:
-            raise topology_source.TopologyBindingRefused("host_id")
-    grant = establish_authorization(
-        descriptor_digest=descriptor_digest,
-        target=args.target,
-        authorization_document=args.authorization_document,
-        execution_plan=execution_plan,
-    )
-
-    # ── the lease, which cannot be self-granted ─────────────────────────────
-    lease = load_lease(args.target, directory=args.lease_dir)
-    lease.covers(now=datetime.now(UTC), authorization_run_id=args.authorization_run)
-    # The terminal record names the lease BY CONTENT, so it is held from here on
-    # rather than re-read at the end: a release must discharge the lease this run
-    # actually executed under, not whichever record is on the target later.
-    ctx.lease = lease
-
-    # This block used to derive a Compose project from the authorization run and
-    # check the lease owned it. Both halves were inert and the comment above them
-    # was false, so all three are gone.
-    #
-    # `owns_project(p)` is `p.startswith(self.compose_project_prefix)` and the
-    # name was built by concatenating that prefix, so the check was true by
-    # construction and could never fire — its own `pragma: no cover` said so.
-    # Worse, the derived name never reached the effects:
-    # `ComposeHostExposureEffects.apply_compose` passes `--project-name
-    # self._spec.product`, so Docker labels every object
-    # `com.docker.compose.project=lane3_exposure`. The comment claimed a deletion
-    # set "scoped by construction"; that property did not hold, and the derived
-    # name's only other use was as item 1's evidence pointer — a checkable,
-    # wrong pointer inside a PASSING item, which is worse than an absent one for
-    # the same reason `RequirementResult` refuses an empty detail.
-    #
-    # The real question the dead check was gesturing at is still open and is NOT
-    # answered here: does the lease's prefix cover `spec.product`, the name
-    # Docker actually uses? That cannot be decided from this source — the prefix
-    # lives in the lease record, which Platform CP owns — so replacing the dead
-    # check with `lease.owns_project(spec.product)` would introduce a refusal
-    # that might reject every run, untested. Named rather than guessed.
+    bindings = prepared.bindings
 
     # ── the external vantage, qualified BEFORE its refusals are believed ────
     evidence = _load_probe_evidence(pathlib.Path(args.probe_evidence))
     _qualify(evidence)
 
-    # ── every PRECONDITION, asked before the host is touched ────────────────
+    # ── pure invocation preconditions, before read-only host observation ───
     #
     # `private_port`, `inside_source_set` and the inside-probe harness used to
     # be reached only after `transaction.run()` had applied the compose stack
@@ -1656,366 +1648,439 @@ def run(
         )
         require_inside_probe_harness(args, target_v6=target_v6, port=private)
 
-    # ONE seam onto the host, wrapped so that what a best-effort cleanup throws
-    # away is still seen. A second `_ssh_runner` would be a second writer.
-    controller = CapturingRunner(_ssh_runner(args.target_address, args.controller_key))
-    effects = ComposeHostExposureEffects(
-        spec,
-        deploy_dir=args.deploy_dir,
-        runner=controller,
-        timeout_seconds=args.timeout,
-    )
-    ctx.vm_installation_id = read_installation_id(controller)
-
-    # ── item 3, before anything mutates ─────────────────────────────────────
-    refused = False
-    try:
-        refuse_non_recreating_apply(["restart"])
-    except DeploymentFoundationError:
-        refused = True
-    results.record(
-        "non_recreating_refused",
-        PASSED if refused else FAILED,
-        "`docker compose restart` refused by the real controller path"
-        if refused
-        else "a non-recreating apply was NOT refused",
-        "refuse_non_recreating_apply(['restart'])",
-    )
-
-    # ── items 1, 2, 4, 5, 6, 10: the transaction itself ─────────────────────
-    snapshot = effects.observe()
-    results.record(
-        "pre_change_snapshot",
-        PASSED,
-        f"{len(snapshot.sockets)} sockets, {len(snapshot.chains)} chains captured "
-        "before mutation",
-        "effects.observe() before any mutation",
-    )
-
-    # The plan is executed HERE, by the public `Executor` under the grant, and
-    # its `DeploymentOutcome` is item 9's last term (Q1, 2026-10-06:
-    # `lane3_receipt_v2.execute_authorized_plan`). Nothing in this file orders
-    # an effect. The Executor receives the retained deployment plan, the
-    # exact deployment-effects instance that observed the prestate, this
-    # runner's exposure effects, and the same discovered bindings the plan
-    # was mirrored through. Without a bindings-supplied host-source
-    # admission provider, the drive still refuses before its first effect;
-    # with the lease in hand `classify_refusal` records that as host state
-    # uncertified, the same answer an owned host gets for any refusal under
-    # the lease.
-    with receipt_v2_refusals(refused_as=SpecError):
-        execution_outcome = receipt_v2.execute_authorized_plan(
-            execution_plan,
-            grant,
-            spec=spec,
-            deployment_plan=base_build.deployment_plan,
-            effects=base_build.effects,
-            exposure_effects=effects,
-            bindings=authority_bindings,
-            lock_dir=args.lock_dir,
+    # Read-only role observation is permitted before authority/lease. Retain
+    # this exact effects instance and DeploymentPlan: Executor later rechecks
+    # the frozen prestate under the product lock before any mutation.
+    with (
+        receipt_v2_refusals(refused_as=PreconditionUnfit),
+        refusal_of(PreconditionUnfit),
+    ):
+        base_plan, deployment_plan, deployment_effects = receipt_v2.build_base_plan(
+            spec,
+            target=args.target,
+            deploy_dir=args.deploy_dir,
+            bindings=bindings,
         )
-
-    # ── item 4 is BLOCKED, and the block is the honest answer ───────────────
-    #
-    # This item drove `ExposureTransaction`, which no longer exists: applying a
-    # product's exposure is now `Executor._reconcile_exposure`, performed from
-    # `FoundationExecutionPlanV3.exposure_reconciliations` under an
-    # `ExecutionGrant`. This workflow does not yet receive the trusted
-    # CP-rendered V3 plan and exact Control V2 authorization-and-dispatch pair,
-    # so `establish_authorization` refuses above before this phase is reached.
-    #
-    # The three things this must not do, in the order they were tempting:
-    #
-    # 1. Order the effects here. `effects.replace_rules` is right there and the
-    #    sequence is twenty lines. Writing it would make this script the second
-    #    executor that boundary 1 exists to remove, in a directory the package's
-    #    own guard did not scan until this commit widened it.
-    # 2. Mint a grant. Foundation must never self-authorize; this file's own
-    #    docstring records the 2026-09-05 defect where dispatch TEXT was
-    #    compared against a lease and no `ExecutionGrant` ever existed.
-    # 3. Report `not_executed` or quietly drop the item. `blocked` is a distinct
-    #    status precisely because "nothing ran it" and "a prerequisite is
-    #    missing" send an operator in different directions, and
-    #    `verify_publication` refuses on either — loudly, which is the point.
-    #
-    # CONSEQUENCE, stated here rather than discovered at the publication gate:
-    # a Lane 3 receipt from this runner can no longer be all-`executed_passed`
-    # while this holds, so it cannot satisfy `verify_publication`. Closing it
-    # needs the trusted CP V3 provider composition, which is a cross-repository
-    # dependency.
-    #
-    # The host is NOT mutated by this phase any more, so the flag stays false
-    # and `precondition_unfit` remains claimable — the opposite of what the
-    # deleted line asserted, and true for the same reason the item is blocked.
-    results.record(
-        "apply_under_lock",
-        BLOCKED,
-        "the exposure apply moved to `Executor._reconcile_exposure`, driven "
-        "from `FoundationExecutionPlanV3.exposure_reconciliations`. This lane "
-        "has no trusted CP-rendered V3 plan and Control V2 pair, so no "
-        "ExecutionGrant names this act. "
-        "Foundation cannot mint one and this runner will not order the effects "
-        "itself: either would rebuild the second executor boundary 1 removed",
-        f"project={spec.product}",
-    )
-
-    observed = effects.observe()
-    sockets = {(s.address, s.port) for s in observed.sockets}
-    # S104 is about BINDING to all interfaces. This is the opposite: the
-    # wildcard addresses are what the lane exists to prove ABSENT, so the
-    # literal here is a refusal predicate rather than a bind.
-    wildcards = ("0.0.0.0", "::", "*")  # noqa: S104
-    wildcard = [p for a, p in sockets if a in wildcards]
-    results.record(
-        "socket_reobservation",
-        PASSED if not wildcard else FAILED,
-        f"{len(sockets)} sockets re-observed; wildcard binds: {wildcard or 'none'}",
-        "ss -tlnp",
-    )
-    results.record(
-        "none_emits_no_socket",
-        PASSED if not any(p == 18444 for _a, p in sockets) else FAILED,
-        'the exposure = "none" port emits no socket',
-        "ss -tlnp",
-    )
-    proxy_status, proxy_detail = judge_proxy_recreation(
-        snapshot.proxies, observed.proxies
-    )
-    results.record("proxy_reobservation", proxy_status, proxy_detail, "ps -eo pid,args")
-
-    planned = build_firewall_plan(spec)
-    landed = []
-    for rule in planned:
-        chain = observed.chain(rule.family, rule.chain)
-        landed.append(bool(chain and chain.rules_for(rule.host_port)))
-    terminal_drop = any(rule.action == "DROP" and rule.terminal for rule in planned)
-    firewall_ok = bool(planned) and all(landed) and terminal_drop
-    results.record(
-        "firewall_reobservation",
-        PASSED if firewall_ok else FAILED,
-        f"{len(planned)} derived rules; landed={sum(landed)}/{len(planned)}; "
-        f"terminal DROP={terminal_drop}",
-        "iptables-save",
-        "ip6tables-save",
-    )
-
-    v6_docker_user = observed.chain("ipv6", "DOCKER-USER")
-    results.record(
-        "inert_v6_chain",
-        PASSED if v6_docker_user is not None else BLOCKED,
-        "ip6tables DOCKER-USER captured; a v6 rule there is inert because the "
-        "chain is jumped only from FORWARD while a v6 publish terminates on INPUT"
-        if v6_docker_user is not None
-        else "the ip6tables DOCKER-USER chain could not be read",
-        "ip6tables -L DOCKER-USER -v -n",
-    )
-
-    # ── items 13-16: the external half, measured from the qualified vantage ─
-    # ── the probe phase, taken while the stack is UP ────────────────────────
-    #
-    # The qualify phase ran before the controller touched anything, so the
-    # vantage was enumerated rather than trusted. These probes could not run
-    # then: a negative measured before the apply is an accurate measurement of
-    # the wrong instant, and item 13 requires the negative to be measured
-    # against a RUNNING service. So they are taken here — after the apply,
-    # before any teardown — and `service_running` is read from the target's own
-    # socket table at that moment rather than asserted.
-    #
-    # Shelling out to the collector is observation, not mutation, and the
-    # invariant this runner states is about mutations. See the module docstring
-    # for why that narrowing is structural rather than convenient.
-    probe_phase = _collect_probe_phase(args)
-    evidence["probes"] = probe_phase.get("probes", {})
-    if "closed_port_behaviour" in probe_phase:
-        evidence["closed_port_behaviour"] = probe_phase["closed_port_behaviour"]
-
-    external = (
-        ("external_positive_v6", "positive_v6", True, "tcp/22 over IPv6, THIS target"),
-        (
-            "external_negative_v6",
-            "negative_v6",
-            False,
-            "the loopback-bound v6 socket, service RUNNING",
-        ),
-        ("external_v4", "v4_pair", False, "IPv4 negative with its tcp/22 control"),
-    )
-    for code, key, want_reachable, note in external:
-        probe = _probe(evidence, key)
-        reachable = bool(probe.get("reachable"))
-        control = bool(probe.get("positive_control_fired", True))
-        # ABSENCE FAILS. `probe.get("service_running", True)` read an evidence
-        # file that simply omitted the key as a running service — an unmeasured
-        # negative reading as an enforced one, which is the defect item 13
-        # exists to catch arriving through the reader instead of the collector.
-        if "service_running" not in probe:
-            raise EvidenceIncomplete(
-                f"the {key!r} probe carries no `service_running`. A negative "
-                "probe against a port where nothing is listening measures an "
-                "absent service, not an enforced exposure, and an unmeasured "
-                "one must never read as a pass"
+        execution_plan = receipt_v2.acquire_execution_plan(
+            base_plan, bindings=bindings, spec=spec
+        )
+        with vantage_topology_refusals(refused_as=PreconditionUnfit):
+            if execution_plan.host_id != bound.host_id:
+                raise topology_source.TopologyBindingRefused("host_id")
+        grant = establish_authorization(
+            descriptor_digest=descriptor_digest,
+            target=args.target,
+            authorization_document=None,
+            execution_plan=execution_plan,
+            prepared=prepared,
+        )
+        if execution_plan.controller_ssh_fingerprint != str(controller_identity):
+            raise PreconditionUnfit("the authorized plan does not name the controller")
+        # The plan carries the descriptor-derived exposure families. If the
+        # descriptor derives none, refuse before taking a lease or deploying a
+        # partial rehearsal. No exposure success can be inferred from ordinary
+        # deployment; no rules are seeded.
+        if not execution_plan.exposure_reconciliations:
+            raise PreconditionUnfit(
+                "Lane 3 exposure rehearsal is blocked: the trusted plan has "
+                "no exposure reconciliations; no deployment or provocation ran"
             )
-        running = bool(probe["service_running"])
-        ok = reachable == want_reachable and control and running
+
+    # Full authorization precedes acquiring the exact controller-bound lease.
+    lease = load_lease(args.target, directory=args.lease_dir)
+    lease.covers(now=datetime.now(UTC), authorization_run_id=args.authorization_run)
+    if controller_identity != lease.controller_identity_fingerprint:
+        raise PreconditionUnfit("the controller identity does not match the held lease")
+    # Release only the held record, never whichever record is present later.
+    ctx.lease = lease
+    # These host/run/controller checks do not prove spec.product is covered by
+    # the lease project prefix; that remains a CP operational admission duty.
+
+    # One caller-held product lock covers exposure prestate, the sole public
+    # Executor and poststate characterization. It is passed through unchanged.
+    with deployment_lock(
+        spec.product,
+        label=f"lane3 rehearsal {deployment_plan.image_digest}",
+        directory=args.lock_dir,
+    ) as held:
+        held.require_held(product=spec.product)
+        # ONE seam onto the host, wrapped so that what a best-effort cleanup throws
+        # away is still seen. A second `_ssh_runner` would be a second writer.
+        controller = CapturingRunner(
+            _ssh_runner(args.target_address, args.controller_key)
+        )
+        effects = ComposeHostExposureEffects(
+            spec,
+            deploy_dir=args.deploy_dir,
+            runner=controller,
+            timeout_seconds=args.timeout,
+        )
+        # Only the object handed to the Executor is recorded. The raw effects
+        # retain the runner's pre-change snapshot and cleanup paths, so those
+        # observations cannot be mistaken for the transaction's boundaries.
+        executor_exposure = RecordingExposureEffects(effects, ctx.exposure_calls)
+        ctx.vm_installation_id = read_installation_id(controller)
+
+        # ── item 3, before anything mutates ─────────────────────────────────────
+        refused = False
+        try:
+            refuse_non_recreating_apply(["restart"])
+        except DeploymentFoundationError:
+            refused = True
         results.record(
-            code,
-            PASSED if ok else FAILED,
-            f"{note}: reachable={reachable} (wanted {want_reachable}), "
-            f"positive control fired={control}, service running={running}",
-            f"probe:{key}",
+            "non_recreating_refused",
+            PASSED if refused else FAILED,
+            "`docker compose restart` refused by the real controller path"
+            if refused
+            else "a non-recreating apply was NOT refused",
+            "refuse_non_recreating_apply(['restart'])",
         )
 
-    behaviour = evidence.get("closed_port_behaviour")
-    results.record(
-        "closed_port_behaviour",
-        PASSED if behaviour in ("reset", "drop") else FAILED,
-        f"target closed-port behaviour recorded as {behaviour!r}",
-        "workstation probe",
-    )
-    # ── items 12 and 16: measured from a vantage INSIDE the source set ─────
-    #
-    # Both used to be literals emitted by a collector that is outside the set by
-    # construction. They are now taken through a restricted jump whose key runs
-    # no command on the vantage, so the TCP connection originates inside while
-    # nothing executes there.
-    #
-    # `lane3_inside_vantage.collect` raises a bare `DeploymentFoundationError`
-    # from two sites — the harness exiting non-zero, and unreadable JSON — and
-    # nothing outside that function can tell them apart. Matching the message is
-    # the guesswork every stable code exists to avoid, so the whole region is
-    # recorded as `evidence_unreadable`, which is what that member's own
-    # definition already covers: "Includes a reader subprocess exiting non-zero:
-    # to a destroy decision that is the same fact as malformed output."
-    #
-    # The mapping table files the non-zero-exit site under `precondition_unfit`
-    # instead. That cannot be honoured HERE: `precondition_unfit` asserts the
-    # host was never touched, and this call is reached long after the apply.
-    # That site's own preconditions are asked above, before any mutation, where
-    # the sentence is true.
-    with refusal_of(EvidenceUnreadable):
-        inside_probe = inside_vantage.collect(
-            str(inside_probe_harness()),
-            jump=args.inside_vantage,
-            target_v4=args.target_address,
-            target_v6=target_v6,
-            port=private,
-            timeout=args.timeout,
+        # ── items 1, 2, 4, 5, 6, 10: the transaction itself ─────────────────────
+        snapshot = effects.observe()
+        results.record(
+            "pre_change_snapshot",
+            PASSED,
+            f"{len(snapshot.sockets)} sockets, {len(snapshot.chains)} chains captured "
+            "before mutation",
+            "effects.observe() before any mutation",
         )
-    inside_observed = _observed_from(args, jump_key=args.inside_jump_key)
-    seen = inside_vantage.vantages(inside_probe, inside_observed)
-    control_ok = inside_vantage.control_is_meaningful(inside_probe)
 
-    # Item 16. ONE receipt row, because `build_receipt` enforces a closed set of
-    # sixteen codes and splitting one would be refused — but the SOURCE MODEL is
-    # per family, and the detail carries both. Michael's "model inside/outside
-    # IPv4 and IPv6 independently" is about which addresses are inside which
-    # set, not about the receipt's vocabulary.
-    #
-    # PASSED requires BOTH families to have reached. A pass on one would be a
-    # v4 result wearing a dual-stack claim, and this vantage is exactly the case
-    # where that goes wrong: its v4 is on the target's segment and its v6 is not.
-    both_reached = all(
-        vantage.outcome is inside_vantage.InsideOutcome.REACHED for vantage in seen
-    )
-    observed_all = all(vantage.observed_source for vantage in seen)
-    per_family = "; ".join(
-        f"{vantage.family}: outcome={vantage.outcome}, observed as "
-        f"{vantage.observed_source or 'NOTHING'} ({vantage.cidr})"
-        for vantage in seen
-    )
-    control_note = (
-        "jump-scope control prohibited as expected"
-        if control_ok
-        else "jump-scope control DID NOT FIRE — a permitopen that refused "
-        "everything would look identical to one correctly scoped"
-    )
-    results.record(
-        "private_from_source",
-        PASSED if both_reached and observed_all and control_ok else FAILED,
-        f"the private port from inside its source set, per family. {per_family}. "
-        f"{control_note}",
-        *(f"inside:{vantage.family}:{vantage.cidr}" for vantage in seen),
-        "requalified-every-run",
-    )
+        bind_authorized_effects(deployment_effects, execution_plan)
 
-    # Item 12, and the branch it fires on is checked rather than assumed.
-    endpoint = f"{spec.product}:{private}"
-    verdicts = [
-        inside_vantage.refusal_fired_for_the_right_reason(
-            vantage,
-            endpoint_token=endpoint,
-            accepted_source_sets=(accepted_source_set,),
+        # Recheck the held lease and identity immediately before entering the
+        # only mutating authority. Executor retains its own prestate drift guard.
+        lease.covers(now=datetime.now(UTC), authorization_run_id=args.authorization_run)
+        if (
+            execution_plan.host_id != bound.host_id
+            or execution_plan.host_id != args.target
+            or execution_plan.controller_ssh_fingerprint != str(controller_identity)
+            or controller_identity != lease.controller_identity_fingerprint
+        ):
+            raise SpecError(
+                "the authorized plan does not name the leased host/controller"
+            )
+        held.require_held(product=spec.product)
+        with receipt_v2_refusals(refused_as=SpecError):
+            ctx.host_mutated = True
+            execution_outcome = receipt_v2.execute_authorized_plan(
+                execution_plan,
+                grant,
+                spec=spec,
+                deployment_plan=deployment_plan,
+                effects=deployment_effects,
+                exposure_effects=executor_exposure,
+                bindings=bindings,
+                lock=held,
+            )
+
+        # ── item 4 is BLOCKED, and the block is the honest answer ───────────────
+        #
+        # This item drove `ExposureTransaction`, which no longer exists: applying a
+        # product's exposure is now `Executor._reconcile_exposure`, performed from
+        # `FoundationExecutionPlanV3.exposure_reconciliations` under an
+        # `ExecutionGrant`. This workflow does not yet receive the trusted
+        # CP-rendered V3 plan and exact Control V2 authorization-and-dispatch pair,
+        # so `establish_authorization` refuses above before this phase is reached.
+        #
+        # The three things this must not do, in the order they were tempting:
+        #
+        # 1. Order the effects here. `effects.replace_rules` is right there and the
+        #    sequence is twenty lines. Writing it would make this script the second
+        #    executor that boundary 1 exists to remove, in a directory the package's
+        #    own guard did not scan until this commit widened it.
+        # 2. Mint a grant. Foundation must never self-authorize; this file's own
+        #    docstring records the 2026-09-05 defect where dispatch TEXT was
+        #    compared against a lease and no `ExecutionGrant` ever existed.
+        # 3. Report `not_executed` or quietly drop the item. `blocked` is a distinct
+        #    status precisely because "nothing ran it" and "a prerequisite is
+        #    missing" send an operator in different directions, and
+        #    `verify_publication` refuses on either — loudly, which is the point.
+        #
+        # CONSEQUENCE, stated here rather than discovered at the publication gate:
+        # a Lane 3 receipt from this runner can no longer be all-`executed_passed`
+        # while this holds, so it cannot satisfy `verify_publication`. Closing it
+        # needs the trusted CP V3 provider composition, which is a cross-repository
+        # dependency.
+        #
+        # A successful ordinary execution does not prove the rehearsal-specific
+        # exposure assertions; this item remains blocked pending that proof.
+        results.record(
+            "apply_under_lock",
+            BLOCKED,
+            "the exposure apply moved to `Executor._reconcile_exposure`, driven "
+            "from `FoundationExecutionPlanV3.exposure_reconciliations`. This lane "
+            "has no trusted CP-rendered V3 plan and Control V2 pair, so no "
+            "ExecutionGrant names this act. "
+            "Foundation cannot mint one and this runner will not order the effects "
+            "itself: either would rebuild the second executor boundary 1 removed",
+            f"project={spec.product}",
         )
-        for vantage in seen
-    ]
-    refused_ok = all(ok for ok, _ in verdicts) and control_ok
-    results.record(
-        "privileged_vantage_refused",
-        PASSED if refused_ok else FAILED,
-        "accept_public_exposure_evidence refused a real probe from inside an "
-        "accepted source set, on the privileged-vantage branch rather than the "
-        "membership one: "
-        + "; ".join(
-            f"{v.family}={detail}"
-            for v, (_, detail) in zip(seen, verdicts, strict=False)
-        ),
-        f"accepted_source_set:{accepted_source_set}",
-    )
 
-    # ── item 8 is BLOCKED, and NOTHING IS SEEDED ────────────────────────────
-    #
-    # This item provoked a real rollback: seed foreign rules into shared chains,
-    # arm an apply that cannot verify, let the transaction meet its own failure
-    # and compensate, then prove the bystanders survived. Every part of that is
-    # still the right rehearsal. What is gone is the thing that performed it —
-    # the compensation now lives in `Executor._restore_exposure`, reached only
-    # through an authorized V3 plan and consumed Control V2 dispatch that this
-    # workflow does not yet receive (see the `apply_under_lock` block above for
-    # why this runner may neither mint one nor order the effects itself).
-    #
-    # THE SEEDING DOES NOT RUN, and that ordering is the whole care in this
-    # edit. `seed_foreign_rules` writes real rules into `DOCKER-USER` and
-    # `INPUT` on a shared host; it is safe only because a provocation follows
-    # it and a `finally` withdraws it. Seeding first and blocking afterwards
-    # would leave a host dirtied to rehearse something that never ran, with the
-    # unwind's own failure modes exercised for no reason. A blocked item
-    # touches nothing.
-    #
-    # `provoke_apply_failure` and `seed_foreign_rules` keep their homes in
-    # `lane3_provocation.py`. They are not dead: they are the provocation half
-    # of the rehearsal, waiting on a driver, and deleting them would mean
-    # rewriting them from the incident notes when the driver arrives.
-    results.record(
-        "provoked_rollback",
-        BLOCKED,
-        "the compensation moved to `Executor._restore_exposure` and is reached "
-        "only through an authorized `FoundationExecutionPlanV3` carrying an "
-        "exposure reconciliation and a consumed Control V2 dispatch, which "
-        "this workflow does not yet receive. No foreign "
-        "rule was seeded: a blocked item must not dirty a shared host to "
-        "rehearse something that will not run",
-        "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
-    )
+        observed = effects.observe()
+        sockets = {(s.address, s.port) for s in observed.sockets}
+        # S104 is about BINDING to all interfaces. This is the opposite: the
+        # wildcard addresses are what the lane exists to prove ABSENT, so the
+        # literal here is a refusal predicate rather than a bind.
+        wildcards = ("0.0.0.0", "::", "*")  # noqa: S104
+        wildcard = [p for a, p in sockets if a in wildcards]
+        results.record(
+            "socket_reobservation",
+            PASSED if not wildcard else FAILED,
+            f"{len(sockets)} sockets re-observed; wildcard binds: {wildcard or 'none'}",
+            "ss -tlnp",
+        )
+        results.record(
+            "none_emits_no_socket",
+            PASSED if not any(p == 18444 for _a, p in sockets) else FAILED,
+            'the exposure = "none" port emits no socket',
+            "ss -tlnp",
+        )
+        proxy_status, proxy_detail = judge_proxy_recreation(
+            snapshot.proxies, observed.proxies
+        )
+        results.record(
+            "proxy_reobservation", proxy_status, proxy_detail, "ps -eo pid,args"
+        )
 
-    # ── item 9: the v2 chain, enforced by build_receipt_v2 ──────────────────
-    #
-    # Item 9 is no longer three digests asserted equal. It is a CHAIN:
-    # descriptor -> the trusted `FoundationExecutionPlanV3` -> the
-    # `ExecutionGrant` issued against that plan -> the `DeploymentOutcome` of
-    # executing it, each link checked by `build_receipt_v2`. The v1 path is gone
-    # in the same change (D-S2c C2), so nothing in this lane can publish a
-    # `RehearsalReceipt.v1` any more.
-    #
-    # The controller's term is still a verification of the host this run
-    # actually observed, never `descriptor_digest` restated: a term read from
-    # the variable the others come from would compare something with itself.
-    execution_report = verify_exposure(spec, observed).descriptor_digest
-    results.record(
-        "digest_equality",
-        PASSED if execution_report == descriptor_digest else FAILED,
-        "descriptor -> authorized V3 plan -> grant -> deployment outcome; the "
-        f"observed host verifies to {execution_report}",
-        "build_receipt_v2(chain)",
-    )
+        planned = build_firewall_plan(spec)
+        landed = []
+        for rule in planned:
+            chain = observed.chain(rule.family, rule.chain)
+            landed.append(bool(chain and chain.rules_for(rule.host_port)))
+        terminal_drop = any(rule.action == "DROP" and rule.terminal for rule in planned)
+        firewall_ok = bool(planned) and all(landed) and terminal_drop
+        results.record(
+            "firewall_reobservation",
+            PASSED if firewall_ok else FAILED,
+            f"{len(planned)} derived rules; landed={sum(landed)}/{len(planned)}; "
+            f"terminal DROP={terminal_drop}",
+            "iptables-save",
+            "ip6tables-save",
+        )
+
+        v6_docker_user = observed.chain("ipv6", "DOCKER-USER")
+        results.record(
+            "inert_v6_chain",
+            PASSED if v6_docker_user is not None else BLOCKED,
+            "ip6tables DOCKER-USER captured; a v6 rule there is inert because the "
+            "chain is jumped only from FORWARD while a v6 publish terminates on INPUT"
+            if v6_docker_user is not None
+            else "the ip6tables DOCKER-USER chain could not be read",
+            "ip6tables -L DOCKER-USER -v -n",
+        )
+
+        # ── items 13-16: the external half, measured from the qualified vantage ─
+        # ── the probe phase, taken while the stack is UP ────────────────────────
+        #
+        # The qualify phase ran before the controller touched anything, so the
+        # vantage was enumerated rather than trusted. These probes could not run
+        # then: a negative measured before the apply is an accurate measurement of
+        # the wrong instant, and item 13 requires the negative to be measured
+        # against a RUNNING service. So they are taken here — after the apply,
+        # before any teardown — and `service_running` is read from the target's own
+        # socket table at that moment rather than asserted.
+        #
+        # Shelling out to the collector is observation, not mutation, and the
+        # invariant this runner states is about mutations. See the module docstring
+        # for why that narrowing is structural rather than convenient.
+        probe_phase = _collect_probe_phase(args)
+        evidence["probes"] = probe_phase.get("probes", {})
+        if "closed_port_behaviour" in probe_phase:
+            evidence["closed_port_behaviour"] = probe_phase["closed_port_behaviour"]
+
+        external = (
+            (
+                "external_positive_v6",
+                "positive_v6",
+                True,
+                "tcp/22 over IPv6, THIS target",
+            ),
+            (
+                "external_negative_v6",
+                "negative_v6",
+                False,
+                "the loopback-bound v6 socket, service RUNNING",
+            ),
+            ("external_v4", "v4_pair", False, "IPv4 negative with its tcp/22 control"),
+        )
+        for code, key, want_reachable, note in external:
+            probe = _probe(evidence, key)
+            reachable = bool(probe.get("reachable"))
+            control = bool(probe.get("positive_control_fired", True))
+            # ABSENCE FAILS. `probe.get("service_running", True)` read an evidence
+            # file that simply omitted the key as a running service — an unmeasured
+            # negative reading as an enforced one, which is the defect item 13
+            # exists to catch arriving through the reader instead of the collector.
+            if "service_running" not in probe:
+                raise EvidenceIncomplete(
+                    f"the {key!r} probe carries no `service_running`. A negative "
+                    "probe against a port where nothing is listening measures an "
+                    "absent service, not an enforced exposure, and an unmeasured "
+                    "one must never read as a pass"
+                )
+            running = bool(probe["service_running"])
+            ok = reachable == want_reachable and control and running
+            results.record(
+                code,
+                PASSED if ok else FAILED,
+                f"{note}: reachable={reachable} (wanted {want_reachable}), "
+                f"positive control fired={control}, service running={running}",
+                f"probe:{key}",
+            )
+
+        behaviour = evidence.get("closed_port_behaviour")
+        results.record(
+            "closed_port_behaviour",
+            PASSED if behaviour in ("reset", "drop") else FAILED,
+            f"target closed-port behaviour recorded as {behaviour!r}",
+            "workstation probe",
+        )
+        # ── items 12 and 16: measured from a vantage INSIDE the source set ─────
+        #
+        # Both used to be literals emitted by a collector that is outside the set by
+        # construction. They are now taken through a restricted jump whose key runs
+        # no command on the vantage, so the TCP connection originates inside while
+        # nothing executes there.
+        #
+        # `lane3_inside_vantage.collect` raises a bare `DeploymentFoundationError`
+        # from two sites — the harness exiting non-zero, and unreadable JSON — and
+        # nothing outside that function can tell them apart. Matching the message is
+        # the guesswork every stable code exists to avoid, so the whole region is
+        # recorded as `evidence_unreadable`, which is what that member's own
+        # definition already covers: "Includes a reader subprocess exiting non-zero:
+        # to a destroy decision that is the same fact as malformed output."
+        #
+        # The mapping table files the non-zero-exit site under `precondition_unfit`
+        # instead. That cannot be honoured HERE: `precondition_unfit` asserts the
+        # host was never touched, and this call is reached long after the apply.
+        # That site's own preconditions are asked above, before any mutation, where
+        # the sentence is true.
+        with refusal_of(EvidenceUnreadable):
+            inside_probe = inside_vantage.collect(
+                str(inside_probe_harness()),
+                jump=args.inside_vantage,
+                target_v4=args.target_address,
+                target_v6=target_v6,
+                port=private,
+                timeout=args.timeout,
+            )
+        inside_observed = _observed_from(args, jump_key=args.inside_jump_key)
+        seen = inside_vantage.vantages(inside_probe, inside_observed)
+        control_ok = inside_vantage.control_is_meaningful(inside_probe)
+
+        # Item 16. ONE receipt row, because `build_receipt` enforces a closed set of
+        # sixteen codes and splitting one would be refused — but the SOURCE MODEL is
+        # per family, and the detail carries both. Michael's "model inside/outside
+        # IPv4 and IPv6 independently" is about which addresses are inside which
+        # set, not about the receipt's vocabulary.
+        #
+        # PASSED requires BOTH families to have reached. A pass on one would be a
+        # v4 result wearing a dual-stack claim, and this vantage is exactly the case
+        # where that goes wrong: its v4 is on the target's segment and its v6 is not.
+        both_reached = all(
+            vantage.outcome is inside_vantage.InsideOutcome.REACHED for vantage in seen
+        )
+        observed_all = all(vantage.observed_source for vantage in seen)
+        per_family = "; ".join(
+            f"{vantage.family}: outcome={vantage.outcome}, observed as "
+            f"{vantage.observed_source or 'NOTHING'} ({vantage.cidr})"
+            for vantage in seen
+        )
+        control_note = (
+            "jump-scope control prohibited as expected"
+            if control_ok
+            else "jump-scope control DID NOT FIRE — a permitopen that refused "
+            "everything would look identical to one correctly scoped"
+        )
+        results.record(
+            "private_from_source",
+            PASSED if both_reached and observed_all and control_ok else FAILED,
+            f"the private port from inside its source set, per family. {per_family}. "
+            f"{control_note}",
+            *(f"inside:{vantage.family}:{vantage.cidr}" for vantage in seen),
+            "requalified-every-run",
+        )
+
+        # Item 12, and the branch it fires on is checked rather than assumed.
+        endpoint = f"{spec.product}:{private}"
+        verdicts = [
+            inside_vantage.refusal_fired_for_the_right_reason(
+                vantage,
+                endpoint_token=endpoint,
+                accepted_source_sets=(accepted_source_set,),
+            )
+            for vantage in seen
+        ]
+        refused_ok = all(ok for ok, _ in verdicts) and control_ok
+        results.record(
+            "privileged_vantage_refused",
+            PASSED if refused_ok else FAILED,
+            "accept_public_exposure_evidence refused a real probe from inside an "
+            "accepted source set, on the privileged-vantage branch rather than the "
+            "membership one: "
+            + "; ".join(
+                f"{v.family}={detail}"
+                for v, (_, detail) in zip(seen, verdicts, strict=False)
+            ),
+            f"accepted_source_set:{accepted_source_set}",
+        )
+
+        # ── item 8 is BLOCKED, and NOTHING IS SEEDED ────────────────────────────
+        #
+        # This item provoked a real rollback: seed foreign rules into shared chains,
+        # arm an apply that cannot verify, let the transaction meet its own failure
+        # and compensate, then prove the bystanders survived. Every part of that is
+        # still the right rehearsal. What is gone is the thing that performed it —
+        # the compensation now lives in `Executor._restore_exposure`, reached only
+        # through an authorized V3 plan and consumed Control V2 dispatch that this
+        # workflow does not yet receive (see the `apply_under_lock` block above for
+        # why this runner may neither mint one nor order the effects itself).
+        #
+        # THE SEEDING DOES NOT RUN, and that ordering is the whole care in this
+        # edit. `seed_foreign_rules` writes real rules into `DOCKER-USER` and
+        # `INPUT` on a shared host; it is safe only because a provocation follows
+        # it and a `finally` withdraws it. Seeding first and blocking afterwards
+        # would leave a host dirtied to rehearse something that never ran, with the
+        # unwind's own failure modes exercised for no reason. A blocked item
+        # touches nothing.
+        #
+        # `provoke_apply_failure` and `seed_foreign_rules` keep their homes in
+        # `lane3_provocation.py`. They are not dead: they are the provocation half
+        # of the rehearsal, waiting on a driver, and deleting them would mean
+        # rewriting them from the incident notes when the driver arrives.
+        results.record(
+            "provoked_rollback",
+            BLOCKED,
+            "the compensation moved to `Executor._restore_exposure` and is reached "
+            "only through an authorized `FoundationExecutionPlanV3` carrying an "
+            "exposure reconciliation and a consumed Control V2 dispatch, which "
+            "this workflow does not yet receive. No foreign "
+            "rule was seeded: a blocked item must not dirty a shared host to "
+            "rehearse something that will not run",
+            "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
+        )
+
+        # ── item 9: the v2 chain, enforced by build_receipt_v2 ──────────────────
+        #
+        # Item 9 is no longer three digests asserted equal. It is a CHAIN:
+        # descriptor -> the trusted `FoundationExecutionPlanV3` -> the
+        # `ExecutionGrant` issued against that plan -> the `DeploymentOutcome` of
+        # executing it, each link checked by `build_receipt_v2`. The v1 path is gone
+        # in the same change (D-S2c C2), so nothing in this lane can publish a
+        # `RehearsalReceipt.v1` any more.
+        #
+        # The controller's term is still a verification of the host this run
+        # actually observed, never `descriptor_digest` restated: a term read from
+        # the variable the others come from would compare something with itself.
+        execution_report = verify_exposure(spec, observed).descriptor_digest
+        results.record(
+            "digest_equality",
+            PASSED if execution_report == descriptor_digest else FAILED,
+            "descriptor -> authorized V3 plan -> grant -> deployment outcome; the "
+            f"observed host verifies to {execution_report}",
+            "build_receipt_v2(chain)",
+        )
 
     # The probe evidence is bound as the ENCRYPTED bundle that is published,
     # and the vantage by its private record reference, never by an address.
@@ -2160,6 +2225,11 @@ def main(
     parser.add_argument(
         "--terminal-evidence-out", default="lane3-terminal-evidence.json"
     )
+    # The PRIVATE canonical exposure records, for the encrypted evidence
+    # bundle. Empty writes none: a run the launcher has not taught to
+    # carry them into the bundle must not scatter private host evidence
+    # into a workspace artifact of its own authority.
+    parser.add_argument("--exposure-calls-out", default="")
     parser.add_argument("--principal-audience", default=DEFAULT_PRINCIPAL_AUDIENCE)
     args = parser.parse_args(argv)
     if args.lease_dir is None:

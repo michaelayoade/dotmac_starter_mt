@@ -1028,6 +1028,24 @@ type = "directory"
 url = "packages/dotmac-customers"
 
 [[package]]
+name = "dotmac-delivery-resend"
+version = "0.1.0a1"
+description = "Transactional fence for human-triggered delivery resends inside a caller transaction"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a105"
+sqlalchemy = "==2.0.51"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-delivery-resend"
+
+[[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a2"
 description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0057 § 3)"
@@ -1382,7 +1400,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a107"
+version = "0.1.0a107+dev"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4505,4 +4523,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "26676828c047bb25fe437d4b588ed7f9a9ea91b4eec1e3932ecf0797931bfeef"
+content-hash = "b2f716e0e9761c094b816ac5972a03ac492b06cdd9ee617db76e047bf3d8b6eb"

@@ -1105,6 +1105,7 @@ def _first_mutation_line(function: ast.FunctionDef) -> int:
 _HOST_MUTATORS = frozenset(
     {
         "apply_compose",
+        "execute_authorized_plan",
         "replace_rules",
         "restore_chains",
         "seed_foreign_rules",
@@ -1126,61 +1127,28 @@ def _host_mutating_calls(function: ast.FunctionDef) -> dict[str, int]:
     return found
 
 
-def test_the_runner_MUTATES_NOTHING_and_the_ordering_guards_are_RETIRED() -> None:
-    """The two position guards that used to live here are retired. Why, exactly.
-
-    They asserted an ORDERING around `ctx.host_mutated = True`: five
-    `precondition_unfit` sites before it, three sites after it. That was the
-    right guard against the defect that shipped — three preconditions reached
-    only once the compose stack had been applied and both filter chains
-    rewritten, so a release could claim `precondition_unfit` about a host it had
-    already changed.
-
-    **Their subject no longer exists.** The apply moved to
-    `Executor._reconcile_exposure` behind an authorization Control does not yet
-    issue, so `apply_under_lock` and `provoked_rollback` are `blocked` and the
-    runner mutates nothing at all. One of the three "after" cases was
-    `transaction.run`, a call to a class that has been deleted.
-
-    They are RETIRED rather than relaxed, and the difference is this test. An
-    ordering assertion around a line that does not exist cannot be made to pass
-    honestly — `_first_mutation_line` would have to stop requiring exactly one
-    assignment, which is precisely the loosening that lets two of them back in.
-    So the weaker claim is dropped and a STRONGER one takes its place: there is
-    no mutation, which makes every `precondition_unfit` site trivially truthful.
-
-    It is a two-directional ratchet. The moment any mutation returns to `run`,
-    this fails and names the guards to restore; the detector they need
-    (`_first_mutation_line`, `_first_call_line`) is deliberately kept and kept
-    under test below, so restoring them is re-pointing a working tool rather
-    than rewriting one from this docstring.
-    """
+def test_runner_declares_mutation_only_at_public_executor_boundary() -> None:
+    """No direct effects ordering; the conservative flag covers Executor refusal."""
     function = _run_function()
-
-    mutators = _host_mutating_calls(function)
-    assert mutators == {}, (
-        f"the Lane 3 runner mutates a host again: {sorted(mutators)}. That is "
-        "not wrong in itself — it is what this lane is FOR — but it means "
-        "`precondition_unfit` can now be claimed about a changed host. Restore "
-        "`ctx.host_mutated = True` immediately before the first mutation and "
-        "restore the two ordering guards this test replaced (git log this "
-        "file); `_first_mutation_line` and `_first_call_line` below are kept "
-        "working precisely so that is a re-point rather than a rewrite"
-    )
-
-    declared = [
-        node.lineno
-        for node in ast.walk(function)
-        if isinstance(node, ast.Assign)
-        and any(ast.unparse(target) == "ctx.host_mutated" for target in node.targets)
-        and ast.unparse(node.value) == "True"
-    ]
-    assert declared == [], (
-        f"`run` declares the host mutated at line(s) {declared} while calling "
-        "no mutator. The flag and the act must not disagree: a release saying "
-        "the host was touched when nothing touched it sends a destroyer to "
-        "quarantine a clean machine"
-    )
+    assert set(_host_mutating_calls(function)) == {"execute_authorized_plan"}
+    boundary = _first_mutation_line(function)
+    execute = _first_call_line(function, "receipt_v2.execute_authorized_plan")
+    assert boundary + 1 == execute
+    # Pure invocation refusals must precede even the read-only base observation.
+    observe = _first_call_line(function, "receipt_v2.build_base_plan")
+    for call in ("private_port", "inside_source_set", "require_inside_probe_harness"):
+        assert _first_call_line(function, call) < observe < boundary
+    lease = _first_call_line(function, "load_lease")
+    for node in ast.walk(function):
+        if isinstance(node, ast.With) and any(
+            isinstance(item.context_expr, ast.Call)
+            and any(
+                isinstance(arg, ast.Name) and arg.id == "PreconditionUnfit"
+                for arg in item.context_expr.args
+            )
+            for item in node.items
+        ):
+            assert node.end_lineno < lease
 
 
 def test_the_no_mutation_ratchet_still_bites() -> None:

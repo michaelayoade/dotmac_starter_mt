@@ -50,6 +50,36 @@ being published." A rehearsal that imports
 rehearsal, even if it carries a
 candidate digest in its output, and does not satisfy the lane.
 
+## Runner phase ordering and remaining execution blockers
+
+The owner ruling keeps read-only prestate and genuine authorization before the
+lease. The runner prepares its installed V3 bindings and holds the signed
+material pair, then builds the base plan from read-only role observation and
+renders the V3 plan. Preparation and observation are not execution grants.
+Failures in this phase refuse before lease custody; only the installed
+Foundation authorization owner can issue the grant against the observed plan.
+
+One deployment plan, deployment-effects instance and startup binding instance
+carry through those phases into execution. The runner requires the installed
+binding factory to supply effects for the target. The descriptor is parsed
+from the same held bytes recorded as its fixture. No mutation is authorized by
+observation, a lease or a product lock alone.
+
+After authorization, the exact lease must cover this run and controller before
+custody is recorded. The public product deployment lock covers execution and
+its characterizing observations; coverage and identities are checked again at
+the Executor boundary. Executor re-observes the host to refuse drift from the
+frozen prestate. The controller lock serializes its product deployments;
+exclusion against independent remote writers still requires admission proof.
+
+The runner supplies the same immutable descriptor used for its V1 base plan,
+and the trusted plan carries that descriptor's derived exposure families. If
+no family is derived, the runner still refuses before taking a lease for an
+incomplete rehearsal. Exposure apply and provoked rollback remain blocked; no
+receipt, version allocation, publication or operational acceptance follows
+from source coverage. Installed attester materials, signed-pair delivery and
+material-backed Control observers still need evidence.
+
 ## Historical result — superseded by the generated status document
 
 | Item | Result |

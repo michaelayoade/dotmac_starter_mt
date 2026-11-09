@@ -235,6 +235,31 @@ def _reasons(root: Path) -> set[str]:
     }
 
 
+def _insert_at_statement(text: str, node: ast.stmt, statements: str) -> str:
+    """Plant at the actual statement's indentation, independent of lock scope."""
+    lines = text.splitlines(keepends=True)
+    indent = " " * node.col_offset
+    lines[node.lineno - 1 : node.lineno - 1] = [
+        indent + line + "\n" for line in statements.splitlines()
+    ]
+    planted = "".join(lines)
+    assert planted != text
+    ast.parse(planted)
+    return planted
+
+
+def _lease_custody_statement(text: str) -> ast.Assign:
+    statements = [
+        node
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Assign)
+        and any(ast.unparse(target) == "ctx.lease" for target in node.targets)
+        and ast.unparse(node.value) == "lease"
+    ]
+    assert len(statements) == 1, "expected one exact lease custody assignment"
+    return statements[0]
+
+
 def test_every_reason_is_planted_somewhere() -> None:
     """NON-VACUITY over the SET rather than one reason at a time.
 
@@ -384,12 +409,20 @@ def test_restoring_the_provocation_seam_CLEARS_the_reason(tmp_path: Path) -> Non
     # detector matches the seam name rather than any `raise`, so an arbitrary
     # error path would not clear this — which is the property the original
     # plant was written to establish and this keeps.
-    marker = '    results.record(\n        "provoked_rollback",'
-    assert marker in text, "the anchor moved; the plant would silently do nothing"
+    anchors = [
+        node
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and ast.unparse(node.value.func) == "results.record"
+        and node.value.args
+        and isinstance(node.value.args[0], ast.Constant)
+        and node.value.args[0].value == "provoked_rollback"
+    ]
+    assert len(anchors) == 1, "expected one provoked-rollback result statement"
     runner.write_text(
-        text.replace(
-            marker,
-            f"    {capability.PROVOCATION_SEAM}(effects, port=1)\n" + marker,
+        _insert_at_statement(
+            text, anchors[0], f"{capability.PROVOCATION_SEAM}(effects, port=1)"
         ),
         encoding="utf-8",
     )
@@ -412,13 +445,12 @@ def test_re_deriving_an_unused_compose_project_is_refused_again(
     root = _tree_with(tmp_path, {})
     runner = root / capability.RUNNER
     text = runner.read_text(encoding="utf-8")
-    text = text.replace(
-        "    # This block used to derive a Compose project",
-        '    project = f"{lease.compose_project_prefix}{args.authorization_run}"\n'
-        "    if not lease.owns_project(project):\n"
-        "        raise DeploymentFoundationError('outside the prefix')\n"
-        "    # This block used to derive a Compose project",
-        1,
+    text = _insert_at_statement(
+        text,
+        _lease_custody_statement(text),
+        'project = f"{lease.compose_project_prefix}{args.authorization_run}"\n'
+        "if not lease.owns_project(project):\n"
+        "    raise DeploymentFoundationError('outside the prefix')",
     )
     runner.write_text(text, encoding="utf-8")
 
@@ -440,15 +472,35 @@ def test_passing_the_derived_project_to_a_consumer_satisfies_it(
     root = _tree_with(tmp_path, {})
     runner = root / capability.RUNNER
     text = runner.read_text(encoding="utf-8")
-    text = text.replace(
-        "    # This block used to derive a Compose project",
-        '    project = f"{lease.compose_project_prefix}{args.authorization_run}"\n'
-        "    # This block used to derive a Compose project",
-        1,
-    ).replace(
-        "        deploy_dir=args.deploy_dir,",
-        "        deploy_dir=args.deploy_dir,\n        compose_project=project,",
-        1,
+    text = _insert_at_statement(
+        text,
+        _lease_custody_statement(text),
+        'project = f"{lease.compose_project_prefix}{args.authorization_run}"',
+    )
+    constructors = [
+        node
+        for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ComposeHostExposureEffects"
+    ]
+    assert len(constructors) == 1, "expected one exposure effects constructor"
+    constructor = constructors[0]
+    assert not any(kw.arg == "compose_project" for kw in constructor.keywords)
+    lines = text.splitlines(keepends=True)
+    closing = constructor.end_lineno - 1
+    indent = lines[closing][: len(lines[closing]) - len(lines[closing].lstrip())]
+    lines.insert(closing, indent + "    compose_project=project,\n")
+    text = "".join(lines)
+    planted = ast.parse(text)
+    assert (
+        sum(
+            isinstance(node, ast.keyword)
+            and node.arg == "compose_project"
+            and ast.unparse(node.value) == "project"
+            for node in ast.walk(planted)
+        )
+        == 1
     )
     runner.write_text(text, encoding="utf-8")
 

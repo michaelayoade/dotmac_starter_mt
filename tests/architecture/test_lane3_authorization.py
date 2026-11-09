@@ -220,11 +220,11 @@ def test_runner_and_workflow_do_not_accept_single_v1_authority() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     script = rehearse_script.SCRIPT.read_text(encoding="utf-8")
     assert "establish_authorization(\n" in runner
-    assert runner.index("establish_authorization(\n") < runner.index(
+    assert runner.index("prepare_authorization(\n") < runner.index(
         "load_lease(args.target"
     )
-    # The grant is issued against the ONE trusted plan, from the D4 producer.
-    # Its prestate is observed and its V1 base rendered before that grant,
+    # Owner ruling: read-only prestate and genuine authority precede the lease.
+    # The grant is issued against the ONE trusted plan, from the D4 producer,
     # through the bindings and effects retained for the later Executor drive.
     assert runner.index("receipt_v2.build_base_plan(") < runner.index(
         "receipt_v2.acquire_execution_plan("
@@ -232,13 +232,20 @@ def test_runner_and_workflow_do_not_accept_single_v1_authority() -> None:
     assert runner.index("receipt_v2.acquire_execution_plan(") < runner.index(
         "establish_authorization(\n"
     )
+    assert runner.index("establish_authorization(\n") < runner.index(
+        "load_lease(args.target"
+    )
+    assert runner.index("load_lease(args.target") < runner.index(
+        "with deployment_lock("
+    )
     assert runner.index("load_lease(args.target") < runner.index(
         "receipt_v2.execute_authorized_plan("
     )
-    assert "deployment_plan=base_build.deployment_plan," in runner
-    assert "effects=base_build.effects," in runner
-    assert "bindings=authority_bindings," in runner
-    assert "lock_dir=args.lock_dir," in runner
+    assert "deployment_plan=deployment_plan," in runner
+    assert "effects=deployment_effects," in runner
+    assert "bindings=bindings," in runner
+    assert "lock=held," in runner
+    assert "directory=args.lock_dir," in runner
     assert "execution_plan=execution_plan," in runner
     assert "--authorization-doc-digest" not in runner
     assert "--authorization-document" in runner

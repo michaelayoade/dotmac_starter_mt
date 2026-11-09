@@ -46,6 +46,7 @@ def _load() -> Any:
 
 runner = _load()
 producer = sys.modules["lane3_receipt_v2"]
+recording = sys.modules["lane3_exposure_recording"]
 
 
 def _write_topology(tmp_path: pathlib.Path, document: Any) -> str:
@@ -172,7 +173,7 @@ def test_an_admitted_run_is_unanswerable_for_want_of_a_trusted_plan(
     # host keeps its standing.
     argv = _argv(tmp_path, topology=DOCUMENT, descriptor=DESCRIPTOR)
     assert runner.main(argv, topology_src=FixedSource(topo_record())) == 2
-    assert "trusted_cp_v3_plan_provider" in capsys.readouterr().err
+    assert "no distribution declares" in capsys.readouterr().err
     _no_receipt_and_no_release(tmp_path)
 
 
@@ -296,3 +297,378 @@ def test_an_assembly_contradiction_under_the_lease_is_uncertified_not_unfit() ->
     exc = runner.SpecError("the evidence bundle is not age-encrypted")
     member = runner.classify_refusal(exc, lease_in_hand=True, host_mutated=False)
     assert member is runner.TerminalRefusal.HOST_STATE_UNCERTIFIED
+
+
+def test_prepared_authorization_reads_pair_and_discovers_bindings_once(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    import lane3_authorization as authorization
+
+    events: list[object] = []
+    bindings = SimpleNamespace(
+        authorization_v3_provider=object(), build_effects=lambda *a: object()
+    )
+    plan = object()
+    grant = object()
+
+    def discover(**kwargs: object) -> object:
+        events.append("discover")
+        return bindings
+
+    def authorize(**kwargs: object) -> object:
+        events.append(kwargs)
+        return grant
+
+    monkeypatch.setattr(
+        authorization, "_verifying_symbols", lambda: (authorize, discover)
+    )
+    path = pathlib.Path(
+        _write(
+            tmp_path,
+            "pair.json",
+            {"authorization_material": {}, "dispatch_material": {}},
+        )
+    )
+    prepared = authorization.prepare_authorization(
+        authorization_document=path, require_build_effects=True
+    )
+    path.unlink()
+    assert prepared.bindings is bindings
+    assert (
+        authorization.establish_authorization(
+            descriptor_digest="digest",
+            target="host",
+            authorization_document=None,
+            execution_plan=plan,
+            prepared=prepared,
+        )
+        is grant
+    )
+    assert events[0] == "discover" and len(events) == 2
+    assert events[1]["bindings"] is bindings
+    assert events[1]["plan"] is plan
+
+
+def test_remote_bootstrap_refuses_local_effects_fallback_before_pair_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import lane3_authorization as authorization
+
+    bindings = SimpleNamespace(authorization_v3_provider=object())
+    monkeypatch.setattr(
+        authorization, "_verifying_symbols", lambda: (object(), lambda **k: bindings)
+    )
+    monkeypatch.setattr(
+        authorization, "_read_document", lambda *a: pytest.fail("read pair")
+    )
+    with pytest.raises(authorization.AuthorizationUnverifiable) as caught:
+        authorization.prepare_authorization(
+            authorization_document="missing", require_build_effects=True
+        )
+    assert caught.value.standing is authorization.Standing.UNANSWERABLE
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "bootstrap",
+        "pair",
+        "factory_runtime",
+        "factory_os",
+        "observe",
+        "authority_missing",
+        "lease",
+        "controller",
+        "lock",
+        "render",
+        "host",
+        "grant",
+        "plan_controller",
+        "exposure",
+        "lease_recheck",
+        "executor",
+    ],
+)
+def test_runner_phase_failures_and_exact_object_handoff(
+    tmp_path: pathlib.Path,
+    lane3_runtime: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """Canaries: each refused phase must prevent every later effect boundary."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    events: list[object] = []
+    captured: dict[str, Any] = {}
+    deployment_plan = SimpleNamespace(image_digest="sha256:image")
+    base = object()
+    plan = SimpleNamespace(
+        controller_ssh_fingerprint="other"
+        if failure == "plan_controller"
+        else FINGERPRINT_TEXT,
+        host_id="other" if failure == "host" else TOPO_HOST,
+        exposure_reconciliations=() if failure == "exposure" else (object(),),
+    )
+    grant = object()
+    held = SimpleNamespace(require_held=lambda **k: events.append("held"))
+
+    def refuse(where: str) -> None:
+        if failure == where:
+            raise runner.SpecError(where)
+
+    class Lease:
+        controller_identity_fingerprint = runner.ControllerSshFingerprintV1.parse(
+            "SHA256:" + "A" * 43 if failure == "controller" else FINGERPRINT_TEXT,
+            field="controller",
+        )
+
+        def covers(self, **kwargs: object) -> None:
+            events.append("covers")
+            refuse("lease" if events.count("covers") == 1 else "lease_recheck")
+
+    lease = Lease()
+    ctx = runner.TerminalContext()
+
+    class Effects:
+        def observe_roles(self) -> tuple[object, ...]:
+            assert ctx.lease is None and "load_lease" not in events
+            assert events[-1] == "build_effects"
+            events.append("observe")
+            refuse("observe")
+            return ()
+
+    effects = Effects()
+
+    def build_effects(*args: object) -> Effects:
+        events.append("build_effects")
+        if failure == "factory_runtime":
+            raise RuntimeError("trusted factory unavailable")
+        if failure == "factory_os":
+            raise OSError("trusted factory input unreadable")
+        return effects
+
+    bindings = SimpleNamespace(build_effects=build_effects)
+    prepared = SimpleNamespace(bindings=bindings)
+
+    def prepare(**kwargs: object) -> object:
+        events.append("bootstrap")
+        assert kwargs["require_build_effects"] is True
+        if failure in {"bootstrap", "pair"}:
+            raise runner.AuthorizationUnverifiable(
+                runner.Standing.UNANSWERABLE
+                if failure == "bootstrap"
+                else runner.Standing.UNATTESTABLE,
+                "missing provider" if failure == "bootstrap" else "malformed pair",
+            )
+        return prepared
+
+    @contextmanager
+    def lock(*args: object, **kwargs: object) -> Any:
+        assert kwargs["directory"] == "/var/lock/dotmac"
+        events.append("lock")
+        refuse("lock")
+        yield held
+        events.append("unlock")
+
+    def build_base(spec: Any, **kwargs: Any) -> tuple[object, object, object]:
+        assert kwargs["bindings"] is bindings
+        assert "effects" not in kwargs and "deployment_plan" not in kwargs
+        captured["spec"] = spec
+        used_effects = bindings.build_effects(spec, pathlib.Path(kwargs["deploy_dir"]))
+        used_effects.observe_roles()
+        return base, deployment_plan, used_effects
+
+    def render(got_base: object, **kwargs: object) -> object:
+        assert got_base is base and kwargs["bindings"] is bindings
+        assert kwargs["spec"] is captured["spec"]
+        events.append("render")
+        if failure == "render":
+            raise producer.ReceiptRefused("prelease renderer contradiction")
+        if failure == "authority_missing":
+            raise producer.AuthorityUnavailable(
+                ["trusted_cp_v3_plan_provider: missing"]
+            )
+        return plan
+
+    def authorize(**kwargs: object) -> object:
+        assert kwargs["prepared"] is prepared and kwargs["execution_plan"] is plan
+        assert ctx.lease is None and "load_lease" not in events
+        events.append("grant")
+        if failure == "grant":
+            raise runner.AuthorizationUnverifiable(
+                runner.Standing.UNATTESTABLE, "prelease pair refusal"
+            )
+        return grant
+
+    def bind(got_effects: object, got_plan: object) -> None:
+        assert got_effects is effects and got_plan is plan and "grant" in events
+        events.append("bind")
+
+    def observe_exposure() -> object:
+        assert ctx.lease is lease and "grant" in events and "lock" in events
+        events.append("exposure_snapshot")
+        return SimpleNamespace(sockets=(), chains=(), proxies=())
+
+    exposure = SimpleNamespace(
+        observe=observe_exposure, execution_descriptor=b"exposure"
+    )
+
+    def load_lease(*args: object, **kwargs: object) -> object:
+        assert "grant" in events and events.index("observe") < events.index("grant")
+        events.append("load_lease")
+        return lease
+
+    def execute(got_plan: object, got_grant: object, **kwargs: Any) -> object:
+        assert got_plan is plan and got_grant is grant
+        assert kwargs["spec"] is captured["spec"]
+        assert kwargs["deployment_plan"] is deployment_plan
+        assert kwargs["effects"] is effects
+        wrapper = kwargs["exposure_effects"]
+        assert isinstance(wrapper, recording.RecordingExposureEffects)
+        assert wrapper.execution_descriptor == b"exposure"
+        assert ctx.exposure_calls == []
+        assert wrapper.observe().sockets == ()
+        assert [(r.sequence, r.method) for r in ctx.exposure_calls] == [(0, "observe")]
+        assert kwargs["bindings"] is bindings and kwargs["lock"] is held
+        assert ctx.host_mutated is True
+        events.append("executor")
+        raise runner.SpecError("executor refused, including drift")
+
+    classify = runner.classify_refusal
+
+    def classify_actual(exc: BaseException, **kwargs: Any) -> Any:
+        captured["refusal"] = exc
+        return classify(exc, **kwargs)
+
+    monkeypatch.setattr(runner, "classify_refusal", classify_actual)
+    monkeypatch.setattr(runner, "TerminalContext", lambda: ctx)
+    monkeypatch.setattr(
+        runner,
+        "record_terminal",
+        lambda context, args, outcome: captured.update(terminal=outcome),
+    )
+    monkeypatch.setattr(runner, "prepare_authorization", prepare)
+    monkeypatch.setattr(runner, "load_lease", load_lease)
+    monkeypatch.setattr(runner, "deployment_lock", lock)
+    monkeypatch.setattr(runner, "_load_probe_evidence", lambda *a: {})
+    monkeypatch.setattr(runner, "_qualify", lambda *a: None)
+    monkeypatch.setattr(runner, "require_inside_probe_harness", lambda *a, **k: None)
+    # Factory failures use the real guarded builder: an out-of-builder factory
+    # call would escape main with RuntimeError/OSError instead of a typed refusal.
+    if failure not in {"factory_runtime", "factory_os"}:
+        monkeypatch.setattr(producer, "build_base_plan", build_base)
+    monkeypatch.setattr(producer, "acquire_execution_plan", render)
+    monkeypatch.setattr(runner, "establish_authorization", authorize)
+    monkeypatch.setattr(runner, "bind_authorized_effects", bind)
+    monkeypatch.setattr(runner, "_ssh_runner", lambda *a: object())
+    monkeypatch.setattr(runner, "ComposeHostExposureEffects", lambda *a, **k: exposure)
+    monkeypatch.setattr(runner, "read_installation_id", lambda *a: "installation")
+    monkeypatch.setattr(producer, "execute_authorized_plan", execute)
+    assert runner.main(
+        _argv(tmp_path, topology=DOCUMENT, descriptor=DESCRIPTOR),
+        topology_src=FixedSource(topo_record()),
+    ) == (2 if failure in {"bootstrap", "authority_missing"} else 1)
+    before_lease = {
+        "bootstrap",
+        "pair",
+        "factory_runtime",
+        "factory_os",
+        "observe",
+        "authority_missing",
+        "render",
+        "host",
+        "grant",
+        "plan_controller",
+        "exposure",
+    }
+    if failure in {"bootstrap", "pair", "factory_runtime", "factory_os"}:
+        assert "observe" not in events
+    if failure in before_lease:
+        assert "load_lease" not in events and "lock" not in events
+        assert ctx.lease is None
+    else:
+        assert (
+            events.index("observe")
+            < events.index("render")
+            < events.index("grant")
+            < events.index("load_lease")
+        )
+    if failure != "executor":
+        assert "executor" not in events
+    if failure in before_lease | {"lease", "controller", "lock"}:
+        assert "exposure_snapshot" not in events
+    terminal = captured["terminal"]
+    if failure in before_lease | {"lease", "controller"}:
+        assert terminal is None
+    else:
+        assert terminal.refusal is runner.TerminalRefusal.HOST_STATE_UNCERTIFIED
+    if failure in {
+        "pair",
+        "factory_runtime",
+        "factory_os",
+        "observe",
+        "render",
+        "host",
+        "grant",
+        "plan_controller",
+        "exposure",
+    }:
+        assert isinstance(captured["refusal"], runner.PreconditionUnfit)
+    if failure in {"bootstrap", "authority_missing"}:
+        assert isinstance(captured["refusal"], runner.AuthorizationUnverifiable)
+    assert ctx.host_mutated is (failure == "executor")
+    if failure in {"factory_runtime", "factory_os"}:
+        assert "render" not in events and "grant" not in events
+    assert events.count("build_effects") == (
+        0 if failure in {"bootstrap", "pair"} else 1
+    )
+    assert events.count("bootstrap") == 1
+    assert events.count("lock") <= 1
+    assert events.count("observe") <= 1
+    _no_receipt_and_no_release(tmp_path)
+
+
+def test_preparation_cannot_supply_the_grant_issuer(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    import lane3_authorization as authorization
+
+    bindings = SimpleNamespace(authorization_v3_provider=object())
+    monkeypatch.setattr(
+        authorization,
+        "_verifying_symbols",
+        lambda: (
+            lambda **k: pytest.fail("startup callable retained"),
+            lambda **k: bindings,
+        ),
+    )
+    path = _write(
+        tmp_path, "pair.json", {"authorization_material": {}, "dispatch_material": {}}
+    )
+    prepared = authorization.prepare_authorization(authorization_document=path)
+
+    def refuse(**kwargs: object) -> None:
+        raise ValueError("installed issuer refuses")
+
+    monkeypatch.setattr(
+        authorization,
+        "_verifying_symbols",
+        lambda: (refuse, lambda **k: pytest.fail("rediscovered")),
+    )
+    with pytest.raises(
+        authorization.AuthorizationUnverifiable, match="installed issuer refuses"
+    ):
+        authorization.establish_authorization(
+            descriptor_digest="digest",
+            target="host",
+            authorization_document=None,
+            execution_plan=object(),
+            prepared=prepared,
+        )

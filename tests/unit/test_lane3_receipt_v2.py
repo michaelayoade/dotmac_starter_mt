@@ -266,14 +266,82 @@ def test_plan_acquisition_delegates_to_the_mirror_with_discovered_bindings(
     bindings = type("B", (), {"authorization_v3_provider": object()})()
     seen: dict[str, object] = {}
 
-    def _render(base_plan: object, *, bindings: object) -> object:
-        seen.update(base_plan=base_plan, bindings=bindings)
+    def _render(base_plan: object, *, bindings: object, spec: object) -> object:
+        seen.update(base_plan=base_plan, bindings=bindings, spec=spec)
         return sentinel
 
     monkeypatch.setattr(lane3_plan_v3, "render_local_execution_plan_v3", _render)
     base = object()
     assert producer.acquire_execution_plan(base, bindings=bindings) is sentinel
-    assert seen == {"base_plan": base, "bindings": bindings}
+    assert seen == {"base_plan": base, "bindings": bindings, "spec": None}
+
+    spec = object()
+    assert (
+        producer.acquire_execution_plan(base, bindings=bindings, spec=spec) is sentinel
+    )
+    assert seen == {"base_plan": base, "bindings": bindings, "spec": spec}
+
+
+def test_plan_acquisition_translates_descriptor_composition_refusals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_plan_v3
+
+    bindings = type("B", (), {"authorization_v3_provider": object()})()
+
+    def _render(base_plan: object, *, bindings: object, spec: object) -> object:
+        raise lane3_plan_v3.ExposureCompositionRefused("descriptor mismatch")
+
+    monkeypatch.setattr(lane3_plan_v3, "render_local_execution_plan_v3", _render)
+    with pytest.raises(producer.ReceiptRefused, match="descriptor mismatch"):
+        producer.acquire_execution_plan(object(), bindings=bindings, spec=object())
+
+
+def test_authority_acquisition_passes_the_same_spec_to_plan_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lane3_authorization
+
+    plan, grant = object(), object()
+    base, bindings, entries, spec = object(), object(), object(), object()
+    document = object()
+    seen: dict[str, object] = {}
+
+    def acquire(got_base: object, **kwargs: object) -> object:
+        seen.update(acquire_base=got_base, acquire_kwargs=kwargs)
+        return plan
+
+    def establish(**kwargs: object) -> object:
+        seen.update(establish_kwargs=kwargs)
+        return grant
+
+    monkeypatch.setattr(producer, "acquire_execution_plan", acquire)
+    monkeypatch.setattr(lane3_authorization, "establish_authorization", establish)
+
+    assert producer.acquire_authority(
+        descriptor_digest="sha256:descriptor",
+        target="lane3-target",
+        authorization_document=document,  # type: ignore[arg-type]
+        base_plan=base,
+        bindings=bindings,
+        entries=entries,
+        spec=spec,
+    ) == (plan, grant)
+    assert seen == {
+        "acquire_base": base,
+        "acquire_kwargs": {
+            "bindings": bindings,
+            "entries": entries,
+            "spec": spec,
+        },
+        "establish_kwargs": {
+            "descriptor_digest": "sha256:descriptor",
+            "target": "lane3-target",
+            "authorization_document": document,
+            "execution_plan": plan,
+            "entries": entries,
+        },
+    }
 
 
 @pytest.mark.parametrize(
@@ -413,6 +481,7 @@ def test_base_plan_prefers_the_bindings_effects_factory(
         bindings=bindings,
     )
 
+    assert _deployment_plan is seen["deployment_plan"]
     assert used_effects is effects
     assert factory_seen == {"spec": spec, "deploy_dir": tmp_path}
 
@@ -450,6 +519,7 @@ def test_base_plan_defaults_to_pinned_compose_host_effects(
         deploy_dir=str(tmp_path),
     )
 
+    assert _deployment_plan is seen["deployment_plan"]
     assert isinstance(used_effects, _ComposeEffects)
     assert constructed == {
         "spec": spec,
@@ -739,3 +809,152 @@ def test_the_admission_provider_satisfies_the_seam_and_refuses_like_the_referenc
         RefusingHostSourceAdmissionProvider().admit_host_source()
     assert mine.value.code == reference.value.code
     assert mine.value.code
+
+
+def test_supplied_deployment_plan_is_not_rebuilt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dotmac_deployment_foundation.engine.plan as plan_module
+    import dotmac_deployment_foundation.execution_plan as render_module
+
+    spec = object()
+    deployment_plan = object()
+    observed = object()
+    effects = type("Effects", (), {"observe_roles": lambda self: observed})()
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        plan_module, "build_plan", lambda *a, **k: pytest.fail("rebuilt")
+    )
+    monkeypatch.setattr(
+        render_module.HostPrestateV1, "from_observations", lambda value: value
+    )
+    monkeypatch.setattr(producer, "_application_profile_digest", lambda: "")
+    spec = type(
+        "Spec",
+        (),
+        {
+            "to_canonical_document": lambda self: type(
+                "Doc", (), {"sha256_digest": lambda self: "digest"}
+            )()
+        },
+    )()
+
+    def render(got_spec: object, got_plan: object, **kwargs: object) -> object:
+        captured.update(spec=got_spec, deployment_plan=got_plan, **kwargs)
+        return observed
+
+    monkeypatch.setattr(render_module, "render_execution_plan", render)
+    base, used_plan, used = producer.build_base_plan(
+        spec,
+        target="host",
+        deploy_dir="/deploy",
+        effects=effects,
+        deployment_plan=deployment_plan,
+    )
+    assert base is observed and used is effects
+    assert used_plan is deployment_plan
+    assert captured["spec"] is spec
+    assert captured["deployment_plan"] is deployment_plan
+    assert captured["prestate"] is observed
+
+
+def test_executor_reuses_live_caller_lock_without_reacquiring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dotmac_deployment_foundation.engine.lock as lock_module
+    import dotmac_deployment_foundation.engine.run as run_module
+
+    spec = type("Spec", (), {"product": "lane3_exposure"})()
+    events: list[object] = []
+
+    class Held:
+        def require_held(self, *, product: str) -> None:
+            events.append(product)
+
+    held = Held()
+    outcome = object()
+
+    class Executor:
+        def __init__(self, *args: object, **kwargs: object):
+            pass
+
+        def run(self, deployment_plan: object, *, lock: object) -> object:
+            events.append(lock)
+            return outcome
+
+    monkeypatch.setattr(
+        lock_module, "deployment_lock", lambda *a, **k: pytest.fail("reacquired")
+    )
+    monkeypatch.setattr(run_module, "Executor", Executor)
+    assert (
+        producer.execute_authorized_plan(
+            object(),
+            object(),
+            spec=spec,
+            deployment_plan=object(),
+            effects=object(),
+            lock=held,
+        )
+        is outcome
+    )
+    assert events == ["lane3_exposure", held]
+
+
+def test_dead_caller_lock_refuses_before_executor_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dotmac_deployment_foundation.engine.run as run_module
+    from dotmac_deployment_foundation.errors import PreconditionFailed
+
+    class Dead:
+        def require_held(self, *, product: str) -> None:
+            raise PreconditionFailed("dead")
+
+    monkeypatch.setattr(
+        run_module, "Executor", lambda *a, **k: pytest.fail("constructed")
+    )
+    with pytest.raises(PreconditionFailed, match="dead"):
+        producer.execute_authorized_plan(
+            object(),
+            object(),
+            spec=type("Spec", (), {"product": "lane3"})(),
+            deployment_plan=object(),
+            effects=object(),
+            lock=Dead(),
+        )
+
+
+def test_public_executor_helper_preserves_prestate_drift_refusal() -> None:
+    from types import SimpleNamespace
+
+    from dotmac_deployment_foundation.engine.run import RoleObservation
+    from dotmac_deployment_foundation.errors import PreconditionFailed
+
+    from tests.unit import test_deployment_foundation_execution_binding as fixture
+
+    spec, deployment_plan, effects = fixture._fixture()
+    plan, _ = fixture._plan_and_digest(spec, deployment_plan, effects=effects)
+    grant = fixture._grant(spec, execution_plan=plan)
+    bindings = SimpleNamespace(
+        deployment_admission_provider=fixture.valid_host_source_kwargs()[
+            "admission_provider"
+        ],
+        evidence_policy=fixture.evidence_policy(),
+        evidence_verifier=fixture.AcceptingVerifier(),
+    )
+    for code, observation in list(effects.roles.items()):
+        effects.roles[code] = RoleObservation(
+            code, observation.running, "sha256:" + "7" * 64, observation.restarts
+        )
+    before = effects.snapshot()
+    with pytest.raises(PreconditionFailed, match="not the host that was authorized"):
+        producer.execute_authorized_plan(
+            plan,
+            grant,
+            spec=spec,
+            deployment_plan=deployment_plan,
+            effects=effects,
+            bindings=bindings,
+            lock=fixture.held_lock(spec.product),
+        )
+    fixture._assert_untouched(effects, before)

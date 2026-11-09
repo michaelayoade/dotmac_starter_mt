@@ -511,11 +511,14 @@ conditions:
   `ExposureEffects`, and passes its own runner to `ComposeHostExposureEffects`.
   It never imports the CLI's private default runner.
 - **A local mirror** of the CLI's private V3 plan rendering:
-  `scripts/lane3_plan_v3.py`, built from public calls only.
-  `tests/unit/test_lane3_plan_v3.py` proves the same canonical bytes and digest
-  as `cli._render_local_execution_plan_v3`, and the same refusals. If parity
-  ever breaks, the mirror follows the CLI, or Foundation exposes a public entry
-  point before the Gate-2 freeze.
+  `scripts/lane3_plan_v3.py`, built from public calls only. With no descriptor
+  supplied, `tests/unit/test_lane3_plan_v3.py` proves the same canonical bytes
+  and digest as `cli._render_local_execution_plan_v3`, and the same refusals.
+  Lane 3 may explicitly supply the same immutable descriptor used for its V1
+  base plan to compose descriptor-derived exposure families; that populated
+  plan intentionally has a different digest and does not claim CLI parity. If
+  default parity ever breaks, the mirror follows the CLI, or Foundation exposes
+  a public entry point before the Gate-2 freeze.
 
 **Not in this slice.** A real admission provider, the Executor drive, the
 OpenBao topology read, `lane3-ssh/` certificates, and moving

@@ -907,6 +907,138 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-durable-timers",
+      "version": "0.1.0a2",
+      "tag": "dotmac-durable-timers-v0.1.0a2",
+      "tag_object": "0de240e82a0cb29ca65c1b73c59e50c9e3cebfac",
+      "peeled_commit": "e223bd7e3b35e9fe9f89658d6534dbf3d998260f",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_durable_timers-0.1.0a2-py3-none-any.whl": "b8f1e2762be67e0d4ef1bf5d941e6d1d5162c604641910b6080c26d919744e22"
+      },
+      "verification_run_id": "42478929012",
+      "source_run_id": "42478929012",
+      "release_authority_digest": "sha256:dbf6545c01a2e716b0daa7dd41bb0f463a589a301fbe4c8a1b78596082e88882",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-collections",
+      "version": "0.1.0a2",
+      "tag": "dotmac-collections-v0.1.0a2",
+      "tag_object": "180133b5688f03e2be32e2472f41649258edadc8",
+      "peeled_commit": "e1bfa54e23bd8184c20beb2dc1d9f0938fa336f6",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_collections-0.1.0a2-py3-none-any.whl": "4483cb4a3530f79f80b510ed7a49c01aa4c467ffeb2737d10e5b9a13737ae345"
+      },
+      "verification_run_id": "42499127496",
+      "source_run_id": "42499127496",
+      "release_authority_digest": "sha256:dbf6545c01a2e716b0daa7dd41bb0f463a589a301fbe4c8a1b78596082e88882",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-service-access-policy",
+      "version": "0.1.0a2",
+      "tag": "dotmac-service-access-policy-v0.1.0a2",
+      "tag_object": "66f117c460806b6df99d57b3e127b271c9353d64",
+      "peeled_commit": "8e39eedbdf8608f2fbd3af40e98608ed7d32d8f0",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_service_access_policy-0.1.0a2-py3-none-any.whl": "e500034480ba113a0329a1deee860d48c2bf0e7145c6cbc1f438f224a813c692"
+      },
+      "verification_run_id": "42512081013",
+      "source_run_id": "42512081013",
+      "release_authority_digest": "sha256:dbf6545c01a2e716b0daa7dd41bb0f463a589a301fbe4c8a1b78596082e88882",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-imports",
+      "version": "0.2.0a2",
+      "tag": "dotmac-imports-v0.2.0a2",
+      "tag_object": "4d0860017829dcc58cd5618ca87a2dc6a8ce15ff",
+      "peeled_commit": "cda763663fd3e08f5876699b7771496eadf95536",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_imports-0.2.0a2-cp312-cp312-manylinux_2_35_x86_64.whl": "402a86ba6bb16ed5043625fb80d3fe192e5318f66919bb334baa90730a32ea41"
+      },
+      "verification_run_id": "42521206654",
+      "source_run_id": "42521206654",
+      "release_authority_digest": "sha256:dbf6545c01a2e716b0daa7dd41bb0f463a589a301fbe4c8a1b78596082e88882",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-delivery-resend",
+      "version": "0.1.0a1",
+      "tag": "dotmac-delivery-resend-v0.1.0a1",
+      "tag_object": "f4a7d107026f5a2f73aaf6098ecaaac6af2187ad",
+      "peeled_commit": "9b9c7dbea2037af4d9d28797c6f7fc422f70c679",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_delivery_resend-0.1.0a1-py3-none-any.whl": "f0720e1b8c1e84e37b7d194deced8b68c3eb0b1bde49182c63f2ca1c62da693e"
+      },
+      "verification_run_id": "42553221260",
+      "source_run_id": "42553221260",
+      "release_authority_digest": "sha256:660b794f5db1d3e9c6a58a9e564318b5d5ae2df9235a1cf38976f8199d345f71",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
+    },
+    {
+      "distribution": "dotmac-payments",
+      "version": "0.1.0a4",
+      "tag": "dotmac-payments-v0.1.0a4",
+      "tag_object": "42272ca128f2bdffd04ee0665ad01fd3278a47fb",
+      "peeled_commit": "fd04ea3cd8bf9332f2d9a2324e1fe7ca70171361",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_payments-0.1.0a4-py3-none-any.whl": "40acbcd78c0588b2159ce400c119f30d47d459314ad09df5fcb32d32ca3601b9"
+      },
+      "verification_run_id": "42565080685",
+      "source_run_id": "42565080685",
+      "release_authority_digest": "sha256:660b794f5db1d3e9c6a58a9e564318b5d5ae2df9235a1cf38976f8199d345f71",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }

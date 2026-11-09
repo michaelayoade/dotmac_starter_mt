@@ -6,6 +6,19 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a108 — Release inventory
+
+Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`
+declarations to the existing browser composition/security owner. This inventory
+does not itself allocate a successor or authorize adoption. Preserve global CSP tightening and
+all unrelated response policy; no unsafe-inline/eval or path-prefix exceptions.
+The initial source gate targets FastAPI 0.140.13 and Starlette 1.10.0;
+other runtime pairs fail construction. Hosted CI owns runtime qualification.
+Refusal canaries cover route/authentication boundaries, teardown errors, replay,
+concurrent policy isolation, downstream CSP intersection and API-only assembly.
+Protected release authorization, verified publication and consumer admission
+are separate gates; this source inventory does not replace them.
+
 ## 0.1.0a107 — Release inventory
 
 This inventories the proposed identity-lifecycle and account-writer successor

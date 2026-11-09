@@ -2423,3 +2423,61 @@ checks remain required. No writer is retired: Starter reference tenant
 constructors and ERP/Sub writers remain unretired, with source parity references
 and existing hash-call debt unchanged. All changes are source-only; no installed,
 hosted, release, Academy factory or pair-adoption qualification is claimed.
+
+
+### Proposed amendment 2026-11-08: reviewed script hashes on a composed document
+
+Historical pre-authorization proposal snapshot, recorded 2026-11-08: the status,
+authorization-marker paragraph and qualification table below describe that
+proposal stage. Subsequent publication status belongs to the release captain's
+protected release records; installed adoption and terminal status belong to
+Academy's acceptance evidence. These observations are not current release claims.
+
+Proposal status: unallocated development source for review. This does not authorize a
+Kernel release, an artifact pin, a production policy exception or Academy
+retirement. Published a107 and its tightening-only contract remain immutable.
+
+The source inventory in `docs/inventories/console-csp-source-observations.json`
+found no reusable route-scoped HTTP CSP owner in ERP, Sub or Academy. ERP's
+unsafe global opt-in is not qualifying source; Sub's opaque-origin automation
+iframe is a different isolation contract. Academy is the actual consumer:
+its authenticated console proxy serves a ttyd inline bundle that real Chrome
+blocks under a107's global policy. The extension belongs to the existing Kernel
+browser-composition and security-header owners; product authorization, proxying,
+provider execution and immutable asset review stay outside that owner.
+
+An assembly may declare canonical SHA-256 script hashes for one authenticated
+bounded GET document route. The registry resolves the declaration, and the
+security owner selects it only on that successful HTML response after initial authentication, admission and endpoint execution have produced
+the eligible response. Exceptions escaping the covered lifecycle before the
+first response start invalidate the grant. Global policy remains exactly
+its validated value, including stricter product image sources; only the
+selected document's `script-src` is replaced with reviewed hashes. Unknown
+or conflicting downstream CSP is preserved with the global intersection.
+No arbitrary policy strings, path prefixes, nonce injection, dynamic upstream
+hashing, unsafe script grants, new origins or header-stripping escape hatch is
+introduced. Missing/spoofed/replayed context, errors, redirects and non-HTML
+responses do not gain the grant.
+
+The initial source gate requires exact FastAPI 0.140.13 and Starlette 1.10.0.
+Other runtime pairs refuse construction until actual hosted response-start
+lifecycle qualification extends this boundary. The general Kernel dependency range is unchanged for
+assemblies that do not opt in. Release authorization remains empty and the
+source marker is a107+dev; no successor number is allocated.
+
+| Requirement | Owner | Source enforcement | Qualification state |
+|---|---|---|---|
+| Immutable, referenced script-hash declarations | Kernel browser composition | `test_browser_document_policy.py` hash/binding/route refusal canaries | hosted CI pending |
+| Successful authenticated document only | Kernel runtime and response security | first effective lifecycle guard, scope/binding identity, response status/type checks | hosted CI pending |
+| Preserve global and downstream restrictions | Kernel response security | exact Academy-policy positive case, downstream intersection, concurrent/replay and error canaries | hosted CI pending |
+| Qualified response-start timing | Kernel app factory | exact-pair refusal guard, pre-start invalidation and actual ASGI post-start cleanup canaries | 0.140.13 / 1.10.0 target; hosted execution pending |
+| Actual provider asset, browser and terminal behavior | Academy | reviewed immutable ttyd bytes; installed-consumer browser/WebSocket/input/isolation acceptance | not yet admitted |
+
+The guarantee is bounded by the first `http.response.start`. Initial
+authentication/admission decisions must finish before returning or yielding a
+principal. Any exception escaping the covered lifecycle before that start
+invalidates the grant before replacement HTML can be handled. Cleanup failure
+after response start cannot retract headers or create a second response, and
+is not a guarantee of database commit success. Actual ASGI message capture on
+the target pair proves this distinction; ordinary metadata-mocked unit tests
+prove only refusal and inactive behavior on the older reference framework.

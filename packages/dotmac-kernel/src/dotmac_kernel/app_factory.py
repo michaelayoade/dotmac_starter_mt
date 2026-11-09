@@ -27,6 +27,8 @@ import re
 from collections.abc import Mapping, Sequence, Set
 from contextlib import asynccontextmanager
 
+import fastapi
+import starlette
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -60,7 +62,9 @@ from dotmac_kernel.middleware.observability import (
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import (
     SecurityHeadersMiddleware,
+    _compile_browser_document_policies,
     _validate_content_security_policy_override,
+    compose_content_security_policy,
 )
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.modules import AnyManifest, ModuleRegistry
@@ -298,6 +302,18 @@ def _required_setting_errors() -> list[str]:
             f"{_defect_summary(exc)}. This is a configuration defect, not an "
             "unreachable database — fix it rather than restarting."
         ]
+
+
+def _validate_browser_document_runtime(active: bool) -> None:
+    """Bound opt-in to the runtime whose request boundary covers response start."""
+    if active and (
+        getattr(fastapi, "__version__", None),
+        getattr(starlette, "__version__", None),
+    ) != ("0.140.13", "1.10.0"):
+        raise ValueError(
+            "browser document policies require FastAPI 0.140.13 and Starlette 1.10.0; "
+            "other runtime pairs are not qualified for the response-start boundary"
+        )
 
 
 def _effective_route_contexts(app: FastAPI):
@@ -639,11 +655,21 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         facets=effective_facets,
         authentication_profiles=effective_profiles,
         browser_capabilities=spec.browser_capabilities if web_enabled else (),
+        browser_document_policies=spec.browser_document_policies if web_enabled else (),
         ui_contract_version=effective_ui_contract_version,
         built_in_surfaces=(
             (("kernel_platform", PLATFORM_WEB_SURFACE),) if platform_web_enabled else ()
         ),
     )
+    _validate_browser_document_runtime(bool(surface_registry.browser_document_policies))
+    if (
+        surface_registry.browser_document_policies
+        and not settings.security_headers_enabled
+    ):
+        raise ValueError(
+            "browser document policies require the Kernel security-header writer "
+            "to be enabled"
+        )
     for facet in surface_registry.facets:
         if facet.admission_permission is not None:
             permission_catalogue.require(facet.admission_permission)
@@ -799,11 +825,19 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     _validate_content_security_policy_override(
         configured_csp, surface_registry.browser_security_requirements
     )
+    compiled_document_policies = _compile_browser_document_policies(
+        configured_csp
+        or compose_content_security_policy(
+            surface_registry.browser_security_requirements
+        ),
+        surface_registry.browser_document_policies,
+    )
     # OUTERMOST: security headers + CSP on every response.
     app.add_middleware(
         SecurityHeadersMiddleware,
         enabled=settings.security_headers_enabled,
         content_security_policy=configured_csp,
+        browser_document_policies=compiled_document_policies,
         browser_security_requirements=(surface_registry.browser_security_requirements),
         cross_origin_opener_policy=(spec.security_policy.cross_origin_opener_policy),
         cross_origin_resource_policy=(
@@ -864,6 +898,35 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             enabled_modules=frozenset(manifest.code for manifest in enabled_manifests),
             stylesheets=tuple(spec.stylesheets),
         )
+
+    # Inspect the effective, post-include dependency tree (including lazy
+    # FastAPI route contexts). An earlier parent/global yield dependency would
+    # finalize outside our exception guard, so fail construction rather than
+    # assuming include_router preserved the required lifecycle boundary.
+    for binding in surface_registry.browser_document_policies:
+        routes = [
+            route
+            for route in _effective_route_contexts(app)
+            if getattr(route, "name", None) == binding.qualified_route
+        ]
+        dependencies = (
+            getattr(getattr(routes[0], "dependant", None), "dependencies", ())
+            if len(routes) == 1
+            else ()
+        )
+        first = dependencies[0] if dependencies else None
+        first_dependencies: object = getattr(first, "dependencies", ())
+        if (
+            first is None
+            or getattr(getattr(first, "call", None), "_dotmac_document_lifecycle", None)
+            is not binding
+            or first_dependencies
+            or getattr(first, "scope", None) != "request"
+        ):
+            raise ValueError(
+                "browser document lifecycle guard must be the first "
+                "effective dependency in request scope"
+            )
 
     # AFTER mounting: every route that now exists must reference only declared
     # permission codes. Fails the boot, before the app is ever returned.
