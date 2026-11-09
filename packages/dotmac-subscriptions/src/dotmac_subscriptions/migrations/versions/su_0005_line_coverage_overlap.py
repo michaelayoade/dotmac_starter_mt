@@ -23,7 +23,9 @@ correction may overlap its own correction chain (the occurrences it replaces and
 those that replace it), and a superseded occurrence stops blocking.  The chain
 must be one contract line: a correction whose predecessor has a different
 contract or line key is refused.  A new unique ``(tenant, corrects_occurrence_id)``
-gives an occurrence at most one successor, as Billing does.
+gives an occurrence at most one successor, as Billing does.  A rival successor
+of the same predecessor is left to that constraint (so the refusal names it)
+rather than reported as a coverage overlap.
 
 At a contract-version supersession at ``S`` the new version's first occurrence
 covers ``[S, end)``; an old emitted occurrence straddling ``S`` is re-covered
@@ -228,6 +230,8 @@ def _function_sql(tables: _PlaneTables) -> str:
                AND NEW.rating_coverage_start < o.rating_coverage_end
                AND o.id NOT IN (SELECT id FROM up)
                AND o.id NOT IN (SELECT id FROM down)
+               AND (NEW.corrects_occurrence_id IS NULL
+                    OR o.corrects_occurrence_id IS DISTINCT FROM NEW.corrects_occurrence_id)
                AND NOT EXISTS (
                  SELECT 1 FROM {occ} s
                   WHERE s.corrects_occurrence_id = o.id AND s.state <> 'cancelled'
