@@ -16,6 +16,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Verify acceptance and approval state transitions
+        run: node --test .github/access-form/test.mjs
       - name: Prepare only the delivered files
         run: |
           bash scripts/stage_rc1_evaluation.sh "$RUNNER_TEMP/evaluation"
