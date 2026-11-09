@@ -995,6 +995,28 @@
           "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-delivery-resend",
+      "version": "0.1.0a1",
+      "tag": "dotmac-delivery-resend-v0.1.0a1",
+      "tag_object": "f4a7d107026f5a2f73aaf6098ecaaac6af2187ad",
+      "peeled_commit": "9b9c7dbea2037af4d9d28797c6f7fc422f70c679",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_delivery_resend-0.1.0a1-py3-none-any.whl": "f0720e1b8c1e84e37b7d194deced8b68c3eb0b1bde49182c63f2ca1c62da693e"
+      },
+      "verification_run_id": "42553221260",
+      "source_run_id": "42553221260",
+      "release_authority_digest": "sha256:660b794f5db1d3e9c6a58a9e564318b5d5ae2df9235a1cf38976f8199d345f71",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a107-py3-none-any.whl",
+          "sha256": "4a2aed86e4feb4b6060f956d0d2b1ba9dee0cd66da033cb96d03a35cb89b62fc"
+        }
+      ]
     }
   ]
 }
