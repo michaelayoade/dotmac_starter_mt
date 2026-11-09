@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Time-bounded service eligibility evidence and qualification decisions"
-contract = "Own qualification cases, immutable typed evidence with observation/validity windows, and expiring eligibility decisions. Positioning and Network Access contribute observations only. NOT coordinates, topology, network reachability truth, catalogue declarations, customer identity, service lifecycle, fulfillment, or provisioning."
+contract = "Own qualification cases, immutable typed evidence with observation/validity windows, and expiring eligibility decisions, readable as a fail-closed warrant (ELIGIBLE, in force at the verifier's instant, subject equal to the supplied reference) that exposes no rationale or evidence fact. Positioning and Network Access contribute observations only. NOT coordinates, topology, network reachability truth, catalogue declarations, customer identity, service lifecycle, fulfillment, or provisioning."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 
 source_revisions = [

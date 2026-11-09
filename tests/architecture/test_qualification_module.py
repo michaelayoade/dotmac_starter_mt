@@ -103,3 +103,39 @@ def test_root_migration_is_a_forced_rls_lineage_and_passes_the_gate() -> None:
         bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
     assert report.ok, report.violations
+
+
+def test_warrant_read_is_read_only_and_exposes_no_evidence() -> None:
+    from dotmac_qualification import contracts
+
+    tree = ast.parse((ROOT / "service.py").read_text(encoding="utf-8"))
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    for name in ("read_decision", "verify_warrant"):
+        called = {
+            node.func.attr
+            for node in ast.walk(functions[name])
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert not called & {"add", "flush", "delete", "commit", "rollback"}
+        keyword_only = {argument.arg for argument in functions[name].args.kwonlyargs}
+        assert "scope" in keyword_only
+    # The verifier supplies its own instant; the module reads no clock here.
+    verify = functions["verify_warrant"]
+    assert "at" in {argument.arg for argument in verify.args.kwonlyargs}
+    assert not any(
+        isinstance(node, ast.Attribute) and node.attr == "now"
+        for node in ast.walk(verify)
+    )
+
+    fields = set(contracts.DecisionRead.__slots__)
+    assert fields == {
+        "decision_id",
+        "case_id",
+        "subject_reference",
+        "specification_reference",
+        "outcome",
+        "decided_at",
+        "expires_at",
+    }
