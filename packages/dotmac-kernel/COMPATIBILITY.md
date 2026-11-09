@@ -1956,10 +1956,16 @@ after recoverable failures, ruling out a falsely healthy but poisoned root.
 `dotmac_kernel.audit` gains `AUDIT_FORBIDDEN_DETAIL_KEYS`,
 `AUDIT_DETAILS_MAX_DEPTH`, `AuditDetailsCoordinateError` (a `ValueError`) and
 `refuse_coordinate_details`. `write_audit_event` and
-`write_platform_audit_event` (and the private connection writer and offline
-history import, which share `_current_audit_event_values`) call it after the
-action-vocabulary check and before anything touches the session, so a refused
-write leaves no partial state.
+`write_platform_audit_event` (and the private connection writer, which shares
+`_current_audit_event_values`) call it after the action-vocabulary check and
+before anything touches the session, so a refused write leaves no partial state.
+
+**Known gap: the offline history import is NOT covered.** `identity_history.py`
+inserts historical audit `details` directly and does not pass through the
+canary, so a coordinate-like key in imported history is not refused. This change
+does not alter that module. A coordinate-key census of the source data is
+required before any history import runs, pending Michael's ruling on whether the
+import must route through the canary.
 
 The forbidden key list is exactly `lat`, `lng`, `lon`, `latitude`, `longitude`,
 `coordinates`, `geo`, `point`, compared case-insensitively and in full: `latency`
