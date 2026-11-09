@@ -870,7 +870,8 @@ def test_retention_preserves_observations_selected_by_product_policy(
 def _three_observations(db: Session, now: datetime) -> tuple[UUID, UUID, UUID, UUID]:
     """Record an old, a middle and a current observation for one unit."""
 
-    unit_id = _unit_with_grant(db, granted_at=now - timedelta(days=3))
+    # The grant (three days) must be active for every receipt time below.
+    unit_id = _unit_with_grant(db, granted_at=now - timedelta(days=2, hours=1))
     ids: list[UUID] = []
     for age in (timedelta(days=2), timedelta(days=1), timedelta(0)):
         result = record_observations(
