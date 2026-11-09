@@ -369,6 +369,12 @@ _INTERNAL_RELATIONS = (
         "rated_obligations",
         ("id", "billing_account_id"),
     ),
+    (
+        "document_lines",
+        ("obligation_id", "price_source_version"),
+        "rated_obligations",
+        ("id", "price_version_id"),
+    ),
     ("document_events", ("document_id",), "documents", ("id",)),
     (
         "confirmed_settlements",

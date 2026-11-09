@@ -348,7 +348,7 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a11"
+__version__ = "0.1.0a12"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,

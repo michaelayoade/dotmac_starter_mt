@@ -156,6 +156,12 @@ class RatedObligation(Base, _TenantRow, _ObligationColumns):
         ),
         UniqueConstraint(
             "tenant_id",
+            "id",
+            "price_version_id",
+            name="uq_rated_obligations_tenant_id_price_version",
+        ),
+        UniqueConstraint(
+            "tenant_id",
             "supersedes_obligation_id",
             name="uq_rated_obligations_tenant_superseded_once",
         ),
@@ -187,6 +193,11 @@ class PlatformRatedObligation(Base, _ObligationColumns):
             "id",
             "billing_account_id",
             name="uq_platform_rated_obligations_id_account",
+        ),
+        UniqueConstraint(
+            "id",
+            "price_version_id",
+            name="uq_platform_rated_obligations_id_price_version",
         ),
         UniqueConstraint(
             "supersedes_obligation_id",
@@ -374,6 +385,19 @@ class DocumentLine(Base, _TenantRow, _DocumentLineColumns):
             name="fk_document_lines_obligation_account",
             ondelete="RESTRICT",
         ),
+        # B1: a rated line names the exact price version its obligation was rated
+        # at. MATCH SIMPLE: credit-note and opening-import lines carry no
+        # obligation_id and are therefore exempt. Added NOT VALID for history.
+        ForeignKeyConstraint(
+            ["tenant_id", "obligation_id", "price_source_version"],
+            [
+                f"{SCHEMA}.rated_obligations.tenant_id",
+                f"{SCHEMA}.rated_obligations.id",
+                f"{SCHEMA}.rated_obligations.price_version_id",
+            ],
+            name="fk_document_lines_obligation_price",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint("tenant_id", "id", name="uq_document_lines_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
@@ -420,6 +444,15 @@ class PlatformDocumentLine(Base, _DocumentLineColumns):
                 f"{SCHEMA}.platform_rated_obligations.billing_account_id",
             ],
             name="fk_platform_document_lines_obligation_account",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["obligation_id", "price_source_version"],
+            [
+                f"{SCHEMA}.platform_rated_obligations.id",
+                f"{SCHEMA}.platform_rated_obligations.price_version_id",
+            ],
+            name="fk_platform_document_lines_obligation_price",
             ondelete="RESTRICT",
         ),
         UniqueConstraint(

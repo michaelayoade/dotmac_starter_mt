@@ -511,7 +511,8 @@
           "dotmac_billing/migrations/versions/bi_0014_opening_variance_ledger.py",
           "dotmac_billing/opening_variance_contracts.py",
           "dotmac_billing/opening_variance_validation.py",
-          "dotmac_billing/opening_variance.py"
+          "dotmac_billing/opening_variance.py",
+          "dotmac_billing/migrations/versions/bi_0015_line_price_version_fk.py"
         ],
         "forbidden_prefixes": [
           "app/",
