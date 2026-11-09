@@ -11,9 +11,18 @@ exceptions note and are never repaired.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import pytest
-from dotmac_billing.service import accept_rated_obligation, create_billing_account
+from dotmac_billing.commands import IssueCreditNote
+from dotmac_billing.document_line_exceptions import (
+    list_document_line_price_exceptions,
+)
+from dotmac_billing.service import (
+    accept_rated_obligation,
+    create_billing_account,
+    issue_credit_note,
+)
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
@@ -23,9 +32,12 @@ from tests.test_billing_isolation import (
     ASSEMBLY_VERSIONS,
     BILLING_VERSIONS,
     KERNEL_VERSIONS,
+    NOW,
+    NUMBERING,
     REPO_ROOT,
     _create_tenants,
     _draft_command,
+    _money,
     _obligation_command,
     _scratch_database,
     _seed_invoice,
@@ -163,8 +175,8 @@ def test_clean_database_has_a_validated_key_and_refuses_a_mismatched_version(pla
 
 
 @pytest.mark.parametrize("plane", PLANES)
-def test_lines_without_an_obligation_are_exempt(plane):
-    """Credit-note lines carry no obligation_id and a synthetic version."""
+def test_invoice_line_without_an_obligation_is_refused(plane):
+    """The exemption is the credit-note document, not a NULL obligation_id."""
     with _scratch_database((_selection(plane),)) as (admin_url, tenant_url, platform):
         scope = _scope(plane, admin_url)
         url = tenant_url if plane == "tenant" else platform
@@ -172,16 +184,58 @@ def test_lines_without_an_obligation_are_exempt(plane):
             account, _first, _second, _third, draft = _three_obligations_one_draft(
                 session, scope
             )
-            _insert_line(
+            for number, version in ((2, "price:v1"), (3, f"credit:{draft.id}")):
+                with pytest.raises(IntegrityError, match="rated obligation"):
+                    _insert_line(
+                        session,
+                        plane,
+                        scope,
+                        account_id=account.id,
+                        document_id=draft.id,
+                        obligation_id=None,
+                        version=version,
+                        line_number=number,
+                    )
+                session.rollback()
+
+
+@pytest.mark.parametrize("plane", PLANES)
+def test_credit_note_line_the_service_writes_is_allowed(plane):
+    """Credit-note exemption: no obligation, ``credit:<credited document>``."""
+    with _scratch_database((_selection(plane),)) as (admin_url, tenant_url, platform):
+        scope = _scope(plane, admin_url)
+        url = tenant_url if plane == "tenant" else platform
+        with _session(url, scope) as session:
+            _account, _obligation, invoice = _seed_invoice(session, scope)
+            credit = issue_credit_note(
                 session,
-                plane,
-                scope,
-                account_id=account.id,
-                document_id=draft.id,
-                obligation_id=None,
-                version=f"credit:{uuid.uuid4()}",
+                scope=scope,
+                command=IssueCreditNote(
+                    original_document_id=invoice.id,
+                    pre_tax_amount=_money("20"),
+                    tax_amount=_money("0"),
+                    total_amount=_money("20"),
+                    reason="service correction",
+                    series_code="credit",
+                    reference_date=date(2026, 8, 17),
+                    actor_ref="billing-test",
+                    correlation_id=f"credit:{invoice.id}",
+                    occurred_at=NOW,
+                    document_profile_code="credit.standard",
+                    document_profile_version="1",
+                ),
+                numbering=NUMBERING,
             )
             session.commit()
+            prefix = "" if plane == "tenant" else "platform_"
+            row = session.execute(
+                text(
+                    "SELECT obligation_id, price_source_version FROM "
+                    f"mod_billing.{prefix}document_lines WHERE document_id = :d"
+                ),
+                {"d": credit.id},
+            ).one()
+            assert row[0] is None and row[1] == f"credit:{invoice.id}"
 
 
 @pytest.mark.parametrize("plane", PLANES)
@@ -206,6 +260,17 @@ def test_existing_violation_stays_not_valid_noted_and_unrepaired(plane):
                 document_id=draft.id,
                 obligation_id=second.id,
                 version="price:history-mismatch",
+            )
+            # A NULL-obligation invoice line, legal before bi_0015.
+            _insert_line(
+                session,
+                plane,
+                scope,
+                account_id=account.id,
+                document_id=draft.id,
+                obligation_id=None,
+                version="price:history-null",
+                line_number=3,
             )
             draft_id, third_id, account_id = draft.id, third.id, account.id
             session.commit()
@@ -244,7 +309,42 @@ def test_existing_violation_stays_not_valid_noted_and_unrepaired(plane):
                 ).scalars()
             )
             # Unrepaired history, and the key still refuses new violations.
-            assert "price:history-mismatch" in versions
+            assert {"price:history-mismatch", "price:history-null"} <= versions
+            # The upgrade added the guard without rejecting either row, and the
+            # review listing names both, read-only.
+            listed = {
+                item.price_source_version: item.reason
+                for item in list_document_line_price_exceptions(session, scope=scope)
+                if item.document_id == draft_id
+            }
+            assert listed == {
+                "price:history-mismatch": "price_version_mismatch",
+                "price:history-null": "obligation_required",
+            }
+            assert (
+                set(
+                    session.execute(
+                        text(
+                            f"SELECT price_source_version FROM mod_billing.{prefix}"
+                            "document_lines WHERE document_id = :d"
+                        ),
+                        {"d": draft_id},
+                    ).scalars()
+                )
+                == versions
+            )
+            with pytest.raises(IntegrityError, match="rated obligation"):
+                _insert_line(
+                    session,
+                    plane,
+                    scope,
+                    account_id=account_id,
+                    document_id=draft_id,
+                    obligation_id=None,
+                    version="price:new-null",
+                    line_number=4,
+                )
+            session.rollback()
             with pytest.raises(IntegrityError, match="obligation_price"):
                 _insert_line(
                     session,
