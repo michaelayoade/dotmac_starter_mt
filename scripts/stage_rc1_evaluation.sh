@@ -93,6 +93,7 @@ PY
 # Resolve the smaller dependency graph in a hosted container before archiving
 # so the archive carries the exact lockfile used by its Docker build.
 python3 - <<'PY'
+import ast
 import json
 import re
 import shutil
@@ -100,7 +101,34 @@ import tomllib
 from pathlib import Path
 
 root = Path.cwd().resolve()
+assembly = Path("app/assembly.py")
+source = assembly.read_text()
+removed = set()
+for node in ast.parse(source).body:
+    if (
+        isinstance(node, ast.Import) and any(alias.name == "dotmac_ui" for alias in node.names)
+        or isinstance(node, ast.ImportFrom) and node.module == "app.features.presentation.contract"
+        or isinstance(node, ast.FunctionDef) and node.name in {"_presentation_stylesheets", "_staff_landing_route"}
+    ):
+        removed.update(range(node.lineno, node.end_lineno + 1))
+for node in ast.walk(ast.parse(source)):
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "ProductAssemblySpec":
+        for keyword in node.keywords:
+            if keyword.arg in {
+                "ui_contract_version", "web_facets", "authentication_profiles",
+                "browser_capabilities", "packaged_static_dirs",
+                "packaged_template_dirs", "stylesheets",
+            }:
+                removed.update(range(keyword.lineno, keyword.end_lineno + 1))
+source = "".join(line for number, line in enumerate(source.splitlines(keepends=True), 1) if number not in removed)
+assert "web_enabled=settings.web_enabled," in source
+assembly.write_text(source.replace("web_enabled=settings.web_enabled,", "web_enabled=False,"))
+registry = Path("app/features/__init__.py")
+registry.write_text(registry.read_text().replace('    "app.features.presentation",\n', ""))
+shutil.rmtree("app/features/presentation")
 manifest = json.loads(Path("deploy/runtime-packages.json").read_text())
+manifest["distributions"].remove("dotmac-ui")
+Path("deploy/runtime-packages.json").write_text(json.dumps(manifest, indent=2) + "\n")
 selected = {value.split("[", 1)[0] for value in manifest["distributions"]}
 project = Path("pyproject.toml")
 text = project.read_text()
@@ -112,7 +140,7 @@ omitted = {
     name: spec["path"] for name, spec in dependencies.items()
     if isinstance(spec, dict) and "path" in spec and name not in selected
 }
-assert len(omitted) == 97
+assert len(omitted) == 98
 for name, relative in omitted.items():
     pattern = rf"(?m)^{re.escape(name)}\s*=\s*\{{[^\n]*\}}\n"
     text, count = re.subn(pattern, "", text)
