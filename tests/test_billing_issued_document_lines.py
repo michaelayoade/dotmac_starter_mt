@@ -9,6 +9,7 @@ import uuid
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from dotmac_billing import models
@@ -62,21 +63,49 @@ def _credit_command(invoice_id):
     )
 
 
-def _append_line(connection, *, plane, scope, document_id, account_id):
+def _spare_obligation(session, scope, account_id):
+    """A rated obligation for a second draft line (a draft invoice-shaped line
+    needs its own obligation under the bi_0015 line guard)."""
+    obligation = billing.accept_rated_obligation(
+        session,
+        scope=scope,
+        command=billing._obligation_command(
+            account_id, scope=scope, source_fact_id=f"line-spare:{uuid.uuid4()}"
+        ),
+        accepted_source_kinds=frozenset({"recurring_charge_occurrence"}),
+    )
+    # Plain values: the session is committed and closed before the line is used.
+    return SimpleNamespace(
+        id=obligation.id, price_version_id=obligation.price_version_id
+    )
+
+
+def _append_line(
+    connection,
+    *,
+    plane,
+    scope,
+    document_id,
+    account_id,
+    obligation_id=None,
+    version="credit:test",
+):
     prefix = "" if plane == "tenant" else "platform_"
     tenant_column = "tenant_id," if plane == "tenant" else ""
     tenant_value = ":tenant_id," if plane == "tenant" else ""
     connection.execute(
         text(f"""INSERT INTO mod_billing.{prefix}document_lines
-        ({tenant_column}id,document_id,billing_account_id,line_number,
+        ({tenant_column}id,document_id,billing_account_id,obligation_id,line_number,
          description,quantity,unit_code,unit_amount,pre_tax_amount,tax_amount,
          total_amount,currency,minor_units,price_source_version)
-        VALUES ({tenant_value}:id,:document_id,:account_id,2,
-         'additional line',1,'credit',20,20,0,20,'NGN',2,'credit:test')"""),
+        VALUES ({tenant_value}:id,:document_id,:account_id,:obligation_id,2,
+         'additional line',1,'credit',20,20,0,20,'NGN',2,:version)"""),
         {
             "id": uuid.uuid4(),
             "document_id": document_id,
             "account_id": account_id,
+            "obligation_id": obligation_id,
+            "version": version,
             "tenant_id": scope.tenant_id if plane == "tenant" else None,
         },
     )
@@ -366,7 +395,15 @@ def test_full_credit_exact_replay_precedes_exhausted_receivable_without_new_rows
 
 
 def _mutate_line(
-    connection, *, action, plane, scope, document_id, account_id, source_id=None
+    connection,
+    *,
+    action,
+    plane,
+    scope,
+    document_id,
+    account_id,
+    source_id=None,
+    spare=None,
 ):
     prefix = "" if plane == "tenant" else "platform_"
     delta = Decimal("0")
@@ -378,6 +415,8 @@ def _mutate_line(
             scope=scope,
             document_id=document_id,
             account_id=account_id,
+            obligation_id=spare.id,
+            version=spare.price_version_id,
         )
         delta = Decimal("20")
     elif action == "update":
@@ -443,6 +482,11 @@ def test_parent_lock_serializes_line_mutation_and_issue_with_matching_snapshot(
     with billing._session(url, scope) as session:
         account_id, document_id = _draft(session, scope, "receipt")
         source_id = None
+        spare = (
+            _spare_obligation(session, scope, account_id)
+            if action in ("insert", "delete")
+            else None
+        )
         if action == "delete":
             _mutate_line(
                 session,
@@ -451,6 +495,7 @@ def test_parent_lock_serializes_line_mutation_and_issue_with_matching_snapshot(
                 scope=scope,
                 document_id=document_id,
                 account_id=account_id,
+                spare=spare,
             )
         if action == "reparent":
             _, source_id = _draft(session, scope, "receipt", account_id=account_id)
@@ -468,6 +513,7 @@ def test_parent_lock_serializes_line_mutation_and_issue_with_matching_snapshot(
             document_id=document_id,
             account_id=account_id,
             source_id=source_id,
+            spare=spare,
         )
 
     def issue(session):

@@ -93,15 +93,38 @@ def _invoice(connection, plane, tenant=None, *, legacy=False):
     """),
         values,
     )
+    obligation_column = "" if legacy else "obligation_id, "
+    obligation_value = "" if legacy else ":obligation, "
+    if not legacy:
+        # Current schema: an invoice line must name its rated obligation (the
+        # bi_0015 line guard). Insert the minimal obligation it names.
+        values["obligation"] = uuid.uuid4()
+        connection.execute(
+            text(f"""
+            INSERT INTO mod_billing.{prefix}rated_obligations
+                (id, {scope_columns}billing_account_id, natural_key_digest,
+                 request_fingerprint, contract_line_ref, contract_version,
+                 charge_component, source_system, source_kind, source_fact_id,
+                 source_fact_version, subject_ref, service_period_status,
+                 collection_timing, pre_tax_amount, tax_amount, total_amount,
+                 currency, minor_units, rated_at, price_version_id)
+            VALUES (:obligation, {scope_values}:account, :digest, :digest,
+                    'raw-fixture', '1', 'base', 'raw-fixture', 'raw-fixture',
+                    :number, '1', 'raw-fixture', 'unverified', 'arrears',
+                    100, 0, 100, 'NGN', 2, :now, '1')
+        """),
+            {**values, "digest": uuid.uuid4().hex + uuid.uuid4().hex},
+        )
     connection.execute(
         text(f"""
         INSERT INTO mod_billing.{prefix}document_lines
             (id, {scope_columns}{"" if legacy else "billing_account_id, "}document_id,
-             line_number, description, quantity, unit_code, unit_amount,
-             pre_tax_amount, tax_amount, total_amount, currency, minor_units,
-             price_source_version)
+             {obligation_column}line_number, description, quantity, unit_code,
+             unit_amount, pre_tax_amount, tax_amount, total_amount, currency,
+             minor_units, price_source_version)
         VALUES (:line, {scope_values}{"" if legacy else ":account, "}:document,
-                1, 'historical service', 1, 'each', 100, 100, 0, 100, 'NGN', 2, '1')
+                {obligation_value}1, 'historical service', 1, 'each', 100, 100, 0,
+                100, 'NGN', 2, '1')
     """),
         values,
     )
