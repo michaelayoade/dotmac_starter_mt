@@ -126,6 +126,24 @@ assembly.write_text(source.replace("web_enabled=settings.web_enabled,", "web_ena
 registry = Path("app/features/__init__.py")
 registry.write_text(registry.read_text().replace('    "app.features.presentation",\n', ""))
 shutil.rmtree("app/features/presentation")
+# API-only mode mounts no browser templates or static assets. Exclude those
+# sources as well, including the Sub-derived Tailwind source stylesheet.
+for assets in (
+    Path("packages/dotmac-kernel/src/dotmac_kernel/templates"),
+    Path("packages/dotmac-kernel/src/dotmac_kernel/static"),
+):
+    shutil.rmtree(assets)
+dockerfile = Path("Dockerfile")
+docker = dockerfile.read_text()
+start = docker.index("FROM rust:1.90.0-slim-bookworm AS rust-toolchain")
+docker = docker[start:]
+overlay = (
+    "COPY --from=css-builder \\\n"
+    "    /build/packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css \\\n"
+    "    ./packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css\n"
+)
+assert overlay in docker
+dockerfile.write_text(docker.replace(overlay, ""))
 manifest = json.loads(Path("deploy/runtime-packages.json").read_text())
 manifest["distributions"].remove("dotmac-ui")
 Path("deploy/runtime-packages.json").write_text(json.dumps(manifest, indent=2) + "\n")
