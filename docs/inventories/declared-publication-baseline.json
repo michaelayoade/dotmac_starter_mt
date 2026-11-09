@@ -149,7 +149,7 @@
     },
     "dotmac-subscriptions": {
       "declared": "0.1.0a4",
-      "reason": "DECLARED BY THE CATALOG-PRICE AND PERIOD-EXCLUSION SLICE (S1), NOT YET RELEASED. a3 IS published (peeled tag dotmac-subscriptions-v0.1.0a3). a4 adds su_0004 (a catalog_price contract line names and equals its published offer price: nullable price_key, composite FK, INSERT trigger) and su_0005 (a coverage-overlap trigger: one contract line is never charged twice for an instant). It adds ContractLineInput.price_key, which catalog-priced lines must now supply (breaking). No adopter pins a4. Remove this row in the a4 release-record change; never by editing the declared version down.",
+      "reason": "DECLARED BY THE CATALOG-PRICE AND PERIOD-EXCLUSION SLICE (S1/S2), NOT YET RELEASED. a3 IS published (peeled tag dotmac-subscriptions-v0.1.0a3). a4 adds su_0004 (a catalog_price contract line names and equals its published offer price: nullable price_key, composite FK, INSERT trigger), su_0005 (a coverage-overlap trigger: one contract line is never charged twice for an instant) and su_0006 (a pending_validity occurrence state resolved only by an owner-evidence command). It adds ContractLineInput.price_key, which catalog-priced lines must now supply (breaking). No adopter pins a4. Remove this row in the a4 release-record change; never by editing the declared version down.",
       "state": "declared-unpublished"
     },
     "dotmac-usage": {

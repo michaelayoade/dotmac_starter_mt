@@ -22,6 +22,8 @@ from dotmac_subscriptions import (
     ExactAmount,
     GenerateRecurringChargeCommand,
     IntervalUnit,
+    OccurrenceValidityHold,
+    OccurrenceValidityOutcome,
     OfferCatalogPage,
     OfferPriceInput,
     OfferPricingMode,
@@ -29,8 +31,10 @@ from dotmac_subscriptions import (
     PublishOfferVersionCommand,
     RateBasis,
     RecordSubscriptionContractVersionCommand,
+    ResolveOccurrenceValidityCommand,
     SubscriptionConflictError,
     SubscriptionDataError,
+    SubscriptionStateError,
     SubscriptionVocabularyRegistry,
     TimerCancelResult,
     TimerScheduleResult,
@@ -40,9 +44,11 @@ from dotmac_subscriptions import (
     end_contract_version,
     generate_recurring_charge,
     list_effective_offers,
+    occurrences_for_contract,
     offer_version_snapshot,
     publish_offer_version,
     record_contract_version,
+    resolve_occurrence_validity,
     unacknowledged_outputs,
     withdraw_offer_version,
 )
@@ -897,3 +903,147 @@ def test_a_contract_priced_line_cannot_name_a_catalogue_price(
             timer=FakeTimer(),
         )
     assert refused.value.code == "subscriptions.contracts.price_key_not_allowed"
+
+
+def _held_occurrence(
+    db: Session,
+    registry: SubscriptionVocabularyRegistry,
+    *,
+    hold: OccurrenceValidityHold | None = OccurrenceValidityHold.prepaid,
+) -> tuple[UUID, UUID]:
+    offer_version_id, _ = _publish(db, registry)
+    contract = record_contract_version(
+        db, _contract_command(offer_version_id), registry=registry, timer=FakeTimer()
+    )
+    result = generate_recurring_charge(
+        db,
+        GenerateRecurringChargeCommand(
+            scope=PlatformScope(),
+            contract_version_id=contract.version_id,
+            contract_line_key=contract.line_keys[0],
+            period_index=0,
+            generation=1,
+            emitted_at=NOW,
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            validity_hold=hold,
+        ),
+        registry=registry,
+        timer=FakeTimer(),
+    )
+    assert (result.staged_output is None) is (hold is not None)
+    return result.occurrence_id, contract.line_keys[0]
+
+
+def _evidence(
+    occurrence_id: UUID,
+    outcome: OccurrenceValidityOutcome = OccurrenceValidityOutcome.confirmed,
+    **overrides: object,
+) -> ResolveOccurrenceValidityCommand:
+    command = ResolveOccurrenceValidityCommand(
+        scope=PlatformScope(),
+        occurrence_id=occurrence_id,
+        outcome=outcome,
+        owner_code="prepaid-wallet",
+        evidence_ref=uuid4(),
+        resolved_at=NOW.replace(hour=6),
+        command_id=uuid4(),
+        correlation_id=uuid4(),
+        idempotency_key=f"validity:{occurrence_id}",
+    )
+    return replace(command, **overrides)  # type: ignore[arg-type]
+
+
+def test_a_held_renewal_stages_no_output_until_the_owner_confirms(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(db, registry)
+    stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
+    assert stored is not None
+    assert (stored.state, stored.validity_hold_reason) == (
+        "pending_validity",
+        "prepaid",
+    )
+    assert stored.validity_owner_code is None
+    assert unacknowledged_outputs(db, scope=PlatformScope()) == ()
+    assert (
+        occurrences_for_contract(
+            db, scope=PlatformScope(), contract_id=stored.contract_id
+        )
+        == ()
+    )
+
+    command = _evidence(occurrence_id)
+    resolved = resolve_occurrence_validity(db, command)
+    assert resolved.replayed is False and resolved.staged_output is not None
+    assert resolved.staged_output.occurrence_id == occurrence_id
+    assert resolved.staged_output.emitted_at == command.resolved_at
+    db.refresh(stored)
+    assert stored.state == "emitted"
+    assert stored.validity_owner_code == "prepaid-wallet"
+    assert stored.validity_evidence_ref == command.evidence_ref
+    assert stored.validity_resolution_command_id == command.command_id
+    assert [
+        o.occurrence_id for o in unacknowledged_outputs(db, scope=PlatformScope())
+    ] == [occurrence_id]
+
+    replay = resolve_occurrence_validity(db, command)
+    assert replay.replayed is True and replay.staged_output is not None
+
+
+def test_a_rejected_hold_is_cancelled_and_never_staged(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(
+        db, registry, hold=OccurrenceValidityHold.capped
+    )
+    result = resolve_occurrence_validity(
+        db, _evidence(occurrence_id, OccurrenceValidityOutcome.rejected)
+    )
+    assert result.staged_output is None
+    stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
+    assert stored is not None and stored.state == "cancelled"
+    assert unacknowledged_outputs(db, scope=PlatformScope()) == ()
+
+
+def test_only_a_pending_occurrence_can_be_resolved_and_only_once(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(db, registry)
+    resolve_occurrence_validity(db, _evidence(occurrence_id))
+    # emitted -> cancelled is forbidden, and so is a second resolution.
+    with pytest.raises(SubscriptionStateError):
+        resolve_occurrence_validity(
+            db,
+            _evidence(
+                occurrence_id,
+                OccurrenceValidityOutcome.rejected,
+                idempotency_key="validity:second",
+            ),
+        )
+
+
+def test_an_ordinary_emitted_occurrence_cannot_be_resolved(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    plain_id, _ = _held_occurrence(db, registry, hold=None)
+    with pytest.raises(SubscriptionStateError):
+        resolve_occurrence_validity(db, _evidence(plain_id))
+
+
+def test_resolution_needs_owner_evidence_and_a_real_instant(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(db, registry)
+    with pytest.raises(SubscriptionDataError, match="owner code"):
+        resolve_occurrence_validity(db, _evidence(occurrence_id, owner_code="  "))
+    with pytest.raises(SubscriptionDataError, match="timezone"):
+        resolve_occurrence_validity(
+            db, _evidence(occurrence_id, resolved_at=datetime(2026, 8, 18, 6))
+        )
+    with pytest.raises(SubscriptionDataError, match="pre-date"):
+        resolve_occurrence_validity(
+            db, _evidence(occurrence_id, resolved_at=NOW.replace(day=1))
+        )
+    stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
+    assert stored is not None and stored.state == "pending_validity"

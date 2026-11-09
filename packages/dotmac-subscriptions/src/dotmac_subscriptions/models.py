@@ -202,6 +202,18 @@ class _OccurrenceColumns:
     )
     command_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     correlation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    # su_0006: why a capped/prepaid renewal is held at pending_validity, and the
+    # owner's typed evidence that resolved it. The evidence columns are NULL
+    # until resolution; there is no JSON.
+    validity_hold_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    validity_owner_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    validity_evidence_ref: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    validity_resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validity_resolution_command_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), nullable=True
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -588,8 +600,35 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
         ),
         CheckConstraint("generation > 0", name="ck_occurrences_generation"),
         CheckConstraint(
-            "state IN ('scheduled', 'due', 'emitted', 'cancelled')",
+            "state IN ('scheduled', 'due', 'emitted', 'cancelled', "
+            "'pending_validity')",
             name="ck_occurrences_state",
+        ),
+        CheckConstraint(
+            "validity_hold_reason IS NULL OR "
+            "validity_hold_reason IN ('capped', 'prepaid')",
+            name="ck_occurrences_validity_hold",
+        ),
+        CheckConstraint(
+            "(state = 'pending_validity' AND validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NULL AND validity_evidence_ref IS NULL "
+            "AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL) "
+            "OR (state <> 'pending_validity' AND "
+            "((validity_hold_reason IS NULL AND validity_owner_code IS NULL "
+            "AND validity_evidence_ref IS NULL AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL) "
+            "OR (validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NOT NULL "
+            "AND validity_evidence_ref IS NOT NULL "
+            "AND validity_resolved_at IS NOT NULL "
+            "AND validity_resolution_command_id IS NOT NULL)))",
+            name="ck_occurrences_validity_evidence",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "validity_resolution_command_id",
+            name="uq_occurrences_validity_command",
         ),
         CheckConstraint(
             "amount_scale >= 0 AND amount_scale <= 6", name="ck_occurrences_scale"
@@ -1032,8 +1071,34 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
         ),
         CheckConstraint("generation > 0", name="ck_platform_occurrences_generation"),
         CheckConstraint(
-            "state IN ('scheduled', 'due', 'emitted', 'cancelled')",
+            "state IN ('scheduled', 'due', 'emitted', 'cancelled', "
+            "'pending_validity')",
             name="ck_platform_occurrences_state",
+        ),
+        CheckConstraint(
+            "validity_hold_reason IS NULL OR "
+            "validity_hold_reason IN ('capped', 'prepaid')",
+            name="ck_platform_occurrences_validity_hold",
+        ),
+        CheckConstraint(
+            "(state = 'pending_validity' AND validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NULL AND validity_evidence_ref IS NULL "
+            "AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL) "
+            "OR (state <> 'pending_validity' AND "
+            "((validity_hold_reason IS NULL AND validity_owner_code IS NULL "
+            "AND validity_evidence_ref IS NULL AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL) "
+            "OR (validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NOT NULL "
+            "AND validity_evidence_ref IS NOT NULL "
+            "AND validity_resolved_at IS NOT NULL "
+            "AND validity_resolution_command_id IS NOT NULL)))",
+            name="ck_platform_occurrences_validity_evidence",
+        ),
+        UniqueConstraint(
+            "validity_resolution_command_id",
+            name="uq_platform_occurrences_validity_command",
         ),
         CheckConstraint(
             "amount_scale >= 0 AND amount_scale <= 6",
