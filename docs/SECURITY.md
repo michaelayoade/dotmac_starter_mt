@@ -107,6 +107,16 @@ Redis-backed implementation of the same `hit()` contract and passes it to
 wiring. No redis dependency ships with the starter
 (contracts-not-implementations).
 
+## Anonymous-route rate limit
+
+`ANONYMOUS_RATE_LIMIT_ROUTES` declares which route templates accept anonymous
+callers; each gets a stricter per-client budget on top of the global limiter,
+keyed on the trusted-proxy client address (never an untrusted peer's
+`X-Forwarded-For`). The shared store is the kernel `rate_limit_buckets` table
+(migration 0031). Production refuses the in-memory store at startup, and a store
+failure answers 503 rather than leaving the route unlimited. See
+`packages/dotmac-kernel/COMPATIBILITY.md` for the adopter upgrade note.
+
 ## Reporting
 
 This is a template repository. Projects built from it should replace this

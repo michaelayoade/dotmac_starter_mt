@@ -59,7 +59,10 @@ from dotmac_kernel.middleware.observability import (
     RequestEvidenceObserverMiddleware,
     _RequestEvidenceSnapshotMiddleware,
 )
-from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
+from dotmac_kernel.middleware.rate_limit import (
+    RateLimitMiddleware,
+    build_anonymous_rate_limit,
+)
 from dotmac_kernel.middleware.security_headers import (
     SecurityHeadersMiddleware,
     _compile_browser_document_policies,
@@ -790,12 +793,30 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         max_age_seconds=settings.csrf_token_ttl_seconds,
         session_cookie_names=surface_registry.session_cookie_names,
     )
+    # Built HERE, while the application is constructed, so a production process
+    # configured for an unusable anonymous-route store never starts rather than
+    # discovering it on the first login attempt.
+    anonymous_rate_limit = build_anonymous_rate_limit(settings)
+    if anonymous_rate_limit is not None and spec.request_evidence is None:
+        logger.warning(
+            "anonymous rate limit is keyed on the transport peer: this assembly "
+            "declares no request_evidence, so behind a reverse proxy every "
+            "anonymous caller shares the proxy's bucket. Declare a "
+            "RequestEvidenceConfigurationV1 with the trusted proxies."
+        )
     app.add_middleware(
         RateLimitMiddleware,
         enabled=settings.rate_limit_enabled,
         requests=settings.rate_limit_requests,
         window_seconds=settings.rate_limit_window_seconds,
         max_keys=settings.rate_limit_max_keys,
+        anonymous_policy=(
+            anonymous_rate_limit[0] if anonymous_rate_limit is not None else None
+        ),
+        anonymous_store=(
+            anonymous_rate_limit[1] if anonymous_rate_limit is not None else None
+        ),
+        production=settings.is_production,
     )
     if spec.request_evidence is not None:
         # Inside the tenant resolver's BaseHTTPMiddleware task boundary, so

@@ -8355,9 +8355,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
-    # Tenant-qualified credential key remains editable until a verified published
-    # tag carries this revision and its digest is recorded above.
-    "dotmac-kernel": frozenset(),
+    # `0031_rate_limit_buckets` (the shared anonymous-route rate-limit counters)
+    # remains editable until a verified published tag carries it and its digest
+    # is recorded above.
+    "dotmac-kernel": frozenset({"20261109_0031_rate_limit_buckets.py"}),
     "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),

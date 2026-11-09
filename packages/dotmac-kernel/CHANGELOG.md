@@ -24,6 +24,16 @@ publication; protected release authorization remains required.
   details now fails at the write; record an opaque reference instead. The
   Starter census found no in-repo producer.
 
+- Per-route anonymous rate limit: `ANONYMOUS_RATE_LIMIT_ROUTES` (route
+  templates, optional method prefix), `_REQUESTS`, `_WINDOW_SECONDS`, `_STORE`.
+  Keyed on the trusted-proxy client address from request evidence (transport peer
+  when none is declared), never on a forwarded header from an untrusted peer.
+  Shared `PostgresRateLimitStore` over new table `rate_limit_buckets` (kernel
+  migration `0031_rate_limit_buckets`, additive). Production refuses the
+  in-memory store at `create_app` and in `validate_settings`; a store failure
+  returns 503, never an unlimited route. **Adopter upgrade:** inert unless routes
+  are declared; apply 0031 before declaring any. See COMPATIBILITY.md.
+
 ## 0.1.0a108 — Release inventory
 
 Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`

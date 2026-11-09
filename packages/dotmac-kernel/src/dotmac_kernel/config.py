@@ -54,6 +54,24 @@ class Settings(BaseSettings):
     # ships with the starter; setting this has no effect until a project
     # provides the store implementation. See dotmac_kernel/middleware/rate_limit.py.
     rate_limit_redis_url: str = ""
+    # Stricter per-route limit for routes that accept ANONYMOUS callers (login,
+    # token exchange, public forms). Opt-in by declaration: the kernel cannot
+    # know which of a product's routes are anonymous, and guessing would either
+    # throttle authenticated traffic or miss the route that matters. A
+    # comma-separated list of route TEMPLATES as the router declares them
+    # (`/auth/login`, `/forms/{token}`), each optionally prefixed by a method
+    # (`POST /auth/login`). Empty (the default) disables the limiter and needs no
+    # store. Keyed on the trusted-proxy client address when the assembly declares
+    # `request_evidence`, otherwise on the transport peer -- never on a forwarded
+    # header from an untrusted peer. See dotmac_kernel/middleware/rate_limit.py.
+    anonymous_rate_limit_routes: str = ""
+    anonymous_rate_limit_requests: int = 10
+    anonymous_rate_limit_window_seconds: int = 60
+    # `postgres` (the kernel `rate_limit_buckets` table, migration 0031; shared
+    # across workers and nodes) or `memory` (process-local; development only).
+    # PRODUCTION REFUSES `memory` when routes are declared: a per-process counter
+    # multiplies the limit by the worker count and resets on every deploy.
+    anonymous_rate_limit_store: str = "postgres"
     # Security response headers (Task 5). Disable only when a fronting
     # proxy owns these headers. Empty CSP = the computed strict default in
     # dotmac_kernel/middleware/security_headers.py. A non-empty compatibility
@@ -142,11 +160,50 @@ def validate_settings(s: Settings) -> list[str]:
         )
     if s.csrf_token_ttl_seconds < 1:
         errors.append("CSRF_TOKEN_TTL_SECONDS must be positive")
+    errors.extend(anonymous_rate_limit_errors(s))
+    return errors
+
+
+ANONYMOUS_RATE_LIMIT_STORES: tuple[str, ...] = ("postgres", "memory")
+
+
+def anonymous_rate_limit_errors(s: Settings) -> list[str]:
+    """Configuration errors of the anonymous-route rate limit; empty when OK.
+
+    Silent when no route is declared: an undeclared limiter needs no store, so a
+    deployment that has not opted in is never refused on its account. Once routes
+    are declared, production refuses the process-local store -- the limit it
+    would enforce is per worker, not per client -- and says so by name.
+    """
+    if not any(r.strip() for r in s.anonymous_rate_limit_routes.split(",")):
+        return []
+    errors: list[str] = []
+    if s.anonymous_rate_limit_requests < 1:
+        errors.append("ANONYMOUS_RATE_LIMIT_REQUESTS must be positive")
+    if s.anonymous_rate_limit_window_seconds < 1:
+        errors.append("ANONYMOUS_RATE_LIMIT_WINDOW_SECONDS must be positive")
+    store = s.anonymous_rate_limit_store.strip().lower()
+    if store not in ANONYMOUS_RATE_LIMIT_STORES:
+        errors.append(
+            "ANONYMOUS_RATE_LIMIT_STORE must be one of "
+            f"{list(ANONYMOUS_RATE_LIMIT_STORES)}, not {s.anonymous_rate_limit_store!r}"
+        )
+    elif s.is_production and store == "memory":
+        errors.append(
+            "ANONYMOUS_RATE_LIMIT_STORE=memory is refused in production: an "
+            "in-memory counter is per worker process, so the anonymous-route "
+            "limit would be multiplied by the worker count and reset on every "
+            "restart. Use ANONYMOUS_RATE_LIMIT_STORE=postgres (kernel migration "
+            "0031_rate_limit_buckets must be applied) or leave "
+            "ANONYMOUS_RATE_LIMIT_ROUTES empty"
+        )
     return errors
 
 
 __all__ = [
+    "ANONYMOUS_RATE_LIMIT_STORES",
     "Settings",
+    "anonymous_rate_limit_errors",
     "settings",
     "validate_settings",
 ]

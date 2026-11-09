@@ -1973,3 +1973,37 @@ at the write. Record the opaque reference of the position (owned by the module
 that holds it) instead. Extending the key list is a contract change. The Starter
 census (every `app/` and `packages/*/src` audit write, by AST) found no producer.
 Source only: no version is allocated and no product adoption is qualified.
+
+
+## Anonymous-route rate limit — 2026-11-09, source only
+
+New settings (all env-driven): `ANONYMOUS_RATE_LIMIT_ROUTES` (comma-separated
+route templates as declared on the router, each optionally `METHOD /template`;
+empty default = feature off), `ANONYMOUS_RATE_LIMIT_REQUESTS` (10),
+`ANONYMOUS_RATE_LIMIT_WINDOW_SECONDS` (60), `ANONYMOUS_RATE_LIMIT_STORE`
+(`postgres` default, or `memory`). Counted per tenant, client address and route,
+in addition to the unchanged global limiter.
+
+**Client address.** The trusted-proxy address from `RequestEvidenceContextV1`
+(`X-Forwarded-For` / `X-Real-IP` honoured only from a peer inside the declared
+`TrustedProxyPolicy`); the transport peer when the assembly declares no
+`request_evidence`. Behind a reverse proxy without `request_evidence`, every
+anonymous caller then shares the proxy's bucket; `create_app` logs a warning.
+The global limiter still keys on the transport peer (unchanged).
+
+**Store.** `PostgresRateLimitStore` counts in `public.rate_limit_buckets`
+(migration `0031_rate_limit_buckets`, platform-catalog posture: no RLS, granted to
+`platform_api`/`app_admin`, revoked from `app_user`; only a SHA-256 of the key is
+stored). It uses the platform database runtime, so `PLATFORM_DATABASE_URL`
+must be set. Fixed windows: up to 2x the budget across a window boundary.
+
+**Adopter upgrade note.** (1) Upgrading changes nothing until routes are
+declared. (2) Apply migration 0031 to every database before declaring routes;
+until then a declared route answers 503 (fail closed), not unlimited.
+(3) Production refuses `ANONYMOUS_RATE_LIMIT_STORE=memory` when routes are
+declared, raising `AnonymousRateLimitStoreError` from `create_app` and reporting
+it from `validate_settings`; a custom store must declare `shared = True`.
+(4) Declare `request_evidence` with the trusted proxies so the key is the real
+client. (5) The reference deployment declares no routes yet; enabling its login
+routes is a deploy-configuration step. Source only: no version allocated, no
+adoption qualified; PostgreSQL grants and migration are covered by hosted CI.
