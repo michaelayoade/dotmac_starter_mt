@@ -730,6 +730,11 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
+    # The private `lane3.exposure-calls.v1` evidence document (the Executor
+    # boundary records a Lane 3 proof joins); owned by
+    # `lane3_exposure_evidence.py`, carried only inside the encrypted
+    # evidence bundle, and written to no Foundation store.
+    "lane3_exposure_evidence.py": 1,
     # The Lane 3 broker-handoff wire contract's canonical JSON
     # (`lane3_handoff_protocol.canonical_json`): it defines `grant_digest` and
     # every handoff digest, is owned by that protocol module, and is written to

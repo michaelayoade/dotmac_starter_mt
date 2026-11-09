@@ -338,7 +338,7 @@ def _parse_call(value: Any, *, where: str) -> ExposureCallRecord:
             f"{where}.method {method!r} is not an exposure method"
         )
     duration = doc["duration_seconds"]
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+    if isinstance(duration, bool) or not isinstance(duration, int | float):
         raise ExposureEvidenceRefused(f"{where}.duration_seconds must be a number")
     timeout = doc["timeout_seconds"]
     if timeout is not None:
