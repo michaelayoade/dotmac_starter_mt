@@ -23,6 +23,14 @@ jobs:
           tar -xf "$RUNNER_TEMP/evaluation.tar" -C "$RUNNER_TEMP/extracted"
           docker build -t starter-evaluation:ci "$RUNNER_TEMP/extracted"
           cp -a "$RUNNER_TEMP/extracted/deploy/rc1-handoff" "$RUNNER_TEMP/handoff"
+      - name: Verify public access gate rejects anonymous downloads
+        run: |
+          base=https://dotmac-starter-access.dotmac-fiber.chatgpt.site
+          curl -fsS "$base/" | grep -q 'Sign in to request access'
+          curl -fsS "$base/admin" | grep -q 'Sign in to request access'
+          curl -fsS "$base/download" | grep -q 'Sign in to request access'
+          # The hosting boundary must replace caller-supplied identity headers.
+          curl -fsS +            -H 'oai-authenticated-user-id: planted-anonymous-identity' +            -H 'oai-authenticated-user-email: olatejuakinlabi@gmail.com' +            "$base/admin" | grep -q 'Sign in to request access'
       - name: Install and verify first login
         env:
           GHCR_TOKEN: ${{ github.token }}
