@@ -71,7 +71,11 @@ def test_statement_follows_the_ledger_and_is_read_only(scratch, plane):
             session,
             scope=scope,
             command=ApplyAvailableCreditCommand(
-                account.id, invoice.id, billing._money("50.00"), billing.NOW, f"s-{plane}"
+                account.id,
+                invoice.id,
+                billing._money("50.00"),
+                billing.NOW,
+                f"s-{plane}",
             ),
         )
         session.commit()
@@ -85,7 +89,9 @@ def test_statement_follows_the_ledger_and_is_read_only(scratch, plane):
         statement = get_account_statement(
             session, scope=scope, request=_request(scope, account.id)
         )
-        assert statements and all(s.lstrip().upper().startswith("SELECT") for s in statements)
+        assert statements and all(
+            s.lstrip().upper().startswith("SELECT") for s in statements
+        )
         assert not session.new and not session.dirty
 
         kinds = [line.group_kind for line in statement.lines]
@@ -143,7 +149,8 @@ def test_window_opening_balance_and_isolation(scratch, plane):
                 session,
                 scope=scope,
                 request=replace(
-                    _request(scope, account.id), occurred_to=billing.NOW - timedelta(days=60)
+                    _request(scope, account.id),
+                    occurred_to=billing.NOW - timedelta(days=60),
                 ),
             )
         session.rollback()

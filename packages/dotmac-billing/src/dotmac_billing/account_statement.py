@@ -161,7 +161,8 @@ class AccountStatementV1:
             expected = StatementBalancesV1(
                 *(
                     Money(
-                        getattr(running, lane).amount + getattr(line.delta, lane).amount,
+                        getattr(running, lane).amount
+                        + getattr(line.delta, lane).amount,
                         self.currency,
                     )
                     for lane in _LANES
@@ -270,7 +271,7 @@ def get_account_statement(
         )
         if account is None:
             raise BillingRuleViolation("not_found", "billing account was not found")
-        watermark = int(
+        read_through_version = int(
             db.execute(
                 _scoped(
                     select(func.coalesce(func.max(groups.c.source_version), 0)).where(
@@ -286,7 +287,7 @@ def get_account_statement(
             groups.c.billing_account_id == request.billing_account_id,
             groups.c.currency == currency.code,
             groups.c.minor_units == currency.minor_units,
-            groups.c.source_version <= watermark,
+            groups.c.source_version <= read_through_version,
         )
         opening_rows = db.execute(
             _scoped(
@@ -381,7 +382,7 @@ def get_account_statement(
         currency=currency,
         occurred_from=request.occurred_from,
         occurred_to=request.occurred_to,
-        watermark_version=watermark,
+        watermark_version=read_through_version,
         opening=opening,
         lines=tuple(lines),
         closing=running,
@@ -392,7 +393,7 @@ def get_account_statement(
         currency,
         request.occurred_from,
         request.occurred_to,
-        watermark,
+        read_through_version,
         opening,
         tuple(lines),
         running,

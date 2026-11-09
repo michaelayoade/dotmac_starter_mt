@@ -1,5 +1,13 @@
 """Public Billing contracts, queries and owner commands."""
 
+from dotmac_billing.account_statement import (
+    AccountStatementLineV1,
+    AccountStatementV1,
+    GetAccountStatementV1,
+    StatementBalancesV1,
+    compute_account_statement_digest,
+    get_account_statement,
+)
 from dotmac_billing.authority import (
     AuthorityBinding,
     BillingPlane,
@@ -83,14 +91,6 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV1,
     WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
-)
-from dotmac_billing.account_statement import (
-    AccountStatementLineV1,
-    AccountStatementV1,
-    GetAccountStatementV1,
-    StatementBalancesV1,
-    compute_account_statement_digest,
-    get_account_statement,
 )
 from dotmac_billing.document_queries import (
     AccountingFactCursorV1,
