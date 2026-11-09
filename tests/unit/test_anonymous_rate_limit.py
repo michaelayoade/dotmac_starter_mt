@@ -7,9 +7,12 @@ migration itself are covered by the hosted migration/RLS suites, not here.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from dotmac_kernel import ProductAssemblySpec, create_app
@@ -19,12 +22,16 @@ from dotmac_kernel.config import (
     validate_settings,
 )
 from dotmac_kernel.middleware.rate_limit import (
+    AnonymousRateLimitConfigurationError,
     AnonymousRateLimitPolicy,
     AnonymousRateLimitStoreError,
+    DedicatedLimiterSessions,
     MemoryStore,
     PostgresRateLimitStore,
     RateLimitMiddleware,
+    anonymous_rate_limit_route_errors,
     build_anonymous_rate_limit,
+    trusted_client_address,
 )
 from dotmac_kernel.models_platform import RateLimitBucket
 from dotmac_kernel.request_evidence import (
@@ -36,6 +43,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+KEY_SECRET = (
+    "k2-test-secret-" + "x" * 32
+)  # documentation value, not a deployment secret
 UNTRUSTED_PEER = "198.51.100.7"
 TRUSTED_PROXY = "192.0.2.10"
 PROXIES = TrustedProxyPolicy.from_declaration("192.0.2.0/24")
@@ -332,6 +342,7 @@ def _settings(**overrides: object) -> Settings:
         **{
             "environment": "production",
             "anonymous_rate_limit_routes": "POST /auth/login",
+            "anonymous_rate_limit_key_secret": KEY_SECRET,
             **overrides,
         }
     )
@@ -439,7 +450,9 @@ def _store(db: Session, clock: _Clock, **kw: object) -> PostgresRateLimitStore:
         yield db
         db.flush()
 
-    return PostgresRateLimitStore(session_provider=provider, clock=clock, **kw)  # type: ignore[arg-type]
+    return PostgresRateLimitStore(
+        key_secret=KEY_SECRET, session_provider=provider, clock=clock, **kw
+    )  # type: ignore[arg-type]
 
 
 def test_postgres_store_counts_rejects_and_reports_retry_after(db: Session) -> None:
@@ -477,6 +490,11 @@ def test_postgres_store_persists_only_a_hash_of_the_key(db: Session) -> None:
     assert len(rows) == 1
     assert len(rows[0].key_hash) == 64
     assert UNTRUSTED_PEER not in rows[0].key_hash
+    # Keyed: the stored value is the HMAC, and NOT the unsalted SHA-256 that an
+    # offline guess over the address space could reproduce.
+    expected = hmac.new(KEY_SECRET.encode(), key.encode(), hashlib.sha256)
+    assert rows[0].key_hash == expected.hexdigest()
+    assert rows[0].key_hash != hashlib.sha256(key.encode()).hexdigest()
     assert rows[0].hit_count == 1
     assert rows[0].expires_at > rows[0].window_start
 
@@ -520,6 +538,406 @@ def test_postgres_store_refuses_an_unsupported_dialect() -> None:
     def provider() -> Iterator[_Db]:
         yield _Db()
 
-    store = PostgresRateLimitStore(session_provider=provider)  # type: ignore[arg-type]
+    store = PostgresRateLimitStore(key_secret=KEY_SECRET, session_provider=provider)  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="does not support dialect"):
         store.hit("k", 0.0, window_seconds=60, limit=1)
+
+
+def test_postgres_store_refuses_an_empty_key_secret() -> None:
+    with pytest.raises(ValueError, match="key secret"):
+        PostgresRateLimitStore(key_secret="")
+
+
+def test_different_secrets_store_different_hashes(db: Session) -> None:
+    clock = _Clock(1_000_000_010.0)
+
+    @contextmanager
+    def provider() -> Iterator[Session]:
+        yield db
+        db.flush()
+
+    for secret in ("a" * 32, "b" * 32):
+        PostgresRateLimitStore(
+            key_secret=secret, session_provider=provider, clock=clock
+        ).hit("k", 0.0, window_seconds=60, limit=5)
+    hashes = {row.key_hash for row in db.scalars(select(RateLimitBucket)).all()}
+    assert len(hashes) == 2
+
+
+# ── secret configuration (by name; values are never printed) ───────────────
+
+
+def test_production_requires_a_real_key_secret_for_the_postgres_store() -> None:
+    errors = anonymous_rate_limit_errors(
+        _settings(anonymous_rate_limit_key_secret="dev-insecure-change-me")
+    )
+    assert len(errors) == 1
+    assert "ANONYMOUS_RATE_LIMIT_KEY_SECRET must be set" in errors[0]
+    short = anonymous_rate_limit_errors(
+        _settings(anonymous_rate_limit_key_secret="short")
+    )
+    assert "at least 32 bytes" in short[0]
+    assert "short" not in short[0].replace("at least", "")
+    reused = anonymous_rate_limit_errors(
+        _settings(jwt_secret=KEY_SECRET, anonymous_rate_limit_key_secret=KEY_SECRET)
+    )
+    assert "distinct" in reused[0]
+    assert KEY_SECRET not in " ".join(reused)
+
+
+def test_development_accepts_the_default_key_secret() -> None:
+    assert (
+        anonymous_rate_limit_errors(
+            _settings(
+                environment="dev",
+                anonymous_rate_limit_key_secret="dev-insecure-change-me",
+            )
+        )
+        == []
+    )
+
+
+# ── IPv6 clients are limited per /64 ───────────────────────────────────────
+
+
+def _scope_request(client_host: str) -> object:
+    from starlette.requests import Request
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [],
+            "client": (client_host, 1),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "address, subject",
+    [
+        ("2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:1111:2222:3333:4444", "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", "2001:db8:1:3::/64"),
+        ("198.51.100.9", "198.51.100.9"),
+        ("unknown", "unknown"),
+    ],
+)
+def test_the_rate_limit_subject_is_an_ipv4_or_an_ipv6_slash_64(
+    address: str, subject: str
+) -> None:
+    assert trusted_client_address(_scope_request(address)) == subject  # type: ignore[arg-type]
+
+
+def test_one_ipv6_slash_64_shares_one_budget() -> None:
+    store = _CapturingStore()
+    client = TestClient(_app(store=store), client=(TRUSTED_PROXY, 5000))
+    codes = [
+        _post(client, **{"X-Forwarded-For": f"2001:db8:1:2::{n:x}"})
+        for n in range(1, 5)
+    ]
+    assert codes == [200, 200, 429, 429]
+    assert all("2001:db8:1:2::/64" in key for key in store.keys)
+
+
+def test_spoofed_leftmost_forwarded_entries_do_not_mint_budgets() -> None:
+    store = _CapturingStore()
+    client = TestClient(_app(store=store), client=(TRUSTED_PROXY, 5000))
+    # The proxy appended the real client (198.51.100.20); the caller rotates the
+    # forged leftmost entry on every request.
+    codes = [
+        _post(client, **{"X-Forwarded-For": f"203.0.113.{n}, 198.51.100.20"})
+        for n in range(1, 5)
+    ]
+    assert codes == [200, 200, 429, 429]
+    assert all("198.51.100.20" in key for key in store.keys)
+    assert not any("203.0.113." in key for key in store.keys)
+
+
+# ── a store that is over budget stops costing database round trips ─────────
+
+
+class _CountingSharedStore(MemoryStore):
+    shared = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def hit(self, key, now, *, window_seconds, limit):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        return super().hit(key, now, window_seconds=window_seconds, limit=limit)
+
+
+def _prod_app(store: _CountingSharedStore, **kw: object) -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/auth/login")
+    def login() -> dict[str, str]:
+        return {}
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        production=True,
+        anonymous_policy=AnonymousRateLimitPolicy.from_declaration(
+            "/auth/login", requests=2, window_seconds=60
+        ),
+        anonymous_store=store,
+        **kw,  # type: ignore[arg-type]
+    )
+    return app
+
+
+def test_a_blocked_key_is_refused_without_touching_the_store() -> None:
+    store = _CountingSharedStore()
+    client = TestClient(_prod_app(store, enabled=False))
+
+    assert [client.post("/auth/login").status_code for _ in range(3)] == [200, 200, 429]
+    calls_when_blocked = store.calls
+    for _ in range(20):
+        response = client.post("/auth/login")
+        assert response.status_code == 429
+        assert int(response.headers["retry-after"]) >= 1
+    assert store.calls == calls_when_blocked
+
+
+def test_blocking_is_per_key() -> None:
+    store = _CountingSharedStore()
+    app = _prod_app(store, enabled=False)
+    TestClient(app, client=("198.51.100.1", 1)).post("/auth/login")
+    blocked = TestClient(app, client=("198.51.100.2", 1))
+    assert [blocked.post("/auth/login").status_code for _ in range(3)] == [
+        200,
+        200,
+        429,
+    ]
+    assert (
+        TestClient(app, client=("198.51.100.1", 1)).post("/auth/login").status_code
+        == 200
+    )
+
+
+def test_the_global_limiter_runs_before_the_anonymous_store() -> None:
+    store = _CountingSharedStore()
+    client = TestClient(_prod_app(store, enabled=True, requests=1, window_seconds=60))
+
+    assert client.post("/auth/login").status_code == 200
+    assert store.calls == 1
+    # Globally throttled: shed by the cheap limiter, the database never asked.
+    assert [client.post("/auth/login").status_code for _ in range(5)] == [429] * 5
+    assert store.calls == 1
+
+
+class _TimingOutStore:
+    shared = True
+
+    def hit(self, key, now, *, window_seconds, limit):  # type: ignore[no-untyped-def]
+        raise TimeoutError("pool timed out")
+
+
+def test_a_pool_or_statement_timeout_is_a_503_not_an_unlimited_route() -> None:
+    app = FastAPI()
+    reached: list[bool] = []
+
+    @app.post("/auth/login")
+    def login() -> dict[str, str]:
+        reached.append(True)
+        return {}
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        enabled=False,
+        production=True,
+        anonymous_policy=AnonymousRateLimitPolicy.from_declaration(
+            "/auth/login", requests=5, window_seconds=60
+        ),
+        anonymous_store=_TimingOutStore(),
+    )
+    client = TestClient(app)
+    assert [client.post("/auth/login").status_code for _ in range(3)] == [503] * 3
+    assert reached == []
+
+
+# ── the limiter's own engine ───────────────────────────────────────────────
+
+
+def test_dedicated_sessions_commit_on_their_own_pool_and_count(
+    tmp_path: Path,
+) -> None:
+    from dotmac_kernel.models import Base
+    from dotmac_kernel.session_runtime import DatabaseRuntime
+    from sqlalchemy import create_engine
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'limiter.db'}")
+    Base.metadata.create_all(engine, tables=[RateLimitBucket.__table__])
+    runtime = DatabaseRuntime(engine=engine)
+    sessions = DedicatedLimiterSessions(runtime_resolver=lambda: runtime)
+    store = PostgresRateLimitStore(
+        key_secret=KEY_SECRET, session_provider=sessions, clock=_Clock(1_000_000_010.0)
+    )
+
+    assert [store.hit("k", 0.0, window_seconds=60, limit=2)[0] for _ in range(3)] == [
+        1,
+        2,
+        3,
+    ]
+    # Committed through the limiter's own pool, visible to the platform engine.
+    with runtime.platform_session() as db:
+        assert db.scalars(select(RateLimitBucket)).one().hit_count == 3
+    # One bounded engine, distinct from the platform engine, reused.
+    ((factory,),) = [(f,) for f in runtime._bounded.values()]
+    assert factory.kw["bind"] is not runtime.platform_engine
+    assert factory.kw["bind"].pool.size() == 4
+    assert factory.kw["bind"].pool._max_overflow == 0
+    assert factory.kw["bind"].pool.timeout() == 0.5
+    runtime.dispose_bounded_pools()
+    assert runtime._bounded == {}
+
+
+def test_a_failing_limiter_transaction_rolls_back_and_propagates(
+    tmp_path: Path,
+) -> None:
+    from dotmac_kernel.models import Base
+    from dotmac_kernel.session_runtime import DatabaseRuntime
+    from sqlalchemy import create_engine
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'limiter.db'}")
+    Base.metadata.create_all(engine, tables=[RateLimitBucket.__table__])
+    runtime = DatabaseRuntime(engine=engine)
+    with pytest.raises(RuntimeError, match="boom"):
+        with runtime.bounded_platform_session() as db:
+            db.add(
+                RateLimitBucket(
+                    key_hash="h" * 64,
+                    window_start=datetime.now(UTC),
+                    hit_count=1,
+                    expires_at=datetime.now(UTC),
+                )
+            )
+            db.flush()
+            raise RuntimeError("boom")
+    with runtime.platform_session() as db:
+        assert db.scalars(select(RateLimitBucket)).all() == []
+    runtime.dispose_bounded_pools()
+
+
+@pytest.mark.parametrize(
+    "kw", [{"pool_size": 0}, {"pool_timeout": 0}, {"statement_timeout_ms": 0}]
+)
+def test_dedicated_sessions_refuse_unbounded_settings(kw: dict[str, float]) -> None:
+    with pytest.raises(ValueError):
+        DedicatedLimiterSessions(**kw)  # type: ignore[arg-type]
+
+
+# ── every rule must match a route (startup validation) ─────────────────────
+
+
+def _table() -> FastAPI:
+    from fastapi import APIRouter
+
+    app = FastAPI()
+
+    @app.post("/auth/login")
+    def login() -> dict[str, str]:
+        return {}
+
+    @app.get("/forms/{token}")
+    def form(token: str) -> dict[str, str]:
+        return {}
+
+    router = APIRouter(prefix="/included")
+
+    @router.post("/thing")
+    def thing() -> dict[str, str]:
+        return {}
+
+    app.include_router(router)
+
+    sub = FastAPI()
+
+    @sub.post("/login")
+    def sub_login() -> dict[str, str]:
+        return {}
+
+    app.mount("/api", sub)
+    return app
+
+
+def _errors(declaration: str, app: FastAPI | None = None) -> list[str]:
+    policy = AnonymousRateLimitPolicy.from_declaration(
+        declaration, requests=1, window_seconds=60
+    )
+    assert policy is not None
+    return anonymous_rate_limit_route_errors(policy, (app or _table()).routes)
+
+
+def test_rules_that_match_a_route_pass_including_include_and_mount_prefixes() -> None:
+    assert (
+        _errors(
+            "POST /auth/login, /forms/{token}, POST /included/thing, POST /api/login"
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "POST /auth/log-in",  # typo
+        "GET /auth/login",  # wrong method
+        "/forms/{id}",  # parameter renamed
+        "POST /thing",  # include prefix forgotten
+        "POST /login",  # mount prefix forgotten
+        "POST /api/nowhere",  # inside a mount, no such route
+    ],
+)
+def test_a_rule_matching_no_route_is_reported(declaration: str) -> None:
+    errors = _errors(declaration)
+    assert len(errors) == 1
+    assert "matches no route" in errors[0]
+
+
+def test_every_failing_rule_is_reported() -> None:
+    assert len(_errors("POST /nope, POST /auth/login, /also-nope")) == 2
+
+
+def test_a_rule_inside_a_mount_is_limited_at_runtime() -> None:
+    """The template is the FULL path, so a mounted route is limited, not skipped
+    (a mount used to report only its own prefix, and the rule never matched)."""
+    store = _CapturingStore()
+    app = _table()
+    policy = AnonymousRateLimitPolicy.from_declaration(
+        "POST /api/login", requests=1, window_seconds=60
+    )
+    app.add_middleware(
+        RateLimitMiddleware,
+        enabled=False,
+        anonymous_policy=policy,
+        anonymous_store=store,
+    )
+    client = TestClient(app, client=(UNTRUSTED_PEER, 5000))
+    assert [client.post("/api/login").status_code for _ in range(3)] == [200, 429, 429]
+    assert len(store.keys) == 1  # the blocked key never reached the store again
+
+
+def test_create_app_in_production_refuses_anonymous_limits_without_request_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dotmac_kernel import app_factory
+    from dotmac_kernel.api_documentation import api_documentation_policy
+
+    monkeypatch.setattr(app_factory.settings, "environment", "production")
+    monkeypatch.setattr(
+        app_factory.settings, "anonymous_rate_limit_routes", "POST /auth/login"
+    )
+    monkeypatch.setattr(app_factory.settings, "anonymous_rate_limit_store", "postgres")
+    monkeypatch.setattr(
+        app_factory.settings, "anonymous_rate_limit_key_secret", KEY_SECRET
+    )
+    spec = ProductAssemblySpec(
+        api_documentation=api_documentation_policy("development"), name="k2-no-evidence"
+    )
+
+    with pytest.raises(AnonymousRateLimitConfigurationError, match="request_evidence"):
+        create_app(spec)

@@ -113,7 +113,11 @@ wiring. No redis dependency ships with the starter
 callers; each gets a stricter per-client budget on top of the global limiter,
 keyed on the trusted-proxy client address (never an untrusted peer's
 `X-Forwarded-For`). The shared store is the kernel `rate_limit_buckets` table
-(migration 0031). Production refuses the in-memory store at startup, and a store
+(migration 0031), counted on a dedicated bounded pool behind the global limiter,
+with the stored key an HMAC under `ANONYMOUS_RATE_LIMIT_KEY_SECRET`. The client
+address is the first untrusted `X-Forwarded-For` hop from the right (the leftmost
+entry is client-controlled). Production refuses the in-memory store, a rule that
+matches no route, and rules without request evidence at startup, and a store
 failure answers 503 rather than leaving the route unlimited. See
 `packages/dotmac-kernel/COMPATIBILITY.md` for the adopter upgrade note.
 

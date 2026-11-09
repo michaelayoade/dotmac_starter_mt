@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     # PRODUCTION REFUSES `memory` when routes are declared: a per-process counter
     # multiplies the limit by the worker count and resets on every deploy.
     anonymous_rate_limit_store: str = "postgres"
+    # HMAC key for the stored rate-limit key (the Postgres store keeps only an
+    # HMAC-SHA256 of `tenant:client:route`, never the address or an unkeyed hash
+    # an attacker could test offline). Resolved by NAME through Settings like the
+    # other secrets; no default is accepted in production (see
+    # `anonymous_rate_limit_errors`). Rotating it resets every open window.
+    anonymous_rate_limit_key_secret: str = "dev-insecure-change-me"
     # Security response headers (Task 5). Disable only when a fronting
     # proxy owns these headers. Empty CSP = the computed strict default in
     # dotmac_kernel/middleware/security_headers.py. A non-empty compatibility
@@ -197,6 +203,23 @@ def anonymous_rate_limit_errors(s: Settings) -> list[str]:
             "0031_rate_limit_buckets must be applied) or leave "
             "ANONYMOUS_RATE_LIMIT_ROUTES empty"
         )
+    if s.is_production and store == "postgres":
+        secret = s.anonymous_rate_limit_key_secret
+        if secret == "dev-insecure-change-me":  # noqa: S105 # nosec B105
+            errors.append(
+                "ANONYMOUS_RATE_LIMIT_KEY_SECRET must be set in production when "
+                "anonymous rate-limit routes are declared"
+            )
+        elif len(secret.encode("utf-8")) < 32:
+            errors.append(
+                "ANONYMOUS_RATE_LIMIT_KEY_SECRET must contain at least 32 bytes "
+                "in production"
+            )
+        elif secret in {s.jwt_secret, s.session_hash_secret, s.csrf_secret}:
+            errors.append(
+                "ANONYMOUS_RATE_LIMIT_KEY_SECRET must be distinct from "
+                "JWT_SECRET, SESSION_HASH_SECRET and CSRF_SECRET in production"
+            )
     return errors
 
 

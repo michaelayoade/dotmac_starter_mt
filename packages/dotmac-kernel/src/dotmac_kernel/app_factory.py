@@ -60,7 +60,9 @@ from dotmac_kernel.middleware.observability import (
     _RequestEvidenceSnapshotMiddleware,
 )
 from dotmac_kernel.middleware.rate_limit import (
+    AnonymousRateLimitConfigurationError,
     RateLimitMiddleware,
+    anonymous_rate_limit_route_errors,
     build_anonymous_rate_limit,
 )
 from dotmac_kernel.middleware.security_headers import (
@@ -716,8 +718,23 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         tuple(facet.shell.qualified_name for facet in surface_registry.facets)
     )
 
+    # Built HERE, while the application is constructed, so a production process
+    # configured for an unusable anonymous-route store never starts rather than
+    # discovering it on the first login attempt.
+    anonymous_rate_limit = build_anonymous_rate_limit(settings)
+    if anonymous_rate_limit is not None and spec.request_evidence is None:
+        message = (
+            "anonymous rate limit is keyed on the transport peer: this assembly "
+            "declares no request_evidence, so behind a reverse proxy every "
+            "anonymous caller shares the proxy's bucket. Declare a "
+            "RequestEvidenceConfigurationV1 with the trusted proxies."
+        )
+        if settings.is_production:
+            raise AnonymousRateLimitConfigurationError(message)
+        logger.warning(message)
+
     @asynccontextmanager
-    async def lifespan(_: FastAPI):
+    async def lifespan(app_: FastAPI):
         for err in validate_settings(settings):
             if settings.is_production:
                 raise RuntimeError(f"Configuration error: {err}")
@@ -726,6 +743,15 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             if settings.is_production:
                 raise RuntimeError(f"Product configuration error: {err}")
             logger.warning("Product config: %s", err)
+        if anonymous_rate_limit is not None:
+            # Against the FINISHED route table: a rule that matches no route
+            # silently never limits, so production refuses to start with one.
+            for err in anonymous_rate_limit_route_errors(
+                anonymous_rate_limit[0], app_.routes
+            ):
+                if settings.is_production:
+                    raise AnonymousRateLimitConfigurationError(err)
+                logger.warning("Anonymous rate limit: %s", err)
         await _run_product_startup_hooks(spec.startup_hooks)
         if settings.seed_on_startup:
             await _run_enabled_seeds(enabled_manifests, disabled)
@@ -793,17 +819,6 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         max_age_seconds=settings.csrf_token_ttl_seconds,
         session_cookie_names=surface_registry.session_cookie_names,
     )
-    # Built HERE, while the application is constructed, so a production process
-    # configured for an unusable anonymous-route store never starts rather than
-    # discovering it on the first login attempt.
-    anonymous_rate_limit = build_anonymous_rate_limit(settings)
-    if anonymous_rate_limit is not None and spec.request_evidence is None:
-        logger.warning(
-            "anonymous rate limit is keyed on the transport peer: this assembly "
-            "declares no request_evidence, so behind a reverse proxy every "
-            "anonymous caller shares the proxy's bucket. Declare a "
-            "RequestEvidenceConfigurationV1 with the trusted proxies."
-        )
     app.add_middleware(
         RateLimitMiddleware,
         enabled=settings.rate_limit_enabled,
