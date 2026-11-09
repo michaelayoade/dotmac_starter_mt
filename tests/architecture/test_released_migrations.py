@@ -8344,6 +8344,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "bi_0014_opening_variance_ledger.py",
             # a12 (the a11 number was never published): B lane.
             "bi_0015_line_price_version_fk.py",
+            "bi_0016_withholding_components.py",
         }
     ),
     "dotmac-collections": frozenset(),

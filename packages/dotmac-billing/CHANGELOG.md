@@ -19,6 +19,33 @@ chain after `bi_0014_opening_variance_ledger`.
   exceptions review. No row is repaired or rewritten. Adds the target unique
   key `rated_obligations(id, price_version_id)` on both planes.
 
+- B2 (`bi_0016_withholding_components`): expected withholding is frozen at
+  issue as structural rows. `document_withholding_components` holds one
+  immutable row per elected expected-withholding component of a `dotmac-tax`
+  determination (positive amount, evidenced by a Tax party classification id;
+  source owner pinned to `dotmac-tax`). Applicability, rate and amount are
+  Tax's alone; Billing freezes and verifies, it selects and calculates nothing.
+  An invoice with no elected component has nothing a discharge can reference:
+  `accept_withholding_discharge` refuses it (`withholding_not_elected`), refuses
+  evidence that differs from the frozen result
+  (`withholding_evidence_differs_from_frozen`) or a non-Tax owner
+  (`withholding_tax_owner`), and refuses a draw above the frozen amount
+  (`withholding_exceeds_frozen_component`). The discharge table gains a
+  composite foreign key on the component identity it already stores
+  (added `NOT VALID`; `VALIDATE` is attempted and pre-existing discharges leave
+  it `NOT VALID` with an exceptions-review comment; nothing is backfilled or
+  repaired) and a BEFORE INSERT guard that keeps each component's net accepted
+  amount within `[0, frozen amount]`. The one-acceptance-per-component unique
+  index and permanent source claim are unchanged.
+- B2: `apply_available_credit` may draw at most the invoice's outstanding
+  receivable less its undischarged frozen withholding
+  (`credit_exceeds_non_withholding_room`), so credit is drawn before the
+  discharge and can never consume the reserved withholding. Cash allocation and
+  non-cash credit are unchanged.
+- B2: add `WithholdingCashRequirementV1` (salvaged from the superseded #1006,
+  without its tax code): a read-only quote of cash required from an invoice total
+  and a Tax-owned withholding amount.
+
 ## 0.1.0a11 — UNRELEASED (rolled into a12)
 
 - Breaking for adapters: `NumberingProvider.allocate` now also receives a

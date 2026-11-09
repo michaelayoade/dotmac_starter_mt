@@ -482,6 +482,24 @@ _INTERNAL_RELATIONS = (
         "withholding_discharges",
         ("id", "billing_account_id", "document_id"),
     ),
+    (
+        "withholding_discharges",
+        ("document_id", "tax_source_owner", "determination_ref", "component_ref"),
+        "document_withholding_components",
+        ("document_id", "tax_source_owner", "determination_ref", "component_ref"),
+    ),
+    (
+        "document_withholding_components",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "document_withholding_components",
+        ("obligation_id", "billing_account_id"),
+        "rated_obligations",
+        ("id", "billing_account_id"),
+    ),
     ("accounting_facts", ("posting_group_id",), "posting_groups", ("id",)),
     ("accounting_facts", ("reverses_fact_id",), "accounting_facts", ("id",)),
     (

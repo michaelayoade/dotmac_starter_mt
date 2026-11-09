@@ -1718,6 +1718,29 @@ def _withholding_constraints(*, tenant: bool) -> tuple[object, ...]:
                 postgresql_where=text("reverses_discharge_id IS NULL"),
                 sqlite_where=text("reverses_discharge_id IS NULL"),
             ),
+            # B2: every discharge names a frozen withholding component of its
+            # invoice (NOT VALID in the migration for pre-existing history).
+            ForeignKeyConstraint(
+                [
+                    *scope,
+                    "document_id",
+                    "tax_source_owner",
+                    "determination_ref",
+                    "component_ref",
+                ],
+                [
+                    *(
+                        f"{SCHEMA}.{prefix}document_withholding_components.{c}"
+                        for c in scope
+                    ),
+                    f"{SCHEMA}.{prefix}document_withholding_components.document_id",
+                    f"{SCHEMA}.{prefix}document_withholding_components.tax_source_owner",
+                    f"{SCHEMA}.{prefix}document_withholding_components.determination_ref",
+                    f"{SCHEMA}.{prefix}document_withholding_components.component_ref",
+                ],
+                name=f"fk_{table}_frozen_component",
+                ondelete="RESTRICT",
+            ),
             schema_table_args(SCHEMA),
         )
     )
@@ -1732,6 +1755,110 @@ class WithholdingDischarge(Base, _TenantRow, _WithholdingDischargeColumns):
 class PlatformWithholdingDischarge(Base, _WithholdingDischargeColumns):
     __tablename__ = "platform_withholding_discharges"
     __table_args__ = _withholding_constraints(tenant=False)
+
+
+class _WithholdingComponentColumns(_EvidenceTime):
+    """One elected expected-withholding component frozen at invoice issue.
+
+    The values are the dotmac-tax determination's, copied verbatim; Billing
+    neither selects a rule nor computes a rate. ``party_classification_id`` is
+    the Tax party classification that evidences the election.
+    """
+
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    obligation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    tax_source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    determination_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    component_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    tax_code_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    rule_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    rule_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    treatment_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    party_category: Mapped[str | None] = mapped_column(String(255))
+    party_classification_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    base_amount: Mapped[Decimal] = money_column()
+    tax_amount: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    determined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+def _withholding_component_constraints(*, tenant: bool) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}document_withholding_components"
+    scope = ["tenant_id"] if tenant else []
+
+    def reference(
+        columns: list[str], target: str, remote: list[str], name: str
+    ) -> object:
+        return ForeignKeyConstraint(
+            [*scope, *columns],
+            [
+                *(f"{SCHEMA}.{prefix}{target}.{c}" for c in scope),
+                *(f"{SCHEMA}.{prefix}{target}.{c}" for c in remote),
+            ],
+            name=name,
+            ondelete="RESTRICT",
+        )
+
+    return (
+        reference(
+            ["document_id", "billing_account_id"],
+            "documents",
+            ["id", "billing_account_id"],
+            f"fk_{table}_document_account",
+        ),
+        reference(
+            ["obligation_id", "billing_account_id"],
+            "rated_obligations",
+            ["id", "billing_account_id"],
+            f"fk_{table}_obligation_account",
+        ),
+        UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
+        UniqueConstraint(
+            *scope,
+            "id",
+            "billing_account_id",
+            "document_id",
+            name=f"uq_{table}_document",
+        ),
+        UniqueConstraint(
+            *scope,
+            "document_id",
+            "tax_source_owner",
+            "determination_ref",
+            "component_ref",
+            name=f"uq_{table}_identity",
+        ),
+        CheckConstraint(
+            "tax_source_owner = 'dotmac-tax'", name=f"ck_{table}_tax_owner"
+        ),
+        CheckConstraint(
+            "tax_amount > 0 AND base_amount >= 0", name=f"ck_{table}_amount"
+        ),
+        CheckConstraint(
+            "currency = upper(currency) AND length(currency) = 3 "
+            "AND minor_units BETWEEN 0 AND 6",
+            name=f"ck_{table}_currency",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class DocumentWithholdingComponent(Base, _TenantRow, _WithholdingComponentColumns):
+    __tablename__ = "document_withholding_components"
+    __table_args__ = _withholding_component_constraints(tenant=True)
+
+
+class PlatformDocumentWithholdingComponent(Base, _WithholdingComponentColumns):
+    __tablename__ = "platform_document_withholding_components"
+    __table_args__ = _withholding_component_constraints(tenant=False)
 
 
 class _NonCashCreditGrantColumns(_EvidenceTime):
@@ -3193,6 +3320,7 @@ TENANT_TABLES = (
     "non_cash_credit_effects",
     "receivable_position_facts_v2",
     "withholding_discharges",
+    "document_withholding_components",
     "billing_accounts",
     "rated_obligations",
     "documents",
@@ -3237,6 +3365,7 @@ PLATFORM_TABLES = (
     "platform_non_cash_credit_effects",
     "platform_receivable_position_facts_v2",
     "platform_withholding_discharges",
+    "platform_document_withholding_components",
     "platform_billing_accounts",
     "platform_rated_obligations",
     "platform_documents",
@@ -3285,6 +3414,8 @@ __all__ = [
     "PlatformReceivablePositionFactV2",
     "WithholdingDischarge",
     "PlatformWithholdingDischarge",
+    "DocumentWithholdingComponent",
+    "PlatformDocumentWithholdingComponent",
     "PLATFORM_TABLES",
     "SCHEMA",
     "TENANT_TABLES",

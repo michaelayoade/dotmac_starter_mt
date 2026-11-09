@@ -83,6 +83,20 @@ invoice-grained exposures. An architecture canary derives the emitted set from
 the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
+Expected withholding is frozen at issue. For each elected component of a
+`dotmac-tax` determination (a positive amount evidenced by a Tax party
+classification, which is how the election is expressed) the issuing transaction
+writes one immutable `document_withholding_components` row. Billing selects no
+rule and calculates no rate; it copies and later verifies Tax's result. A
+withholding discharge is a draw on exactly one such row (composite foreign key on
+the component identity, plus a guard that keeps the net accepted amount within
+the frozen amount), so a discharge on an invoice that was not elected, with
+evidence that differs from what was frozen, or above the frozen amount, is
+refused. `apply_available_credit` may draw at most the outstanding receivable
+less the undischarged frozen withholding. `WithholdingCashRequirementV1` quotes
+the cash an invoice requires once a Tax-owned withholding amount is deducted; it
+is not a discharge, cash or credit.
+
 The historical first release candidate is `0.1.0a1`; the current unreleased
 development successor is `0.1.0a12` and requires
 `dotmac-kernel>=0.1.0a105` plus
