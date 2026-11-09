@@ -5,9 +5,16 @@
 the price a line bills at is the price its obligation was rated at, enforced by
 the database rather than by service code.
 
-The key is MATCH SIMPLE on purpose: a line without an ``obligation_id`` (a
-credit-note line, or any line not backed by a rated obligation) is exempt.
-Opening-import invoices carry no document lines at all.
+The key is MATCH SIMPLE, so on its own it would exempt any line without an
+``obligation_id``. That exemption is therefore keyed on the document, not on
+the NULL: a BEFORE INSERT / UPDATE-OF-identity trigger refuses a line with no
+obligation unless its parent is a credit note and the line carries the
+``price_source_version = 'credit:' || credits_document_id`` the credit writer
+sets. Opening-import invoices carry no document lines at all (the importer
+writes the document row only), so there is no opening-line exemption. The
+trigger fires only on new writes (and on updates of the identity columns); it
+never inspects, and so cannot reject, existing rows. They are listed for the
+manual exceptions review by ``list_document_line_price_exceptions``.
 
 History is not repaired. The constraint is added ``NOT VALID`` (new and updated
 rows are checked at once) and ``VALIDATE`` is then attempted. If existing rows
@@ -86,10 +93,54 @@ def upgrade() -> None:
             END
             $$;
         """)
+        _create_guard(table, scope)
+
+
+def _create_guard(table: str, scope: list[str]) -> None:
+    """Refuse a new line with no obligation unless it is a credit-note line."""
+
+    prefix = "platform_" if table.startswith("platform_") else ""
+    scoped = " AND d.tenant_id = NEW.tenant_id" if scope else ""
+    function = f"{_SCHEMA}.require_{prefix}document_line_obligation"
+    op.execute(f"""
+        CREATE FUNCTION {function}() RETURNS trigger AS $$
+        DECLARE
+            parent record;
+        BEGIN
+            IF NEW.obligation_id IS NOT NULL THEN
+                RETURN NEW;
+            END IF;
+            SELECT d.document_kind, d.credits_document_id INTO parent
+              FROM {_SCHEMA}.{prefix}documents d
+             WHERE d.id = NEW.document_id{scoped};
+            IF NOT FOUND THEN
+                RETURN NEW;  -- the document foreign key refuses it
+            END IF;
+            IF parent.document_kind = 'credit_note'
+               AND parent.credits_document_id IS NOT NULL
+               AND NEW.price_source_version = 'credit:' || parent.credits_document_id::text
+            THEN
+                RETURN NEW;
+            END IF;
+            RAISE EXCEPTION 'a document line needs its rated obligation unless it is a credit-note line'
+              USING ERRCODE = 'check_violation';
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER {table}_price_identity
+          BEFORE INSERT OR UPDATE OF obligation_id, price_source_version, document_id
+          ON {_SCHEMA}.{table}
+          FOR EACH ROW EXECUTE FUNCTION {function}();
+    """)  # nosec B608 -- closed plane/table identifiers; no input reaches this DDL
 
 
 def downgrade() -> None:
     for table, parent, unique, _scope, _target in _planes():
+        prefix = "platform_" if table.startswith("platform_") else ""
+        op.execute(
+            f"DROP TRIGGER IF EXISTS {table}_price_identity ON {_SCHEMA}.{table};"
+            f"DROP FUNCTION IF EXISTS "
+            f"{_SCHEMA}.require_{prefix}document_line_obligation();"
+        )
         op.drop_constraint(
             f"fk_{table}_obligation_price", table, schema=_SCHEMA, type_="foreignkey"
         )
