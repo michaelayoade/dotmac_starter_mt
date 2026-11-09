@@ -8,7 +8,7 @@ here.
 
 ## 0.1.0a109 — Release inventory
 
-This inventories proposed source after the allocated, unpublished `0.1.0a108`
+This inventories proposed source after the published and tagged `0.1.0a108`
 (source marker `0.1.0a108+dev`). It allocates no version and proves no
 publication; protected release authorization remains required.
 

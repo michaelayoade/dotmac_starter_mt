@@ -134,7 +134,7 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a108+dev",
-      "reason": "REVIEWED DOCUMENT SCRIPT CONTRACT AND AUDIT COORDINATE CANARY AWAITING VERIFIED PUBLICATION. Published a107 remains immutable and consumed; a108 is allocated and unpublished at the time of this change. The route-bound static script-hash CSP source follows product inventory, and the audit trail now refuses coordinate-like detail keys at any depth. Development markers do not authorize publication; allocation requires separate protected authorization and mechanical version changes. Hosted qualification, build-once publication, independent install-back verification, tag and record bind the released successor; consumer admission is separate. Remove this row only through an oracle-backed release record.",
+      "reason": "REVIEWED DOCUMENT SCRIPT CONTRACT AND AUDIT COORDINATE CANARY AWAITING VERIFIED PUBLICATION. Published a107 remains immutable and consumed; a108 is now published and tagged and is likewise immutable; this row tracks the source marker 0.1.0a108+dev, which carries unreleased changes beyond it. The route-bound static script-hash CSP source follows product inventory, and the audit trail now refuses coordinate-like detail keys at any depth. Development markers do not authorize publication; allocation requires separate protected authorization and mechanical version changes. Hosted qualification, build-once publication, independent install-back verification, tag and record bind the released successor; consumer admission is separate. Remove this row only through an oracle-backed release record.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
