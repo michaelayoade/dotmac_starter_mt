@@ -50,13 +50,13 @@ from dotmac_billing.commands import (
     IssueCreditNote,
     IssueDocument,
     NumberingProvider,
-    TaxSealReader,
     ReallocationCommand,
     ReduceNonCashCreditGrant,
     RefundCommand,
     ReverseNonCashCreditApplication,
     ReversePostingGroupCommand,
     ReverseWithholdingDischarge,
+    TaxSealReader,
 )
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
@@ -3428,9 +3428,10 @@ def freeze_issued_invoice_withholding(
     result fingerprint and date; with no reader wired the command refuses. The
     rows carry the bound line's obligation. It writes the same append-only
     component rows issuance writes and never touches the invoice. Idempotent on
-    ``command_id``; refused when components exist, for a credit note or void invoice, for V1 evidence,
-    when the determination is not as of the issue date, or when the frozen
-    withholding would exceed what is outstanding plus what was already withheld.
+    ``command_id``; refused when components exist, for a credit note or void
+    invoice, for V1 evidence, when the determination is not as of the issue
+    date, or when the frozen withholding would exceed what is outstanding plus
+    what was already withheld.
     """
 
     if not isinstance(scope, TenantScope):
