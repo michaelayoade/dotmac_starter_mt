@@ -330,7 +330,7 @@ def test_production_accepts_the_postgres_store_and_development_defaults_to_memor
     RateLimitMiddleware(
         _noop,
         anonymous_policy=_POLICY,
-        anonymous_store=PostgresRateLimitStore(),
+        anonymous_store=PostgresRateLimitStore(key_secret=KEY_SECRET),
         production=True,
     )
     dev = RateLimitMiddleware(_noop, anonymous_policy=_POLICY)
@@ -786,7 +786,7 @@ def test_dedicated_sessions_commit_on_their_own_pool_and_count(
     with runtime.platform_session() as db:
         assert db.scalars(select(RateLimitBucket)).one().hit_count == 3
     # One bounded engine, distinct from the platform engine, reused.
-    ((factory,),) = [(f,) for f in runtime._bounded.values()]
+    (factory,) = runtime._bounded.values()
     assert factory.kw["bind"] is not runtime.platform_engine
     assert factory.kw["bind"].pool.size() == 4
     assert factory.kw["bind"].pool._max_overflow == 0
@@ -919,7 +919,9 @@ def test_a_rule_inside_a_mount_is_limited_at_runtime() -> None:
     )
     client = TestClient(app, client=(UNTRUSTED_PEER, 5000))
     assert [client.post("/api/login").status_code for _ in range(3)] == [200, 429, 429]
-    assert len(store.keys) == 1  # the blocked key never reached the store again
+    # Two store calls: the allowed hit and the one that discovered the block.
+    # The third request is refused from the in-process cache, store untouched.
+    assert len(store.keys) == 2
 
 
 def test_the_global_limiter_still_buckets_a_mount_as_one_route() -> None:

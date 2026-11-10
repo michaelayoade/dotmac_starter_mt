@@ -38,7 +38,7 @@ publication; protected release authorization remains required.
   and an in-process blocked-key cache; the stored key is an HMAC under
   `ANONYMOUS_RATE_LIMIT_KEY_SECRET`; every declared rule must match a route
   (production refuses to start otherwise, mounts included); production also
-  refuses declared rules with no `request_evidence`.
+  refuses declared rules when the assembly declares no request evidence.
 
 ### Changed
 
