@@ -3480,6 +3480,15 @@ def _seal_equals_evidence(
                 (line.sequence, line.taxable_amount, line.rate, line.tax_amount)
                 for line in component.lines
             ),
+            tuple(
+                sorted(
+                    (
+                        (d.determination_set_id, d.determination_id, d.tax_amount)
+                        for d in component.dependency_components
+                    ),
+                    key=lambda v: (str(v[0]), str(v[1])),
+                )
+            ),
         )
 
     sealed = sorted((shape(c) for c in seal.components), key=lambda v: str(v[0]))
@@ -3700,7 +3709,9 @@ def freeze_issued_invoice_withholding(
             issue_date=issue_date,
             line_id=command.line_id,
         )
-        for c in elected:
+        for c in seal.components:
+            # From Tax's sealed values only: the offered dependency amounts are
+            # proven equal to them above, never trusted on their own.
             expected = source_amount.amount
             if c.calculation_base_code == "source_plus_dependency_tax":
                 expected += sum(

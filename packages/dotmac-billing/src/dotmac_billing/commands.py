@@ -66,6 +66,15 @@ class TaxSealedLineV1:
 
 
 @dataclass(frozen=True, slots=True)
+class TaxSealedDependencyV1:
+    """A prior tax a dependency-tax base folds in, with the amount Tax sealed."""
+
+    determination_set_id: UUID
+    determination_id: UUID
+    tax_amount: Money
+
+
+@dataclass(frozen=True, slots=True)
 class TaxSealedComponentV1:
     """One elected withholding component exactly as dotmac-tax sealed it."""
 
@@ -80,6 +89,7 @@ class TaxSealedComponentV1:
     base_amount: Money
     tax_amount: Money
     lines: tuple[TaxSealedLineV1, ...]
+    dependency_components: tuple[TaxSealedDependencyV1, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,6 +437,7 @@ __all__ = [
     "WITHHOLDING_FREEZE_PERMISSION",
     "TaxDeterminationSealV1",
     "TaxSealedComponentV1",
+    "TaxSealedDependencyV1",
     "TaxSealedLineV1",
     "TaxSealReader",
     "ReallocationCommand",

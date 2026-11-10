@@ -50,7 +50,7 @@ chain after `bi_0014_opening_variance_ledger`.
   - dotmac-tax must return the sealed determination through the assembly-wired
     `TaxSealReader` (none wired: refused): identity, fingerprints, date, every
     original fact and the elected components (code, rule, base, rate lines,
-    amount) must equal what the caller offered, and the rows are built from
+    amount, and the sealed prior-tax amounts a dependency base folds in) must equal what the caller offered, and the rows are built from
     Tax's values;
   - one Tax determination backs one live invoice for late freezes
     (`withholding_freeze_determination_in_use`; a voided invoice releases it).
