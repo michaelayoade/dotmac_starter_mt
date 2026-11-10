@@ -345,6 +345,17 @@ def test_existing_violation_stays_not_valid_noted_and_unrepaired(plane):
                     line_number=4,
                 )
             session.rollback()
+            # Changing the document's kind afterwards cannot launder a line that
+            # the guard would refuse (the history line has no obligation).
+            with pytest.raises(IntegrityError, match="rated obligation"):
+                session.execute(
+                    text(
+                        f"UPDATE mod_billing.{prefix}documents "
+                        "SET document_kind = 'receipt' WHERE id = :d"
+                    ),
+                    {"d": draft_id},
+                )
+            session.rollback()
             with pytest.raises(IntegrityError, match="obligation_price"):
                 _insert_line(
                     session,
