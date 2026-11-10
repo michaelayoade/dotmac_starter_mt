@@ -4210,7 +4210,9 @@ imported invoices share one internal backing resolver; original historical
 payments, WHT and credits remain documentary evidence and never become new
 current allocations or cash. Generic document void refuses imported backing.
 
-Opening recognition/unwind publish distinct `AccountingFactV5`. Genuine
+Opening recognition/unwind publish distinct `AccountingFactV5`; ledger-lane
+opening-variance facts publish the distinct `AccountingFactV6`
+(`billing.accounting.fact.v6`) on effect-free posting groups. Genuine
 post-import allocations, WHT, non-cash and cash-lot operations keep their
 existing V1–V4 accounting contracts and publish separate imported
 `ReceivableExposureV2`; no synthetic obligation, due basis or native exposure

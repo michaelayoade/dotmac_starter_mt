@@ -28,6 +28,7 @@ module = ModuleManifest(
     outbox_event_types=(
         "billing.settlement.earmarked.v1",
         "billing.settlement.earmark.changed.v1",
+        "billing.accounting.fact.v6",
         "billing.accounting.fact.v5",
         "billing.receivable.exposure.v2",
         "billing.accounting.fact.v4",

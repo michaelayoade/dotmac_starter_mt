@@ -273,7 +273,8 @@ fractional-attribution evidence is refused rather than defaulted or clamped.
 
 Current allocation, WHT, non-cash, eligible credit-note and cash-draw commands
 use the same native/imported backing resolver and their existing accounting
-facts. Opening AR recognition and full unwind use `AccountingFactV5`.
+facts. Opening AR recognition and full unwind use `AccountingFactV5`; ledger-lane
+opening-variance facts use the distinct `AccountingFactV6` on effect-free posting groups.
 `ReceivableExposureV2` preserves unknown legacy collection provenance without
 allowing automated collection. Permanent physical source claims prevent live
 and historical WHT/non-cash/credit identities from being spent twice, across

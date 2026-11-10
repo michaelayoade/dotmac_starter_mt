@@ -40,6 +40,11 @@ from dotmac_billing.opening_contracts import (
     OpeningSourceIdentityV1,
     OpeningTargetV1,
 )
+from dotmac_billing.opening_variance_contracts import (
+    OpeningBatchControlV1,
+    OpeningPartitionMeasuresV1,
+    OpeningVarianceV1,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +175,12 @@ class OpeningManifestV2(OpeningCashValue):
     controls: tuple[OpeningLaneControlsV1, ...]
     cash_lots: tuple[OpeningCashLotV1, ...]
     receivables: tuple[OpeningReceivableItemV1, ...]
+    # ST-4c: one fingerprint binds the transfer and its variance ledger. The
+    # opening has never run (no windows, no seals), so V2 is extended in place
+    # (#973 Finding-5 precedent); a missing measures row is a counted blocker.
+    measures: tuple[OpeningPartitionMeasuresV1, ...] = ()
+    variances: tuple[OpeningVarianceV1, ...] = ()
+    batch_controls: tuple[OpeningBatchControlV1, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
