@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-payables"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant supplier-liability and payment-obligation authority"
 authors = ["DotMac"]
 readme = "README.md"
