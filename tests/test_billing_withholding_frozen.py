@@ -19,6 +19,7 @@ from dotmac_billing import service
 from dotmac_billing.commands import (
     ApplyAvailableCreditCommand,
     ReverseWithholdingDischarge,
+    TaxDeterminationSealV1,
 )
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
 from dotmac_billing.service import (
@@ -493,6 +494,34 @@ def _freeze_command(account_id, invoice_id, scope, evidence, command_id=None):
     )
 
 
+class _TaxSeals:
+    """A dotmac-tax reader double holding the sealed identity of what it is given."""
+
+    def __init__(self, *items):
+        self.items = {
+            item.determination.determination_set_id: TaxDeterminationSealV1(
+                item.determination.determination_set_id,
+                item.determination.result_fingerprint,
+                item.determination.occurred_on,
+            )
+            for item in items
+        }
+
+    def read_seal(self, *, scope, determination_set_id):
+        return self.items.get(determination_set_id)
+
+
+def freeze_issued_invoice_withholding(session, *, scope, command, tax_seal="confirm"):
+    """The service command with a Tax reader that confirms the evidence it is given."""
+    from dotmac_billing import service as billing_service
+
+    if isinstance(tax_seal, str):
+        tax_seal = _TaxSeals(command.evidence)
+    return billing_service.freeze_issued_invoice_withholding(
+        session, scope=scope, command=command, tax_seal=tax_seal
+    )
+
+
 def _v2_invoice(session, scope):
     """An invoice issued with V2 Tax evidence (and so declared line sources)
     whose expected withholding was not elected at issue: nothing was frozen."""
@@ -549,8 +578,6 @@ def _line_obligation(session, invoice_id):
 
 
 def test_pre_freeze_invoice_is_frozen_then_discharged(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -584,8 +611,6 @@ def test_pre_freeze_invoice_is_frozen_then_discharged(scratch):
 
 
 def test_double_freeze_is_refused(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -609,8 +634,6 @@ def test_double_freeze_is_refused(scratch):
 
 
 def test_freeze_above_outstanding_is_refused(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -633,8 +656,6 @@ def test_freeze_above_outstanding_is_refused(scratch):
 
 def test_freeze_must_be_as_of_the_issue_date(scratch):
     from datetime import date
-
-    from dotmac_billing.service import freeze_issued_invoice_withholding
 
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
@@ -660,8 +681,6 @@ def test_freeze_must_be_as_of_the_issue_date(scratch):
 
 
 def test_replay_of_the_same_command_id_is_a_no_op(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -681,8 +700,6 @@ def test_replay_of_the_same_command_id_is_a_no_op(scratch):
 
 
 def test_v1_evidence_is_refused(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -712,7 +729,6 @@ def _retarget(late, **result_changes):
 
 
 def test_a_determination_for_another_commercial_source_is_refused(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
     from dotmac_billing.tax_dependency_evidence import TaxCommercialSourceEvidenceV1
 
     admin_url, tenant_url, _ = scratch
@@ -735,8 +751,6 @@ def test_a_determination_for_another_commercial_source_is_refused(scratch):
 
 
 def test_a_determination_with_other_original_facts_is_refused(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -756,8 +770,6 @@ def test_a_determination_with_other_original_facts_is_refused(scratch):
 
 
 def test_a_base_above_the_bound_line_is_refused(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -789,7 +801,6 @@ def test_withholding_already_accepted_under_old_rules_does_not_block_a_freeze(
     """Older records stay correctable: outstanding plus already-withheld bounds it."""
     from alembic import command as alembic_command
     from alembic.config import Config
-    from dotmac_billing.service import freeze_issued_invoice_withholding
 
     with billing._scratch_database(
         (ModulePlane.TENANT,), target_revision="bi_0015_line_price_version_fk"
@@ -889,8 +900,6 @@ def test_database_refuses_a_late_freeze_next_to_issue_rows(scratch):
 
 
 def test_database_refuses_a_second_freeze_with_another_command(scratch):
-    from dotmac_billing.service import freeze_issued_invoice_withholding
-
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
@@ -931,9 +940,61 @@ def test_database_refuses_a_component_on_another_documents_line(scratch):
         session.rollback()
 
 
+def test_no_tax_reader_wired_refuses_the_freeze(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id, invoice_id, scope, _late(session, invoice_id, tax)
+                ),
+                tax_seal=None,
+            )
+        assert refused.value.code == "billing.withholding_freeze_tax_seal_unavailable"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+@pytest.mark.parametrize("fault", ["unknown", "fingerprint", "date"])
+def test_tax_must_confirm_the_determination(scratch, fault):
+    from datetime import timedelta
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        evidence = _late(session, invoice_id, tax)
+        seals = _TaxSeals(evidence)
+        key = evidence.determination.determination_set_id
+        if fault == "unknown":
+            seals.items.clear()
+        elif fault == "fingerprint":
+            seals.items[key] = replace(
+                seals.items[key], result_fingerprint="rv2:" + "c" * 64
+            )
+        else:
+            seals.items[key] = replace(
+                seals.items[key],
+                occurred_on=seals.items[key].occurred_on + timedelta(days=1),
+            )
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(account.id, invoice_id, scope, evidence),
+                tax_seal=seals,
+            )
+        assert refused.value.code == "billing.withholding_freeze_tax_seal_mismatch"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
 def test_platform_plane_freeze_is_refused(scratch):
     from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
-    from dotmac_billing.service import freeze_issued_invoice_withholding
     from dotmac_kernel.cache import PlatformScope
 
     _, _, platform_url = scratch

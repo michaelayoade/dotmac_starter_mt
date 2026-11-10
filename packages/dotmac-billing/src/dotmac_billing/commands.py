@@ -33,6 +33,28 @@ from dotmac_billing.opening_variance_contracts import OpeningVarianceResolutionR
 from dotmac_billing.tax_dependency_evidence import InvoiceTaxEvidenceV2
 
 
+@dataclass(frozen=True, slots=True)
+class TaxDeterminationSealV1:
+    """What dotmac-tax holds, sealed, for one determination set."""
+
+    determination_set_id: UUID
+    result_fingerprint: str
+    occurred_on: date
+
+
+class TaxSealReader(Protocol):
+    """Assembly adapter over the independently owned dotmac-tax capability.
+
+    ``read_seal`` returns the sealed identity Tax holds for a determination set,
+    or ``None`` when Tax has no such set. It is read-only and tenant-scoped. The
+    late-freeze command refuses when no reader is wired.
+    """
+
+    def read_seal(
+        self, *, scope: Scope, determination_set_id: UUID
+    ) -> TaxDeterminationSealV1 | None: ...
+
+
 class NumberingProvider(Protocol):
     """Assembly adapter over the independently owned numbering capability.
 
@@ -216,9 +238,12 @@ class FreezeIssuedInvoiceWithholding:
     classification. The caller does supply Tax-owned amounts, so Billing does
     not trust them: the determination must name the commercial source of
     exactly one line of this invoice, its original facts must equal the facts
-    that line retained, the base is capped at that line, and the frozen total is
-    capped at the outstanding amount plus withholding already accepted. The
-    frozen rows carry that line's obligation. Idempotent on ``command_id``.
+    that line retained, each base equals that line's source amount (plus the
+    referenced prior tax for a dependency-tax base), dotmac-tax must confirm the
+    determination through the wired ``TaxSealReader`` (no reader, no freeze), and
+    the frozen total is capped at the outstanding amount plus withholding already
+    accepted. The frozen rows carry that line's obligation. Idempotent on
+    ``command_id``.
     """
 
     scope: Scope
@@ -321,6 +346,8 @@ __all__ = [
     "IssueCreditNote",
     "IssueDocument",
     "NumberingProvider",
+    "TaxDeterminationSealV1",
+    "TaxSealReader",
     "ReallocationCommand",
     "RefundCommand",
     "ReversePostingGroupCommand",
