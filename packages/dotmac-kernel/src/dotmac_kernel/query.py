@@ -93,6 +93,9 @@ def pagination_context(*, total: int, limit: int, offset: int) -> dict[str, obje
     returned here. Promoted from Academy's product copy so every assembly
     renders list pagination the same way instead of re-deriving page math
     per route. `page_items` carries `None` where an ellipsis belongs.
+    The requested query offset is preserved. An out-of-range offset shows
+    0-0 with no active page; navigation stays near the last valid page and
+    Previous recovers there directly for a nonempty collection.
     """
     if limit < 1:
         raise ValueError("limit must be at least 1")
@@ -101,11 +104,11 @@ def pagination_context(*, total: int, limit: int, offset: int) -> dict[str, obje
     if total < 0:
         raise ValueError("total must not be negative")
     total_pages = max(1, ceil(total / limit))
-    current_page = min(total_pages, (offset // limit) + 1)
+    out_of_range = offset >= total if total else offset > 0
+    window_page = min(total_pages, (offset // limit) + 1)
+    current_page = None if out_of_range else window_page
     wanted = {1, total_pages}
-    wanted.update(
-        range(max(1, current_page - 1), min(total_pages, current_page + 1) + 1)
-    )
+    wanted.update(range(max(1, window_page - 1), min(total_pages, window_page + 1) + 1))
     page_items: list[int | None] = []
     previous = 0
     for page in sorted(wanted):
@@ -120,8 +123,11 @@ def pagination_context(*, total: int, limit: int, offset: int) -> dict[str, obje
         "current_page": current_page,
         "total_pages": total_pages,
         "page_items": page_items,
-        "page_start": offset + 1 if total else 0,
-        "page_end": min(offset + limit, total),
+        "page_start": offset + 1 if total and not out_of_range else 0,
+        "page_end": min(offset + limit, total) if not out_of_range else 0,
+        "prev_offset": (total_pages - 1) * limit
+        if out_of_range
+        else max(offset - limit, 0),
         "has_prev": offset > 0,
         "has_next": offset + limit < total,
     }

@@ -12,6 +12,32 @@ The current kernel version is the `[tool.poetry] version` in this package's
 `pyproject.toml` (pre-release `0.x` alphas; per-release notes in
 `CHANGELOG.md`) — it is deliberately not repeated here, where it would drift.
 
+## List pagination presentation
+
+`dotmac_kernel.query.pagination_context(*, total, limit, offset)` is public and
+pairs with `components/table_macros.html::table_pagination(request, pagination,
+label="items", page_sizes=(10, 25, 50), hidden_fields=())`. Integers must satisfy
+`total >= 0`, `limit >= 1`, `offset >= 0`; violations raise `ValueError`.
+
+The returned dict contains `total`, `limit`, the unchanged requested `offset`,
+`current_page`, `total_pages` (at least 1), `page_items` (integers with `None`
+ellipses), `page_start`, `page_end`, `prev_offset`, `has_prev`, and `has_next`.
+The helper does not run or clamp a query. At an offset outside a nonempty
+collection, or a positive offset into an empty collection, the displayed range
+is 0–0 and `current_page` is `None`: no page link is falsely marked active.
+Navigation stays anchored at the last valid window; Previous returns directly
+to `(total_pages - 1) * limit` for a nonempty stale offset and to zero for
+an empty stale offset; valid pages use `max(offset - limit, 0)`. Empty offset zero retains `current_page == 1`.
+Valid offsets preserve their existing ranges and page windows.
+
+The macro preserves URL query parameters, uses `prev_offset` for Previous,
+and resets offset to zero on its page-size GET form. `hidden_fields` supplies
+filters for that form. Assemblies provide the `table-pagination*`,
+`pagination-*`, and `rows-per-page` styling and Kernel `components.js` delegated
+submission behavior. The older `pagination(page, total_pages, base_url)` macro
+is unchanged. Source, deliberate departures and outstanding consumer retirement
+gates are recorded in [the UI inventory](../../docs/inventories/ui-build-once-20261110.md).
+
 ## Settings: the minimal core, and everything else
 
 Nine modules carry settings — `settings_resolver`, `settings_models`,

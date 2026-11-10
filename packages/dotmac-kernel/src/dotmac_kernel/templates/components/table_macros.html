@@ -178,7 +178,7 @@
     </form>
     <div class="pagination-pages">
       {% if pagination.has_prev %}
-      <a class="pagination-button pagination-direction" href="{{ request.url.include_query_params(offset=[pagination.offset - pagination.limit, 0] | max, limit=pagination.limit) }}" aria-label="Previous page">
+      <a class="pagination-button pagination-direction" href="{{ request.url.include_query_params(offset=pagination.prev_offset, limit=pagination.limit) }}" aria-label="Previous page">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 15-5-5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/></svg><span>Previous</span>
       </a>
       {% else %}
