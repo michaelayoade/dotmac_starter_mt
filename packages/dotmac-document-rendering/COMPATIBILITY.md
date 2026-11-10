@@ -70,3 +70,14 @@ The existing document currency scale remains zero through nine minor units.
 Equivalent Decimal scales, instant offsets and signed zero Money retain the
 same semantic digest and displayed value; no amount is rounded or recomputed
 by the renderer.
+
+## 0.1.0a2 V3 source successor
+
+V3 is additive and versioned independently: `InvoiceDocumentFactV3.contract_version
+== 3`, `DocumentProjectionV3.projection_contract_version == 3`, cv1 domains
+`dotmac-document-rendering.fact.v3` and `.projection.v3`. Section content for
+every field V2 projects is identical; the differences are the frozen
+`brand_logo` identity, the `brand_logo` template decision, and a payment link
+projected as plain text. The Kernel floor stays `>=0.1.0a103`. Catalogs and
+profile bindings are the V2 `TemplateCatalogV2`. A V3 renderer or PDF engine
+must declare `resource_policy == "data-only"`.

@@ -83,3 +83,28 @@ admitted digit independently of caller precision, rounding or traps. Coefficient
 absolute exponents and scaled Money integer digits are bounded at 4,096; values
 beyond those bounds fail with a typed refusal. The document currency contract
 and Kernel103 cv1 encoding stay unchanged, and caller contexts are preserved.
+
+## Embedded logo and data-only output (V3, source candidate)
+
+V3 is additive in the unreleased `0.1.0a2`; V1 and V2 are unchanged.
+`InvoiceDocumentFactV3` replaces V2's bare brand file reference with an
+`EmbeddedLogoAssetV3` snapshot frozen at issue: `{file_id, media_type
+(image/png|image/jpeg), sha256, byte_length <= 256 KiB}`. The bytes travel in
+`RenderRequestV3.logo_content`, read by the assembly through a scoped verified
+read of `dotmac-files`; this package never reads a file, brand or URL. Before
+use the bytes are checked for exact length, PNG/JPEG magic bytes and the frozen
+sha256, and the width and height parsed from the PNG IHDR or JPEG SOFn header must each be 1 to 4096 pixels (no pixel is decoded); any mismatch is a permanent `fact_shape_invalid` refusal with no
+payload. The only resource a V3 document references is the `data:` image the
+renderer builds from those verified bytes, and `html_data_only_violations_v3`
+fails the render if any other URL, active element or stylesheet reference
+appears. A frozen payment link is shown as text, not as an anchor.
+
+`PdfEngineV3` adds `resource_policy = "data-only"`: the engine fetches no
+file, network or relative resource. `PdfDocumentRendererV3` refuses an engine
+that does not declare it. Run `renderer_refusal_violations_v3` and
+`engine_refusal_violations_v3` (with a process-level `FetchSpy` supplied by the
+caller) against every renderer and engine; an empty result is the pass. A spy
+sees only its own process, so a subprocess or remote engine needs an
+observation point at its own boundary. Passing the kit is necessary, not
+sufficient: a real engine must pass it inside its own sandbox, and its
+declared policy proves nothing by itself.
