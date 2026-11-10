@@ -13,7 +13,7 @@ from alembic import op
 
 revision = "pa_0002_optional_supplier_doc"
 down_revision = "pa_0001_payables"
-branch_labels = ("payables",)
+branch_labels = None
 depends_on = None
 
 _SCHEMA = "mod_payables"

@@ -112,6 +112,18 @@ def test_supplier_document_number_is_optional_in_model_and_migration() -> None:
     assert source.count("nullable=False") == 1
 
 
+def test_payables_lineage_loads_as_one_alembic_head() -> None:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config()
+    config.set_main_option("script_location", str(ROOT / "migrations"))
+    scripts = ScriptDirectory.from_config(config)
+
+    assert scripts.get_heads() == ["pa_0002_optional_supplier_doc"]
+    assert scripts.get_bases() == ["pa_0001_payables"]
+
+
 def test_lineage_passes_the_composed_migration_gate() -> None:
     from dotmac_kernel.migrations.gate import run_gate
 
