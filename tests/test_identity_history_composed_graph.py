@@ -66,7 +66,7 @@ def test_real_installed_kernel_learning_and_partial_assembly_replay(
     }
     # This containing Kernel head supplies all four effects through genuine
     # ancestry, including 106's audit effect and the new credential tenant key.
-    head = "0030_credential_tenant_key"
+    head = "0031_rate_limit_buckets"
     bindings = tuple(
         PrerequisiteBinding(name, head, "kernel") for name in module.requires
     )

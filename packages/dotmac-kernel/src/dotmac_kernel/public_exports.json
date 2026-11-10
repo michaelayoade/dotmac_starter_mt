@@ -195,7 +195,9 @@
     "dotmac_kernel.config": {
       "classification": "supported",
       "exports": [
+        "ANONYMOUS_RATE_LIMIT_STORES",
         "Settings",
+        "anonymous_rate_limit_errors",
         "settings",
         "validate_settings"
       ],
@@ -843,9 +845,18 @@
     "dotmac_kernel.middleware.rate_limit": {
       "classification": "supported",
       "exports": [
+        "AnonymousRateLimitConfigurationError",
+        "AnonymousRateLimitPolicy",
+        "AnonymousRateLimitStoreError",
+        "AnonymousRouteRule",
+        "DedicatedLimiterSessions",
         "MemoryStore",
+        "PostgresRateLimitStore",
         "RateLimitMiddleware",
-        "RateLimitStore"
+        "RateLimitStore",
+        "anonymous_rate_limit_route_errors",
+        "build_anonymous_rate_limit",
+        "trusted_client_address"
       ],
       "status": "declared"
     },
@@ -982,7 +993,8 @@
       "exports": [
         "PlatformAdmin",
         "PlatformAuditEvent",
-        "PlatformSession"
+        "PlatformSession",
+        "RateLimitBucket"
       ],
       "status": "declared"
     },
