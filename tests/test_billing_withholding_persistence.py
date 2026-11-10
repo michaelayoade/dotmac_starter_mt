@@ -262,7 +262,7 @@ def _freeze_component(connection, plane, row):
         "document_id": row["document_id"],
         "obligation_id": None,
         "origin": "late_freeze",
-        "command_id": f"raw-fixture:{row['component_ref']}",
+        "command_id": f"raw-fixture:{row['document_id']}",
         "actor_ref": "finance-user:fixture",
         "reason": "fixture: component cited by a raw SQL discharge",
         "tax_source_owner": row["tax_source_owner"],
