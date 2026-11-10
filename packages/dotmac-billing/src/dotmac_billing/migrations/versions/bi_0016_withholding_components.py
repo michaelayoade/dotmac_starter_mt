@@ -187,6 +187,9 @@ def _create(platform: bool) -> None:
     table = f"{prefix}document_withholding_components"
     discharges = f"{prefix}withholding_discharges"
     scope_x = "" if platform else " AND x.tenant_id = NEW.tenant_id"
+    tenant_key = "'platform'" if platform else "NEW.tenant_id::text"
+    join_x = "" if platform else " AND o.tenant_id = x.tenant_id"
+    live_tenant = "" if platform else ", o.tenant_id"
     scope_list = [] if platform else ["tenant_id"]
     # Target of the component -> document line key; implied by the existing
     # one-line-per-obligation uniqueness, so it cannot reject any existing row.
@@ -253,6 +256,30 @@ def _create(platform: bool) -> None:
             ) THEN
                 RAISE EXCEPTION 'a document has a single withholding freeze'
                   USING ERRCODE = 'check_violation';
+            END IF;
+            -- One Tax determination backs one live invoice, for late freezes. The
+            -- advisory lock (plane, tenant, determination) serializes concurrent
+            -- freezes of the same determination across different documents; a
+            -- voided invoice no longer holds it (the same live-issuance rule the
+            -- receivable-backing resolution uses).
+            IF NEW.origin = 'late_freeze' THEN
+                PERFORM pg_advisory_xact_lock(hashtextextended(
+                    'billing.wht.freeze:{prefix}:' || {tenant_key} || ':'
+                    || NEW.tax_source_owner || ':' || NEW.determination_ref, 0));
+                IF EXISTS (
+                    SELECT 1 FROM mod_billing.{table} x
+                      JOIN mod_billing.{prefix}documents o
+                        ON o.id = x.document_id{join_x}
+                     WHERE x.origin = 'late_freeze'
+                       AND x.tax_source_owner = NEW.tax_source_owner
+                       AND x.determination_ref = NEW.determination_ref
+                       AND x.document_id <> NEW.document_id{scope_x}
+                       AND mod_billing.has_{prefix}live_invoice_issuance(
+                            o.id, o.billing_account_id, o.currency, o.minor_units{live_tenant})
+                ) THEN
+                    RAISE EXCEPTION 'this Tax determination is already frozen on another live invoice'
+                      USING ERRCODE = 'unique_violation';
+                END IF;
             END IF;
             SELECT coalesce(sum(x.tax_amount), 0) INTO frozen
               FROM mod_billing.{table} x WHERE x.document_id = NEW.document_id{scope_x};

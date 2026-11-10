@@ -52,9 +52,12 @@ chain after `bi_0014_opening_variance_ledger`.
     original fact and the elected components (code, rule, base, rate lines,
     amount) must equal what the caller offered, and the rows are built from
     Tax's values;
-  - one Tax determination backs one live invoice (`withholding_freeze_determination_in_use`;
-    a voided invoice releases it); the database does not enforce this because
-    voiding lives on document events, so it is a service rule;
+  - one Tax determination backs one live invoice for late freezes
+    (`withholding_freeze_determination_in_use`; a voided invoice releases it).
+    The service refuses first, and the admission trigger enforces it for
+    `late_freeze` rows under an advisory lock on (plane, tenant, determination),
+    reading liveness through the same `has_live_invoice_issuance` rule the
+    receivable-backing resolution uses (SQLSTATE 23505);
   - the frozen total is capped at outstanding plus withholding already accepted.
   The rows carry the bound line's obligation and are the same append-only rows
   issuance writes (`origin = 'late_freeze'`, with command id, actor, reason and
