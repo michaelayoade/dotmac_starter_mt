@@ -53,8 +53,10 @@ candidate digest in its output, and does not satisfy the lane.
 ## Independent publication evidence
 
 The public publication oracle requires authenticated offline verification in
-addition to receipt, selected-run and candidate binding. Its fixed result stage
-is unimplemented, so otherwise eligible receipts remain indeterminate.
+addition to receipt, selected-run and candidate binding. The fixed public
+consumer verifies SSHSIG and every current tuple/profile/policy/time binding.
+The checked-in signer policy remains unenrolled, so otherwise eligible receipts
+remain indeterminate; no production key or profile is introduced.
 
 The private plaintext consumer is an offline helper. It verifies exactly the
 manifest's two allowed members, their lengths and digests, strict exposure-call
@@ -64,8 +66,8 @@ Control consumption, outcomes, exact rules, foreign preservation or negative
 compensation, and cannot produce a publication certificate.
 
 Michael selected preparing the offline-custody design. Private evidence never
-becomes a public-runner input; authenticated result admission and complete
-independent joins remain open. No caller-written PASS supplies that missing
+becomes a public-runner input. Actual signer/profile enrollment, complete
+offline verification and independent joins remain open. No caller-written PASS supplies that missing
 authority, and no rehearsal item changes status in this source slice.
 
 ## Runner phase ordering and remaining execution blockers

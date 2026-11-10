@@ -461,13 +461,14 @@ provisioning, release or deployment was authorized by the design selection.
 
 The bounded plaintext consumer is offline-only: it verifies the closed
 manifest/member set and exposure-crossing completeness. The public publication
-oracle instead requires an authenticated offline verification result. That
-fixed stage is unimplemented and returns indeterminate. Complete independent
+oracle instead requires an authenticated offline verification result. Its
+public consumer is implemented with an unenrolled policy, so it remains
+indeterminate. Complete independent
 Control/outcome/compensation joins remain required before any result can
 certify a rehearsal. Eligible receipt metadata alone cannot make publication
 pass, and private plaintext is not a public-runner input.
 
-### Prepared offline-result design (not implemented)
+### Public offline-result authentication (source; unenrolled)
 
 Use a dedicated offline Ed25519 signing key, separate from the `age` decryption
 key and existing CP, candidate and host keys. The proposed maintained signature
@@ -476,24 +477,42 @@ with fixed namespace `foundation-rehearsal-verification-v1@dotmac.io` and signer
 principal `foundation-offline-verifier@dotmac.io`. These are purpose identifiers,
 not assertions that an email account or enrolled key exists.
 
-A pinned offline verifier checks ciphertext identity before decryption, checks
-its approved source/tool profile, then performs every required private evidence
-join. Only after success may it create a closed canonical public result bound
-to the selected repository/run/attempt, evidence artifact, receipt/ciphertext
-and candidate digests, release revision, verifier profile and verification
-policy, with verification and expiry times. No private paths, addresses, raw
-observations, free text or caller-supplied check results leave that boundary.
-The plaintext helper alone cannot produce this complete result.
+The complete offline orchestrator remains unimplemented. It must check
+ciphertext identity before decryption, its approved source/tool profile and
+every required private evidence join before creating any verified result. The
+plaintext helper alone cannot produce one.
+
+The implemented `lane3.offline-verification-result.v1` public claim binds the
+selected repository/run/attempt, SDK-canonical receipt digest, ciphertext digest,
+CandidateArtifact.v1 record digest, release revision, verifier source/profile
+and current policy digests, verification time and expiry. The artifact-record
+digest is not the wheel file SHA. No independently unverified evidence artifact
+ID or wheel SHA is added to this contract; actual retrieval/provenance and
+recorded distribution bytes remain full offline-verifier prerequisites. No
+private paths, addresses, raw observations, free text or supplied check results
+belong in the public claim.
 
 The public oracle authenticates the detached signature with a protected-main
-public signer policy and mandatory revocation file, and independently matches
-every expected coordinate and current profile/policy standing. Neither result
-nor workflow input selects the trust root, verifier executable or verification
-time. Initial proposed limits are 24 hours result lifetime and five minutes
-future-clock tolerance; these need refusal proofs before operational use.
-Two bounded public base64 workflow inputs, decoded through fixed Python file
-handling, can transport result and signature without a new service or registry.
-They remain untrusted evidence until signature and binding checks pass.
+policy, signer file and mandatory revocation file. Their exact hashes, fixed
+namespace/principal, current source/profile, all expected coordinates and expiry
+must match. The fixed `/usr/bin/ssh-keygen` must be a safe root-owned regular
+file matching the enrolled tool hash. Result and workflow input select no trust
+root, executable or verification time. Maximum result age/lifetime is 24 hours;
+future-clock tolerance is five minutes. OpenSSH applies signer validity and
+revocations at current verification time.
+
+Two bounded public base64 inputs enter the release step through environment
+values, never shell interpolation. Strict decoding and authentication precede
+retention of the exact public result, signature and receipt in a named release
+artifact. The existing candidate-distribution artifact remains separate. No
+new service or result registry is introduced.
+
+The publisher receives the seven independent build-oracle coordinates through
+fixed job outputs. After preparation and a fresh protected-main assertion, it
+re-authenticates that selected public decision immediately before upload. A
+fresh post-signature clock check rejects expiry during queue or verification.
+This narrow recheck does not select a newer rehearsal API run; API selection
+and admission remain the original build-side oracle's responsibility.
 
 This signature authenticates the trusted offline principal; it does not prove
 actual code execution or workstation integrity. Michael must control that
@@ -501,12 +520,17 @@ boundary and run the pinned verifier. Existing cosign/SLSA artifact proofs and
 OpenBao identity proofs keep their separate purposes. Existing host/candidate
 attestations cannot be repurposed to certify bundle contents.
 
-The result schema, signature adapter, public trust/profile policy and offline
-orchestrator still require source implementation and hosted negative proofs.
-The operational packet must identify actual tool pins, public recipient and
-signing-key enrollment, custody procedure, revocation/recovery and cleanup.
-This design creates no key and enrolls no signer. Publication stays unavailable
-until all required evidence and current trust checks are implemented and pass.
+Hosted synthetic-key tests are authored for the result parser, signature
+adapter and public oracle wiring; execution remains required. The shipped
+policy is `unenrolled`, its three enrollment pins are null, and both public
+trust files are empty. Missing revocations never mean success. This source
+creates no production key and enrolls no signer.
+
+The complete offline verifier, private evidence joins and actual operational
+packet remain open. That packet must identify tool/profile pins, public age
+recipient and signing-key enrollment, custody procedure, revocation/recovery,
+cleanup and live negative proofs. Publication stays unavailable until every
+required evidence and current trust check is implemented, qualified and enrolled.
 
 ## 12. D4 scope: producing `RehearsalReceipt.v2` (added 2026-10-06)
 
