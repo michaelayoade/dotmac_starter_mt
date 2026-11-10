@@ -141,10 +141,7 @@ def test_confirmation_needs_an_actor_a_matching_emitted_at_and_a_past_instant(
     # emitted_at differs from the resolution instant.
     with pytest.raises(DBAPIError, match="owner evidence"):
         admin.execute(
-            text(
-                sql
-                % ("emitted_at = :at, validity_resolved_at = :at2" + actor)
-            ),
+            text(sql % ("emitted_at = :at, validity_resolved_at = :at2" + actor)),
             {
                 "id": pending,
                 "at": RESOLVED_AT,

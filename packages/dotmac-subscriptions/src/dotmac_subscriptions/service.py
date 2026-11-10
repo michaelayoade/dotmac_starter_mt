@@ -37,13 +37,13 @@ from dotmac_subscriptions.commands import (
     ContractLineInput,
     ContractVersionResult,
     DurableTimerPort,
-    OwnerEvidencePort,
     EndContractVersionCommand,
     EndContractVersionResult,
     GenerateRecurringChargeCommand,
     OccurrenceResult,
     OccurrenceValidityResult,
     OfferPricingMode,
+    OwnerEvidencePort,
     PublishOfferVersionCommand,
     PublishOfferVersionResult,
     RecordSubscriptionContractVersionCommand,
@@ -66,7 +66,6 @@ from dotmac_subscriptions.errors import (
     SubscriptionStateError,
 )
 from dotmac_subscriptions.lifecycle import (
-    VALIDITY_HOLD_OWNERS,
     OccurrenceState,
     OccurrenceValidityHold,
     OccurrenceValidityOutcome,

@@ -123,7 +123,7 @@ class SubscriptionVocabularyRegistry:
                 owner=manifest.name,
                 vocabulary="obligation source",
             )
-        installed = {manifest.code for manifest in manifests}
+        installed = {manifest.name for manifest in manifests}
         hold_owners: dict[str, str] = {}
         # The default (prepaid -> billing, which derives the prepaid_funding
         # lane) is applied only where billing is installed.  `capped` has NO
