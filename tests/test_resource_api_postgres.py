@@ -371,7 +371,7 @@ def test_without_the_advisory_lock_both_versions_apply(
 ) -> None:
     """Sensitivity proof: the lock is what prevents the mislabelled double apply."""
     monkeypatch.setattr(
-        "dotmac_kernel.source_import.lock_reference", lambda *a, **k: None
+        "dotmac_kernel.source_import._lock_reference", lambda *a, **k: None
     )
     results, applied = _race(engine, tenant)
     assert sorted(applied) == [3, 5]

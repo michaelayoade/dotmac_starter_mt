@@ -1649,8 +1649,7 @@
         "content_digest",
         "flat_id_map",
         "import_record",
-        "import_scope",
-        "lock_reference"
+        "import_scope"
       ],
       "status": "declared"
     },

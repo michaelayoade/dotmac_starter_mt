@@ -28,7 +28,7 @@ row commit together), so a crash leaves no row and a retry re-drives cleanly.
 Concurrency: two requests for the SAME key are also serialised by the ledger's
 unique constraint.
 
-Concurrency (B6): ``lock_reference`` takes a transaction-scoped advisory lock on
+Concurrency (B6): ``_lock_reference`` takes a transaction-scoped advisory lock on
 (tenant, scope, reference) before the prior-version read, so importers of one
 reference are serialised and a racing v3 and v5 end with one applied and one
 ``stale`` or ``updated`` decided on the true prior state. The stored result is a
@@ -177,7 +177,7 @@ def flat_id_map(result: Mapping[str, object] | None) -> dict[str, object]:
     return checked
 
 
-def lock_reference(
+def _lock_reference(
     db: Session, *, tenant_id: Any, scope: str, external_ref: str
 ) -> None:
     """Serialise importers of one (tenant, scope, reference) until transaction end (B6).
@@ -281,7 +281,7 @@ def import_record(
             result=result,
         )
 
-    lock_reference(
+    _lock_reference(
         db, tenant_id=principal.tenant_id, scope=scope, external_ref=external_ref
     )
     if current_version is not None:
@@ -332,6 +332,5 @@ __all__ = [
     "content_digest",
     "flat_id_map",
     "import_record",
-    "lock_reference",
     "import_scope",
 ]
