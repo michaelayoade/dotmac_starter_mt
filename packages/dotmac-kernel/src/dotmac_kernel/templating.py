@@ -3,7 +3,9 @@
 Every web route renders HTML through `render()` in this module — never
 construct a separate `Jinja2Templates` instance elsewhere, so template
 context always carries the same globals (`request`, `brand`,
-`static_asset_url`, `current_year`) from one place.
+`static_asset_url`, `current_year`) from one place. Optional per-render product
+filters use a temporary adapter over an isolated overlay of this same
+composition; they do not create a second composition or runtime owner.
 
 Ported from ST:app/templates.py (`_asset_version`/`_static_asset_url`);
 the sanitize/format/timeago Jinja filters from that donor are NOT ported
@@ -41,7 +43,7 @@ explicit route context > per-request tenant override > static global.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from functools import lru_cache
@@ -311,6 +313,7 @@ def render(
     context: dict[str, Any] | None = None,
     *,
     status_code: int = 200,
+    filters: Mapping[str, Callable[..., Any]] | None = None,
 ) -> HTMLResponse:
     """Render template `name` with `context`, returning an HTMLResponse.
 
@@ -326,11 +329,40 @@ def render(
     `context` didn't already define its own — see this module's docstring
     for the full precedence rule and why no route needs to change to pick
     this up.
+
+    `filters` supplies render-local product callables without mutating the
+    canonical environment. Names are dot-separated identifiers and must not
+    replace canonical filters, including Jinja builtins. Validation snapshots
+    the mapping before any template is loaded. A nonempty snapshot uses a
+    fresh overlay with private filter/global dictionaries and no bytecode
+    cache, so compiled constants cannot leak between filter implementations.
     """
+    if filters is not None and not isinstance(filters, Mapping):
+        raise TypeError("filters must be a mapping")
+    filter_snapshot = dict(filters) if filters is not None else {}
+    for filter_name, function in filter_snapshot.items():
+        if not isinstance(filter_name, str) or not all(
+            part.isidentifier() for part in filter_name.split(".")
+        ):
+            raise ValueError("filter names must be dot-separated identifiers")
+        if filter_name in templates.env.filters:
+            raise ValueError("canonical filter names are reserved")
+        if not callable(function):
+            raise TypeError("filter values must be callable")
+    renderer = templates
+    if filter_snapshot:
+        env = templates.env.overlay(bytecode_cache=None)
+        env.filters = {**templates.env.filters, **filter_snapshot}
+        env.globals = dict(templates.env.globals)
+        renderer = Jinja2Templates(
+            env=env, context_processors=templates.context_processors
+        )
+
     ctx = dict(context or {})
     surface: SurfaceContext | None = getattr(request.state, "surface_context", None)
     if surface is None:
-        app = getattr(request, "app", None)
+        # Request.app indexes scope["app"] and raises for a bare request.
+        app = getattr(request, "scope", {}).get("app")
         app_state = getattr(app, "state", None)
         candidate = getattr(app_state, "default_surface_context", None)
         surface = candidate if isinstance(candidate, SurfaceContext) else None
@@ -355,7 +387,7 @@ def render(
     branding = getattr(request.state, "branding", None)
     if branding is not None:
         ctx.setdefault("brand", branding)
-    return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+    return renderer.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
 __all__ = [

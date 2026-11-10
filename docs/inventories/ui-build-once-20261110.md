@@ -69,3 +69,63 @@ installed-artifact cutover; a source observation does not retire their code.
 Auth and error local templates retire only after product context/route contracts
 and the foreign-shell/error-body canary pass against the installed artifact.
 No version, release authorization or adoption disposition is allocated here.
+
+
+## Per-render product filters — source amendment before implementation
+
+Added 2026-11-10 before the render-filter extension. Academy
+`c9cc6cb12c28992106e9a6b7324df6d6478a71b9:app/web/templating.py` constructs a
+product `Jinja2Templates` with `nav_context`, registers `localtime` from
+`app/services/localtime.py`, and defines/registers `datefmt` and `elapsed`.
+Actual caller examples are `templates/learn/home.html` (localtime/datefmt),
+`templates/labs/_operation.html` and `templates/labs/_status.html`
+(localtime/elapsed), and `templates/admin/reminders.html` (localtime).
+These observations were retrieved with read-only `git show` and `git grep` from
+the sender-hold object repository; C9 is source evidence, not a claim that this
+revision or the extension is in production.
+
+At the existing ERP `74fa788ae562905e4c8a1fcd46616585e4bf7694` baseline,
+`app/templates.py` constructs one product template environment and registers
+`format_currency`, `format_number`, `format_date`, `format_datetime`,
+`urldecode`, `sanitize_html` and `nl2br`. At the existing Sub
+`c7707880232c9298ef89c24a1aea66d35bd3a1e6` baseline, `app/timezone.py`
+installs a class-level TemplateResponse patch to localize context, while
+`app/services/web_auth.py` and other product web services construct environments.
+The inventory does not port these lifecycle/global mutation mechanisms.
+
+`render(..., filters=...)` is NEW design in the existing Kernel templating
+owner, not a production port or a new rendering/runtime owner. It snapshots and
+validates product filter names/callables, refuses collisions with canonical
+filters (including Jinja builtins), and for a nonempty mapping makes an ephemeral
+environment overlay with private filter/global dictionaries and no bytecode
+cache. It retains the canonical loader and autoescape policy, and uses the
+public `Jinja2Templates(env=..., context_processors=...)` adapter to preserve
+TemplateResponse metadata and context processing. No environment getter,
+persistent overlay cache or public singleton is added. Product filter logic,
+branding/nav/context facades and product resource policy remain product-owned.
+
+Source compatibility was inspected without importing applications: the lock
+pins Starlette 0.46.2, and both its installed `templating.py` and cached 0.37.2
+source/metadata expose the public `env=` constructor. Kernel's FastAPI floor is
+`>=0.111`; no dependency floor or version is allocated by this extension.
+
+`compose_templates` still changes ONE process-global composition; the last
+composition wins. Render-local filter isolation is not concurrent isolation for
+different applications' template loaders. None/empty filter calls preserve the
+existing canonical rendering path. Hosted tests in `tests/unit/test_templating.py`
+cover real shared-macro/product include/import composition, alternating filter
+implementations, snapshotting, canonical and shared-bytecode-cache isolation,
+invalid/reserved mappings, autoescape, context processors and response metadata,
+CSRF/branding/surface propagation and sequential namespace/reset behavior.
+Tests are authored, not executed locally. Hosted final-head/base acceptance,
+verified installed release and Academy public-render cutover remain pending;
+no adoption or product environment retirement is claimed.
+
+
+The consumer also exposed an existing bare-request rendering defect:
+Starlette `Request.app` indexes `scope["app"]` and raises `KeyError` for direct
+handler test requests without an application. The same owner now reads the
+optional application through public request scope when selecting the default
+surface. Normal FastAPI scopes preserve their default surface; a bare request
+uses the existing empty-surface fallback. A dedicated hosted canary covers this
+bounded exception to preserving the old no-filter rendering path.

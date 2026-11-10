@@ -38,6 +38,35 @@ submission behavior. The older `pagination(page, total_pages, base_url)` macro
 is unchanged. Source, deliberate departures and outstanding consumer retirement
 gates are recorded in [the UI inventory](../../docs/inventories/ui-build-once-20261110.md).
 
+## Render-local product filters
+
+`dotmac_kernel.templating.render(request, name, context=None, *,
+status_code=200, filters=None)` accepts an optional
+`Mapping[str, Callable[..., Any]]`. It snapshots the mapping before rendering.
+Names must be nonempty dot-separated identifiers; values must be callable.
+A non-mapping or noncallable value raises `TypeError`; an invalid name or a
+collision with any canonical filter, including Jinja builtins and Kernel's
+`local_datetime`/`local_date`, raises `ValueError` before template rendering.
+A failed validation does not install any filters.
+
+None/empty mappings follow the existing canonical path. Nonempty mappings apply
+only to that response and its includes/imports/macros through an ephemeral
+same-owner environment overlay, with copied filter/global dictionaries and no
+bytecode cache. The canonical loader, autoescape, context processors, request,
+CSRF, branding/surface enrichment, status and TemplateResponse metadata remain
+in force. Caller filter functions retain their own behavior and state; Kernel
+does not copy callables or make them safe to execute untrusted code.
+
+The private `templates` singleton and `static_asset_url` Python helper remain
+unsupported product imports. Products pass filter callables through `render`
+and product context through its existing `context` argument. This extension
+adds no getter or persistent environment. `compose_templates` remains one
+process-global composition, with the last composition winning; render-local
+filters do not isolate different applications' concurrent loader compositions.
+This extension is unpublished and awaits hosted and installed-artifact
+qualification; [the source inventory](../../docs/inventories/ui-build-once-20261110.md)
+records the Academy caller and related ERP/Sub owners.
+
 ## Settings: the minimal core, and everything else
 
 Nine modules carry settings — `settings_resolver`, `settings_models`,
