@@ -72,9 +72,9 @@ def _v2(old):
     )
 
 
-def _evidence(scope):
+def _evidence(scope, *, wht_tax="10"):
     vat = _v2(predecessor._evidence(scope))
-    raw = _v2(predecessor._evidence(scope, taxes=("10",)))
+    raw = _v2(predecessor._evidence(scope, taxes=(wht_tax,)))
     component = raw.components[0]
     component = replace(
         component,

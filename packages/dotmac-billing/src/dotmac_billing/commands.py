@@ -31,7 +31,6 @@ from dotmac_billing.contracts import (
 )
 from dotmac_billing.opening_variance_contracts import OpeningVarianceResolutionRefV1
 from dotmac_billing.tax_dependency_evidence import InvoiceTaxEvidenceV2
-from dotmac_billing.tax_evidence import InvoiceTaxEvidenceV1
 
 
 class NumberingProvider(Protocol):
@@ -212,10 +211,14 @@ class AcceptWithholdingDischarge:
 class FreezeIssuedInvoiceWithholding:
     """Freeze withholding for an issued invoice that has no frozen components.
 
-    ``evidence`` is the dotmac-tax determination evaluated as of the invoice's
+    ``evidence`` is a V2 dotmac-tax determination, evaluated as of the invoice's
     issue date (purpose ``expected_withholding``); the election is its party
-    classification. There are no caller-supplied amounts. Idempotent on
-    ``command_id``.
+    classification. The caller does supply Tax-owned amounts, so Billing does
+    not trust them: the determination must name the commercial source of
+    exactly one line of this invoice, its original facts must equal the facts
+    that line retained, the base is capped at that line, and the frozen total is
+    capped at the outstanding amount plus withholding already accepted. The
+    frozen rows carry that line's obligation. Idempotent on ``command_id``.
     """
 
     scope: Scope
@@ -224,7 +227,7 @@ class FreezeIssuedInvoiceWithholding:
     command_id: str
     actor_ref: str
     reason: str
-    evidence: InvoiceTaxEvidenceV1 | InvoiceTaxEvidenceV2
+    evidence: InvoiceTaxEvidenceV2
 
 
 @dataclass(frozen=True, slots=True)

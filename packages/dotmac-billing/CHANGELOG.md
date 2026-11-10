@@ -39,21 +39,27 @@ chain after `bi_0014_opening_variance_ledger`.
   index and permanent source claim are unchanged.
 - B2: add `freeze_issued_invoice_withholding` (`FreezeIssuedInvoiceWithholding`),
   the governed command for an issued invoice that has no frozen components
-  (issued before bi_0016, or imported as an open item). It takes the
-  dotmac-tax expected-withholding determination evaluated as of the invoice's
-  issue date (election = its party classification; no caller-supplied amounts)
-  and writes the same append-only component rows issuance writes
+  (issued before bi_0016). It takes a V2 dotmac-tax expected-withholding
+  determination evaluated as of the invoice's issue date (election = its party
+  classification). The amounts are Tax's but not trusted: the determination must
+  name the commercial source of exactly one line of the invoice, its original
+  facts must equal that line's retained facts, the base is capped at the line
+  (net, or gross for a dependency-tax base) and the frozen total at outstanding
+  plus withholding already accepted. The rows carry that line's obligation. It
+  writes the same append-only component rows issuance writes
   (`origin = 'late_freeze'`, with command id, actor, reason and the
   determination reference); it never mutates the invoice. Idempotent on
   `command_id`; refused when components exist, for a credit note, void or
   non-live invoice, when the determination is not as of the issue date, or when
   the frozen total would exceed the outstanding receivable. Tenant plane only;
   the platform plane stays fail-closed (`withholding_freeze_platform_unsupported`).
-  The component's `obligation_id` is optional for this origin (imported items
-  have no rated obligation). Afterwards the discharge foreign key, cap guard and
-  credit-draw cap apply unchanged. Opening-import hook: the import caller (an
-  assembly or the opening lane) invokes this same function for each imported
-  open invoice after admission; no opening-lane code is changed here.
+  A component's document and obligation must be a line of that document
+  (composite key on `document_lines`), a document has a single freeze (same
+  origin and command id, serialized by the document row lock in the admission
+  trigger). Afterwards the discharge foreign key, cap guard and
+  credit-draw cap apply unchanged. An imported open invoice carries no document
+  line, so it has no line source to bind and the command refuses it
+  (`withholding_freeze_unbound`); how those are frozen is an open decision.
 - B2: `apply_available_credit` may draw at most the invoice's outstanding
   receivable less its undischarged frozen withholding
   (`credit_exceeds_non_withholding_room`), so credit is drawn before the

@@ -2,16 +2,10 @@
 
 A discharge now needs a frozen component of its invoice. These helpers build a
 real dotmac-tax determination that matches a legacy discharge command's Tax
-evidence and freeze it through the governed
-``freeze_issued_invoice_withholding`` command (tenant plane). Where that command
-cannot or must not run, a component row is written directly with the same
-production row builder:
-
-* the platform plane (Tax evidence is tenant-only, so the command refuses it);
-* a second component on an invoice that already has one (the command freezes one
-  determination per invoice);
-* ``direct=True`` for tests whose subject is a later refusal (a reversed
-  issuance, an over-outstanding claim) that the command would pre-empt.
+evidence and write the component row with the same production row builder the
+issue path and the governed late-freeze command use. They do not go through the
+command: it binds its Tax evidence to the invoice's declared line sources, which
+the legacy fixtures do not have, and it is proven on its own.
 
 No assertion of any legacy test is changed; only the missing precondition (a
 frozen elected component) is supplied.
@@ -30,7 +24,6 @@ from dotmac_billing import (
     TaxDeterminationSetEvidenceV1,
     service,
 )
-from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Money
 from sqlalchemy import select
@@ -96,48 +89,59 @@ def _determination(scope, tax, document) -> InvoiceTaxEvidenceV1:
 
 
 def ensure_frozen(db, scope, command, *, direct: bool = False) -> None:
-    """Make the component a discharge command cites exist, once."""
+    """Make the component a discharge command cites exist, once.
+
+    The governed late-freeze command now binds Tax evidence to the invoice's own
+    declared line sources, which these legacy fixtures do not carry, so a
+    component is always written directly with the production row builder. The
+    command itself is proven in ``test_billing_withholding_frozen``. ``direct``
+    is kept for callers; both settings write the row directly.
+
+    A document has a single freeze, so a second component on an invoice reuses
+    the existing rows' origin, command and obligation.
+    """
     tax = command.tax_evidence
     plane = service._models(scope)
-    existing = db.execute(
-        select(
-            plane.wht_component.document_id, plane.wht_component.component_ref
-        ).where(plane.wht_component.document_id == command.document_id)
-    ).all()
+    existing = (
+        db.execute(
+            select(plane.wht_component).where(
+                plane.wht_component.document_id == command.document_id
+            )
+        )
+        .scalars()
+        .all()
+    )
     if any(row.component_ref == tax.component_ref for row in existing):
         return
     document = db.get(plane.document, command.document_id)
     evidence = _determination(scope, tax, document)
-    if isinstance(scope, TenantScope) and not existing and not direct:
-        service.freeze_issued_invoice_withholding(
-            db,
-            scope=scope,
-            command=FreezeIssuedInvoiceWithholding(
-                scope,
-                command.billing_account_id,
-                command.document_id,
-                f"fixture-freeze:{tax.determination_ref}",
-                "finance-user:fixture",
-                "fixture: invoice predates frozen withholding",
-                evidence,
-            ),
-        )
-        return
     result = evidence.determination
+    if existing:
+        first = existing[0]
+        origin = {
+            "origin": first.origin,
+            "command_id": first.command_id,
+            "actor_ref": first.actor_ref,
+            "reason": first.reason,
+        }
+        obligation_id = first.obligation_id
+    else:
+        origin = {
+            "origin": "late_freeze",
+            "command_id": f"fixture-freeze:{command.document_id}",
+            "actor_ref": "finance-user:fixture",
+            "reason": "fixture: direct component for a legacy test",
+        }
+        obligation_id = document.obligation_id
     db.add(
         service._frozen_component_row(
             scope=scope,
             plane=plane,
             document=document,
-            obligation_id=document.obligation_id,
+            obligation_id=obligation_id,
             result=result,
             component=result.components[0],
-            origin={
-                "origin": "late_freeze",
-                "command_id": f"fixture-freeze:{tax.determination_ref}",
-                "actor_ref": "finance-user:fixture",
-                "reason": "fixture: direct component for a legacy test",
-            },
+            origin=origin,
         )
     )
     db.flush()

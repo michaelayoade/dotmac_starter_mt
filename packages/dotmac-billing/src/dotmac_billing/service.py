@@ -3274,18 +3274,115 @@ def _freeze_withholding_components(
     return frozen
 
 
+def _bind_freeze_to_invoice_line(
+    db: Session,
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    document: _DocumentRow,
+    evidence: InvoiceTaxEvidenceV2,
+) -> Any:
+    """The invoice line (its obligation) whose commercial source the Tax
+    determination describes; refuses when none or more than one matches.
+
+    The determination's commercial source must be declared by exactly one line's
+    retained Tax evidence, and the original facts it states must equal the facts
+    retained for that source on the line. Returns that line's obligation.
+    """
+
+    wanted = evidence.determination.commercial_source
+    facts = _original_facts(evidence.determination)
+    lines = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.line)
+                .where(plane.line.document_id == document.id)
+                .order_by(plane.line.line_number),
+                scope,
+                plane.line,
+            )
+        ).scalars()
+    )
+    matches: list[Any] = []
+    for line in lines:
+        if line.obligation_id is None:
+            continue
+        obligation = _one(
+            db, scope=scope, model=plane.obligation, row_id=line.obligation_id
+        )
+        payload = obligation.tax_evidence
+        if not _is_dependency_evidence_payload(payload):
+            continue
+        try:
+            retained = _decode_tax_evidence(
+                payload,
+                scope=scope,
+                tax_amount=_money(
+                    obligation.tax_amount, obligation.currency, obligation.minor_units
+                ),
+            )
+            declared = _decode(
+                payload[0]["commercial_sources"],
+                tuple[TaxCommercialSourceEvidenceV1, ...],
+            )
+        except (BillingRuleViolation, ValueError, TypeError, KeyError):
+            continue
+        if wanted not in declared:
+            continue
+        for item in cast(tuple[InvoiceTaxEvidenceV2, ...], retained):
+            for result in (item.determination, *item.prior_determinations):
+                if result.commercial_source == wanted and (
+                    _original_facts(result) != facts
+                ):
+                    raise BillingRuleViolation(
+                        "withholding_freeze_facts_differ",
+                        "the Tax determination describes different original facts "
+                        "than the invoice line retained",
+                    )
+        matches.append(obligation)
+    if len({row.id for row in matches}) != 1:
+        raise BillingRuleViolation(
+            "withholding_freeze_unbound",
+            "the Tax determination must name the commercial source of exactly one "
+            "line of this invoice",
+        )
+    return matches[0]
+
+
+def _original_facts(result: Any) -> tuple[object, ...]:
+    """The original-fact tuple a commercial source pins, without its date.
+
+    The date is checked separately (it must be the invoice issue date), because
+    the line's retained evidence may have been determined at another instant.
+    """
+
+    return (
+        result.tenant_id,
+        result.source_amount,
+        result.recognition_basis_code,
+        result.counterparty_ref,
+        result.supply_ref,
+        result.place_ref,
+    )
+
+
 def freeze_issued_invoice_withholding(
     db: Session, *, scope: Scope, command: FreezeIssuedInvoiceWithholding
 ) -> tuple[Any, ...]:
     """Freeze withholding for an issued invoice that has none frozen (tenant plane).
 
-    For an invoice issued before components were frozen, or imported as an open
-    item. The dotmac-tax determination is evaluated as of the invoice's issue
-    date; the election is its party classification. It writes the same
-    append-only component rows issuance writes and never touches the invoice.
-    Idempotent on ``command_id``; refused when components exist, for a credit
-    note or void invoice, when the determination is not as of the issue date, or
-    when the frozen withholding would exceed what is still outstanding.
+    For an invoice issued before components were frozen. The caller supplies a
+    dotmac-tax V2 determination evaluated as of the invoice's issue date; the
+    election is its party classification. Billing does not take it on trust: the
+    determination's commercial source must be one of the invoice's own line
+    sources, the original facts it describes (tenant, source amount, recognition
+    basis, counterparty, supply, place) must equal the facts retained on that
+    line, and the frozen base is capped at that line. The rows carry the bound
+    line's obligation. It writes the same append-only component rows issuance
+    writes and never touches the invoice. Idempotent on ``command_id``; refused
+    when components exist, for a credit note or void invoice, for V1 evidence,
+    when the determination is not as of the issue date, or when the frozen
+    withholding would exceed what is outstanding plus what was already withheld.
     """
 
     if not isinstance(scope, TenantScope):
@@ -3342,13 +3439,19 @@ def freeze_issued_invoice_withholding(
         evidence = command.evidence
         currency = Currency(document.currency, document.minor_units)
         try:
+            if not isinstance(evidence, InvoiceTaxEvidenceV2):
+                raise ValueError("freeze requires V2 Tax evidence with its source")
             if evidence.purpose != "expected_withholding":
                 raise ValueError("freeze requires expected-withholding evidence")
+            validate_commercial_source_binding(
+                (evidence,),
+                commercial_sources=(evidence.determination.commercial_source,),
+            )
             validate_invoice_tax_evidence_versioned(
                 (evidence,),
                 scope=scope,
                 tax_amount=Money(Decimal(0), currency),
-                v2=isinstance(evidence, InvoiceTaxEvidenceV2),
+                v2=True,
             )
         except (ValueError, TypeError, DecimalException) as exc:
             raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
@@ -3378,18 +3481,50 @@ def freeze_issued_invoice_withholding(
                 "withholding_freeze_currency",
                 "withholding currency differs from the invoice",
             )
+        bound = _bind_freeze_to_invoice_line(
+            session, scope=scope, plane=plane, document=document, evidence=evidence
+        )
+        line_net = Decimal(bound.pre_tax_amount)
+        line_gross = Decimal(bound.total_amount)
+        base_total = Decimal(0)
+        for c in elected:
+            base_total += c.base_amount.amount
+            # A base that folds in a dependency tax may reach the line's gross;
+            # any other base stays within the line's net.
+            limit = (
+                line_gross
+                if c.calculation_base_code == "source_plus_dependency_tax"
+                else line_net
+            )
+            if c.base_amount.amount > limit:
+                raise BillingRuleViolation(
+                    "withholding_freeze_base_exceeds_line",
+                    "a withholding base exceeds the invoice line it is bound to",
+                )
+        if base_total > line_gross:
+            raise BillingRuleViolation(
+                "withholding_freeze_base_exceeds_line",
+                "the total withholding base exceeds the invoice line it is bound to",
+            )
         total = sum((c.tax_amount.amount for c in elected), Decimal(0))
-        if total > _document_outstanding(session, scope=scope, document=document):
+        # Older finance records stay correctable: withholding already accepted
+        # under earlier rules reduced the outstanding amount, so it is added
+        # back. The command only computes this bound; it repairs nothing.
+        room = _document_outstanding(
+            session, scope=scope, document=document
+        ) + _document_withheld(session, scope=scope, document_id=document.id)
+        if total > room:
             raise BillingRuleViolation(
                 "withholding_freeze_exceeds_outstanding",
-                "frozen withholding would exceed the invoice's outstanding receivable",
+                "frozen withholding would exceed the invoice's outstanding "
+                "receivable plus the withholding already accepted",
             )
         rows = [
             _frozen_component_row(
                 scope=scope,
                 plane=plane,
                 document=document,
-                obligation_id=document.obligation_id,
+                obligation_id=bound.id,
                 result=result,
                 component=component,
                 origin={

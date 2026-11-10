@@ -35,8 +35,8 @@ No downgrade.
 
 from __future__ import annotations
 
-# All identifiers are closed Billing plane/table literals.
-# ruff: noqa: S608
+# All DDL identifiers are closed Billing plane/table literals (see the per-line
+# S608 suppressions below).
 from collections.abc import Iterator
 
 import sqlalchemy as sa
@@ -137,6 +137,14 @@ def _elements(platform: bool) -> tuple[SchemaItem, ...]:
             ["id", "billing_account_id"],
             f"fk_{table}_obligation_account",
         ),
+        # The obligation must be one of THIS document's own lines. MATCH SIMPLE:
+        # a late-freeze row without an obligation is exempt.
+        fk(
+            ["document_id", "obligation_id"],
+            "document_lines",
+            ["document_id", "obligation_id"],
+            f"fk_{table}_document_line",
+        ),
         sa.UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
         sa.UniqueConstraint(
             *scope,
@@ -180,6 +188,14 @@ def _create(platform: bool) -> None:
     discharges = f"{prefix}withholding_discharges"
     scope_x = "" if platform else " AND x.tenant_id = NEW.tenant_id"
     scope_list = [] if platform else ["tenant_id"]
+    # Target of the component -> document line key; implied by the existing
+    # one-line-per-obligation uniqueness, so it cannot reject any existing row.
+    op.create_unique_constraint(
+        f"uq_{prefix}document_lines_document_obligation",
+        f"{prefix}document_lines",
+        [*scope_list, "document_id", "obligation_id"],
+        schema=_SCHEMA,
+    )
     if platform:
         op.create_table(
             "platform_document_withholding_components",
@@ -214,8 +230,11 @@ def _create(platform: bool) -> None:
             doc record;
             frozen numeric;
         BEGIN
+            -- One writer per document at a time: the row lock serializes every
+            -- competing freeze, so the single-freeze rule below cannot be raced.
             SELECT * INTO doc FROM mod_billing.{prefix}documents x
-             WHERE x.id = NEW.document_id{scope_x};
+             WHERE x.id = NEW.document_id{scope_x}
+             FOR UPDATE;
             IF doc.id IS NULL OR doc.document_kind <> 'invoice' OR doc.issued_at IS NULL
                OR doc.billing_account_id IS DISTINCT FROM NEW.billing_account_id
                OR doc.currency <> NEW.currency OR doc.minor_units <> NEW.minor_units
@@ -223,6 +242,16 @@ def _create(platform: bool) -> None:
                OR NEW.base_amount <> round(NEW.base_amount, NEW.minor_units)
             THEN
                 RAISE EXCEPTION 'withholding component needs its issued invoice and exact money'
+                  USING ERRCODE = 'check_violation';
+            END IF;
+            -- A document has one freeze: every row shares its origin and command.
+            IF EXISTS (
+                SELECT 1 FROM mod_billing.{table} x
+                 WHERE x.document_id = NEW.document_id{scope_x}
+                   AND (x.origin <> NEW.origin
+                        OR x.command_id IS DISTINCT FROM NEW.command_id)
+            ) THEN
+                RAISE EXCEPTION 'a document has a single withholding freeze'
                   USING ERRCODE = 'check_violation';
             END IF;
             SELECT coalesce(sum(x.tax_amount), 0) INTO frozen
@@ -236,7 +265,7 @@ def _create(platform: bool) -> None:
         $$ LANGUAGE plpgsql;
         CREATE TRIGGER {table}_admission BEFORE INSERT ON mod_billing.{table}
           FOR EACH ROW EXECUTE FUNCTION mod_billing.admit_{prefix}withholding_component();
-    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
+    """)  # noqa: S608  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
     # The discharge side: the cap guard and the foreign key.
     op.execute(f"""
         CREATE FUNCTION mod_billing.cap_{prefix}withholding_component() RETURNS trigger AS $$
@@ -276,7 +305,7 @@ def _create(platform: bool) -> None:
         $$ LANGUAGE plpgsql;
         CREATE TRIGGER {discharges}_component_cap BEFORE INSERT ON mod_billing.{discharges}
           FOR EACH ROW EXECUTE FUNCTION mod_billing.cap_{prefix}withholding_component();
-    """)  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
+    """)  # noqa: S608  # nosec B608 -- closed plane/table identifiers and fixed scope expressions; no input reaches this DDL
     local = ", ".join(
         [
             *scope_list,

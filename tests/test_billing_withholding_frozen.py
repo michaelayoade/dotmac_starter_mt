@@ -36,6 +36,7 @@ from sqlalchemy.exc import DBAPIError
 
 from tests import test_billing_isolation as billing
 from tests import test_billing_public_invoice_authoring as authoring
+from tests import test_billing_tax_dependency_evidence as dependency
 from tests import test_billing_tax_determination_evidence as evidence_fixtures
 
 _money = billing._money
@@ -492,26 +493,83 @@ def _freeze_command(account_id, invoice_id, scope, evidence, command_id=None):
     )
 
 
+def _v2_invoice(session, scope):
+    """An invoice issued with V2 Tax evidence (and so declared line sources)
+    whose expected withholding was not elected at issue: nothing was frozen."""
+    account = create_billing_account(
+        session,
+        scope=scope,
+        external_account_ref=str(uuid4()),
+        currency="NGN",
+        minor_units=2,
+    )
+    tax = dependency._evidence(scope)
+    issued = authoring._issue(
+        session, scope, dependency._command(account.id, scope, tax)
+    )
+    session.flush()
+    return account, issued.invoice_id, tax
+
+
+def _issue_date(session, invoice_id):
+    return session.execute(
+        text(
+            "SELECT (issued_at AT TIME ZONE timezone)::date "
+            "FROM mod_billing.documents WHERE id = :d"
+        ),
+        {"d": invoice_id},
+    ).scalar_one()
+
+
+def _late(session, invoice_id, tax, **changes):
+    """The invoice's own expected-withholding Tax result, re-determined as of
+    its issue date with the party election (what finance would obtain from Tax)."""
+    item = tax[1]
+    on = _issue_date(session, invoice_id)
+    result = item.determination
+    component = replace(
+        result.components[0],
+        party_category="wht-elected",
+        party_classification_id=uuid4(),
+    )
+    result = replace(result, components=(component,), occurred_on=on)
+    priors = tuple(replace(p, occurred_on=on) for p in item.prior_determinations)
+    item = replace(item, determination=result, prior_determinations=priors)
+    return replace(item, **changes) if changes else item
+
+
+def _line_obligation(session, invoice_id):
+    return session.execute(
+        text(
+            "SELECT obligation_id FROM mod_billing.document_lines "
+            "WHERE document_id = :d"
+        ),
+        {"d": invoice_id},
+    ).scalar_one()
+
+
 def test_pre_freeze_invoice_is_frozen_then_discharged(scratch):
     from dotmac_billing.service import freeze_issued_invoice_withholding
 
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
-        # A legacy invoice: issued with no frozen component (like pre-bi_0016).
-        account, _, invoice = billing._seed_invoice(session, scope, suffix="late")
-        assert _components(session, invoice.id) == []
-        evidence = _as_of_issue(scope)
+        # An invoice issued with no frozen component (like pre-bi_0016).
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        assert _components(session, invoice_id) == []
+        evidence = _late(session, invoice_id, tax)
         rows = freeze_issued_invoice_withholding(
             session,
             scope=scope,
-            command=_freeze_command(account.id, invoice.id, scope, evidence),
+            command=_freeze_command(account.id, invoice_id, scope, evidence),
         )
         assert len(rows) == 1
         assert rows[0].origin == "late_freeze"
         assert rows[0].actor_ref == "finance-user:fixture"
-        assert rows[0].tax_amount == Decimal("5.00")
+        assert rows[0].tax_amount == Decimal("10.00")
         assert rows[0].tax_source_owner == "dotmac-tax"
+        # The row carries the bound line's obligation, not a caller choice.
+        assert rows[0].obligation_id == _line_obligation(session, invoice_id)
         assert rows[0].determination_ref == str(
             evidence.determination.determination_set_id
         )
@@ -519,7 +577,7 @@ def test_pre_freeze_invoice_is_frozen_then_discharged(scratch):
         row = accept_withholding_discharge(
             session,
             scope=scope,
-            command=_discharge(account, invoice.id, scope, evidence, accepted="5.00"),
+            command=_discharge(account, invoice_id, scope, evidence, accepted="5.00"),
         )
         assert row.amount_delta == Decimal("5.00")
         session.rollback()
@@ -531,19 +589,19 @@ def test_double_freeze_is_refused(scratch):
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
-        account, _, invoice = billing._seed_invoice(session, scope, suffix="twice")
-        evidence = _as_of_issue(scope)
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        evidence = _late(session, invoice_id, tax)
         freeze_issued_invoice_withholding(
             session,
             scope=scope,
-            command=_freeze_command(account.id, invoice.id, scope, evidence),
+            command=_freeze_command(account.id, invoice_id, scope, evidence),
         )
         with pytest.raises(BillingRuleViolation) as refused:
             freeze_issued_invoice_withholding(
                 session,
                 scope=scope,
                 command=_freeze_command(
-                    account.id, invoice.id, scope, _as_of_issue(scope)
+                    account.id, invoice_id, scope, _late(session, invoice_id, tax)
                 ),
             )
         assert refused.value.code == "billing.withholding_already_frozen"
@@ -556,18 +614,20 @@ def test_freeze_above_outstanding_is_refused(scratch):
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
-        # The seeded invoice is 120.00; a 130.00 withholding cannot be frozen.
-        account, _, invoice = billing._seed_invoice(session, scope, suffix="over")
+        # The invoice is 107.50; a 130.00 withholding cannot be frozen.
+        account, invoice_id, _ = _v2_invoice(session, scope)
+        big = dependency._evidence(scope, wht_tax="130")
+        # Same source and original facts as the invoice's own line.
         with pytest.raises(BillingRuleViolation) as refused:
             freeze_issued_invoice_withholding(
                 session,
                 scope=scope,
                 command=_freeze_command(
-                    account.id, invoice.id, scope, _as_of_issue(scope, amount="130.00")
+                    account.id, invoice_id, scope, _late(session, invoice_id, big)
                 ),
             )
         assert refused.value.code == "billing.withholding_freeze_exceeds_outstanding"
-        assert _components(session, invoice.id) == []
+        assert _components(session, invoice_id) == []
         session.rollback()
 
 
@@ -579,17 +639,21 @@ def test_freeze_must_be_as_of_the_issue_date(scratch):
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
-        account, _, invoice = billing._seed_invoice(session, scope, suffix="asof")
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        late = _late(session, invoice_id, tax)
+        other = date(2026, 9, 30)
+        late = replace(
+            late,
+            determination=replace(late.determination, occurred_on=other),
+            prior_determinations=tuple(
+                replace(p, occurred_on=other) for p in late.prior_determinations
+            ),
+        )
         with pytest.raises(BillingRuleViolation) as refused:
             freeze_issued_invoice_withholding(
                 session,
                 scope=scope,
-                command=_freeze_command(
-                    account.id,
-                    invoice.id,
-                    scope,
-                    _as_of_issue(scope, on=date(2026, 9, 30)),
-                ),
+                command=_freeze_command(account.id, invoice_id, scope, late),
             )
         assert refused.value.code == "billing.withholding_freeze_not_as_of_issue"
         session.rollback()
@@ -601,14 +665,269 @@ def test_replay_of_the_same_command_id_is_a_no_op(scratch):
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)
     with billing._session(tenant_url, scope) as session:
-        account, _, invoice = billing._seed_invoice(session, scope, suffix="replay")
+        account, invoice_id, tax = _v2_invoice(session, scope)
         command = _freeze_command(
-            account.id, invoice.id, scope, _as_of_issue(scope), "freeze:fixed-id"
+            account.id,
+            invoice_id,
+            scope,
+            _late(session, invoice_id, tax),
+            "freeze:fixed-id",
         )
         first = freeze_issued_invoice_withholding(session, scope=scope, command=command)
         again = freeze_issued_invoice_withholding(session, scope=scope, command=command)
         assert [row.id for row in first] == [row.id for row in again]
-        assert len(_components(session, invoice.id)) == 1
+        assert len(_components(session, invoice_id)) == 1
+        session.rollback()
+
+
+def test_v1_evidence_is_refused(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, _ = _v2_invoice(session, scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id, invoice_id, scope, _as_of_issue(scope)
+                ),
+            )
+        assert refused.value.code == "billing.tax_evidence_invalid"
+        session.rollback()
+
+
+def _retarget(late, **result_changes):
+    """Apply a change to the principal result and every prior (one source)."""
+    return replace(
+        late,
+        determination=replace(late.determination, **result_changes),
+        prior_determinations=tuple(
+            replace(p, **{k: v for k, v in result_changes.items() if k != "components"})
+            for p in late.prior_determinations
+        ),
+    )
+
+
+def test_a_determination_for_another_commercial_source_is_refused(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+    from dotmac_billing.tax_dependency_evidence import TaxCommercialSourceEvidenceV1
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        late = _retarget(
+            _late(session, invoice_id, tax),
+            commercial_source=TaxCommercialSourceEvidenceV1("commercial:invented", "1"),
+        )
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(account.id, invoice_id, scope, late),
+            )
+        assert refused.value.code == "billing.withholding_freeze_unbound"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+def test_a_determination_with_other_original_facts_is_refused(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        late = _retarget(
+            _late(session, invoice_id, tax), counterparty_ref="another-customer"
+        )
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(account.id, invoice_id, scope, late),
+            )
+        assert refused.value.code == "billing.withholding_freeze_facts_differ"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+def test_a_base_above_the_bound_line_is_refused(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        late = _late(session, invoice_id, tax)
+        component = late.determination.components[0]
+        component = replace(
+            component,
+            base_amount=_money("500.00"),
+            lines=(replace(component.lines[0], taxable_amount=_money("500.00")),),
+        )
+        late = replace(
+            late, determination=replace(late.determination, components=(component,))
+        )
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(account.id, invoice_id, scope, late),
+            )
+        assert refused.value.code == "billing.withholding_freeze_base_exceeds_line"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+def test_withholding_already_accepted_under_old_rules_does_not_block_a_freeze(
+    scratch, monkeypatch
+):
+    """Older records stay correctable: outstanding plus already-withheld bounds it."""
+    from alembic import command as alembic_command
+    from alembic.config import Config
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    with billing._scratch_database(
+        (ModulePlane.TENANT,), target_revision="bi_0015_line_price_version_fk"
+    ) as (history_admin, history_tenant, _):
+        scope = _scope(history_admin)
+        monkeypatch.setattr(
+            service, "_require_frozen_withholding", lambda *a, **k: None
+        )
+        with billing._session(history_tenant, scope) as session:
+            account, invoice_id, tax = _v2_invoice(session, scope)
+            account_id = account.id
+            # 4.00 accepted before components existed; outstanding is now 103.50.
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=_discharge(account, invoice_id, scope, tax[1], accepted="4.00"),
+            )
+            session.commit()
+        config = Config(str(billing.REPO_ROOT / "alembic.ini"))
+        config.set_main_option("script_location", str(billing.REPO_ROOT / "alembic"))
+        config.set_main_option(
+            "version_locations",
+            f"{billing.KERNEL_VERSIONS} {billing.ASSEMBLY_VERSIONS} "
+            f"{billing.BILLING_VERSIONS}",
+        )
+        config.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(module="billing", planes=(ModulePlane.TENANT,)),
+        )
+        old = os.environ.get("MIGRATION_DATABASE_URL")
+        os.environ["MIGRATION_DATABASE_URL"] = history_admin
+        try:
+            alembic_command.upgrade(config, "bi_0016_withholding_components")
+        finally:
+            if old is None:
+                os.environ.pop("MIGRATION_DATABASE_URL", None)
+            else:
+                os.environ["MIGRATION_DATABASE_URL"] = old
+        monkeypatch.undo()
+        with billing._session(history_tenant, scope) as session:
+            # 105.00 exceeds the 103.50 outstanding but not outstanding + 4.00.
+            big = dependency._evidence(scope, wht_tax="105")
+            rows = freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account_id, invoice_id, scope, _late(session, invoice_id, big)
+                ),
+            )
+            assert [row.tax_amount for row in rows] == [Decimal("105.00")]
+            session.rollback()
+
+
+def _extra_row(session, scope, invoice_id, origin, obligation_id=None):
+    """Another component row written straight to the table (the app role can)."""
+    plane = service._models(scope)
+    document = session.get(plane.document, invoice_id)
+    result = evidence_fixtures._evidence(
+        scope, purpose="expected_withholding", taxes=("1.00",)
+    ).determination
+    component = replace(result.components[0], party_classification_id=uuid4())
+    session.add(
+        service._frozen_component_row(
+            scope=scope,
+            plane=plane,
+            document=document,
+            obligation_id=obligation_id,
+            result=result,
+            component=component,
+            origin=origin,
+        )
+    )
+    session.flush()
+
+
+_LATE = {
+    "origin": "late_freeze",
+    "actor_ref": "finance-user:fixture",
+    "reason": "fixture: a second freeze",
+}
+
+
+def test_database_refuses_a_late_freeze_next_to_issue_rows(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        _, invoice_id, _ = _invoice(session, scope, elected=True)
+        assert len(_components(session, invoice_id)) == 1
+        with pytest.raises(DBAPIError) as refused:
+            _extra_row(
+                session,
+                scope,
+                invoice_id,
+                {**_LATE, "command_id": f"late:{uuid4()}"},
+            )
+        assert refused.value.orig.sqlstate == "23514"
+        session.rollback()
+
+
+def test_database_refuses_a_second_freeze_with_another_command(scratch):
+    from dotmac_billing.service import freeze_issued_invoice_withholding
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        freeze_issued_invoice_withholding(
+            session,
+            scope=scope,
+            command=_freeze_command(
+                account.id, invoice_id, scope, _late(session, invoice_id, tax)
+            ),
+        )
+        with pytest.raises(DBAPIError) as refused:
+            _extra_row(
+                session,
+                scope,
+                invoice_id,
+                {**_LATE, "command_id": f"other:{uuid4()}"},
+            )
+        assert refused.value.orig.sqlstate == "23514"
+        session.rollback()
+
+
+def test_database_refuses_a_component_on_another_documents_line(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        _, invoice_id, _ = _v2_invoice(session, scope)
+        _, other_id, _ = _v2_invoice(session, scope)
+        with pytest.raises(DBAPIError) as refused:
+            _extra_row(
+                session,
+                scope,
+                invoice_id,
+                {**_LATE, "command_id": f"late:{uuid4()}"},
+                obligation_id=_line_obligation(session, other_id),
+            )
+        assert refused.value.orig.sqlstate == "23503"
         session.rollback()
 
 

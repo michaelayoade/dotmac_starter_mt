@@ -415,6 +415,13 @@ class DocumentLine(Base, _TenantRow, _DocumentLineColumns):
         UniqueConstraint(
             "tenant_id", "obligation_id", name="uq_document_lines_tenant_obligation"
         ),
+        # Target of the frozen withholding component's document-line key (bi_0016).
+        UniqueConstraint(
+            "tenant_id",
+            "document_id",
+            "obligation_id",
+            name="uq_document_lines_document_obligation",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -459,6 +466,11 @@ class PlatformDocumentLine(Base, _DocumentLineColumns):
             "document_id", "line_number", name="uq_platform_document_lines_line"
         ),
         UniqueConstraint("obligation_id", name="uq_platform_document_lines_obligation"),
+        UniqueConstraint(
+            "document_id",
+            "obligation_id",
+            name="uq_platform_document_lines_document_obligation",
+        ),
         UniqueConstraint(
             "id",
             "document_id",
@@ -1823,6 +1835,12 @@ def _withholding_component_constraints(*, tenant: bool) -> tuple[object, ...]:
             "rated_obligations",
             ["id", "billing_account_id"],
             f"fk_{table}_obligation_account",
+        ),
+        reference(
+            ["document_id", "obligation_id"],
+            "document_lines",
+            ["document_id", "obligation_id"],
+            f"fk_{table}_document_line",
         ),
         UniqueConstraint(*scope, "id", name=f"uq_{table}_id"),
         UniqueConstraint(
