@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -89,7 +89,8 @@ def _resolve(conn: Connection, occurrence: uuid.UUID, state: str = "emitted") ->
             "validity_owner_code = 'wallet', "
             "validity_evidence_ref = gen_random_uuid(), "
             "validity_resolved_at = :at, "
-            "validity_resolution_command_id = gen_random_uuid() WHERE id = :id"
+            "validity_resolution_command_id = gen_random_uuid(), "
+            "validity_actor_ref = 'ops:alice' WHERE id = :id"
         ),
         {"state": state, "at": RESOLVED_AT, "id": occurrence},
     )
@@ -119,6 +120,47 @@ def test_a_pending_row_blocks_its_coverage_until_it_is_cancelled(
     _occurrence(admin, ids, left, OCT1, NOV1)
 
 
+def test_confirmation_needs_an_actor_a_matching_emitted_at_and_a_past_instant(
+    admin: Connection, subscriptions_scratch: tuple[str, str, str]
+) -> None:
+    left, _ = _make_tenants(subscriptions_scratch[0])
+    ids = _seed_tenant_line(subscriptions_scratch[0], left)
+    pending = _held(admin, ids, left, OCT1, NOV1)
+    evidence = (
+        "validity_owner_code = 'wallet', validity_evidence_ref = gen_random_uuid(), "
+        "validity_resolution_command_id = gen_random_uuid()"
+    )
+    sql = f"UPDATE {TABLE} SET state = 'emitted', {evidence}, %s WHERE id = :id"
+    # No actor reference.
+    with pytest.raises(DBAPIError, match="owner evidence"):
+        admin.execute(
+            text(sql % "emitted_at = :at, validity_resolved_at = :at"),
+            {"id": pending, "at": RESOLVED_AT},
+        )
+    actor = ", validity_actor_ref = 'ops:alice'"
+    # emitted_at differs from the resolution instant.
+    with pytest.raises(DBAPIError, match="owner evidence"):
+        admin.execute(
+            text(
+                sql
+                % ("emitted_at = :at, validity_resolved_at = :at2" + actor)
+            ),
+            {
+                "id": pending,
+                "at": RESOLVED_AT,
+                "at2": RESOLVED_AT + timedelta(hours=1),
+            },
+        )
+    # A resolution instant in the future (DB clock) is refused.
+    future = datetime.now(UTC) + timedelta(days=1)
+    with pytest.raises(DBAPIError, match="owner evidence"):
+        admin.execute(
+            text(sql % ("emitted_at = :at, validity_resolved_at = :at" + actor)),
+            {"id": pending, "at": future},
+        )
+    _resolve(admin, pending)
+
+
 def test_only_owner_evidence_resolves_a_pending_row(
     admin: Connection, subscriptions_scratch: tuple[str, str, str]
 ) -> None:
@@ -142,7 +184,8 @@ def test_only_owner_evidence_resolves_a_pending_row(
                 "validity_owner_code = 'wallet', "
                 "validity_evidence_ref = gen_random_uuid(), "
                 "validity_resolved_at = now(), "
-                "validity_resolution_command_id = gen_random_uuid() WHERE id = :id"
+                "validity_resolution_command_id = gen_random_uuid(), "
+                "validity_actor_ref = 'ops:alice' WHERE id = :id"
             ),
             {"id": pending},
         )
@@ -218,7 +261,8 @@ def test_the_platform_plane_holds_and_resolves_the_same_way(admin: Connection) -
             "UPDATE mod_subscriptions.platform_recurring_charge_occurrences SET "
             "state = 'emitted', emitted_at = :at, validity_owner_code = 'cap', "
             "validity_evidence_ref = gen_random_uuid(), validity_resolved_at = :at, "
-            "validity_resolution_command_id = gen_random_uuid() WHERE id = :id"
+            "validity_resolution_command_id = gen_random_uuid(), "
+            "validity_actor_ref = 'ops:alice' WHERE id = :id"
         ),
         {"at": RESOLVED_AT, "id": pending},
     )

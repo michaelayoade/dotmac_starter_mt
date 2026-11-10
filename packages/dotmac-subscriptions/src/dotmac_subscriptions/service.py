@@ -37,6 +37,7 @@ from dotmac_subscriptions.commands import (
     ContractLineInput,
     ContractVersionResult,
     DurableTimerPort,
+    OwnerEvidencePort,
     EndContractVersionCommand,
     EndContractVersionResult,
     GenerateRecurringChargeCommand,
@@ -65,7 +66,9 @@ from dotmac_subscriptions.errors import (
     SubscriptionStateError,
 )
 from dotmac_subscriptions.lifecycle import (
+    VALIDITY_HOLD_OWNERS,
     OccurrenceState,
+    OccurrenceValidityHold,
     OccurrenceValidityOutcome,
     require_occurrence_transition,
 )
@@ -1819,7 +1822,10 @@ def _occurrence_row(
 
 
 def resolve_occurrence_validity(
-    db: Session, command: ResolveOccurrenceValidityCommand
+    db: Session,
+    command: ResolveOccurrenceValidityCommand,
+    *,
+    owner_evidence: OwnerEvidencePort,
 ) -> OccurrenceValidityResult:
     """Resolve a ``pending_validity`` occurrence from the OWNER's evidence.
 
@@ -1830,12 +1836,20 @@ def resolve_occurrence_validity(
     """
     _require_aware(command.resolved_at, "resolved_at")
     owner_code = command.owner_code.strip()
+    actor_ref = command.actor_ref.strip()
     key = command.idempotency_key
-    if not owner_code or len(owner_code) > 120 or not key or len(key) > 200:
+    if (
+        not owner_code
+        or len(owner_code) > 120
+        or not actor_ref
+        or len(actor_ref) > 160
+        or not key
+        or len(key) > 200
+    ):
         raise SubscriptionDataError(
             "occurrences.owner_evidence_required",
-            "An owner code and an idempotency key (at most 200 characters) are "
-            "required.",
+            "An owner code, an actor reference (at most 160 characters) and an "
+            "idempotency key (at most 200 characters) are required.",
         )
     target = (
         OccurrenceState.emitted
@@ -1847,6 +1861,7 @@ def resolve_occurrence_validity(
             "occurrence_id": str(command.occurrence_id),
             "outcome": command.outcome.value,
             "owner_code": owner_code,
+            "actor_ref": actor_ref,
             "evidence_ref": str(command.evidence_ref),
             "resolved_at": command.resolved_at.astimezone(UTC).isoformat(),
             "command_id": str(command.command_id),
@@ -1858,6 +1873,27 @@ def resolve_occurrence_validity(
             session, scope=command.scope, occurrence_id=command.occurrence_id, lock=True
         )
         require_occurrence_transition(OccurrenceState(row.state), target)
+        hold = OccurrenceValidityHold(row.validity_hold_reason)
+        if owner_code not in VALIDITY_HOLD_OWNERS[hold]:
+            raise SubscriptionDataError(
+                "occurrences.owner_mismatch",
+                "That owner may not resolve this kind of hold.",
+            )
+        verdict = owner_evidence.verify(
+            session,
+            scope=command.scope,
+            owner_code=owner_code,
+            evidence_ref=command.evidence_ref,
+            occurrence_id=command.occurrence_id,
+            hold_reason=hold.value,
+            confirmed=target is OccurrenceState.emitted,
+            resolved_at=command.resolved_at.astimezone(UTC),
+        )
+        if not verdict.verified:
+            raise SubscriptionDataError(
+                "occurrences.owner_evidence_unverified",
+                "The owner did not verify that evidence.",
+            )
         resolved_at = command.resolved_at.astimezone(UTC)
         if resolved_at < _stored_utc(row.emitted_at):
             raise SubscriptionDataError(
@@ -1869,6 +1905,7 @@ def resolve_occurrence_validity(
         row.validity_evidence_ref = command.evidence_ref
         row.validity_resolved_at = resolved_at
         row.validity_resolution_command_id = command.command_id
+        row.validity_actor_ref = actor_ref
         if target is OccurrenceState.emitted:
             row.emitted_at = resolved_at
         session.flush()

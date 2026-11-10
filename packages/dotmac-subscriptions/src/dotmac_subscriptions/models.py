@@ -214,6 +214,7 @@ class _OccurrenceColumns:
     validity_resolution_command_id: Mapped[UUID | None] = mapped_column(
         Uuid(), nullable=True
     )
+    validity_actor_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -613,16 +614,19 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
             "(state = 'pending_validity' AND validity_hold_reason IS NOT NULL "
             "AND validity_owner_code IS NULL AND validity_evidence_ref IS NULL "
             "AND validity_resolved_at IS NULL "
-            "AND validity_resolution_command_id IS NULL) "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
             "OR (state <> 'pending_validity' AND "
             "((validity_hold_reason IS NULL AND validity_owner_code IS NULL "
             "AND validity_evidence_ref IS NULL AND validity_resolved_at IS NULL "
-            "AND validity_resolution_command_id IS NULL) "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
             "OR (validity_hold_reason IS NOT NULL "
             "AND validity_owner_code IS NOT NULL "
             "AND validity_evidence_ref IS NOT NULL "
             "AND validity_resolved_at IS NOT NULL "
-            "AND validity_resolution_command_id IS NOT NULL)))",
+            "AND validity_resolution_command_id IS NOT NULL "
+            "AND validity_actor_ref IS NOT NULL)))",
             name="ck_occurrences_validity_evidence",
         ),
         UniqueConstraint(
@@ -648,6 +652,7 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
             "corrects_occurrence_id",
             unique=True,
             postgresql_where=sa.text("state <> 'cancelled'"),
+            sqlite_where=sa.text("state <> 'cancelled'"),
         ),
         Index(
             "ix_occurrences_line_coverage",
@@ -1088,16 +1093,19 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
             "(state = 'pending_validity' AND validity_hold_reason IS NOT NULL "
             "AND validity_owner_code IS NULL AND validity_evidence_ref IS NULL "
             "AND validity_resolved_at IS NULL "
-            "AND validity_resolution_command_id IS NULL) "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
             "OR (state <> 'pending_validity' AND "
             "((validity_hold_reason IS NULL AND validity_owner_code IS NULL "
             "AND validity_evidence_ref IS NULL AND validity_resolved_at IS NULL "
-            "AND validity_resolution_command_id IS NULL) "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
             "OR (validity_hold_reason IS NOT NULL "
             "AND validity_owner_code IS NOT NULL "
             "AND validity_evidence_ref IS NOT NULL "
             "AND validity_resolved_at IS NOT NULL "
-            "AND validity_resolution_command_id IS NOT NULL)))",
+            "AND validity_resolution_command_id IS NOT NULL "
+            "AND validity_actor_ref IS NOT NULL)))",
             name="ck_platform_occurrences_validity_evidence",
         ),
         UniqueConstraint(
@@ -1117,6 +1125,7 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
             "corrects_occurrence_id",
             unique=True,
             postgresql_where=sa.text("state <> 'cancelled'"),
+            sqlite_where=sa.text("state <> 'cancelled'"),
         ),
         Index(
             "ix_platform_occurrences_line_coverage",

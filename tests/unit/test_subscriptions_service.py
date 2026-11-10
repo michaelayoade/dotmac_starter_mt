@@ -24,9 +24,11 @@ from dotmac_subscriptions import (
     IntervalUnit,
     OccurrenceValidityHold,
     OccurrenceValidityOutcome,
+    OccurrenceValidityResult,
     OfferCatalogPage,
     OfferPriceInput,
     OfferPricingMode,
+    OwnerEvidenceVerdict,
     ProrationPolicy,
     PublishOfferVersionCommand,
     RateBasis,
@@ -905,6 +907,39 @@ def test_a_contract_priced_line_cannot_name_a_catalogue_price(
     assert refused.value.code == "subscriptions.contracts.price_key_not_allowed"
 
 
+class FakeOwnerEvidence:
+    """Owner port fake: verifies only references it was told about."""
+
+    def __init__(self, *, verifies: bool = True) -> None:
+        self.verifies = verifies
+        self.calls: list[tuple[str, UUID, str, bool]] = []
+
+    def verify(
+        self,
+        db: Session,
+        *,
+        scope: Scope,
+        owner_code: str,
+        evidence_ref: UUID,
+        occurrence_id: UUID,
+        hold_reason: str,
+        confirmed: bool,
+        resolved_at: datetime,
+    ) -> OwnerEvidenceVerdict:
+        self.calls.append((owner_code, evidence_ref, hold_reason, confirmed))
+        return OwnerEvidenceVerdict(verified=self.verifies)
+
+
+def _resolve_validity(
+    db: Session,
+    command: ResolveOccurrenceValidityCommand,
+    owner_evidence: FakeOwnerEvidence | None = None,
+) -> OccurrenceValidityResult:
+    return resolve_occurrence_validity(
+        db, command, owner_evidence=owner_evidence or FakeOwnerEvidence()
+    )
+
+
 def _held_occurrence(
     db: Session,
     registry: SubscriptionVocabularyRegistry,
@@ -945,6 +980,7 @@ def _evidence(
         occurrence_id=occurrence_id,
         outcome=outcome,
         owner_code="prepaid-wallet",
+        actor_ref="ops:alice",
         evidence_ref=uuid4(),
         resolved_at=NOW.replace(hour=6),
         command_id=uuid4(),
@@ -974,20 +1010,21 @@ def test_a_held_renewal_stages_no_output_until_the_owner_confirms(
     )
 
     command = _evidence(occurrence_id)
-    resolved = resolve_occurrence_validity(db, command)
+    resolved = _resolve_validity(db, command)
     assert resolved.replayed is False and resolved.staged_output is not None
     assert resolved.staged_output.occurrence_id == occurrence_id
     assert resolved.staged_output.emitted_at == command.resolved_at
     db.refresh(stored)
     assert stored.state == "emitted"
     assert stored.validity_owner_code == "prepaid-wallet"
+    assert stored.validity_actor_ref == "ops:alice"
     assert stored.validity_evidence_ref == command.evidence_ref
     assert stored.validity_resolution_command_id == command.command_id
     assert [
         o.occurrence_id for o in unacknowledged_outputs(db, scope=PlatformScope())
     ] == [occurrence_id]
 
-    replay = resolve_occurrence_validity(db, command)
+    replay = _resolve_validity(db, command)
     assert replay.replayed is True and replay.staged_output is not None
 
 
@@ -997,8 +1034,13 @@ def test_a_rejected_hold_is_cancelled_and_never_staged(
     occurrence_id, _ = _held_occurrence(
         db, registry, hold=OccurrenceValidityHold.capped
     )
-    result = resolve_occurrence_validity(
-        db, _evidence(occurrence_id, OccurrenceValidityOutcome.rejected)
+    result = _resolve_validity(
+        db,
+        _evidence(
+            occurrence_id,
+            OccurrenceValidityOutcome.rejected,
+            owner_code="usage-cap",
+        ),
     )
     assert result.staged_output is None
     stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
@@ -1010,10 +1052,10 @@ def test_only_a_pending_occurrence_can_be_resolved_and_only_once(
     db: Session, registry: SubscriptionVocabularyRegistry
 ) -> None:
     occurrence_id, _ = _held_occurrence(db, registry)
-    resolve_occurrence_validity(db, _evidence(occurrence_id))
+    _resolve_validity(db, _evidence(occurrence_id))
     # emitted -> cancelled is forbidden, and so is a second resolution.
     with pytest.raises(SubscriptionStateError):
-        resolve_occurrence_validity(
+        _resolve_validity(
             db,
             _evidence(
                 occurrence_id,
@@ -1028,7 +1070,7 @@ def test_an_ordinary_emitted_occurrence_cannot_be_resolved(
 ) -> None:
     plain_id, _ = _held_occurrence(db, registry, hold=None)
     with pytest.raises(SubscriptionStateError):
-        resolve_occurrence_validity(db, _evidence(plain_id))
+        _resolve_validity(db, _evidence(plain_id))
 
 
 def test_resolution_needs_owner_evidence_and_a_real_instant(
@@ -1036,14 +1078,95 @@ def test_resolution_needs_owner_evidence_and_a_real_instant(
 ) -> None:
     occurrence_id, _ = _held_occurrence(db, registry)
     with pytest.raises(SubscriptionDataError, match="owner code"):
-        resolve_occurrence_validity(db, _evidence(occurrence_id, owner_code="  "))
+        _resolve_validity(db, _evidence(occurrence_id, owner_code="  "))
     with pytest.raises(SubscriptionDataError, match="timezone"):
-        resolve_occurrence_validity(
+        _resolve_validity(
             db, _evidence(occurrence_id, resolved_at=datetime(2026, 8, 18, 6))
         )
     with pytest.raises(SubscriptionDataError, match="pre-date"):
-        resolve_occurrence_validity(
+        _resolve_validity(
             db, _evidence(occurrence_id, resolved_at=NOW.replace(day=1))
         )
     stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
     assert stored is not None and stored.state == "pending_validity"
+
+
+def test_an_owner_may_resolve_only_its_own_kind_of_hold(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(db, registry)  # prepaid
+    port = FakeOwnerEvidence()
+    with pytest.raises(SubscriptionDataError) as refused:
+        _resolve_validity(db, _evidence(occurrence_id, owner_code="usage-cap"), port)
+    assert refused.value.code == "occurrences.owner_mismatch"
+    assert port.calls == []  # refused before the owner is even asked
+    stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
+    assert stored is not None and stored.state == "pending_validity"
+
+
+def test_unverified_owner_evidence_is_refused_and_verified_is_checked_once(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(db, registry)
+    command = _evidence(occurrence_id)
+    with pytest.raises(SubscriptionDataError) as refused:
+        _resolve_validity(db, command, FakeOwnerEvidence(verifies=False))
+    assert refused.value.code == "occurrences.owner_evidence_unverified"
+    stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
+    assert stored is not None and stored.state == "pending_validity"
+    port = FakeOwnerEvidence()
+    _resolve_validity(db, command, port)
+    assert port.calls == [("prepaid-wallet", command.evidence_ref, "prepaid", True)]
+
+
+def test_resolution_needs_an_actor_reference(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    occurrence_id, _ = _held_occurrence(db, registry)
+    with pytest.raises(SubscriptionDataError, match="actor reference"):
+        _resolve_validity(db, _evidence(occurrence_id, actor_ref="  "))
+
+
+def test_a_rejected_pending_correction_is_cancelled_and_leaves_its_predecessor_emitted(
+    db: Session, registry: SubscriptionVocabularyRegistry
+) -> None:
+    """Driven through the service: the correction is held, then rejected.
+
+    The predecessor stays emitted and has no live successor.  (The overlap and
+    one-live-successor refusals are database triggers/indexes and are proved on
+    PostgreSQL in test_subscriptions_catalog_price_coverage_overlap.py.)
+    """
+    original_id, line_key = _held_occurrence(db, registry, hold=None)
+    original = db.get(PlatformRecurringChargeOccurrence, original_id)
+    assert original is not None
+    held = generate_recurring_charge(
+        db,
+        GenerateRecurringChargeCommand(
+            scope=PlatformScope(),
+            contract_version_id=original.contract_version_id,
+            contract_line_key=line_key,
+            period_index=1,
+            generation=2,
+            emitted_at=NOW,
+            command_id=uuid4(),
+            correlation_id=uuid4(),
+            corrects_occurrence_id=original_id,
+            validity_hold=OccurrenceValidityHold.prepaid,
+        ),
+        registry=registry,
+        timer=FakeTimer(),
+    ).occurrence_id
+    _resolve_validity(db, _evidence(held, OccurrenceValidityOutcome.rejected))
+
+    successor = db.get(PlatformRecurringChargeOccurrence, held)
+    assert successor is not None and successor.state == "cancelled"
+    assert successor.corrects_occurrence_id == original_id
+    db.refresh(original)
+    assert original.state == "emitted"
+    live = db.scalars(
+        select(PlatformRecurringChargeOccurrence).where(
+            PlatformRecurringChargeOccurrence.corrects_occurrence_id == original_id,
+            PlatformRecurringChargeOccurrence.state != "cancelled",
+        )
+    ).all()
+    assert live == []

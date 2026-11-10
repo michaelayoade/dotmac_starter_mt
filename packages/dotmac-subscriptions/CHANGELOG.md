@@ -46,6 +46,11 @@
   downgrade restores the su_0001 body verbatim. `occurrences_for_contract` now
   lists emitted occurrences only, and a non-cash grant requires an emitted
   occurrence. Subscriptions holds no cap, balance or tax logic.
+  `resolve_occurrence_validity` now takes `owner_evidence: OwnerEvidencePort`
+  (verified inside the locked operation), binds each hold to its owner
+  (`VALIDITY_HOLD_OWNERS`), requires `actor_ref` (recorded as
+  `validity_actor_ref`), and the database requires `emitted_at = resolved_at` on
+  confirmation and a resolution instant not later than the database clock.
 - `su_0003` and earlier keep their released bytes.
 
 ## 0.1.0a3

@@ -5,7 +5,7 @@ for two replaced guards:
 
 * the occurrence ``state`` CHECK gains ``pending_validity``;
 * five nullable, TYPED columns record the hold reason and the owner's evidence
-  (owner code, evidence reference, resolved-at, command id).  There is no JSON.
+  (owner code, evidence reference, resolved-at, command id, actor reference).  There is no JSON.
   They are all NULL until resolution; one CHECK ties them to the state;
 * ``freeze_occurrence_content`` (shared by both planes) is replaced.  Every
   other column must stay equal (the ``to_jsonb`` comparison) and the
@@ -48,6 +48,7 @@ _EVIDENCE = (
     "validity_evidence_ref",
     "validity_resolved_at",
     "validity_resolution_command_id",
+    "validity_actor_ref",
 )
 _NULL_EVIDENCE = " AND ".join(f"{c} IS NULL" for c in _EVIDENCE)
 _SET_EVIDENCE = " AND ".join(f"{c} IS NOT NULL" for c in _EVIDENCE)
@@ -110,7 +111,7 @@ _SU_0001_FUNCTION = """
 _FREEZE_ALLOWED = (
     "ARRAY['output_acknowledged_at', 'state', 'emitted_at', "
     "'validity_owner_code', 'validity_evidence_ref', 'validity_resolved_at', "
-    "'validity_resolution_command_id']"
+    "'validity_resolution_command_id', 'validity_actor_ref']"
 )
 
 _FREEZE_PENDING_VALIDITY = f"""
@@ -132,6 +133,9 @@ _FREEZE_PENDING_VALIDITY = f"""
                OR NEW.validity_evidence_ref IS NULL
                OR NEW.validity_resolved_at IS NULL
                OR NEW.validity_resolution_command_id IS NULL
+               OR NULLIF(BTRIM(NEW.validity_actor_ref), '') IS NULL
+               OR NEW.validity_resolved_at > now()
+               OR (NEW.state = 'emitted' AND NEW.emitted_at IS DISTINCT FROM NEW.validity_resolved_at)
                OR NEW.output_acknowledged_at IS DISTINCT FROM OLD.output_acknowledged_at
                OR (NEW.state = 'cancelled' AND NEW.emitted_at IS DISTINCT FROM OLD.emitted_at)
             THEN
@@ -146,6 +150,7 @@ _FREEZE_PENDING_VALIDITY = f"""
              OR NEW.validity_owner_code IS DISTINCT FROM OLD.validity_owner_code
              OR NEW.validity_evidence_ref IS DISTINCT FROM OLD.validity_evidence_ref
              OR NEW.validity_resolved_at IS DISTINCT FROM OLD.validity_resolved_at
+             OR NEW.validity_actor_ref IS DISTINCT FROM OLD.validity_actor_ref
              OR NEW.validity_resolution_command_id
                 IS DISTINCT FROM OLD.validity_resolution_command_id THEN
             RAISE EXCEPTION 'occurrence state is terminal outside pending_validity resolution'
@@ -196,6 +201,11 @@ def _upgrade_plane(tables: _PlaneTables) -> None:
     op.add_column(
         table,
         sa.Column("validity_resolution_command_id", sa.Uuid(), nullable=True),
+        schema=_SCHEMA,
+    )
+    op.add_column(
+        table,
+        sa.Column("validity_actor_ref", sa.String(160), nullable=True),
         schema=_SCHEMA,
     )
     op.drop_constraint(tables.state_check, table, type_="check", schema=_SCHEMA)

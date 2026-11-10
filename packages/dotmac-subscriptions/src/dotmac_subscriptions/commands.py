@@ -336,6 +336,8 @@ class ResolveOccurrenceValidityCommand:
     command_id: UUID
     correlation_id: UUID
     idempotency_key: str
+    #: Who resolved it, recorded on the occurrence beside the owner's evidence.
+    actor_ref: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +358,34 @@ class TimerScheduleResult:
 @dataclass(frozen=True, slots=True)
 class TimerCancelResult:
     canceled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerEvidenceVerdict:
+    """The owner's own answer about one evidence reference."""
+
+    verified: bool
+
+
+class OwnerEvidencePort(Protocol):
+    """Assembly adapter over the module that owns the cap or the prepayment.
+
+    Called inside the locked resolution so the evidence is checked against the
+    owner, not trusted from the caller.  Subscriptions does not interpret it.
+    """
+
+    def verify(
+        self,
+        db: Session,
+        *,
+        scope: Scope,
+        owner_code: str,
+        evidence_ref: UUID,
+        occurrence_id: UUID,
+        hold_reason: str,
+        confirmed: bool,
+        resolved_at: datetime,
+    ) -> OwnerEvidenceVerdict: ...
 
 
 class DurableTimerPort(Protocol):
@@ -390,6 +420,8 @@ __all__ = [
     "ContractLineInput",
     "ContractVersionResult",
     "DurableTimerPort",
+    "OwnerEvidencePort",
+    "OwnerEvidenceVerdict",
     "EndContractVersionCommand",
     "EndContractVersionResult",
     "GenerateRecurringChargeCommand",
