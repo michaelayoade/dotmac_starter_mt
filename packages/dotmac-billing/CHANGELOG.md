@@ -95,6 +95,15 @@ chain after `bi_0014_opening_variance_ledger`.
   without its tax code): a read-only quote of cash required from an invoice total
   and a Tax-owned withholding amount.
 
+- B3: add `get_account_statement` (`GetAccountStatementV1` ->
+  `AccountStatementV1`): a read-only, lock-free projection of one account's
+  posting groups in one currency over a half-open `occurred_at` window, ordered
+  by `(occurred_at, source_version)`, with opening/closing and running balances
+  for the three lanes (never netted) and a sealed SHA-256 digest
+  (`compute_account_statement_digest`, recomputable by a consumer; the dataclass
+  verifies it on construction). Anchored to the ledger watermark read, bounded to
+  5000 lines (`statement_too_large`). No DDL, no write, no event.
+
 ## 0.1.0a11 — UNRELEASED (rolled into a12)
 
 - Breaking for adapters: `NumberingProvider.allocate` now also receives a

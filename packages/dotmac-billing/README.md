@@ -106,6 +106,11 @@ rows are built from Tax's values). An opening-imported invoice is refused with
 the cash an invoice requires once a Tax-owned withholding amount is deducted; it
 is not a discharge, cash or credit.
 
+`get_account_statement` projects a sealed, read-only account statement over the
+ordered ledger: opening balances, each posting group with its per-lane deltas and
+running balances, closing balances and a digest a consumer can recompute. It
+writes nothing and takes no lock.
+
 The historical first release candidate is `0.1.0a1`; the current unreleased
 development successor is `0.1.0a12` and requires
 `dotmac-kernel>=0.1.0a105` plus
