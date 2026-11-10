@@ -23,7 +23,11 @@ correction may overlap its own correction chain (the occurrences it replaces and
 those that replace it), and a superseded occurrence stops blocking.  The chain
 must be one contract line: a correction whose predecessor has a different
 contract or line key is refused.  A new unique ``(tenant, corrects_occurrence_id)``
-gives an occurrence at most one successor, as Billing does.  A rival successor
+gives an occurrence at most one LIVE successor, as Billing does (it is a partial
+unique index over non-cancelled rows, so a cancelled successor frees the slot).
+A correction may replace only an ``emitted`` occurrence, and it is exempt from
+overlap with its immediate predecessor only (not with older ancestors, which may
+be live again once an intermediate correction is cancelled).  A rival successor
 of the same predecessor is left to that constraint (so the refusal names it)
 rather than reported as a coverage overlap.
 
@@ -145,7 +149,8 @@ def _refuse_existing_conflicts(tables: _PlaneTables) -> None:
     duplicated = bind.execute(
         sa.text(
             f"SELECT count(*) FROM (SELECT 1 FROM {occurrences} "  # noqa: S608 # nosec B608 -- identifiers are module-owned literals
-            f"WHERE corrects_occurrence_id IS NOT NULL GROUP BY {keys} "
+            f"WHERE corrects_occurrence_id IS NOT NULL AND state <> 'cancelled' "
+            f"GROUP BY {keys} "
             "HAVING count(*) > 1) d"
         )
     ).scalar_one()
@@ -201,6 +206,15 @@ def _function_sql(tables: _PlaneTables) -> str:
               'a correction must replace an occurrence of the same contract line'
               USING ERRCODE = 'check_violation';
           END IF;
+          IF NEW.corrects_occurrence_id IS NOT NULL AND NEW.state <> 'cancelled'
+             AND NOT EXISTS (
+            SELECT 1 FROM {occ} p
+             WHERE p.id = NEW.corrects_occurrence_id AND p.state = 'emitted'
+          ) THEN
+            RAISE EXCEPTION
+              'a correction may replace only an emitted occurrence'
+              USING ERRCODE = 'check_violation';
+          END IF;
           IF NEW.state = 'cancelled' OR EXISTS (
             SELECT 1 FROM {occ} s
              WHERE s.corrects_occurrence_id = NEW.id AND s.state <> 'cancelled'
@@ -209,13 +223,7 @@ def _function_sql(tables: _PlaneTables) -> str:
             RETURN NEW;
           END IF;
           IF EXISTS (
-            WITH RECURSIVE up(id) AS (
-              SELECT NEW.corrects_occurrence_id
-               WHERE NEW.corrects_occurrence_id IS NOT NULL
-              UNION ALL
-              SELECT o.corrects_occurrence_id FROM {occ} o JOIN up ON o.id = up.id
-               WHERE o.corrects_occurrence_id IS NOT NULL{same_tenant('o')}
-            ), down(id) AS (
+            WITH RECURSIVE down(id) AS (
               SELECT o.id FROM {occ} o
                WHERE o.corrects_occurrence_id = NEW.id{same_tenant('o')}
               UNION ALL
@@ -228,7 +236,7 @@ def _function_sql(tables: _PlaneTables) -> str:
                AND o.state <> 'cancelled'
                AND o.rating_coverage_start < NEW.rating_coverage_end
                AND NEW.rating_coverage_start < o.rating_coverage_end
-               AND o.id NOT IN (SELECT id FROM up)
+               AND o.id IS DISTINCT FROM NEW.corrects_occurrence_id
                AND o.id NOT IN (SELECT id FROM down)
                AND (NEW.corrects_occurrence_id IS NULL
                     OR o.corrects_occurrence_id IS DISTINCT FROM NEW.corrects_occurrence_id)
@@ -260,8 +268,14 @@ def _upgrade_plane(tables: _PlaneTables) -> None:
     else:
         unique_columns = ["corrects_occurrence_id"]
         index_columns = ["contract_id", "contract_line_key", "rating_coverage_start"]
-    op.create_unique_constraint(
-        tables.unique_name, tables.occurrences, unique_columns, schema=_SCHEMA
+    # Partial: a cancelled successor does not use up the predecessor's slot.
+    op.create_index(
+        tables.unique_name,
+        tables.occurrences,
+        unique_columns,
+        unique=True,
+        schema=_SCHEMA,
+        postgresql_where=sa.text("state <> 'cancelled'"),
     )
     op.create_index(
         tables.index_name, tables.occurrences, index_columns, schema=_SCHEMA
@@ -288,6 +302,4 @@ def downgrade() -> None:
         op.execute(f"DROP TRIGGER IF EXISTS {tables.trigger_name} ON {occurrences};")
         op.execute(f"DROP FUNCTION IF EXISTS {_q(tables.function_name)}();")
         op.drop_index(tables.index_name, table_name=tables.occurrences, schema=_SCHEMA)
-        op.drop_constraint(
-            tables.unique_name, tables.occurrences, type_="unique", schema=_SCHEMA
-        )
+        op.drop_index(tables.unique_name, table_name=tables.occurrences, schema=_SCHEMA)
