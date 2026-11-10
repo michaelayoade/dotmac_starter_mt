@@ -997,6 +997,112 @@ def test_database_refuses_a_second_freeze_with_another_command(scratch):
         session.rollback()
 
 
+def _late_row(session, scope, invoice_id, sealed, command_id=None):
+    """A late-freeze component row for ``invoice_id`` built from a sealed result."""
+    plane = service._models(scope)
+    document = session.get(plane.document, invoice_id)
+    session.add(
+        service._frozen_component_row(
+            scope=scope,
+            plane=plane,
+            document=document,
+            obligation_id=None,
+            result=sealed,
+            component=sealed.components[0],
+            origin={
+                **_LATE,
+                "command_id": command_id or f"late:{uuid4()}",
+            },
+        )
+    )
+    session.flush()
+
+
+def test_database_refuses_one_determination_on_a_second_live_invoice(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        first_account, first_id, tax = _v2_invoice(session, scope)
+        _, second_id, _ = _v2_invoice(session, scope)
+        late = _late(session, first_id, tax)
+        freeze_issued_invoice_withholding(
+            session,
+            scope=scope,
+            command=_freeze_command(first_account.id, first_id, scope, late),
+        )
+        with pytest.raises(DBAPIError) as refused:
+            _late_row(session, scope, second_id, _sealed(late))
+        assert refused.value.orig.sqlstate == "23505"
+        session.rollback()
+
+
+def test_a_voided_invoice_releases_its_determination(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        first_account, first_id, tax = _v2_invoice(session, scope)
+        second_account, second_id, _ = _v2_invoice(session, scope)
+        late = _late(session, first_id, tax)
+        freeze_issued_invoice_withholding(
+            session,
+            scope=scope,
+            command=_freeze_command(first_account.id, first_id, scope, late),
+        )
+        service.void_document(
+            session,
+            scope=scope,
+            document_id=first_id,
+            actor_ref="finance-user:fixture",
+            occurred_at=billing.NOW,
+            source_ref=str(uuid4()),
+        )
+        # Allowed by the database and by the service once the first is voided.
+        _late_row(session, scope, second_id, _sealed(late))
+        assert len(_components(session, second_id)) == 1
+        session.rollback()
+
+
+def test_concurrent_freezes_of_one_determination_serialize(scratch):
+    import threading
+    import time
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        _, first_id, tax = _v2_invoice(session, scope)
+        _, second_id, _ = _v2_invoice(session, scope)
+        sealed = _sealed(_late(session, first_id, tax))
+        session.commit()
+    outcome = []
+    started = threading.Event()
+
+    def second():
+        try:
+            with billing._session(tenant_url, scope) as other:
+                started.set()
+                _late_row(other, scope, second_id, sealed)
+                other.commit()
+                outcome.append("committed")
+        except DBAPIError as error:
+            outcome.append(error.orig.sqlstate)
+
+    with billing._session(tenant_url, scope) as holder:
+        _late_row(holder, scope, first_id, sealed)
+        thread = threading.Thread(target=second, daemon=True)
+        thread.start()
+        assert started.wait(timeout=30)
+        time.sleep(1.0)
+        # The second freeze waits on the determination lock the first holds.
+        assert outcome == [] and thread.is_alive()
+        holder.commit()
+    thread.join(timeout=60)
+    assert not thread.is_alive()
+    assert outcome == ["23505"]
+    with billing._session(tenant_url, scope) as check:
+        assert len(_components(check, first_id)) == 1
+        assert _components(check, second_id) == []
+
+
 def test_database_refuses_a_component_on_another_documents_line(scratch):
     admin_url, tenant_url, _ = scratch
     scope = _scope(admin_url)

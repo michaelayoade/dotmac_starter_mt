@@ -151,6 +151,9 @@ def withholding_command(db, account_id, document_id, *, scope, direct=False, **k
     """``_withholding_command`` with its component frozen for the invoice."""
     from tests import test_billing_isolation as billing
 
+    # One Tax determination backs one live invoice (database rule for late
+    # freezes), so a command that names no suffix gets its own determination.
+    kw.setdefault("suffix", str(uuid4()))
     command = billing._withholding_command(account_id, document_id, scope=scope, **kw)
     ensure_frozen(db, scope, command, direct=direct)
     return command
