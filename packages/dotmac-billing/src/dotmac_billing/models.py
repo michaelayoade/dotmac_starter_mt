@@ -1866,7 +1866,7 @@ def _withholding_component_constraints(*, tenant: bool) -> tuple[object, ...]:
         ),
         CheckConstraint(
             "(origin = 'issue' AND obligation_id IS NOT NULL "
-            "AND command_id IS NULL AND actor_ref IS NULL AND reason IS NULL) "
+            "AND command_id IS NOT NULL AND actor_ref IS NULL AND reason IS NULL) "
             "OR (origin = 'late_freeze' AND command_id IS NOT NULL "
             "AND actor_ref IS NOT NULL AND reason IS NOT NULL)",
             name=f"ck_{table}_origin",

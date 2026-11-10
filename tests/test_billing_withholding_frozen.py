@@ -17,6 +17,7 @@ from uuid import uuid4
 import pytest
 from dotmac_billing import service
 from dotmac_billing.commands import (
+    WITHHOLDING_FREEZE_PERMISSION,
     ApplyAvailableCreditCommand,
     ReverseWithholdingDischarge,
     TaxDeterminationSealV1,
@@ -503,6 +504,9 @@ class _TaxSeals:
                 item.determination.determination_set_id,
                 item.determination.result_fingerprint,
                 item.determination.occurred_on,
+                item.determination.commercial_source,
+                item.determination.source_amount,
+                item.determination.counterparty_ref,
             )
             for item in items
         }
@@ -511,14 +515,32 @@ class _TaxSeals:
         return self.items.get(determination_set_id)
 
 
-def freeze_issued_invoice_withholding(session, *, scope, command, tax_seal="confirm"):
-    """The service command with a Tax reader that confirms the evidence it is given."""
+class _Permissions:
+    """A permission reader double: holds the freeze permission for named actors."""
+
+    def __init__(self, *actors):
+        self.actors = set(actors)
+
+    def holds(self, *, scope, actor_ref, code):
+        return code == WITHHOLDING_FREEZE_PERMISSION and actor_ref in self.actors
+
+
+def freeze_issued_invoice_withholding(
+    session, *, scope, command, tax_seal="confirm", permissions="grant"
+):
+    """The service command with a confirming Tax reader and a granting reader."""
     from dotmac_billing import service as billing_service
 
     if isinstance(tax_seal, str):
         tax_seal = _TaxSeals(command.evidence)
+    if isinstance(permissions, str):
+        permissions = _Permissions(command.actor_ref)
     return billing_service.freeze_issued_invoice_withholding(
-        session, scope=scope, command=command, tax_seal=tax_seal
+        session,
+        scope=scope,
+        command=command,
+        tax_seal=tax_seal,
+        permissions=permissions,
     )
 
 
@@ -981,6 +1003,83 @@ def test_tax_must_confirm_the_determination(scratch, fault):
             )
         assert refused.value.code == "billing.withholding_freeze_tax_seal_mismatch"
         assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+def test_no_permission_reader_wired_refuses_the_freeze(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id, invoice_id, scope, _late(session, invoice_id, tax)
+                ),
+                permissions=None,
+            )
+        assert refused.value.code == "billing.withholding_freeze_permission_unavailable"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+def test_an_actor_without_the_permission_cannot_freeze(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, tax = _v2_invoice(session, scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    account.id, invoice_id, scope, _late(session, invoice_id, tax)
+                ),
+                permissions=_Permissions("someone-else"),
+            )
+        assert refused.value.code == "billing.withholding_freeze_permission_denied"
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
+def _line_id(session, invoice_id):
+    return session.execute(
+        text("SELECT id FROM mod_billing.document_lines WHERE document_id = :d"),
+        {"d": invoice_id},
+    ).scalar_one()
+
+
+def test_a_v1_era_line_is_frozen_only_when_named_and_confirmed(scratch):
+    from dataclasses import replace as _replace
+
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        # Issued with V1 retained Tax evidence: no commercial source on the line.
+        account, invoice_id, _ = _invoice(session, scope, elected=False)
+        late = _late(session, invoice_id, dependency._evidence(scope))
+        unnamed = _freeze_command(account.id, invoice_id, scope, late)
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(session, scope=scope, command=unnamed)
+        assert refused.value.code == "billing.withholding_freeze_unbound"
+        named = _replace(unnamed, line_id=_line_id(session, invoice_id))
+        # Tax must confirm the commercial source and facts for that line.
+        seals = _TaxSeals(late)
+        key = late.determination.determination_set_id
+        seals.items[key] = _replace(
+            seals.items[key], counterparty_ref="another-customer"
+        )
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session, scope=scope, command=named, tax_seal=seals
+            )
+        assert refused.value.code == "billing.withholding_freeze_tax_seal_mismatch"
+        rows = freeze_issued_invoice_withholding(session, scope=scope, command=named)
+        assert [row.obligation_id for row in rows] == [
+            _line_obligation(session, invoice_id)
+        ]
         session.rollback()
 
 
