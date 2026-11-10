@@ -32,6 +32,7 @@ from dotmac_billing.opening_receivable_validation import (
 )
 from dotmac_kernel.cache import Scope, TenantScope
 
+from tests import billing_opening_variance_fixtures as variance_fixture
 from tests.unit import test_billing_opening_receivable_contracts as ar
 
 
@@ -327,15 +328,17 @@ def _with_other_partition(command: ImportOpeningAccountV2) -> ImportOpeningAccou
     )
     return replace(
         command,
-        manifest=replace(
-            manifest,
-            receivables=(first_item, replace(second_item, partition=other)),
-            cash_lots=(first_lot, replace(second_lot, partition=other)),
-            dispositions=tuple(
-                replace(row, partition=other) if row.identity in moved else row
-                for row in manifest.dispositions
-            ),
-            controls=(local_control, other_control),
+        manifest=variance_fixture.with_exact_measures(
+            replace(
+                manifest,
+                receivables=(first_item, replace(second_item, partition=other)),
+                cash_lots=(first_lot, replace(second_lot, partition=other)),
+                dispositions=tuple(
+                    replace(row, partition=other) if row.identity in moved else row
+                    for row in manifest.dispositions
+                ),
+                controls=(local_control, other_control),
+            )
         ),
     )
 

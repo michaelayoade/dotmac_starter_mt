@@ -278,24 +278,40 @@ def test_an_unlisted_code_and_an_unresolvable_source_stay_blocking():
     assert only(run(ghost)).reason == "census_blocking_exception"
 
 
-def test_a_held_partition_stays_in_the_manifest_marked_held_with_one_reason():
-    held = run(classes=a10(("a", "opening_gap_other", "match")))
-    decision = only(held)
+def test_finding_only_applies_to_closed_history_and_never_to_an_open_document():
+    """M8 (design 2.2): a provenance finding on closed history is recorded in the
+    decision, not blocking; on an open document it stays blocking."""
+    policies = [{"code": "settlement_provenance", "policy": "finding_only"}]
+    closed = census(blocking_exceptions=[exc("a", "settlement_provenance", "i-closed")])
+    admitted = run(closed, rules(code_policies=policies))
+    decision = only(admitted)
+    assert decision.admitted and decision.reason is None
+    assert dict(decision.findings) == {"settlement_provenance": 1}
+    assert admitted.census["blocking_exceptions"] == []
+    on_open = census(blocking_exceptions=[exc("a", "settlement_provenance", "i-open")])
+    blocked = only(run(on_open, rules(code_policies=policies)))
+    assert (blocked.admitted, blocked.reason) == (False, "census_blocking_exception")
+    # without the policy the same closed-history code blocks (fail closed)
+    assert only(run(closed)).reason == "census_blocking_exception"
+    # no other relaxing policy exists
+    with pytest.raises(AdmissibilityError):
+        rules(code_policies=[{"code": "residual_mismatch", "policy": "ignore"}])
+
+
+def test_a_non_admitted_partition_is_routed_out_and_listed_with_one_reason():
+    """Q1: no manifest-marked hold exists; the partition leaves the manifest and
+    the decision record lists its rows, stated lane figures and census codes."""
+    routed = run(classes=a10(("a", "opening_gap_other", "match")))
+    decision = only(routed)
     assert (decision.admitted, decision.reason) == (False, "a10_opening_not_exact")
-    assert decision.route == "post_seal_admission"
-    assert held.census["eligible_invoice_ids"] == []
-    assert held.held_invoice_reasons == {
-        UUID(uid("i-open")): "held:a10_opening_not_exact"
-    }
-    # still in the population, with its census exceptions out of the blockers
-    assert {x["invoice_id"] for x in held.census["invoices"]} == {
-        uid("i-open"),
-        uid("i-closed"),
-    }
-    assert held.census["blocking_exceptions"] == []
-    ctl = held.census["controls"][0]
-    assert (ctl["eligible_count"], ctl["eligible_residual"]) == (0, "0.00")
-    assert held.counts()["route:post_seal_admission"] == 1
+    assert decision.route == "governed_correction"
+    assert routed.census["eligible_invoice_ids"] == []
+    assert routed.census["invoices"] == []
+    assert routed.census["controls"] == []
+    assert decision.rows == 2  # i-open and i-closed are listed, never dropped
+    assert dict(decision.lane_figures)["collectible_receivable"]
+    assert routed.counts()["route:governed_correction"] == 1
+    assert not hasattr(routed, "held_invoice_reasons")
 
 
 def test_a_structural_hold_stays_out_with_a_governed_correction_route():
@@ -406,6 +422,14 @@ def reseller_map(default="svc-1", overrides=()):
     )
 
 
+def carry_wallet():
+    """A reseller wallet lane is non-AR money: it is admitted only when the rules
+    carry it as a lane_not_transferred variance (design 2.2)."""
+    return rules(
+        code_policies=[{"code": "unbacked_lane", "policy": "carry_as_variance"}]
+    )
+
+
 def reseller_census():
     c = census()
     c["lanes"] = [lane("a", "60.00", credit="7.00"), lane("r", "0.00", credit="3.00")]
@@ -417,7 +441,9 @@ RES_CLASSES = a10(EXACT, ("r", "opening_exact", "match"))
 
 
 def test_reseller_subscriber_invoices_and_wallet_map_to_the_reseller_account():
-    result = run(reseller_census(), classes=RES_CLASSES, reseller=reseller_map())
+    result = run(
+        reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=reseller_map()
+    )
     decisions = {d.account_id: d for d in result.decisions}
     assert uid("a") not in decisions  # folded away
     reseller = decisions[uid("r")]
@@ -435,13 +461,17 @@ def test_reseller_subscriber_invoices_and_wallet_map_to_the_reseller_account():
 
 def test_one_service_ref_per_document_with_per_invoice_override():
     mapping = reseller_map(overrides=[("i-open", "svc-9")])
-    result = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    result = run(
+        reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=mapping
+    )
     assert result.service_refs == {UUID(uid("i-open")): "svc-9"}
 
 
 def test_a_missing_service_ref_holds_the_reseller_partition():
     mapping = reseller_map(default=None)
-    result = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    result = run(
+        reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=mapping
+    )
     decision = only(
         type(
             "P",
@@ -531,15 +561,17 @@ def test_an_excluded_residue_is_never_dropped_it_holds_the_partition():
 
 def test_every_member_of_a_reseller_partition_must_pass_a10():
     mapping = reseller_map()
-    ok = run(reseller_census(), classes=RES_CLASSES, reseller=mapping)
+    ok = run(reseller_census(), carry_wallet(), classes=RES_CLASSES, reseller=mapping)
     assert [d.admitted for d in ok.decisions] == [True]
     bad = a10(("a", "opening_gap_other", "match"), ("r", "opening_exact", "match"))
-    held = run(reseller_census(), classes=bad, reseller=mapping)
+    held = run(reseller_census(), carry_wallet(), classes=bad, reseller=mapping)
     decision = only(held)
     assert (decision.account_id, decision.reason) == (uid("r"), "a10_opening_not_exact")
     assert decision.detail == (f"{uid('a')}:opening_gap_other",)
     missing = a10(("r", "opening_exact", "match"))
-    decision = only(run(reseller_census(), classes=missing, reseller=mapping))
+    decision = only(
+        run(reseller_census(), carry_wallet(), classes=missing, reseller=mapping)
+    )
     assert (decision.reason, decision.detail) == ("a10_missing", (uid("a"),))
     # a reseller's folded subscribers are not "unused" A10 accounts
     assert ok.a10_accounts_unused == 0

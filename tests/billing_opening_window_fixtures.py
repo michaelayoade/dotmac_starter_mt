@@ -97,6 +97,10 @@ def _principal(scratch, plane):
         "opening_window_seals",
         "opening_hold_admissions",
         "opening_authority_switch_receipts",
+        "opening_variances",
+        "opening_variance_events",
+        "opening_control_gaps",
+        "opening_control_gap_events",
     }
     with engine.begin() as connection:
         connection.execute(

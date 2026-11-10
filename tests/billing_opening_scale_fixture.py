@@ -69,7 +69,11 @@ def rules_document() -> dict[str, object]:
             "matching_post_cause": "match",
             "draft_allocation_post_causes": ["known:stale_draft_allocation"],
         },
-        "code_policies": [],
+        # M8: provenance gaps on CLOSED history are findings, not blockers.
+        "code_policies": [
+            {"code": "settlement_provenance", "policy": "finding_only"},
+            {"code": "residual_mismatch", "policy": "carry_as_variance"},
+        ],
         "closed_invoice_statuses": ["paid", "written_off", "void"],
         "open_invoice_statuses": ["issued", "overdue", "partially_paid"],
         "drafts": {"draft_status": "draft"},
@@ -306,13 +310,20 @@ def build_scale_inputs(
                         "reasons": ["no_authenticated_frozen_document"],
                     }
                 )
-    # a handful of the open partitions carry residual_mismatch (stay held)
+    # a handful of the open partitions carry a census finding. The first one is an
+    # uncarried invoice_provenance (blocking: routed out to governed correction);
+    # the others are a carried residual_mismatch and import.
     mismatch_partitions = [p for p in open_partitions if p not in clean_open_partitions]
+    blocked_partitions = set(mismatch_partitions[:1])
     for p in mismatch_partitions:
         exceptions.append(
             {
                 "account_id": accounts[p],
-                "code": "residual_mismatch",
+                "code": (
+                    "invoice_provenance"
+                    if p in blocked_partitions
+                    else "residual_mismatch"
+                ),
                 "currency": "NGN",
                 "detail": "synthetic residual mismatch",
                 "source_id": _id("invoice", first_invoice[p]),
@@ -331,13 +342,23 @@ def build_scale_inputs(
             klass, cause = "opening_gap_other", "match"
         else:
             klass, cause = "opening_exact", "match"
+        # credit-positive net; an exact account rebuilds to exactly -lane
+        drift = 0 if (klass, cause) == ("opening_exact", "match") else 5000
         a10_accounts.append(
-            {"account_id": accounts[p], "opening_class": klass, "post_cause": cause}
+            {
+                "account_id": accounts[p],
+                "currency": "NGN",
+                "rebuild_net": _signed_money(-lane_receivable[p] - drift),
+                "opening_class": klass,
+                "post_cause": cause,
+            }
         )
     for k in range(32):  # A10 accounts the census does not know (ignored)
         a10_accounts.append(
             {
                 "account_id": account_uuid(partitions + k),
+                "currency": "NGN",
+                "rebuild_net": "0.00",
                 "opening_class": "opening_exact",
                 "post_cause": "match",
             }
@@ -348,22 +369,24 @@ def build_scale_inputs(
         if a10_accounts[p]["opening_class"] == "opening_exact"
         and a10_accounts[p]["post_cause"] == "match"
     }
-    eligible_expected = sum(len(open_by_partition.get(p, ())) for p in clean_admitted)
-    # No rule relaxes a census code, so provenance gaps block their partition.
-    # Place them only where the partition is not a clean admission, so the
-    # admitted population (and the eligible count) stay as designed while the
-    # exception volume stays at full-run scale.
-    for p, account, settlement_id in provenance_gaps:
-        if p not in clean_admitted:
-            exceptions.append(
-                {
-                    "account_id": account,
-                    "code": "settlement_provenance",
-                    "currency": "NGN",
-                    "detail": "synthetic provenance gap",
-                    "source_id": settlement_id,
-                }
-            )
+    # W-V1: A10 no longer gates admission (it is the rebuild memo basis) and a
+    # carried residual_mismatch no longer blocks, so every open partition imports.
+    _ = clean_admitted
+    eligible_expected = sum(
+        len(v) for p, v in open_by_partition.items() if p not in blocked_partitions
+    )
+    # Provenance gaps sit on closed history in every partition, admitted ones
+    # included (M8 finding_only); the admitted population stays as designed.
+    for _p, account, settlement_id in provenance_gaps:
+        exceptions.append(
+            {
+                "account_id": account,
+                "code": "settlement_provenance",
+                "currency": "NGN",
+                "detail": "synthetic provenance gap",
+                "source_id": settlement_id,
+            }
+        )
 
     lanes = [
         {
@@ -449,7 +472,7 @@ def build_scale_inputs(
     return {
         "census": census,
         "a10": {
-            "schema": "billing.opening.a10-account-classes.v1",
+            "schema": "billing.opening.a10-account-rebuild.v1",
             "accounts": a10_accounts,
         },
         "rules": rules_document(),
@@ -462,6 +485,11 @@ def build_scale_inputs(
             "draft": n_draft - pending["draft"],
         },
     }
+
+
+def _signed_money(minor: int) -> str:
+    sign = "-" if minor < 0 else ""
+    return f"{sign}{_money(abs(minor))}"
 
 
 def _money(minor: int) -> str:
