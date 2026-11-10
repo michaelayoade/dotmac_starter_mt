@@ -24,6 +24,7 @@ from dotmac_positioning.contracts import (
     GeofenceTransition,
     ObservationDisposition,
     ObservationInput,
+    ObservationNotFound,
     ObservationOutcome,
     ObservationPolicy,
     PolygonFence,
@@ -41,6 +42,7 @@ from dotmac_positioning.models import (
     Geofence,
     GeofenceFact,
     GeofenceState,
+    ObservationHold,
     PositionObservation,
     SourceAssignment,
     SourceIdentity,
@@ -1099,6 +1101,113 @@ def get_trail(
     )
 
 
+def _hold_ref(value: str) -> str:
+    normalized = value.strip()
+    if not normalized or len(normalized) > 128:
+        raise PositionObservationRejected(
+            "hold reference must contain 1 to 128 characters"
+        )
+    return normalized
+
+
+def place_observation_hold(
+    db: Session,
+    *,
+    scope: TenantScope,
+    observation_id: UUID,
+    hold_ref: str,
+    placed_at: datetime,
+) -> ObservationHold:
+    """Pin one observation against pruning on behalf of an opaque holder.
+
+    The reference is the holder's own and carries no meaning here. Placing the
+    same reference again returns the existing hold. The observation row is
+    locked first so concurrent placements converge and a concurrent prune
+    cannot delete the row underneath the new hold.
+    """
+
+    tenant_id = _tenant(scope)
+    reference = _hold_ref(hold_ref)
+    observation = db.scalars(
+        select(PositionObservation)
+        .where(
+            PositionObservation.tenant_id == tenant_id,
+            PositionObservation.id == observation_id,
+        )
+        .with_for_update()
+    ).one_or_none()
+    if observation is None:
+        raise ObservationNotFound(f"observation {observation_id} was not found")
+    existing = db.scalars(
+        select(ObservationHold).where(
+            ObservationHold.tenant_id == tenant_id,
+            ObservationHold.observation_id == observation_id,
+            ObservationHold.hold_ref == reference,
+        )
+    ).one_or_none()
+    if existing is not None:
+        return existing
+    row = ObservationHold(
+        tenant_id=tenant_id,
+        observation_id=observation_id,
+        hold_ref=reference,
+        placed_at=_as_utc(placed_at),
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def release_observation_hold(
+    db: Session,
+    *,
+    scope: TenantScope,
+    observation_id: UUID,
+    hold_ref: str,
+) -> bool:
+    """Release one holder's pin; the observation becomes prunable again.
+
+    Returns whether a hold existed. Other holders' pins are untouched, so the
+    observation stays retained until the last of them is released.
+    """
+
+    tenant_id = _tenant(scope)
+    reference = _hold_ref(hold_ref)
+    row = db.scalars(
+        select(ObservationHold)
+        .where(
+            ObservationHold.tenant_id == tenant_id,
+            ObservationHold.observation_id == observation_id,
+            ObservationHold.hold_ref == reference,
+        )
+        .with_for_update()
+    ).one_or_none()
+    if row is None:
+        return False
+    db.delete(row)
+    db.flush()
+    return True
+
+
+def list_observation_holds(
+    db: Session,
+    *,
+    scope: TenantScope,
+    observation_id: UUID,
+) -> tuple[str, ...]:
+    """Return the opaque references currently holding one observation."""
+
+    rows = db.scalars(
+        select(ObservationHold.hold_ref)
+        .where(
+            ObservationHold.tenant_id == _tenant(scope),
+            ObservationHold.observation_id == observation_id,
+        )
+        .order_by(ObservationHold.hold_ref)
+    )
+    return tuple(rows)
+
+
 def prune_observations(
     db: Session,
     *,
@@ -1106,17 +1215,21 @@ def prune_observations(
     received_before: datetime,
     preserve_observation_ids: frozenset[UUID] = frozenset(),
 ) -> int:
-    """Delete expired evidence except current or product-preserved rows."""
+    """Delete expired evidence except current, held or product-preserved rows."""
 
     tenant_id = _tenant(scope)
     current_ids = select(CurrentPosition.observation_id).where(
         CurrentPosition.tenant_id == tenant_id,
         CurrentPosition.observation_id.is_not(None),
     )
+    held_ids = select(ObservationHold.observation_id).where(
+        ObservationHold.tenant_id == tenant_id,
+    )
     query = db.query(PositionObservation).filter(
         PositionObservation.tenant_id == tenant_id,
         PositionObservation.received_at < _as_utc(received_before),
         PositionObservation.id.not_in(current_ids),
+        PositionObservation.id.not_in(held_ids),
     )
     if preserve_observation_ids:
         query = query.filter(
@@ -1453,9 +1566,12 @@ __all__ = [
     "get_current_position",
     "get_trail",
     "grant_collection",
+    "list_observation_holds",
+    "place_observation_hold",
     "prune_observations",
     "rebuild_current_position",
     "record_observations",
+    "release_observation_hold",
     "resolve_tracked_unit",
     "revoke_collection",
     "unassign_source",

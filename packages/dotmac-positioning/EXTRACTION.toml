@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Provider-neutral tracked-unit position evidence, projections, collection grants, source assignments, retention, and geofence facts"
-contract = "Tenant-scoped opaque tracked units; temporal source assignments; purpose-bound collection grants; immutable replay-safe observations with device and receipt time, accuracy, source, and opaque context; deterministic current/trail projections; caller-selected retention; and neutral circle/polygon entry/exit facts evaluated only for explicit product-selected opaque fence ids. Products own subject links, fence applicability, authorization, policy defaults, business consequences, transports, and presentation."
+contract = "Tenant-scoped opaque tracked units; temporal source assignments; purpose-bound collection grants; immutable replay-safe observations with device and receipt time, accuracy, source, and opaque context; deterministic current/trail projections; caller-selected retention with neutral observation holds that an opaque holder reference places and releases and that pruning always honours; and neutral circle/polygon entry/exit facts evaluated only for explicit product-selected opaque fence ids. Products own subject links, fence applicability, authorization, policy defaults, business consequences, transports, and presentation."
 authority_boundary = "dotmac-positioning owns position evidence and rebuildable neutral projections, not vehicle lifecycle, work-order lifecycle, attendance consequences, provider transport, or map presentation. Product owners retain subject links, applicability, policy and every business consequence."
 source_repositories = [
   "dotmac_sub",

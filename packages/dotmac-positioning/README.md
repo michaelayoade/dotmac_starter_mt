@@ -32,6 +32,18 @@ shape, so ADR-0028 correctly rejects a redundant `ModulePlaneSelection`; plane
 selection belongs only to a module that declares multiple supported sets. The
 package provides no single-tenant, product, provider, or superuser bypass.
 
+## Retention holds
+
+A product may pin a single observation against pruning under an opaque holder
+reference (`place_observation_hold`, `release_observation_hold`,
+`list_observation_holds`). The reference carries no meaning here: positioning
+never learns whether it names a decision, a dispute or a warrant, and it stores
+no subject, address or consequence. `prune_observations` never deletes a held
+row and a restricting foreign key stops any other deleter. An observation stays
+retained until its last hold is released. A hold extends retention only; it
+grants no collection, and ingest still needs an active collection grant and the
+caller's `ObservationPolicy`.
+
 ## Native computation candidate
 
 The unreleased `0.2.0a1` candidate includes a private Rust `_native` extension behind the existing public Python API. Authorization, tenant isolation, transactions and persistence retain their current owners. Installing a matching wheel needs no compiler. Building from source requires the exact Rust and build-tool pins in the packaged `build.py`, plus a C linker; the source archive includes locked Cargo inputs. No Python computation fallback is installed. Hosted qualification and publication remain separate from this source change.

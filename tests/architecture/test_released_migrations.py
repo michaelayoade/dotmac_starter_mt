@@ -8485,7 +8485,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-payables": frozenset(),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
-    "dotmac-positioning": frozenset(),
+    # `po_0002` adds neutral observation retention holds; still editable until
+    # `dotmac-positioning` 0.2.0a2 is tagged.
+    "dotmac-positioning": frozenset({"po_0002_observation_holds.py"}),
     "dotmac-procurement": frozenset(),
     "dotmac-projects": frozenset(),
     "dotmac-publishing": frozenset(),
