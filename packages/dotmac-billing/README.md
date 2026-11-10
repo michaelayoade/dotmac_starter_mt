@@ -84,7 +84,7 @@ the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
 The historical first release candidate is `0.1.0a1`; the current unreleased
-development successor is `0.1.0a11` and requires
+development successor is `0.1.0a12` and requires
 `dotmac-kernel>=0.1.0a105` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.

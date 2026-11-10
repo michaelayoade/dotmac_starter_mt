@@ -8487,10 +8487,14 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "su_0005_line_coverage_overlap.py",
         }
     ),
-    # `bi_0013` adds the sealed hold list guards and post-seal hold admission
-    # audit table; `bi_0014` the opening variance ledger (ST-4c). Both are still
-    # editable until billing 0.1.0a11 is tagged.
-    "dotmac-billing": frozenset(),
+    # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
+    # frozen. `bi_0015` is a12's, still editable until a12 is tagged.
+    "dotmac-billing": frozenset(
+        {
+            # a12 (the a11 number is published): B lane, still unreleased.
+            "bi_0015_line_price_version_fk.py",
+        }
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),

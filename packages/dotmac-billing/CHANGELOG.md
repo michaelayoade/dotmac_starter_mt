@@ -2,7 +2,24 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a11 — UNRELEASED
+## 0.1.0a12 — UNRELEASED
+
+The a11 number was never published; a12 carries everything listed under a11
+below plus the B lane. Migrations here (`bi_0015` and later) are unreleased and
+chain after `bi_0014_opening_variance_ledger`.
+
+- B1 (`bi_0015_line_price_version_fk`): a composite foreign key
+  `document_lines(obligation_id, price_source_version)` references the rated
+  obligation's `(id, price_version_id)` (tenant-qualified on the tenant plane),
+  so a rated line can only bill at the price version its obligation was rated
+  at. The key is MATCH SIMPLE: credit-note lines (no `obligation_id`) are
+  exempt, and opening-import invoices carry no document lines. The constraint is
+  added `NOT VALID` and `VALIDATE` is attempted; if existing rows violate it the
+  constraint stays `NOT VALID` with a constraint comment naming the manual
+  exceptions review. No row is repaired or rewritten. Adds the target unique
+  key `rated_obligations(id, price_version_id)` on both planes.
+
+## 0.1.0a11 — UNRELEASED (rolled into a12)
 
 - Breaking for adapters: `NumberingProvider.allocate` now also receives a
   required `document_reference`, the stable identity of the document being
