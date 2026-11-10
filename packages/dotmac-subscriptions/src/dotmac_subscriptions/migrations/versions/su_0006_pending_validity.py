@@ -269,6 +269,7 @@ def downgrade() -> None:
             tables.state_check, table, f"state IN ({_OLD_STATES})", schema=_SCHEMA
         )
         for column in (
+            "validity_actor_ref",
             "validity_resolution_command_id",
             "validity_resolved_at",
             "validity_evidence_ref",

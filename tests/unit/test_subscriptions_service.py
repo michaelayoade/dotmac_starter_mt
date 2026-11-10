@@ -1043,7 +1043,7 @@ def test_a_capped_hold_has_no_registered_owner_so_generation_refuses_it(
 ) -> None:
     with pytest.raises(SubscriptionDataError) as refused:
         _held_occurrence(db, registry, hold=OccurrenceValidityHold.capped)
-    assert refused.value.code == "occurrences.hold_owner_unregistered"
+    assert refused.value.code == "subscriptions.occurrences.hold_owner_unregistered"
     assert db.scalars(select(PlatformRecurringChargeOccurrence)).all() == []
 
 
@@ -1055,7 +1055,7 @@ def test_hold_owners_are_checked_against_installed_module_codes() -> None:
     assert bare.validity_hold_owners == {}
     with pytest.raises(SubscriptionDataError) as unregistered:
         bare.require_validity_hold_owner("prepaid")
-    assert unregistered.value.code == "occurrences.hold_owner_unregistered"
+    assert unregistered.value.code == "subscriptions.occurrences.hold_owner_unregistered"
     # Billing installed: prepaid -> billing; capped stays unregistered.
     both = SubscriptionVocabularyRegistry.from_manifests((product, billing))
     assert both.validity_hold_owners == {"prepaid": "billing"}
@@ -1064,12 +1064,12 @@ def test_hold_owners_are_checked_against_installed_module_codes() -> None:
         SubscriptionVocabularyRegistry.from_manifests(
             (product,), validity_hold_owners={"capped": "usage"}
         )
-    assert unknown_owner.value.code == "vocabulary.unknown_hold_owner"
+    assert unknown_owner.value.code == "subscriptions.vocabulary.unknown_hold_owner"
     with pytest.raises(SubscriptionDataError) as unknown_hold:
         SubscriptionVocabularyRegistry.from_manifests(
             (product,), validity_hold_owners={"mystery": "product"}
         )
-    assert unknown_hold.value.code == "vocabulary.unknown_validity_hold"
+    assert unknown_hold.value.code == "subscriptions.vocabulary.unknown_validity_hold"
     named = SubscriptionVocabularyRegistry.from_manifests(
         (product, billing), validity_hold_owners={"capped": "product"}
     )
@@ -1079,7 +1079,7 @@ def test_hold_owners_are_checked_against_installed_module_codes() -> None:
         both.validity_hold_owners["capped"] = "product"  # type: ignore[index]
     with pytest.raises(SubscriptionDataError) as direct:
         SubscriptionVocabularyRegistry({}, {}, {}, {"capped": "ghost"})
-    assert direct.value.code == "vocabulary.unknown_hold_owner"
+    assert direct.value.code == "subscriptions.vocabulary.unknown_hold_owner"
 
 
 def test_a_rejected_hold_is_cancelled_and_never_staged(
@@ -1137,7 +1137,7 @@ def test_an_owner_may_resolve_only_its_own_kind_of_hold(
     port = FakeOwnerEvidence()
     with pytest.raises(SubscriptionDataError) as refused:
         _resolve_validity(db, _evidence(occurrence_id, owner_code="product"), port)
-    assert refused.value.code == "occurrences.owner_mismatch"
+    assert refused.value.code == "subscriptions.occurrences.owner_mismatch"
     assert port.calls == []  # refused before the owner is even asked
     stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
     assert stored is not None and stored.state == "pending_validity"
@@ -1150,7 +1150,7 @@ def test_unverified_owner_evidence_is_refused_and_verified_is_checked_once(
     command = _evidence(occurrence_id)
     with pytest.raises(SubscriptionDataError) as refused:
         _resolve_validity(db, command, FakeOwnerEvidence(verifies=False))
-    assert refused.value.code == "occurrences.owner_evidence_unverified"
+    assert refused.value.code == "subscriptions.occurrences.owner_evidence_unverified"
     stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
     assert stored is not None and stored.state == "pending_validity"
     port = FakeOwnerEvidence()
@@ -1235,4 +1235,4 @@ def test_replaying_a_rejected_period_says_so_instead_of_looking_held(
             registry=registry,
             timer=FakeTimer(),
         )
-    assert replayed.value.code == "occurrences.period_rejected"
+    assert replayed.value.code == "subscriptions.occurrences.period_rejected"
