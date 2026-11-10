@@ -6,29 +6,55 @@ plumbing so an adopter DECLARES a ``ResourceDeclaration`` instead of writing it:
 
 * an opaque, tamper-evident **cursor** (``encode_cursor`` / ``decode_cursor``);
 * a **changes feed** (``changes_page``) that pages by keyset on
-  ``(updated_at, id)``, never by offset, and never serves a row newer than the
-  **settle horizon**;
+  ``(updated_at, id)``, never by offset, and never serves a row that is not yet
+  **settled**;
 * the **tombstone** shape for a delete or a void (``Tombstone``);
 * a **completeness summary** (``summarize``): a count and a digest over
-  ``(id, version)`` for a window;
+  ``(id, version)`` for a window, plus the means to re-read that window;
 * **exact-scope read keys** built on the kernel machine keys
   (``ResourceScopes``): read, contact-read and import-write are separate exact
-  scopes, none of them a wildcard.
+  scopes, none of them a wildcard, and read and import-write never share a key.
 
-## Why a settle horizon (the late-commit rule)
+## What "settled" means, and what is guaranteed
 
-The feed orders by ``updated_at``. PostgreSQL ``now()`` is the TRANSACTION START
-time, so a transaction that starts at 10:00:00 and commits at 10:00:40 stamps its
-rows 10:00:00 yet becomes visible at 10:00:40. A reader that polled at 10:00:20
-and advanced its cursor past 10:00:10 would never see that row. The helper
-therefore serves only rows with ``updated_at < now - settle_horizon``. The
-horizon MUST exceed the longest write transaction on the resource, and the
-column MUST be written from one clock (the database's ``now()``); skew between
-writer clocks counts against the horizon. The consumer additionally treats the
-feed as at-least-once and de-duplicates on ``(id, version)``, so an overlapping
-re-read is always safe. A commit-ordered sequence would remove the assumption;
-the horizon needs no schema beyond the columns a versioned resource already has,
-which is why it is the standard method.
+The feed orders by ``updated_at``. A transaction that stamps a row and commits
+later makes it visible AFTER a reader may have advanced past its stamp, so a
+bare ``updated_at`` cursor can skip it. Three controls bound that, none of them
+absolute:
+
+1. **Database clock (B1).** The horizon is ``clock_timestamp() - settle_horizon``
+   computed IN the database, never from the reader's Python clock.
+2. **Open-transaction fence (B2, PostgreSQL).** The effective horizon is the
+   LEAST of that and the start time of the oldest transaction open in this
+   database (``pg_stat_activity.xact_start``, excluding the reader's own
+   backend) and of any prepared transaction. A transaction of any length is
+   therefore held back until it ends. The fence needs no privilege beyond what
+   every role has, but ``pg_stat_activity`` shows other roles' sessions only as
+   ``<insufficient privilege>`` rows with every other column NULL. When such
+   sessions exist the reader cannot see their transactions; the declaration's
+   ``unseen_sessions`` policy decides: ``"refuse"`` (default, fail-safe: the
+   call raises ``ResourceUnavailableError`` rather than claim completeness it
+   cannot know) or ``"horizon_only"`` (an explicit choice to rely on the
+   hold-back alone; the page and summary say so in ``fence``). The kit does not
+   require, and nothing should grant, ``pg_read_all_stats``; make the reader
+   role a member of the writer roles instead if it must see them. Not
+   PostgreSQL (the unit-test SQLite): hold-back only, ``fence`` says so.
+3. **Trigger stamping (B3).** ``updated_at`` and ``version`` are stamped by a
+   database trigger (``stamping_trigger_ddl``), not by application code. The
+   kernel ``TimestampMixin`` is NOT enough: its ``onupdate`` uses the writer's
+   application clock at flush time while inserts use the database ``now()``,
+   which breaks the single-clock precondition. A declaration must attest
+   ``stamped_by_trigger=True`` and adopters verify it with
+   ``stamping_trigger_installed``.
+
+Residuals, stated plainly: writers that cannot be seen (policy
+``"horizon_only"``) are covered only by the hold-back, so a transaction longer
+than the horizon can still commit behind a cursor; batch jobs must commit in
+batches shorter than the horizon; a logical restore or clock step can move
+stamps backwards. The consumer treats the feed as at-least-once and
+de-duplicates on ``(id, version)``, and a period is closed only on a summary
+computed at close time (``verify_period``) with ``changes_page(since=...)`` as
+the re-read path when it does not match.
 
 ## What a published resource must be
 
@@ -44,7 +70,7 @@ which is why it is the standard method.
 The cursor is opaque so that callers do not build on its structure. Its checksum
 detects corruption and accidental edits; it is not authentication. A forged
 cursor can only move a caller to another position inside data its key is already
-allowed to read, because every page re-checks the key's scope.
+allowed to read, because every page re-checks the key's scope and tenant.
 
 Receives a ``Session``; issues SELECTs only; never commits.
 """
@@ -54,16 +80,18 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
 import json
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from dotmac_kernel.exceptions import BadRequestError, ForbiddenError
+from dotmac_kernel.exceptions import BadRequestError, DomainError, ForbiddenError
 from dotmac_kernel.machine_auth import MachinePrincipal, require_machine_scope
 
 #: Default hold-back. Longer than any write transaction a resource should have.
@@ -72,11 +100,21 @@ DEFAULT_SETTLE_HORIZON = timedelta(seconds=60)
 MIN_SETTLE_HORIZON = timedelta(seconds=1)
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 1000
+#: Widest window a single summary may cover (B12). Close long periods in slices.
+DEFAULT_MAX_SUMMARY_WINDOW = timedelta(days=93)
 CURSOR_VERSION = 1
+
+UnseenSessionsPolicy = Literal["refuse", "horizon_only"]
+
+_IDENT = re.compile(r"[a-z_][a-z0-9_]*")
 
 
 class InvalidCursorError(BadRequestError):
     """The cursor is not one this resource issued (corrupt, edited or foreign)."""
+
+
+class ResourceUnavailableError(DomainError):
+    """The settle fence cannot be established, so completeness cannot be claimed."""
 
 
 # --- scope declaration --------------------------------------------------------
@@ -100,7 +138,9 @@ class ResourceScopes:
     SEPARATE scope for email, phone and service address; a resource that declares
     ``contact_fields`` but no ``contact_read`` never exposes them at all.
     ``import_write`` admits the idempotent import API and nothing else. The
-    three must be distinct, so no key reads by virtue of being allowed to write.
+    three must be distinct, and a key holding ``import_write`` is refused by the
+    feed and summary while a key holding ``read`` or ``contact_read`` is refused
+    by the import API (B9): no key both reads and writes a resource.
     """
 
     read: str
@@ -126,35 +166,56 @@ class ResourceDeclaration:
     ``model`` is a mapped class; the ``*_column`` fields name its attributes.
     ``serialize`` returns the Starter module's own schema for a live row (the
     canonical shape is the owning module's, not the kit's). Contact fields named
-    in ``contact_fields`` are removed from it unless the caller holds
+    in ``contact_fields`` are removed at ANY depth unless the caller holds
     ``scopes.contact_read``.
+
+    ``stamped_by_trigger`` is an attestation with no default: the published
+    table's ``updated_at`` and ``version`` are stamped by the database trigger
+    from ``stamping_trigger_ddl``, not by application code. ``False`` is refused.
+    ``tenant_id_column`` (default ``tenant_id``; ``None`` only for a table with
+    no tenant column) scopes every read to the key's tenant.
     """
 
     name: str
     model: Any
     scopes: ResourceScopes
     serialize: Callable[[Any], Mapping[str, Any]]
+    stamped_by_trigger: bool
     id_column: str = "id"
     version_column: str = "version"
     updated_at_column: str = "updated_at"
     deleted_at_column: str | None = "deleted_at"
+    tenant_id_column: str | None = "tenant_id"
     contact_fields: frozenset[str] = field(default_factory=frozenset)
     settle_horizon: timedelta = DEFAULT_SETTLE_HORIZON
+    max_summary_window: timedelta = DEFAULT_MAX_SUMMARY_WINDOW
+    unseen_sessions: UnseenSessionsPolicy = "refuse"
     api_version: str = "v1"
 
     def __post_init__(self) -> None:
         if not self.name or not all(c.isalnum() or c in "-_" for c in self.name):
             raise ValueError(f"resource name {self.name!r} must be [A-Za-z0-9_-]+")
+        if self.stamped_by_trigger is not True:
+            raise ValueError(
+                "a published resource must stamp updated_at and version by a "
+                "database trigger (stamping_trigger_ddl); application-clock "
+                "stamping breaks the single-clock precondition"
+            )
         if self.settle_horizon < MIN_SETTLE_HORIZON:
             raise ValueError(
                 f"settle_horizon {self.settle_horizon} is below the minimum "
                 f"{MIN_SETTLE_HORIZON}; a shorter hold-back can skip a late commit"
             )
+        if self.max_summary_window <= timedelta(0):
+            raise ValueError("max_summary_window must be positive")
+        if self.unseen_sessions not in ("refuse", "horizon_only"):
+            raise ValueError("unseen_sessions must be 'refuse' or 'horizon_only'")
         for label, attribute in (
             ("id_column", self.id_column),
             ("version_column", self.version_column),
             ("updated_at_column", self.updated_at_column),
             ("deleted_at_column", self.deleted_at_column),
+            ("tenant_id_column", self.tenant_id_column),
         ):
             if attribute is not None and not hasattr(self.model, attribute):
                 raise ValueError(f"{label} {attribute!r} is not on the model")
@@ -173,7 +234,7 @@ class ResourceDeclaration:
 
 
 def require_read(principal: MachinePrincipal, declaration: ResourceDeclaration) -> None:
-    """Refuse a key that does not hold the resource's exact read scope.
+    """Refuse a key that lacks the exact read scope, or that also holds import-write.
 
     Enforced inside the helpers as well as by the route dependency, so a route
     that forgets the dependency still cannot publish to a key outside its scope.
@@ -183,6 +244,103 @@ def require_read(principal: MachinePrincipal, declaration: ResourceDeclaration) 
             f"machine credential {principal.label!r} does not carry scope "
             f"{declaration.scopes.read!r}"
         )
+    write = declaration.scopes.import_write
+    if write is not None and principal.has_scope(write):
+        raise ForbiddenError(
+            f"machine credential {principal.label!r} holds the import scope for "
+            f"{declaration.name!r}; a key may read or write a resource, not both"
+        )
+
+
+def check_session_tenant(db: Session, principal: MachinePrincipal) -> None:
+    """Refuse a key whose tenant is not the tenant the session is scoped to (B11).
+
+    On PostgreSQL the session tenant is ``app.current_tenant`` (what RLS keys on).
+    Unset is refused: a reader with no established tenant must not be served.
+    Other dialects (the unit-test SQLite) have no session tenant; the per-row
+    ``tenant_id`` filter still applies.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    current = db.execute(
+        sa.text("SELECT current_setting('app.current_tenant', true)")
+    ).scalar_one()
+    if not current:
+        raise ForbiddenError("no tenant is established for this session")
+    if str(current).lower() != str(principal.tenant_id).lower():
+        raise ForbiddenError("the key's tenant is not the session tenant")
+
+
+# --- trigger stamping ---------------------------------------------------------
+
+
+def _ident(value: str) -> str:
+    if not _IDENT.fullmatch(value):
+        raise ValueError(f"{value!r} is not a plain lower-case SQL identifier")
+    return value
+
+
+def _trigger_names(table: str, schema: str | None) -> tuple[str, str, str]:
+    table = _ident(table)
+    qualified_table = f"{_ident(schema)}.{table}" if schema else table
+    prefix = f"{_ident(schema)}." if schema else ""
+    return qualified_table, f"{prefix}dotmac_stamp_{table}", f"dotmac_stamp_{table}"
+
+
+def stamping_trigger_ddl(
+    table: str,
+    *,
+    schema: str | None = None,
+    updated_at_column: str = "updated_at",
+    version_column: str = "version",
+) -> tuple[str, ...]:
+    """PostgreSQL DDL that stamps ``updated_at`` and ``version`` in the database.
+
+    INSERT sets ``version = 1`` and ``updated_at = clock_timestamp()``; an UPDATE
+    that changes any column sets ``version = OLD.version + 1`` and a fresh
+    ``updated_at``, whatever the statement supplied, so application code cannot
+    forge or forget either. Run each statement in the owning module's migration.
+    """
+    qualified_table, function, trigger = _trigger_names(table, schema)
+    updated, version = _ident(updated_at_column), _ident(version_column)
+    return (
+        f"CREATE OR REPLACE FUNCTION {function}() RETURNS trigger "
+        "LANGUAGE plpgsql AS $$ BEGIN "
+        "IF TG_OP = 'INSERT' THEN "
+        f"NEW.{version} := 1; NEW.{updated} := clock_timestamp(); "
+        f"ELSIF NEW IS DISTINCT FROM OLD THEN "
+        f"NEW.{version} := OLD.{version} + 1; NEW.{updated} := clock_timestamp(); "
+        "END IF; RETURN NEW; END $$",
+        f"CREATE TRIGGER {trigger} BEFORE INSERT OR UPDATE ON {qualified_table} "
+        f"FOR EACH ROW EXECUTE FUNCTION {function}()",
+    )
+
+
+def drop_stamping_trigger_ddl(
+    table: str, *, schema: str | None = None
+) -> tuple[str, ...]:
+    qualified_table, function, trigger = _trigger_names(table, schema)
+    return (
+        f"DROP TRIGGER IF EXISTS {trigger} ON {qualified_table}",
+        f"DROP FUNCTION IF EXISTS {function}()",
+    )
+
+
+def stamping_trigger_installed(
+    db: Session, table: str, *, schema: str | None = None
+) -> bool | None:
+    """True if the trigger is installed and enabled; ``None`` off PostgreSQL."""
+    if db.get_bind().dialect.name != "postgresql":
+        return None
+    qualified_table, _function, trigger = _trigger_names(table, schema)
+    found = db.execute(
+        sa.text(
+            "SELECT 1 FROM pg_trigger WHERE tgrelid = CAST(:rel AS regclass) "
+            "AND tgname = :name AND NOT tgisinternal AND tgenabled <> 'D'"
+        ),
+        {"rel": qualified_table, "name": trigger},
+    ).first()
+    return found is not None
 
 
 # --- tombstone and change envelope -------------------------------------------
@@ -239,6 +397,10 @@ class ChangesPage:
     has_more: bool
     #: Rows at or after this instant were withheld as not yet settled.
     horizon: datetime
+    #: How the horizon was fenced: ``pg_stat_activity``,
+    #: ``horizon_only_unseen_sessions``
+    #: or ``horizon_only_non_postgres``.
+    fence: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -246,6 +408,7 @@ class ChangesPage:
             "next_cursor": self.next_cursor,
             "has_more": self.has_more,
             "horizon": _iso(self.horizon),
+            "fence": self.fence,
         }
 
 
@@ -292,7 +455,9 @@ def decode_cursor(resource: str, cursor: str) -> tuple[datetime, str]:
     try:
         body_text, check_text = cursor.split(".")
         body = _unb64(body_text)
-        if not hmac_equal(_unb64(check_text), hashlib.sha256(body).digest()[:8]):
+        if not hmac.compare_digest(
+            _unb64(check_text), hashlib.sha256(body).digest()[:8]
+        ):
             raise ValueError("checksum")
         payload = json.loads(body)
         if payload["v"] != CURSOR_VERSION or payload["r"] != resource:
@@ -302,25 +467,83 @@ def decode_cursor(resource: str, cursor: str) -> tuple[datetime, str]:
         raise InvalidCursorError("cursor is not valid for this resource") from None
 
 
-def hmac_equal(left: bytes, right: bytes) -> bool:
-    import hmac
-
-    return hmac.compare_digest(left, right)
+# --- settle bound (B1, B2) ----------------------------------------------------
 
 
-# --- changes feed -------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class SettleBound:
+    horizon: datetime
+    fence: str
+    #: The database clock when the bound was computed.
+    computed_at: datetime
 
 
-def _horizon(declaration: ResourceDeclaration, now: datetime | None) -> datetime:
-    return _utc(now or datetime.now(UTC)) - declaration.settle_horizon
+_PG_BOUND = sa.text(
+    """
+    SELECT clock_timestamp() AS computed_at,
+           LEAST(
+             clock_timestamp() - make_interval(secs => :secs),
+             (SELECT min(xact_start) FROM pg_stat_activity
+               WHERE datname = current_database() AND pid <> pg_backend_pid()
+                 AND xact_start IS NOT NULL),
+             (SELECT min(prepared) FROM pg_prepared_xacts
+               WHERE database = current_database())
+           ) AS horizon,
+           (SELECT count(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND pid <> pg_backend_pid()
+               AND backend_type IS NULL) AS unseen
+    """
+)
 
 
-def _coerce_id(declaration: ResourceDeclaration, text: str) -> Any:
-    python_type = declaration.column(declaration.id_column).type.python_type
-    try:
-        return python_type(text)
-    except (ValueError, TypeError):
-        raise InvalidCursorError("cursor is not valid for this resource") from None
+def settle_bound(
+    db: Session, declaration: ResourceDeclaration, *, now: datetime | None = None
+) -> SettleBound:
+    """The instant before which rows are settled, from the DATABASE clock.
+
+    ``now`` is a test seam honoured only off PostgreSQL; on PostgreSQL the
+    database clock and open-transaction fence decide.
+    """
+    seconds = declaration.settle_horizon.total_seconds()
+    if db.get_bind().dialect.name == "postgresql":
+        row = db.execute(_PG_BOUND, {"secs": seconds}).one()
+        fence = "pg_stat_activity"
+        if row.unseen:
+            if declaration.unseen_sessions == "refuse":
+                raise ResourceUnavailableError(
+                    f"{row.unseen} session(s) in this database are not visible to "
+                    "the reader role, so open transactions cannot be fenced; make "
+                    "the reader a member of the writer roles, or declare "
+                    "unseen_sessions='horizon_only' to rely on the hold-back alone"
+                )
+            fence = "horizon_only_unseen_sessions"
+        return SettleBound(
+            horizon=_utc(row.horizon), fence=fence, computed_at=_utc(row.computed_at)
+        )
+    clock = _utc(
+        now if now is not None else db.execute(sa.select(sa.func.now())).scalar_one()
+    )
+    return SettleBound(
+        horizon=clock - declaration.settle_horizon,
+        fence="horizon_only_non_postgres",
+        computed_at=clock,
+    )
+
+
+# --- shaping -------------------------------------------------------------------
+
+
+def _strip_contact(value: Any, names: frozenset[str]) -> Any:
+    """Remove contact fields at ANY depth, in mappings inside lists inside mappings."""
+    if isinstance(value, Mapping):
+        return {
+            key: _strip_contact(item, names)
+            for key, item in value.items()
+            if key not in names
+        }
+    if isinstance(value, list | tuple):
+        return [_strip_contact(item, names) for item in value]
+    return value
 
 
 def _shape(
@@ -330,8 +553,7 @@ def _shape(
     contact = declaration.contact_fields
     scope = declaration.scopes.contact_read
     if contact and not (scope is not None and principal.has_scope(scope)):
-        for name in contact:
-            record.pop(name, None)
+        record = _strip_contact(record, contact)
     return record
 
 
@@ -368,30 +590,59 @@ def _item(
     )
 
 
+def _coerce_id(declaration: ResourceDeclaration, text: str) -> Any:
+    python_type = declaration.column(declaration.id_column).type.python_type
+    try:
+        return python_type(text)
+    except (ValueError, TypeError):
+        raise InvalidCursorError("cursor is not valid for this resource") from None
+
+
+def _tenant_filter(
+    declaration: ResourceDeclaration, principal: MachinePrincipal
+) -> Any:
+    if declaration.tenant_id_column is None:
+        return sa.true()
+    return declaration.column(declaration.tenant_id_column) == principal.tenant_id
+
+
+# --- changes feed -------------------------------------------------------------
+
+
 def changes_page(
     db: Session,
     declaration: ResourceDeclaration,
     *,
     principal: MachinePrincipal,
     after: str | None = None,
+    since: datetime | None = None,
     limit: int = DEFAULT_PAGE_SIZE,
     now: datetime | None = None,
 ) -> ChangesPage:
     """One page of changes strictly after ``after``, settled rows only.
 
-    ``after=None`` starts from the beginning. Keyset on ``(updated_at, id)`` makes
-    the position stable under inserts and ties; rows newer than the settle
-    horizon are withheld until they are older than it.
+    ``after=None`` starts from the beginning. ``since`` starts at an instant
+    instead (``updated_at >= since``) and is the RE-READ path (B4): a receiver
+    whose period summary does not match re-reads the window from its start with
+    ``since=window_from`` and de-duplicates on ``(id, version)``. ``after`` and
+    ``since`` are mutually exclusive.
     """
     require_read(principal, declaration)
+    check_session_tenant(db, principal)
+    if after is not None and since is not None:
+        raise BadRequestError("after and since are mutually exclusive")
     if not 1 <= limit <= MAX_PAGE_SIZE:
         raise BadRequestError(f"limit must be between 1 and {MAX_PAGE_SIZE}")
 
     updated = declaration.column(declaration.updated_at_column)
     ident = declaration.column(declaration.id_column)
-    horizon = _horizon(declaration, now)
+    bound = settle_bound(db, declaration, now=now)
 
-    stmt = sa.select(declaration.model).where(updated < horizon)
+    stmt = sa.select(declaration.model).where(
+        updated < bound.horizon, _tenant_filter(declaration, principal)
+    )
+    if since is not None:
+        stmt = stmt.where(updated >= _utc(since))
     if after is not None:
         position, raw_id = decode_cursor(declaration.name, after)
         record_id = _coerce_id(declaration, raw_id)
@@ -409,11 +660,21 @@ def changes_page(
         else after
     )
     return ChangesPage(
-        items=items, next_cursor=next_cursor, has_more=has_more, horizon=horizon
+        items=items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+        horizon=bound.horizon,
+        fence=bound.fence,
     )
 
 
 # --- completeness summary -----------------------------------------------------
+
+
+def digest_pairs(pairs: Iterable[tuple[object, int]]) -> tuple[int, str]:
+    """``(count, digest)`` over ``(id, version)`` pairs, order independent."""
+    lines = sorted(f"{record_id}:{int(version)}" for record_id, version in pairs)
+    return len(lines), hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,6 +689,15 @@ class ResourceSummary:
     #: False when the window was cut at the horizon; a receiver must not close
     #: the period on an unsettled summary.
     settled: bool
+    #: The database clock when the summary was computed. A period closes only on
+    #: a summary computed at close time, never a cached one.
+    computed_at: datetime
+    fence: str
+
+    @property
+    def reread_since(self) -> datetime:
+        """Pass to ``changes_page(since=...)`` to re-read this window on a mismatch."""
+        return self.window_from
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -437,7 +707,24 @@ class ResourceSummary:
             "count": self.count,
             "digest": self.digest,
             "settled": self.settled,
+            "computed_at": _iso(self.computed_at),
+            "fence": self.fence,
         }
+
+
+def verify_period(
+    summary: ResourceSummary, local_pairs: Iterable[tuple[object, int]]
+) -> bool:
+    """True only if the summary is settled and matches the receiver's own pairs.
+
+    The receiver builds ``local_pairs`` from what it holds for the same window at
+    the moment it asks to close; on ``False`` it re-reads the window with
+    ``changes_page(since=summary.reread_since)`` and checks again.
+    """
+    if not summary.settled:
+        return False
+    count, digest = digest_pairs(local_pairs)
+    return count == summary.count and hmac.compare_digest(digest, summary.digest)
 
 
 def summarize(
@@ -451,30 +738,41 @@ def summarize(
 ) -> ResourceSummary:
     """Count and digest ``(id, version)`` for ``[window_from, window_to)``.
 
-    Tombstones are rows and are counted, so a void changes the digest.
+    Tombstones are rows and are counted, so a void changes the digest. The window
+    is bounded by ``declaration.max_summary_window`` (B12).
     """
     require_read(principal, declaration)
+    check_session_tenant(db, principal)
     start, end = _utc(window_from), _utc(window_to)
     if end <= start:
         raise BadRequestError("window_to must be after window_from")
-    horizon = _horizon(declaration, now)
-    effective_end = min(end, horizon)
+    if end - start > declaration.max_summary_window:
+        raise BadRequestError(
+            f"window exceeds the maximum of {declaration.max_summary_window}"
+        )
+    bound = settle_bound(db, declaration, now=now)
+    effective_end = min(end, bound.horizon)
 
     updated = declaration.column(declaration.updated_at_column)
     ident = declaration.column(declaration.id_column)
     version = declaration.column(declaration.version_column)
     pairs = db.execute(
-        sa.select(ident, version).where(updated >= start, updated < effective_end)
+        sa.select(ident, version).where(
+            updated >= start,
+            updated < effective_end,
+            _tenant_filter(declaration, principal),
+        )
     ).all()
-    lines = sorted(f"{row[0]}:{int(row[1])}" for row in pairs)
-    digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+    count, digest = digest_pairs((row[0], row[1]) for row in pairs)
     return ResourceSummary(
         resource=declaration.name,
         window_from=start,
         window_to=effective_end,
-        count=len(lines),
+        count=count,
         digest=digest,
         settled=effective_end >= end,
+        computed_at=bound.computed_at,
+        fence=bound.fence,
     )
 
 
@@ -482,6 +780,7 @@ __all__ = [
     "CURSOR_VERSION",
     "ChangeItem",
     "ChangesPage",
+    "DEFAULT_MAX_SUMMARY_WINDOW",
     "DEFAULT_PAGE_SIZE",
     "DEFAULT_SETTLE_HORIZON",
     "InvalidCursorError",
@@ -490,10 +789,20 @@ __all__ = [
     "ResourceDeclaration",
     "ResourceScopes",
     "ResourceSummary",
+    "ResourceUnavailableError",
+    "SettleBound",
     "Tombstone",
+    "UnseenSessionsPolicy",
     "changes_page",
+    "check_session_tenant",
     "decode_cursor",
+    "digest_pairs",
+    "drop_stamping_trigger_ddl",
     "encode_cursor",
     "require_read",
+    "settle_bound",
+    "stamping_trigger_ddl",
+    "stamping_trigger_installed",
     "summarize",
+    "verify_period",
 ]

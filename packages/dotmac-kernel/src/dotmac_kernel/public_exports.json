@@ -1369,6 +1369,7 @@
         "CURSOR_VERSION",
         "ChangeItem",
         "ChangesPage",
+        "DEFAULT_MAX_SUMMARY_WINDOW",
         "DEFAULT_PAGE_SIZE",
         "DEFAULT_SETTLE_HORIZON",
         "InvalidCursorError",
@@ -1377,12 +1378,22 @@
         "ResourceDeclaration",
         "ResourceScopes",
         "ResourceSummary",
+        "ResourceUnavailableError",
+        "SettleBound",
         "Tombstone",
+        "UnseenSessionsPolicy",
         "changes_page",
+        "check_session_tenant",
         "decode_cursor",
+        "digest_pairs",
+        "drop_stamping_trigger_ddl",
         "encode_cursor",
         "require_read",
-        "summarize"
+        "settle_bound",
+        "stamping_trigger_ddl",
+        "stamping_trigger_installed",
+        "summarize",
+        "verify_period"
       ],
       "status": "declared"
     },
@@ -1634,9 +1645,12 @@
         "ImportRefused",
         "ImportResult",
         "ImportVerdict",
+        "MAX_RESULT_KEYS",
         "content_digest",
+        "flat_id_map",
         "import_record",
-        "import_scope"
+        "import_scope",
+        "lock_reference"
       ],
       "status": "declared"
     },

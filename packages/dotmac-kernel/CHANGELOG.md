@@ -9,10 +9,14 @@ here.
 ## Unreleased (source marker `0.1.0a108+dev`)
 
 Add `dotmac_kernel.resource_api` and `dotmac_kernel.source_import` (ADR-0079):
-the cursor codec, settle-horizon changes feed, tombstone envelope, completeness
-summary and exact-scope resource declaration, and the idempotent import verdict
-helper over the existing idempotency ledger. No table, migration or route is
-added. This does not allocate a version or authorize a release; the `+dev`
+the cursor codec, a changes feed fenced by the database clock and the oldest
+open PostgreSQL transaction, the tombstone envelope, the completeness summary
+with a `since` re-read path and `verify_period`, the exact-scope resource
+declaration (read and import-write never share a key; contact fields stripped at
+any depth; tenant checked), the DB stamping-trigger DDL helper, and the
+idempotent import verdict helper over the existing idempotency ledger
+(advisory-locked per reference, flat id-map results). No table, migration or
+route is added. This does not allocate a version or authorize a release; the `+dev`
 marker is the sanctioned unpublished state.
 
 ## 0.1.0a108 — Release inventory

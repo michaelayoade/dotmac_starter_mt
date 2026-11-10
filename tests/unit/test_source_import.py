@@ -15,6 +15,7 @@ from dotmac_kernel.source_import import (
     ImportBlocked,
     ImportRefused,
     ImportVerdict,
+    flat_id_map,
     import_record,
 )
 from sqlalchemy import select
@@ -27,6 +28,7 @@ DECL = ResourceDeclaration(
     model=Widget,
     scopes=ResourceScopes(read="invoices:read", import_write="imports.invoices:write"),
     serialize=lambda r: {},
+    stamped_by_trigger=True,
     settle_horizon=timedelta(seconds=5),
 )
 
@@ -186,3 +188,68 @@ def test_inputs_are_validated(db: Session, tenant_row: Tenant) -> None:
         with pytest.raises(BadRequestError):
             run(db, tenant_row, effect, **kwargs)
     assert effect.calls == 0
+
+
+def test_a_key_that_also_reads_is_refused_by_import(
+    db: Session, tenant_row: Tenant
+) -> None:
+    effect = Effect()
+    for extra in ("invoices:read",):
+        with pytest.raises(ForbiddenError):
+            run(db, tenant_row, effect, scopes=("imports.invoices:write", extra))
+    assert effect.calls == 0
+
+
+def test_the_stored_result_is_a_small_flat_id_map() -> None:
+    assert flat_id_map({"local_id": "r1", "n": 2}) == {"local_id": "r1", "n": 2}
+    assert flat_id_map(None) == {}
+    for bad in (
+        {"nested": {"a": 1}},
+        {"lst": [1]},
+        {"Bad-Key": "x"},
+        {"v": "x" * 201},
+        {"v": 1.5},
+        {"v": True},
+        {f"k{i}": 1 for i in range(17)},
+    ):
+        with pytest.raises(ValueError):
+            flat_id_map(bad)
+
+
+def test_a_payload_in_the_result_is_refused_and_nothing_is_recorded(
+    db: Session, tenant_row: Tenant
+) -> None:
+    def leaky(session: Session, seen: frozenset[int]):
+        return {"customer": {"email": "a@example.test"}}
+
+    with pytest.raises(ValueError):
+        run(db, tenant_row, leaky)
+    assert db.execute(select(IdempotencyRecord)).scalars().all() == []
+
+
+def test_current_version_callback_replaces_the_ledger_scan(
+    db: Session, tenant_row: Tenant
+) -> None:
+    effect = Effect()
+    result = import_record(
+        db,
+        DECL,
+        principal=key(tenant_row, "imports.invoices:write"),
+        external_ref="INV-9",
+        version=2,
+        content={"a": 1},
+        apply=effect,
+        current_version=lambda session: 5,
+    )
+    assert result.verdict is ImportVerdict.STALE and effect.calls == 0
+    result = import_record(
+        db,
+        DECL,
+        principal=key(tenant_row, "imports.invoices:write"),
+        external_ref="INV-9",
+        version=6,
+        content={"a": 1},
+        apply=effect,
+        current_version=lambda session: 5,
+    )
+    assert result.verdict is ImportVerdict.UPDATED and effect.seen[-1] == frozenset({5})

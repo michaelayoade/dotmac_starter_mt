@@ -1963,3 +1963,11 @@ declaration containing `*` is refused), the cursor is opaque and resource-bound,
 and the import ledger reuses `idempotency_records` with scope
 `import:<source>:<type>`; no table, migration or route is added. Source
 inspection does not qualify hosted execution, publication or adoption.
+
+Amended for review: the horizon is computed in the database and capped at the
+oldest open PostgreSQL transaction; a reader that cannot see other roles'
+sessions refuses unless the declaration chooses `unseen_sessions="horizon_only"`.
+`ResourceDeclaration` requires `stamped_by_trigger=True` (use
+`stamping_trigger_ddl`, verify with `stamping_trigger_installed`). `import_record`
+takes an advisory lock per (tenant, scope, reference), stores only a flat id
+map, and accepts an optional `current_version` callback.

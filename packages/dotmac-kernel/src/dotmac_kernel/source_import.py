@@ -25,10 +25,16 @@ window, so a replay long after any receipt has been redacted still answers
 ``unchanged``. Nothing is written before the effect (the effect and the ledger
 row commit together), so a crash leaves no row and a retry re-drives cleanly.
 
-Concurrency: two requests for the SAME key are serialised by the ledger's unique
-constraint. Two different versions of one reference racing is resolved by the
-receiver's own version check inside ``apply``; the effect receives the prior
-highest version so it can refuse to move backwards.
+Concurrency: two requests for the SAME key are also serialised by the ledger's
+unique constraint.
+
+Concurrency (B6): ``lock_reference`` takes a transaction-scoped advisory lock on
+(tenant, scope, reference) before the prior-version read, so importers of one
+reference are serialised and a racing v3 and v5 end with one applied and one
+``stale`` or ``updated`` decided on the true prior state. The stored result is a
+small flat id map only (B7, ``flat_id_map``): the ledger is permanent and must
+never hold payload or personal data. Read and import-write scopes are mutually
+exclusive on a key (B9) and the key's tenant must be the session tenant (B11).
 
 ``blocked:predecessor`` and ``refused:<code>`` are raised by ``apply`` as
 ``ImportBlocked`` / ``ImportRefused``; they roll the effect back, record nothing,
@@ -44,6 +50,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -57,7 +64,7 @@ from dotmac_kernel.idempotency import (
 )
 from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_kernel.machine_auth import MachinePrincipal
-from dotmac_kernel.resource_api import ResourceDeclaration
+from dotmac_kernel.resource_api import ResourceDeclaration, check_session_tenant
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
@@ -141,6 +148,54 @@ def _ledger_key(external_ref: str, version: int) -> str:
     return key
 
 
+MAX_RESULT_KEYS = 16
+MAX_RESULT_VALUE_LENGTH = 200
+_RESULT_KEY = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def flat_id_map(result: Mapping[str, object] | None) -> dict[str, object]:
+    """Validate the stored result: a small FLAT map of ids (B7).
+
+    The ledger keeps the result forever, so it must never carry payload or
+    personal data. Keys are short snake_case names; values are strings (at most
+    200 characters) or integers; no nesting. Anything else is a programming
+    error in the adopter's ``apply`` and raises ``ValueError``.
+    """
+    if result is None:
+        return {}
+    if len(result) > MAX_RESULT_KEYS:
+        raise ValueError(f"import result has more than {MAX_RESULT_KEYS} keys")
+    checked: dict[str, object] = {}
+    for key, value in result.items():
+        if not isinstance(key, str) or not _RESULT_KEY.fullmatch(key):
+            raise ValueError("import result keys must be short snake_case names")
+        if isinstance(value, bool) or not isinstance(value, str | int):
+            raise ValueError("import result values must be strings or integers")
+        if isinstance(value, str) and len(value) > MAX_RESULT_VALUE_LENGTH:
+            raise ValueError("import result string value is too long")
+        checked[key] = value
+    return checked
+
+
+def lock_reference(
+    db: Session, *, tenant_id: Any, scope: str, external_ref: str
+) -> None:
+    """Serialise importers of one (tenant, scope, reference) until transaction end (B6).
+
+    A transaction-scoped PostgreSQL advisory lock taken BEFORE the versions-seen
+    read, so a racing v3 and v5 cannot both observe the same prior state, both
+    apply, and mislabel created/updated. Requires READ COMMITTED (the kernel
+    default) so the second importer sees the first's ledger row after the lock.
+    No-op off PostgreSQL.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    db.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+        {"k": f"{tenant_id}|{scope}|{external_ref}"},
+    )
+
+
 def _versions_seen(
     db: Session, *, tenant_id: Any, scope: str, external_ref: str
 ) -> set[int]:
@@ -166,6 +221,7 @@ def import_record(
     version: int,
     content: Any,
     apply: Callable[[Session, frozenset[int]], Mapping[str, object] | None],
+    current_version: Callable[[Session], int | None] | None = None,
 ) -> ImportResult:
     """Import one record version idempotently.
 
@@ -173,7 +229,16 @@ def import_record(
     an ``import_write`` scope and the key must hold exactly that scope; a key that
     can read the resource, or import a different one, is refused. ``apply``
     receives the session and the set of versions already imported for this
-    reference, runs at most once per key, and returns the JSON result to record.
+    reference, runs at most once per key, and returns the result to record,
+    which must be a small flat id map (``flat_id_map``).
+
+    ``current_version`` (B8) lets the receiver supply the highest version it has
+    already imported from its OWN record store, by exact key. Without it the kit
+    scans the ledger for ``<ref>@`` keys: that query is served by the unique
+    ``(tenant_id, scope, key)`` index only to the extent the database collation
+    allows a prefix range (a plain btree does not serve ``LIKE 'prefix%'`` under
+    a non-C collation), so a receiver with many versions per reference should
+    pass the callback and keep the scan as a fallback.
     """
     required = declaration.scopes.import_write
     if required is None or not principal.has_scope(required):
@@ -181,6 +246,14 @@ def import_record(
             f"machine credential {principal.label!r} does not carry the import "
             f"scope for {declaration.name!r}"
         )
+    # B9: no key both reads and writes a resource.
+    for read_scope in (declaration.scopes.read, declaration.scopes.contact_read):
+        if read_scope is not None and principal.has_scope(read_scope):
+            raise ForbiddenError(
+                f"machine credential {principal.label!r} holds a read scope for "
+                f"{declaration.name!r}; a key may read or write a resource, not both"
+            )
+    check_session_tenant(db, principal)
     if isinstance(version, bool) or not isinstance(version, int):
         raise BadRequestError("version must be an integer")
     if not 1 <= version <= MAX_VERSION:
@@ -208,9 +281,16 @@ def import_record(
             result=result,
         )
 
-    seen = _versions_seen(
+    lock_reference(
         db, tenant_id=principal.tenant_id, scope=scope, external_ref=external_ref
     )
+    if current_version is not None:
+        latest = current_version(db)
+        seen: set[int] = {latest} if latest else set()
+    else:
+        seen = _versions_seen(
+            db, tenant_id=principal.tenant_id, scope=scope, external_ref=external_ref
+        )
     # The exact key is decided by the ledger below (replay or conflict) even when
     # a later version exists; only a genuinely new, lower version is stale.
     if version not in seen and seen and max(seen) > version:
@@ -222,7 +302,7 @@ def import_record(
             tenant_id=principal.tenant_id,
             scope=scope,
             key=key,
-            operation=lambda session: apply(session, frozenset(seen)),
+            operation=lambda session: flat_id_map(apply(session, frozenset(seen))),
             operation_name=f"import:{declaration.name}",
             fingerprint=digest,
             expires_at=None,
@@ -248,7 +328,10 @@ __all__ = [
     "ImportRefused",
     "ImportResult",
     "ImportVerdict",
+    "MAX_RESULT_KEYS",
     "content_digest",
+    "flat_id_map",
     "import_record",
+    "lock_reference",
     "import_scope",
 ]
