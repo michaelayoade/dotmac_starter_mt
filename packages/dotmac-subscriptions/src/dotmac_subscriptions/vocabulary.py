@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -25,6 +25,13 @@ PORTED_BILLING_TREATMENT_REASONS: Final[tuple[str, ...]] = (
     "sponsored_service",
     "other_approved",
 )
+
+#: Hold reasons a renewal can be parked under (``OccurrenceValidityHold`` values).
+KNOWN_VALIDITY_HOLDS: Final[frozenset[str]] = frozenset({"capped", "prepaid"})
+
+#: Prepaid evidence is owned by billing (it derives the ``prepaid_funding``
+#: lane).  ``capped`` is deliberately absent until its owner is named.
+DEFAULT_VALIDITY_HOLD_OWNERS: Final[Mapping[str, str]] = {"prepaid": "billing"}
 
 #: The module code that owns the seven ported reasons above.
 PORTED_REASON_OWNER: Final = "subscriptions"
@@ -73,6 +80,10 @@ class SubscriptionVocabularyRegistry:
     #: which is the correct answer for a caller that never opted into
     #: treatments. `from_manifests` is the way to get the seven ported reasons.
     billing_treatment_reasons: dict[str, str] = field(default_factory=dict)
+    #: ``validity_hold`` value -> the module code entitled to evidence it.  A
+    #: hold with no entry FAILS CLOSED: it cannot be resolved until an owner is
+    #: registered.  DEFAULTED for the same released-construction reason as above.
+    validity_hold_owners: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_manifests(
@@ -80,7 +91,9 @@ class SubscriptionVocabularyRegistry:
         manifests: Iterable[AnyManifest],
         *,
         reason_declarations: Iterable[BillingTreatmentReasonDeclaration] = (),
+        validity_hold_owners: Mapping[str, str] | None = None,
     ) -> SubscriptionVocabularyRegistry:
+        manifests = tuple(manifests)
         charge_models: dict[str, str] = {}
         obligation_sources: dict[str, str] = {}
         billing_treatment_reasons: dict[str, str] = {}
@@ -110,7 +123,33 @@ class SubscriptionVocabularyRegistry:
                 owner=manifest.name,
                 vocabulary="obligation source",
             )
-        return cls(charge_models, obligation_sources, billing_treatment_reasons)
+        installed = {manifest.code for manifest in manifests}
+        hold_owners: dict[str, str] = {}
+        # The default (prepaid -> billing, which derives the prepaid_funding
+        # lane) is applied only where billing is installed.  `capped` has NO
+        # default owner: it stays unregistered, and so unresolvable, until an
+        # owner is named.  An EXPLICIT entry must name an installed module.
+        if DEFAULT_VALIDITY_HOLD_OWNERS["prepaid"] in installed:
+            hold_owners.update(DEFAULT_VALIDITY_HOLD_OWNERS)
+        for hold, owner in (validity_hold_owners or {}).items():
+            if hold not in KNOWN_VALIDITY_HOLDS:
+                raise SubscriptionDataError(
+                    "vocabulary.unknown_validity_hold",
+                    f"validity hold {hold!r} is not a hold reason.",
+                )
+            if owner not in installed:
+                raise SubscriptionDataError(
+                    "vocabulary.unknown_hold_owner",
+                    f"validity hold {hold!r} names owner {owner!r}, which is not "
+                    "an installed module code.",
+                )
+            hold_owners[hold] = owner
+        return cls(
+            charge_models,
+            obligation_sources,
+            billing_treatment_reasons,
+            hold_owners,
+        )
 
     @staticmethod
     def _add(
@@ -149,6 +188,16 @@ class SubscriptionVocabularyRegistry:
                 f"obligation source {code!r} is undeclared",
             ) from exc
 
+    def require_validity_hold_owner(self, hold: str) -> str:
+        try:
+            return self.validity_hold_owners[hold]
+        except KeyError as exc:
+            raise SubscriptionDataError(
+                "occurrences.hold_owner_unregistered",
+                f"validity hold {hold!r} has no registered owner, so it cannot "
+                "be resolved",
+            ) from exc
+
     def require_billing_treatment_reason(self, code: str) -> str:
         try:
             return self.billing_treatment_reasons[code]
@@ -160,6 +209,8 @@ class SubscriptionVocabularyRegistry:
 
 
 __all__ = [
+    "DEFAULT_VALIDITY_HOLD_OWNERS",
+    "KNOWN_VALIDITY_HOLDS",
     "PORTED_BILLING_TREATMENT_REASONS",
     "PORTED_REASON_OWNER",
     "BillingTreatmentReasonDeclaration",

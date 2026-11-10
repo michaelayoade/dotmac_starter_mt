@@ -324,7 +324,8 @@ class ResolveOccurrenceValidityCommand:
     ``owner_code`` names the module or product that owns the cap or the
     prepayment and ``evidence_ref`` is that owner's own identifier for the
     evidence. Subscriptions records both and interprets neither: it holds no
-    cap, balance or tax logic.
+    cap, balance or tax logic.  The resolution instant is stamped by the
+    database clock, never supplied by the caller.
     """
 
     scope: Scope
@@ -332,7 +333,6 @@ class ResolveOccurrenceValidityCommand:
     outcome: OccurrenceValidityOutcome
     owner_code: str
     evidence_ref: UUID
-    resolved_at: datetime
     command_id: UUID
     correlation_id: UUID
     idempotency_key: str
@@ -384,7 +384,6 @@ class OwnerEvidencePort(Protocol):
         occurrence_id: UUID,
         hold_reason: str,
         confirmed: bool,
-        resolved_at: datetime,
     ) -> OwnerEvidenceVerdict: ...
 
 

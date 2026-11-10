@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import Enum
-from types import MappingProxyType
 from typing import TypeVar
 
 from dotmac_subscriptions.errors import SubscriptionStateError
@@ -40,17 +39,6 @@ class OccurrenceValidityHold(str, Enum):
 
     capped = "capped"
     prepaid = "prepaid"
-
-
-#: Which owner may evidence which hold.  Subscriptions interprets neither the
-#: cap nor the prepayment, but it does bind each hold to the owner that is
-#: entitled to resolve it: evidence from any other owner is refused.
-VALIDITY_HOLD_OWNERS: Mapping[OccurrenceValidityHold, frozenset[str]] = MappingProxyType(
-    {
-        OccurrenceValidityHold.capped: frozenset({"usage-cap"}),
-        OccurrenceValidityHold.prepaid: frozenset({"prepaid-wallet"}),
-    }
-)
 
 
 class OccurrenceValidityOutcome(str, Enum):
@@ -167,7 +155,6 @@ def _require_transition(
 
 
 __all__ = [
-    "VALIDITY_HOLD_OWNERS",
     "BillingArrangementDecisionStatus",
     "BillingArrangementStatus",
     "BillingTreatment",

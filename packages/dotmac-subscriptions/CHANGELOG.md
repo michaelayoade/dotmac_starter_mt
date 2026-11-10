@@ -47,8 +47,11 @@
   lists emitted occurrences only, and a non-cash grant requires an emitted
   occurrence. Subscriptions holds no cap, balance or tax logic.
   `resolve_occurrence_validity` now takes `owner_evidence: OwnerEvidencePort`
-  (verified inside the locked operation), binds each hold to its owner
-  (`VALIDITY_HOLD_OWNERS`), requires `actor_ref` (recorded as
+  (verified inside the locked operation) and `registry`, which binds each hold
+  to its owner (`SubscriptionVocabularyRegistry.validity_hold_owners`: prepaid ->
+  `billing` when billing is installed; `capped` is unregistered and fails closed
+  until an owner is named), stamps the resolution instant from the database
+  clock (`resolved_at` is no longer an input), requires `actor_ref` (recorded as
   `validity_actor_ref`), and the database requires `emitted_at = resolved_at` on
   confirmation and a resolution instant not later than the database clock.
 - `su_0003` and earlier keep their released bytes.

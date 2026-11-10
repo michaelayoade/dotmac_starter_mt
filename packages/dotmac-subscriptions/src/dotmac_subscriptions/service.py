@@ -1796,6 +1796,12 @@ def generate_recurring_charge(
                 "occurrences.validity_hold_conflict",
                 "The stored occurrence was held differently.",
             )
+        if stored.state == OccurrenceState.cancelled.value:
+            # A replay must not read as "still held": the owner rejected it.
+            raise SubscriptionConflictError(
+                "occurrences.period_rejected",
+                "The stored occurrence for this period was rejected by its owner.",
+            )
         held = stored.state != OccurrenceState.emitted.value
         if not held:
             output = _output_for_id(db, scope=command.scope, occurrence_id=stored_id)
@@ -1825,6 +1831,7 @@ def resolve_occurrence_validity(
     db: Session,
     command: ResolveOccurrenceValidityCommand,
     *,
+    registry: SubscriptionVocabularyRegistry,
     owner_evidence: OwnerEvidencePort,
 ) -> OccurrenceValidityResult:
     """Resolve a ``pending_validity`` occurrence from the OWNER's evidence.
@@ -1832,9 +1839,10 @@ def resolve_occurrence_validity(
     This is the only way out of the hold. ``confirmed`` moves it to ``emitted``
     and stages the rated output now (never at the pending insert); ``rejected``
     cancels it and releases its coverage. Subscriptions records the owner code
-    and the owner's evidence reference and interprets neither.
+    and the owner's evidence reference and interprets neither.  The resolution
+    instant is the database transaction time (``now()``), the same clock the
+    freeze trigger compares against.
     """
-    _require_aware(command.resolved_at, "resolved_at")
     owner_code = command.owner_code.strip()
     actor_ref = command.actor_ref.strip()
     key = command.idempotency_key
@@ -1863,7 +1871,6 @@ def resolve_occurrence_validity(
             "owner_code": owner_code,
             "actor_ref": actor_ref,
             "evidence_ref": str(command.evidence_ref),
-            "resolved_at": command.resolved_at.astimezone(UTC).isoformat(),
             "command_id": str(command.command_id),
         }
     )
@@ -1874,7 +1881,7 @@ def resolve_occurrence_validity(
         )
         require_occurrence_transition(OccurrenceState(row.state), target)
         hold = OccurrenceValidityHold(row.validity_hold_reason)
-        if owner_code not in VALIDITY_HOLD_OWNERS[hold]:
+        if owner_code != registry.require_validity_hold_owner(hold.value):
             raise SubscriptionDataError(
                 "occurrences.owner_mismatch",
                 "That owner may not resolve this kind of hold.",
@@ -1887,28 +1894,30 @@ def resolve_occurrence_validity(
             occurrence_id=command.occurrence_id,
             hold_reason=hold.value,
             confirmed=target is OccurrenceState.emitted,
-            resolved_at=command.resolved_at.astimezone(UTC),
         )
         if not verdict.verified:
             raise SubscriptionDataError(
                 "occurrences.owner_evidence_unverified",
                 "The owner did not verify that evidence.",
             )
-        resolved_at = command.resolved_at.astimezone(UTC)
-        if resolved_at < _stored_utc(row.emitted_at):
+        held_at = _stored_utc(row.emitted_at)
+        row.state = target.value
+        row.validity_owner_code = owner_code
+        row.validity_evidence_ref = command.evidence_ref
+        row.validity_resolved_at = func.now()
+        row.validity_resolution_command_id = command.command_id
+        row.validity_actor_ref = actor_ref
+        if target is OccurrenceState.emitted:
+            row.emitted_at = func.now()
+        session.flush()
+        session.refresh(row)
+        if row.validity_resolved_at is None or (
+            _stored_utc(row.validity_resolved_at) < held_at
+        ):
             raise SubscriptionDataError(
                 "occurrences.resolution_before_hold",
                 "Owner evidence cannot pre-date the held occurrence.",
             )
-        row.state = target.value
-        row.validity_owner_code = owner_code
-        row.validity_evidence_ref = command.evidence_ref
-        row.validity_resolved_at = resolved_at
-        row.validity_resolution_command_id = command.command_id
-        row.validity_actor_ref = actor_ref
-        if target is OccurrenceState.emitted:
-            row.emitted_at = resolved_at
-        session.flush()
         return {"outcome": command.outcome.value}
 
     try:
