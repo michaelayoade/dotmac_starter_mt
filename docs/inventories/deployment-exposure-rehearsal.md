@@ -50,6 +50,24 @@ being published." A rehearsal that imports
 rehearsal, even if it carries a
 candidate digest in its output, and does not satisfy the lane.
 
+## Independent publication evidence
+
+The public publication oracle requires authenticated offline verification in
+addition to receipt, selected-run and candidate binding. Its fixed result stage
+is unimplemented, so otherwise eligible receipts remain indeterminate.
+
+The private plaintext consumer is an offline helper. It verifies exactly the
+manifest's two allowed members, their lengths and digests, strict exposure-call
+bytes and a concrete V3 plan's reconciliation crossings. It accepts no
+untrusted plan dictionary. These checks alone cannot establish genuine
+Control consumption, outcomes, exact rules, foreign preservation or negative
+compensation, and cannot produce a publication certificate.
+
+Michael selected preparing the offline-custody design. Private evidence never
+becomes a public-runner input; authenticated result admission and complete
+independent joins remain open. No caller-written PASS supplies that missing
+authority, and no rehearsal item changes status in this source slice.
+
 ## Runner phase ordering and remaining execution blockers
 
 The owner ruling keeps read-only prestate and genuine authorization before the
