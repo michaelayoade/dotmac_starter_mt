@@ -74,6 +74,8 @@ class ServiceOrder(Base, TimestampMixin):
         String(160), nullable=True
     )
     service_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # Opaque; NULL only for orders opened through V1 before V2 existed.
+    service_location_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     request_key: Mapped[str] = mapped_column(String(240), nullable=False)
     order_type: Mapped[ServiceOrderType] = mapped_column(
         _enum(ServiceOrderType, "service_order_type"), nullable=False

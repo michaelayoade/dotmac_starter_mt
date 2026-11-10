@@ -8495,7 +8495,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-referrals": frozenset(),
     "dotmac-release-catalog": frozenset(),
     "dotmac-reseller-management": frozenset(),
-    "dotmac-service-orders": frozenset(),
+    # `so_0002` adds the opaque service-location ref; still editable until
+    # `dotmac-service-orders` 0.1.0a2 is tagged.
+    "dotmac-service-orders": frozenset({"so_0002_service_location_ref.py"}),
     "dotmac-sites": frozenset(),
     "dotmac-surveys": frozenset(),
     "dotmac-web-analytics": frozenset(),

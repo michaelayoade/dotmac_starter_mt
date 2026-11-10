@@ -3092,6 +3092,7 @@
           "dotmac_service_orders/manifest.py",
           "dotmac_service_orders/migrations/__init__.py",
           "dotmac_service_orders/migrations/versions/so_0001_service_delivery_orders.py",
+          "dotmac_service_orders/migrations/versions/so_0002_service_location_ref.py",
           "dotmac_service_orders/models.py",
           "dotmac_service_orders/service.py"
         ],
