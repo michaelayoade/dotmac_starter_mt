@@ -500,6 +500,12 @@ _INTERNAL_RELATIONS = (
         "rated_obligations",
         ("id", "billing_account_id"),
     ),
+    (
+        "document_withholding_components",
+        ("document_id", "obligation_id"),
+        "document_lines",
+        ("document_id", "obligation_id"),
+    ),
     ("accounting_facts", ("posting_group_id",), "posting_groups", ("id",)),
     ("accounting_facts", ("reverses_fact_id",), "accounting_facts", ("id",)),
     (

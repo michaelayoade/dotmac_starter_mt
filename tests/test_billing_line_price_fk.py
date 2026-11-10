@@ -354,7 +354,7 @@ def test_existing_violation_stays_not_valid_noted_and_unrepaired(plane):
                     document_id=draft_id,
                     obligation_id=third_id,
                     version="price:new-mismatch",
-                    line_number=3,
+                    line_number=5,
                 )
             session.rollback()
 

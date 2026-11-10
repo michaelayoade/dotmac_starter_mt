@@ -4460,6 +4460,9 @@ def test_withholding_rollback_removes_discharge_position_fact_and_retry(scratch,
         command = frozen_withholding_command(
             session, account.id, invoice.id, scope=scope, suffix=f"rollback-{plane}"
         )
+        # The frozen component is a precondition, not part of the rolled-back
+        # discharge: persist it so the retry below can draw on it.
+        session.commit()
         row = accept_withholding_discharge(session, scope=scope, command=command)
         discharge_id, group_id, account_id = row.id, row.posting_group_id, account.id
         session.rollback()
