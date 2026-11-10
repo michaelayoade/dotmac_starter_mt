@@ -526,6 +526,34 @@ policy is `unenrolled`, its three enrollment pins are null, and both public
 trust files are empty. Missing revocations never mean success. This source
 creates no production key and enrolls no signer.
 
+### Late evidence transport (source; unenrolled)
+
+The runner no longer accepts a prebuilt encrypted bundle. Its external probe
+bytes are read once for qualification and retained unchanged in memory. After
+execution, it freezes the actual Executor crossing records and applies the
+existing completeness join, then the fixed finalizer builds the V1 manifest
+and a deterministic uncompressed USTAR archive with exactly `manifest.json`,
+`probe-evidence.json` and `exposure-calls.json`. Encryption happens before receipt
+assembly in the same process that holds the genuine plan, grant and outcome.
+The receipt binds the exact newly written ciphertext read back by the finalizer.
+
+`docs/inventories/lane3-evidence-encryption-policy.json` is protected source,
+not a dispatch input. Its initial `unenrolled` state has no public recipient or
+age executable hash. Before any host contact, preflight requires enrollment and
+safe fixed `/usr/bin/age` matching its pin. Enrollment remains Michael's separate
+operational decision. The adapter uses only the public native X25519 recipient;
+there is no private key, signing or decryption operation. Plaintext archive bytes
+remain in memory, process diagnostics are suppressed, and ciphertext output is
+exclusive, private-mode and read back with bounds. The collector uses an invocation-owned
+private temporary directory and exclusive file creation, removed on script exit. Uploads enumerate only
+ciphertext plus existing receipt/status and terminal records, never raw members.
+
+These are transport checks. The age header is not an independent encryption
+proof; enrolled-tool encrypt/decrypt round-trip is still owed. There is no
+complete offline proof producer and no behavioral PASS from this finalizer;
+Control/outcome/exact-rule/foreign-preservation/negative-target joins and both
+BLOCKED rehearsal items remain outstanding.
+
 The complete offline verifier, private evidence joins and actual operational
 packet remain open. That packet must identify tool/profile pins, public age
 recipient and signing-key enrollment, custody procedure, revocation/recovery,
@@ -654,8 +682,10 @@ admitted launcher change. C4 needs B5 and Gate-0. C5 needs C4.
   - It takes the plan only from `lane3_receipt_v2.acquire_execution_plan`, and
     `establish_authorization` issues the grant against that plan.
   - It drives `execute_authorized_plan` at the transaction phase, and assembles
-    with `assemble_receipt` from the encrypted `--evidence-bundle` and
-    `--probe-vantage-ref`.
+    with `assemble_receipt` from current-run evidence finalized into the new
+    `--evidence-bundle-out` ciphertext. The vantage reference derives from
+    bound topology; neither a prebuilt ciphertext nor a supplied vantage
+    reference is accepted.
   - All of those refuse today. With the checked-in topology a run is
     UNANSWERABLE (exit 2) before the descriptor; with an admitted topology it is
     UNANSWERABLE at the plan, before the lease. D4 refusals map onto this
