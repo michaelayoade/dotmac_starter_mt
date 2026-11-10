@@ -8530,7 +8530,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    "dotmac-payables": frozenset(),
+    "dotmac-payables": frozenset({"pa_0002_optional_supplier_doc.py"}),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     "dotmac-positioning": frozenset(),
