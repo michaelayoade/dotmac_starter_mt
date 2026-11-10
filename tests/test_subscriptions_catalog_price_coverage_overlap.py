@@ -414,7 +414,9 @@ def test_the_overlap_guard_is_a_plain_trigger_with_no_extension(
     unique = set(
         admin.scalars(
             text(
-                "SELECT conname FROM pg_constraint WHERE conname IN "
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'mod_subscriptions' "
+                "AND indexdef LIKE 'CREATE UNIQUE INDEX%' "
+                "AND indexdef LIKE '%WHERE%cancelled%' AND indexname IN "
                 "('uq_occurrences_correction', 'uq_platform_occurrences_correction')"
             )
         )
@@ -551,6 +553,30 @@ def test_a_correction_may_replace_its_chain_but_only_once_and_on_one_line(
         )
 
 
+def test_a_cancelled_correction_neither_extends_exemption_nor_uses_the_slot(
+    admin: Connection, subscriptions_scratch: tuple[str, str, str]
+) -> None:
+    left, _ = _make_tenants(subscriptions_scratch[0])
+    ids = _seed_tenant_line(subscriptions_scratch[0], left)
+    original = ids["occurrence"]  # emitted, Sep 1 - Oct 1
+
+    # P corrects A and is cancelled, so A is live again.
+    cancelled = _occurrence(
+        admin, ids, left, SEP1, SEP15, corrects=original, state="cancelled"
+    )
+    # A correction of the cancelled P would overlap the live A: refused.
+    with pytest.raises(DBAPIError, match="only an emitted"):
+        _occurrence(admin, ids, left, SEP1, OCT1, corrects=cancelled)
+    with pytest.raises(DBAPIError, match=OVERLAP):
+        _occurrence(admin, ids, left, SEP15, OCT15)
+    # The cancelled successor did not use up A's one-successor slot.
+    live = _occurrence(admin, ids, left, SEP1, SEP15, corrects=original)
+    with pytest.raises(DBAPIError, match="uq_occurrences_correction"):
+        _occurrence(admin, ids, left, SEP1, SEP15, corrects=original)
+    # A chain continues from the live head.
+    _occurrence(admin, ids, left, SEP1, SEP15, corrects=live)
+
+
 def test_supersession_recovers_the_old_straddler_then_the_new_version_fits(
     admin: Connection, subscriptions_scratch: tuple[str, str, str]
 ) -> None:
@@ -632,7 +658,7 @@ def test_migrations_roll_back_and_forward_and_refuse_to_lose_evidence(
             "'prevent_platform_occurrence_coverage_overlap'"
         )
         assert not present(
-            "SELECT 1 FROM pg_constraint WHERE conname = "
+            "SELECT 1 FROM pg_indexes WHERE indexname = "
             "'uq_platform_occurrences_correction'"
         )
 

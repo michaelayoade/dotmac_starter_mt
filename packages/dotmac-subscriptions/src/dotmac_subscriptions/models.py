@@ -642,8 +642,12 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
         Index("ix_occurrences_unacknowledged", "tenant_id", "output_acknowledged_at"),
         # At most one successor per occurrence, as Billing's obligation
         # correction. The coverage-overlap trigger itself is migration-owned.
-        UniqueConstraint(
-            "tenant_id", "corrects_occurrence_id", name="uq_occurrences_correction"
+        Index(
+            "uq_occurrences_correction",
+            "tenant_id",
+            "corrects_occurrence_id",
+            unique=True,
+            postgresql_where=sa.text("state <> 'cancelled'"),
         ),
         Index(
             "ix_occurrences_line_coverage",
@@ -1108,8 +1112,11 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
             "ix_platform_occurrences_contract", "contract_version_id", "period_start"
         ),
         Index("ix_platform_occurrences_unacknowledged", "output_acknowledged_at"),
-        UniqueConstraint(
-            "corrects_occurrence_id", name="uq_platform_occurrences_correction"
+        Index(
+            "uq_platform_occurrences_correction",
+            "corrects_occurrence_id",
+            unique=True,
+            postgresql_where=sa.text("state <> 'cancelled'"),
         ),
         Index(
             "ix_platform_occurrences_line_coverage",

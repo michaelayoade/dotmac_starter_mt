@@ -135,7 +135,8 @@ def _function_sql(tables: _PlaneTables) -> str:
           SELECT ov.version, ov.state, ov.pricing_mode, ov.charge_model_code
             INTO ver
             FROM {_q(tables.versions)} ov
-           WHERE ov.id = NEW.offer_version_id{tenant_version};
+           WHERE ov.id = NEW.offer_version_id{tenant_version}
+             FOR SHARE OF ov;
           IF NOT FOUND THEN
             RAISE EXCEPTION 'contract line names an unknown offer version'
               USING ERRCODE = 'foreign_key_violation';
