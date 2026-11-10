@@ -6,6 +6,15 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased (source marker `0.1.0a108+dev`)
+
+Add `dotmac_kernel.resource_api` and `dotmac_kernel.source_import` (ADR-0079):
+the cursor codec, settle-horizon changes feed, tombstone envelope, completeness
+summary and exact-scope resource declaration, and the idempotent import verdict
+helper over the existing idempotency ledger. No table, migration or route is
+added. This does not allocate a version or authorize a release; the `+dev`
+marker is the sanctioned unpublished state.
+
 ## 0.1.0a108 — Release inventory
 
 Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`
