@@ -810,6 +810,49 @@ def test_mixed_cash_draw_partial_and_full_inverse_restore_imported_basis(
         db.commit()
 
 
+def test_late_freeze_of_an_opening_imported_invoice_has_its_own_refusal(scratch):
+    """Detected structurally (the opening basis row), never by a caller flag."""
+    from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
+
+    from tests import test_billing_tax_dependency_evidence as dependency
+
+    class _Holds:
+        def holds(self, *, scope, actor_ref, code):
+            return True
+
+    class _NoTax:
+        def read_seal(self, *, scope, determination_set_id):
+            raise AssertionError("refused before Tax is asked")
+
+    scope, url = noncash._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as db:
+        account = cash._new_account(db, scope)
+        _, receipt = _import(db, scope, account)
+        cash._seal_window(db, scope)
+        basis = _bases(db, scope, receipt)[0]
+        with pytest.raises(BillingRuleViolation) as refused:
+            s.freeze_issued_invoice_withholding(
+                db,
+                scope=scope,
+                command=FreezeIssuedInvoiceWithholding(
+                    scope,
+                    account,
+                    basis.document_id,
+                    "freeze:opening",
+                    "finance-user:fixture",
+                    "opening imports wait for a party mapping",
+                    dependency._evidence(scope)[1],
+                ),
+                tax_seal=_NoTax(),
+                permissions=_Holds(),
+            )
+        assert (
+            refused.value.code
+            == "billing.withholding_freeze_opening_import_unavailable"
+        )
+        db.rollback()
+
+
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_withholding_noncash_credit_and_credit_note_room_and_owner_inverses(
     scratch, plane

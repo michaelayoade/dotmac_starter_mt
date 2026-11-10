@@ -95,7 +95,14 @@ evidence that differs from what was frozen, or above the frozen amount, is
 refused. `apply_available_credit` may draw at most the outstanding receivable
 less the undischarged frozen withholding. An invoice issued before components were frozen is brought under the same rule by `freeze_issued_invoice_withholding`, a
 governed, idempotent, append-only command that takes the Tax determination as of
-the issue date and binds it to the invoice's own line source. `WithholdingCashRequirementV1` quotes
+the issue date and binds it to the invoice's own line source. It requires the
+`billing.withholding.freeze` permission, checked through an assembly-wired
+`ActorPermissionReader` that authorizes the actor it is given: the route must use
+`permission_guard("billing.withholding.freeze")`, pass the authenticated party it
+returns as `actor_ref`, and wire the reader over `authorize_party`. It also needs
+an assembly-wired `TaxSealReader` that returns Tax's sealed determination (the
+rows are built from Tax's values). An opening-imported invoice is refused with
+`withholding_freeze_opening_import_unavailable` until a party mapping exists. `WithholdingCashRequirementV1` quotes
 the cash an invoice requires once a Tax-owned withholding amount is deducted; it
 is not a discharge, cash or credit.
 

@@ -58,6 +58,7 @@ from dotmac_billing.commands import (
     ReverseNonCashCreditApplication,
     ReversePostingGroupCommand,
     ReverseWithholdingDischarge,
+    TaxDeterminationSealV1,
     TaxSealReader,
 )
 from dotmac_billing.contracts import (
@@ -3442,6 +3443,82 @@ def _original_facts(result: Any) -> tuple[object, ...]:
     )
 
 
+def _seal_equals_evidence(
+    seal: TaxDeterminationSealV1, result: Any, elected: tuple[Any, ...]
+) -> bool:
+    """Tax's sealed determination equals what the caller offered, in full."""
+
+    if (
+        seal.determination_set_id != result.determination_set_id
+        or seal.result_fingerprint != result.result_fingerprint
+        or seal.source_fingerprint != result.source_fingerprint
+        or seal.occurred_on != result.occurred_on
+        or seal.determined_at != result.determined_at
+        or seal.tenant_id != result.tenant_id
+        or seal.commercial_source != result.commercial_source
+        or seal.source_amount != result.source_amount
+        or seal.recognition_basis_code != result.recognition_basis_code
+        or seal.counterparty_ref != result.counterparty_ref
+        or seal.supply_ref != result.supply_ref
+        or seal.place_ref != result.place_ref
+    ):
+        return False
+
+    def shape(component: Any) -> tuple[object, ...]:
+        return (
+            component.determination_id,
+            component.tax_code_id,
+            component.rule_id,
+            component.rule_version,
+            component.treatment_code,
+            component.calculation_base_code,
+            component.party_category,
+            component.party_classification_id,
+            component.base_amount,
+            component.tax_amount,
+            tuple(
+                (line.sequence, line.taxable_amount, line.rate, line.tax_amount)
+                for line in component.lines
+            ),
+        )
+
+    sealed = sorted((shape(c) for c in seal.components), key=lambda v: str(v[0]))
+    offered = sorted((shape(c) for c in elected), key=lambda v: str(v[0]))
+    return bool(sealed) and sealed == offered
+
+
+def _require_determination_not_in_use(
+    db: Session,
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    document: _DocumentRow,
+    result: Any,
+) -> None:
+    """One Tax determination backs one live invoice; a voided one releases it."""
+
+    others = db.execute(
+        _where_scope(
+            select(plane.wht_component.document_id)
+            .where(
+                plane.wht_component.tax_source_owner == WITHHOLDING_TAX_OWNER,
+                plane.wht_component.determination_ref
+                == str(result.determination_set_id),
+                plane.wht_component.document_id != document.id,
+            )
+            .distinct(),
+            scope,
+            plane.wht_component,
+        )
+    ).scalars()
+    for other_id in tuple(others):
+        if resolve_receivable_backing(db, scope=scope, document_id=other_id).active:
+            raise BillingRuleViolation(
+                "withholding_freeze_determination_in_use",
+                "this Tax determination is already frozen on another live invoice",
+            )
+
+
 def freeze_issued_invoice_withholding(
     db: Session,
     *,
@@ -3520,6 +3597,24 @@ def freeze_issued_invoice_withholding(
             row_id=command.document_id,
             lock=True,
         )
+        basis_model = _receivable_model(scope, "OpeningReceivableBasis")
+        if (
+            session.execute(
+                _where_scope(
+                    select(basis_model.id).where(
+                        basis_model.document_id == document.id
+                    ),
+                    scope,
+                    basis_model,
+                )
+            ).first()
+            is not None
+        ):
+            raise BillingRuleViolation(
+                "withholding_freeze_opening_import_unavailable",
+                "an opening-imported invoice cannot be frozen yet: it has no line "
+                "source and billing holds no party mapping for its account",
+            )
         _require_credit_target(
             session, scope=scope, document=document, account_id=account.id
         )
@@ -3575,20 +3670,17 @@ def freeze_issued_invoice_withholding(
         seal = tax_seal.read_seal(
             scope=scope, determination_set_id=result.determination_set_id
         )
-        if (
-            seal is None
-            or seal.determination_set_id != result.determination_set_id
-            or seal.result_fingerprint != result.result_fingerprint
-            or seal.occurred_on != result.occurred_on
-            or seal.commercial_source != result.commercial_source
-            or seal.source_amount != result.source_amount
-            or seal.counterparty_ref != result.counterparty_ref
-        ):
+        elected = tuple(c for c in result.components if _is_elected_withholding(c))
+        if seal is None or not _seal_equals_evidence(seal, result, elected):
             raise BillingRuleViolation(
                 "withholding_freeze_tax_seal_mismatch",
-                "dotmac-tax does not confirm this determination, fingerprint and date",
+                "dotmac-tax does not confirm this determination: identity, "
+                "fingerprints, date, original facts and every elected component "
+                "must equal what Tax sealed",
             )
-        elected = tuple(c for c in result.components if _is_elected_withholding(c))
+        _require_determination_not_in_use(
+            session, scope=scope, plane=plane, document=document, result=result
+        )
         if not elected:
             raise BillingRuleViolation(
                 "withholding_not_elected",
@@ -3640,7 +3732,7 @@ def freeze_issued_invoice_withholding(
                 plane=plane,
                 document=document,
                 obligation_id=bound.id,
-                result=result,
+                result=seal,
                 component=component,
                 origin={
                     "origin": "late_freeze",
@@ -3649,7 +3741,7 @@ def freeze_issued_invoice_withholding(
                     "reason": command.reason,
                 },
             )
-            for component in elected
+            for component in sorted(seal.components, key=lambda c: c.determination_id)
         ]
         session.add_all(rows)
         session.flush()

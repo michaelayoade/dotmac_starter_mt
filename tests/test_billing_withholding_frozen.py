@@ -21,6 +21,8 @@ from dotmac_billing.commands import (
     ApplyAvailableCreditCommand,
     ReverseWithholdingDischarge,
     TaxDeterminationSealV1,
+    TaxSealedComponentV1,
+    TaxSealedLineV1,
 )
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
 from dotmac_billing.service import (
@@ -495,20 +497,53 @@ def _freeze_command(account_id, invoice_id, scope, evidence, command_id=None):
     )
 
 
+def _sealed(item):
+    """What dotmac-tax would seal for this evidence (the double reads the evidence)."""
+    result = item.determination
+    return TaxDeterminationSealV1(
+        determination_set_id=result.determination_set_id,
+        result_fingerprint=result.result_fingerprint,
+        source_fingerprint=result.source_fingerprint,
+        occurred_on=result.occurred_on,
+        determined_at=result.determined_at,
+        tenant_id=result.tenant_id,
+        commercial_source=result.commercial_source,
+        source_amount=result.source_amount,
+        recognition_basis_code=result.recognition_basis_code,
+        counterparty_ref=result.counterparty_ref,
+        supply_ref=result.supply_ref,
+        place_ref=result.place_ref,
+        components=tuple(
+            TaxSealedComponentV1(
+                determination_id=c.determination_id,
+                tax_code_id=c.tax_code_id,
+                rule_id=c.rule_id,
+                rule_version=c.rule_version,
+                treatment_code=c.treatment_code,
+                calculation_base_code=c.calculation_base_code,
+                party_category=c.party_category,
+                party_classification_id=c.party_classification_id,
+                base_amount=c.base_amount,
+                tax_amount=c.tax_amount,
+                lines=tuple(
+                    TaxSealedLineV1(
+                        ln.sequence, ln.taxable_amount, ln.rate, ln.tax_amount
+                    )
+                    for ln in c.lines
+                ),
+            )
+            for c in result.components
+            if c.tax_amount.amount > 0 and c.party_classification_id is not None
+        ),
+    )
+
+
 class _TaxSeals:
-    """A dotmac-tax reader double holding the sealed identity of what it is given."""
+    """A dotmac-tax reader double holding the sealed result of what it is given."""
 
     def __init__(self, *items):
         self.items = {
-            item.determination.determination_set_id: TaxDeterminationSealV1(
-                item.determination.determination_set_id,
-                item.determination.result_fingerprint,
-                item.determination.occurred_on,
-                item.determination.commercial_source,
-                item.determination.source_amount,
-                item.determination.counterparty_ref,
-            )
-            for item in items
+            item.determination.determination_set_id: _sealed(item) for item in items
         }
 
     def read_seal(self, *, scope, determination_set_id):
@@ -999,7 +1034,7 @@ def test_no_tax_reader_wired_refuses_the_freeze(scratch):
         session.rollback()
 
 
-@pytest.mark.parametrize("fault", ["unknown", "fingerprint", "date"])
+@pytest.mark.parametrize("fault", ["unknown", "fingerprint", "date", "amount"])
 def test_tax_must_confirm_the_determination(scratch, fault):
     from datetime import timedelta
 
@@ -1012,6 +1047,13 @@ def test_tax_must_confirm_the_determination(scratch, fault):
         key = evidence.determination.determination_set_id
         if fault == "unknown":
             seals.items.clear()
+        elif fault == "amount":
+            # A real set id and fingerprint paired with a different amount.
+            seal = seals.items[key]
+            seals.items[key] = replace(
+                seal,
+                components=(replace(seal.components[0], tax_amount=_money("1.00")),),
+            )
         elif fault == "fingerprint":
             seals.items[key] = replace(
                 seals.items[key], result_fingerprint="rv2:" + "c" * 64
@@ -1107,6 +1149,33 @@ def test_a_v1_era_line_is_frozen_only_when_named_and_confirmed(scratch):
         assert [row.obligation_id for row in rows] == [
             _line_obligation(session, invoice_id)
         ]
+        session.rollback()
+
+
+def test_one_determination_cannot_back_two_live_invoices(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        first_account, first_id, tax = _v2_invoice(session, scope)
+        second_account, second_id, _ = _v2_invoice(session, scope)
+        freeze_issued_invoice_withholding(
+            session,
+            scope=scope,
+            command=_freeze_command(
+                first_account.id, first_id, scope, _late(session, first_id, tax)
+            ),
+        )
+        # The same sealed determination, offered for a different live invoice.
+        with pytest.raises(BillingRuleViolation) as refused:
+            freeze_issued_invoice_withholding(
+                session,
+                scope=scope,
+                command=_freeze_command(
+                    second_account.id, second_id, scope, _late(session, second_id, tax)
+                ),
+            )
+        assert refused.value.code == "billing.withholding_freeze_determination_in_use"
+        assert _components(session, second_id) == []
         session.rollback()
 
 

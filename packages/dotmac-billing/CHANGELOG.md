@@ -39,29 +39,50 @@ chain after `bi_0014_opening_variance_ledger`.
   index and permanent source claim are unchanged.
 - B2: add `freeze_issued_invoice_withholding` (`FreezeIssuedInvoiceWithholding`),
   the governed command for an issued invoice that has no frozen components
-  (issued before bi_0016). It takes a V2 dotmac-tax expected-withholding
-  determination evaluated as of the invoice's issue date (election = its party
-  classification). The amounts are Tax's but not trusted: the determination must
-  name the commercial source of exactly one line of the invoice, its original
-  facts must equal facts that line positively retained, each base equals the
-  line's source amount (plus the referenced prior tax for a dependency-tax
-  base), dotmac-tax must confirm the determination (set id, result fingerprint,
-  date) through the assembly-wired `TaxSealReader` (none wired: refused), and the
-  frozen total is capped at outstanding plus withholding already accepted. The rows carry that line's obligation. It
-  writes the same append-only component rows issuance writes
-  (`origin = 'late_freeze'`, with command id, actor, reason and the
-  determination reference); it never mutates the invoice. Idempotent on
-  `command_id`; refused when components exist, for a credit note, void or
-  non-live invoice, when the determination is not as of the issue date, or when
-  the frozen total would exceed the outstanding receivable. Tenant plane only;
-  the platform plane stays fail-closed (`withholding_freeze_platform_unsupported`).
-  A component's document and obligation must be a line of that document
-  (composite key on `document_lines`), a document has a single freeze (same
-  origin and command id, serialized by the document row lock in the admission
-  trigger). Afterwards the discharge foreign key, cap guard and
-  credit-draw cap apply unchanged. An imported open invoice carries no document
-  line, so it has no line source to bind and the command refuses it
-  (`withholding_freeze_unbound`); how those are frozen is an open decision.
+  (any issued invoice without a freeze, for an authorized actor). It takes a V2
+  dotmac-tax expected-withholding determination evaluated as of the invoice's
+  issue date (election = its party classification) and does not trust it:
+  - the determination must name the commercial source of exactly one line of the
+    invoice and equal the original facts that line positively retained; a line
+    whose retained evidence is V1 must be named explicitly (`line_id`);
+  - each base equals the line's source amount (plus the referenced prior tax for
+    a dependency-tax base);
+  - dotmac-tax must return the sealed determination through the assembly-wired
+    `TaxSealReader` (none wired: refused): identity, fingerprints, date, every
+    original fact and the elected components (code, rule, base, rate lines,
+    amount) must equal what the caller offered, and the rows are built from
+    Tax's values;
+  - one Tax determination backs one live invoice (`withholding_freeze_determination_in_use`;
+    a voided invoice releases it); the database does not enforce this because
+    voiding lives on document events, so it is a service rule;
+  - the frozen total is capped at outstanding plus withholding already accepted.
+  The rows carry the bound line's obligation and are the same append-only rows
+  issuance writes (`origin = 'late_freeze'`, with command id, actor, reason and
+  the determination reference); the command never mutates the invoice.
+  Idempotent on `command_id`; refused when components exist, for a credit note,
+  void or non-live invoice, or when the determination is not as of the issue
+  date. Tenant plane only; the platform plane stays fail-closed
+  (`withholding_freeze_platform_unsupported`). A component's document and
+  obligation must be a line of that document (composite key on `document_lines`)
+  and a document has a single freeze (same origin and command id, serialized by
+  the document row lock in the admission trigger; `command_id` is NOT NULL for
+  every origin, issue rows carrying `issue:<document id>`). Afterwards the
+  discharge foreign key, cap guard and credit-draw cap apply unchanged.
+- B2: new permission `billing.withholding.freeze` (manifest `PermissionSpec`,
+  default role `admin`) and two assembly-wired ports, `ActorPermissionReader` and
+  `TaxSealReader` (`TaxDeterminationSealV1`, `TaxSealedComponentV1`,
+  `TaxSealedLineV1`). The command refuses with no reader wired. `holds` authorizes
+  the actor the caller names, not the caller: the route must use
+  `permission_guard("billing.withholding.freeze")`, pass the authenticated party
+  that guard returns as `actor_ref`, and the assembly must wire
+  `ActorPermissionReader` over `dotmac_kernel.deps.authorize_party`. When the
+  assembly installs billing, its explicit `starter.admin` grant list must add the
+  permission by hand.
+- B2: an opening-imported invoice (it has an `opening_receivable_bases` row) is
+  refused with `withholding_freeze_opening_import_unavailable`, detected
+  structurally. It has no line source and billing accounts carry no party
+  reference; the branch waits for a party mapping from the dotmac_sub_thin
+  composition.
 - B2: `apply_available_credit` may draw at most the invoice's outstanding
   receivable less its undischarged frozen withholding
   (`credit_exceeds_non_withholding_room`), so credit is drawn before the
