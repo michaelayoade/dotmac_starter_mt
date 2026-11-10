@@ -16,6 +16,7 @@ no-op, since it indicates the caller did not request ordering.
 
 from __future__ import annotations
 
+from math import ceil
 from typing import TypeVar
 
 from sqlalchemy import Select
@@ -84,7 +85,50 @@ def apply_ordering(
     return stmt.order_by(column)
 
 
+def pagination_context(*, total: int, limit: int, offset: int) -> dict[str, object]:
+    """Display and navigation values for a server-rendered list page.
+
+    The template half of this contract is the `table_pagination` macro in
+    `templates/components/table_macros.html`, which reads exactly the keys
+    returned here. Promoted from Academy's product copy so every assembly
+    renders list pagination the same way instead of re-deriving page math
+    per route. `page_items` carries `None` where an ellipsis belongs.
+    """
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+    if offset < 0:
+        raise ValueError("offset must not be negative")
+    if total < 0:
+        raise ValueError("total must not be negative")
+    total_pages = max(1, ceil(total / limit))
+    current_page = min(total_pages, (offset // limit) + 1)
+    wanted = {1, total_pages}
+    wanted.update(
+        range(max(1, current_page - 1), min(total_pages, current_page + 1) + 1)
+    )
+    page_items: list[int | None] = []
+    previous = 0
+    for page in sorted(wanted):
+        if previous and page - previous > 1:
+            page_items.append(None)
+        page_items.append(page)
+        previous = page
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "current_page": current_page,
+        "total_pages": total_pages,
+        "page_items": page_items,
+        "page_start": offset + 1 if total else 0,
+        "page_end": min(offset + limit, total),
+        "has_prev": offset > 0,
+        "has_next": offset + limit < total,
+    }
+
+
 __all__ = [
     "apply_pagination",
     "escape_like",
+    "pagination_context",
 ]

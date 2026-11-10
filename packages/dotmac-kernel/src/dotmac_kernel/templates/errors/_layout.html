@@ -1,0 +1,39 @@
+{#
+  Standalone shell for the branded error pages.
+
+  Error templates must NOT extend `base.html`: template composition puts the
+  assembly layer first, so `base.html` resolves to the PRODUCT's shell, whose
+  block contract is the product's own (`title`/`content` in Academy, for
+  example). These pages override `body`, which a product shell is not
+  contracted to define — when it does not, Jinja silently drops the whole
+  error body and the user gets an empty branded shell. This layout is
+  kernel-owned and only relies on kernel template globals (`brand`,
+  `static_asset_url`, `extra_stylesheets`), so it renders identically in
+  every assembly. A product that wants its own error look ships its own
+  `errors/*.html` in its assembly layer, which still wins resolution.
+#}
+<!doctype html>
+<html lang="en" x-data :class="{ 'dark': $store.dark.on }">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="htmx-config" content='{"defaultSwapStyle":"innerHTML"}' />
+    <title>{% block title %}{{ brand.name if brand and brand.name else "Error" }}{% endblock %}</title>
+
+    <link rel="stylesheet" href="{{ static_asset_url('/static/fonts/fonts.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('/static/css/main.css') }}">
+    {% for href in extra_stylesheets %}
+    <link rel="stylesheet" href="{{ href }}">
+    {% endfor %}
+</head>
+<body class="min-h-screen bg-[var(--dmui-surface-background)] text-[var(--dmui-text-primary)] antialiased">
+    <script src="{{ static_asset_url('/static/js/htmx.min.js') }}"></script>
+    <script src="{{ static_asset_url('/static/js/components.js') }}"></script>
+    <script defer src="{{ static_asset_url('/static/js/alpine.min.js') }}"></script>
+    <script src="{{ static_asset_url('/static/js/csrf.js') }}"></script>
+
+    <main>
+    {% block body %}{% endblock %}
+    </main>
+</body>
+</html>

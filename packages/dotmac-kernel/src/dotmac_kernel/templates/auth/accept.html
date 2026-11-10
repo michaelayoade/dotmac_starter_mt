@@ -1,0 +1,61 @@
+{#
+  Accept-an-invitation page (token link target), sibling of
+  auth/login.html. The kernel ships the page only — the product owns the
+  routes that render it and accept the POST, and the invitation
+  lifecycle behind it. Context contract: `form_action`, `token`,
+  `csrf_token`, `error`, `message`, `min_password_length`,
+  `surface.login_path`.
+#}
+{% extends "base.html" %}
+
+{% block title %}Set up your account · {{ brand.name if brand and brand.name else "Admin" }}{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center bg-[var(--dmui-surface-background)] px-4">
+    <div class="w-full max-w-md">
+        <div id="accept-card" class="bg-[var(--dmui-surface-elevated)] rounded-2xl shadow-xl p-8 border border-[var(--dmui-border-default)]">
+            <div class="text-center mb-8">
+                <div class="h-12 w-12 mx-auto mb-4 rounded-xl bg-[var(--dmui-action-primary-default)] flex items-center justify-center text-[var(--dmui-action-primary-on)] font-bold text-lg">
+                    {{ brand.mark if brand and brand.mark else "A" }}
+                </div>
+                <h1 class="text-2xl font-bold text-[var(--dmui-text-primary)] font-display">Set up your account</h1>
+                <p class="text-sm text-[var(--dmui-text-muted)] mt-1">Choose a password to activate your account.{% if min_password_length %} At least {{ min_password_length }} characters.{% endif %}</p>
+            </div>
+
+            {% if error %}
+            <div class="mb-4 p-3 rounded-lg bg-[var(--dmui-status-negative-surface)] text-[var(--dmui-status-negative-foreground)] text-sm" role="alert">
+                {{ error }}
+            </div>
+            {% endif %}
+            {% if message %}
+            <div class="mb-4 p-3 rounded-lg bg-[var(--dmui-status-positive-surface)] text-[var(--dmui-status-positive-foreground)] text-sm" role="status">
+                {{ message }}
+            </div>
+            {% endif %}
+
+            <form method="post" action="{{ form_action }}" hx-post="{{ form_action }}"
+                  hx-select="#accept-card"
+                  hx-target="#accept-card"
+                  hx-swap="outerHTML"
+                  class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="token" value="{{ token }}" />
+                <div>
+                    <label for="password" class="block text-sm font-medium text-[var(--dmui-text-secondary)] mb-1">Password</label>
+                    <input type="password" id="password" name="password" required autofocus autocomplete="new-password"
+                           {% if min_password_length %}minlength="{{ min_password_length }}"{% endif %}
+                           class="w-full px-3 py-2 rounded-lg border border-[var(--dmui-border-strong)] bg-[var(--dmui-surface-primary)] text-[var(--dmui-text-primary)] focus:ring-2 focus:ring-[var(--dmui-focus-ring-color)] focus:border-[var(--dmui-border-focus)]" />
+                </div>
+                <button type="submit"
+                        class="w-full py-2.5 px-4 rounded-lg bg-[var(--dmui-action-primary-default)] hover:bg-[var(--dmui-action-primary-hover)] text-[var(--dmui-action-primary-on)] font-medium shadow-lg btn-hover text-sm">
+                    Activate account
+                </button>
+            </form>
+
+            <p class="mt-6 text-center text-sm text-[var(--dmui-text-muted)]">
+                <a class="font-medium text-[var(--dmui-action-primary-default)] hover:underline" href="{{ surface.login_path }}">Back to sign in</a>
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
