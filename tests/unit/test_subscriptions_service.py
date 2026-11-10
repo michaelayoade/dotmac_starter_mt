@@ -1055,7 +1055,9 @@ def test_hold_owners_are_checked_against_installed_module_codes() -> None:
     assert bare.validity_hold_owners == {}
     with pytest.raises(SubscriptionDataError) as unregistered:
         bare.require_validity_hold_owner("prepaid")
-    assert unregistered.value.code == "subscriptions.occurrences.hold_owner_unregistered"
+    assert (
+        unregistered.value.code == "subscriptions.occurrences.hold_owner_unregistered"
+    )
     # Billing installed: prepaid -> billing; capped stays unregistered.
     both = SubscriptionVocabularyRegistry.from_manifests((product, billing))
     assert both.validity_hold_owners == {"prepaid": "billing"}
