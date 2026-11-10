@@ -1824,7 +1824,7 @@ url = "packages/dotmac-publishing"
 
 [[package]]
 name = "dotmac-qualification"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Time-bounded service qualification evidence and decisions"
 optional = false
 python-versions = ">=3.11,<3.14"

@@ -23,6 +23,41 @@ class DecisionOutcome(enum.StrEnum):
     MANUAL_REVIEW = "MANUAL_REVIEW"
 
 
+class WarrantRefusal(enum.StrEnum):
+    """Why a decision cannot warrant a promotion. Closed and data-free."""
+
+    NOT_FOUND = "NOT_FOUND"
+    SUBJECT_MISMATCH = "SUBJECT_MISMATCH"
+    NOT_ELIGIBLE = "NOT_ELIGIBLE"
+    NOT_YET_EFFECTIVE = "NOT_YET_EFFECTIVE"
+    EXPIRED = "EXPIRED"
+
+
+class WarrantRefused(Conflict):
+    """The decision does not warrant the promotion asked of it."""
+
+    def __init__(self, reason: WarrantRefusal) -> None:
+        super().__init__(f"qualification warrant refused: {reason.value}")
+        self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionRead:
+    """The decision facts a verifier needs, and nothing else.
+
+    It deliberately omits the rationale and every evidence fact, so a warrant
+    check can never carry location, address or network data to its caller.
+    """
+
+    decision_id: UUID
+    case_id: UUID
+    subject_reference: str
+    specification_reference: str
+    outcome: DecisionOutcome
+    decided_at: datetime
+    expires_at: datetime
+
+
 @dataclass(frozen=True, slots=True)
 class OpenQualification:
     subject_reference: str
@@ -50,8 +85,11 @@ class RecordDecision:
 __all__ = [
     "Conflict",
     "DecisionOutcome",
+    "DecisionRead",
     "OpenQualification",
     "QualificationError",
     "RecordDecision",
     "RecordEvidence",
+    "WarrantRefusal",
+    "WarrantRefused",
 ]
