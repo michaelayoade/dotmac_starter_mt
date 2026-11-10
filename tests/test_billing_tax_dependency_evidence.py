@@ -72,9 +72,9 @@ def _v2(old):
     )
 
 
-def _evidence(scope):
+def _evidence(scope, *, wht_tax="10"):
     vat = _v2(predecessor._evidence(scope))
-    raw = _v2(predecessor._evidence(scope, taxes=("10",)))
+    raw = _v2(predecessor._evidence(scope, taxes=(wht_tax,)))
     component = raw.components[0]
     component = replace(
         component,
@@ -392,6 +392,32 @@ def test_withholding_discharge_retains_complete_dependency_lineage(scratch):
         account = _account(session, scope)
         issued = authoring._issue(session, scope, _command(account.id, scope, evidence))
         tax = _discharge_evidence(scope, account.id, issued.invoice_id, evidence[1])
+        # The invoice's Tax result carries no party election, so nothing was
+        # frozen at issue; freeze the cited component with the production row
+        # builder from the exact evidence (not a replacement of it).
+        from dotmac_billing import service as billing_service
+
+        plane = billing_service._models(scope)
+        wht_result = evidence[1].determination
+        session.add(
+            billing_service._frozen_component_row(
+                scope=scope,
+                plane=plane,
+                document=session.get(plane.document, issued.invoice_id),
+                obligation_id=None,
+                result=wht_result,
+                component=replace(
+                    wht_result.components[0], party_classification_id=uuid4()
+                ),
+                origin={
+                    "origin": "late_freeze",
+                    "command_id": f"fixture-freeze:{wht_result.determination_set_id}",
+                    "actor_ref": "finance-user:fixture",
+                    "reason": "fixture: elected component for a lineage test",
+                },
+            )
+        )
+        session.flush()
         old = billing._withholding_command(
             account.id, issued.invoice_id, scope=scope, suffix=str(uuid4())
         )

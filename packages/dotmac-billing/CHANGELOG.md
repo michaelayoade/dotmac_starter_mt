@@ -19,6 +19,82 @@ chain after `bi_0014_opening_variance_ledger`.
   exceptions review. No row is repaired or rewritten. Adds the target unique
   key `rated_obligations(id, price_version_id)` on both planes.
 
+- B2 (`bi_0016_withholding_components`): expected withholding is frozen at
+  issue as structural rows. `document_withholding_components` holds one
+  immutable row per elected expected-withholding component of a `dotmac-tax`
+  determination (positive amount, evidenced by a Tax party classification id;
+  source owner pinned to `dotmac-tax`). Applicability, rate and amount are
+  Tax's alone; Billing freezes and verifies, it selects and calculates nothing.
+  An invoice with no elected component has nothing a discharge can reference:
+  `accept_withholding_discharge` refuses it (`withholding_not_elected`), refuses
+  evidence that differs from the frozen result
+  (`withholding_evidence_differs_from_frozen`) or a non-Tax owner
+  (`withholding_tax_owner`), and refuses a draw above the frozen amount
+  (`withholding_exceeds_frozen_component`). The discharge table gains a
+  composite foreign key on the component identity it already stores
+  (added `NOT VALID`; `VALIDATE` is attempted and pre-existing discharges leave
+  it `NOT VALID` with an exceptions-review comment; nothing is backfilled or
+  repaired) and a BEFORE INSERT guard that keeps each component's net accepted
+  amount within `[0, frozen amount]`. The one-acceptance-per-component unique
+  index and permanent source claim are unchanged.
+- B2: add `freeze_issued_invoice_withholding` (`FreezeIssuedInvoiceWithholding`),
+  the governed command for an issued invoice that has no frozen components
+  (any issued invoice without a freeze, for an authorized actor). It takes a V2
+  dotmac-tax expected-withholding determination evaluated as of the invoice's
+  issue date (election = its party classification) and does not trust it:
+  - the determination must name the commercial source of exactly one line of the
+    invoice and equal the original facts that line positively retained; a line
+    whose retained evidence is V1 must be named explicitly (`line_id`);
+  - each base equals the line's source amount (plus the referenced prior tax for
+    a dependency-tax base);
+  - dotmac-tax must return the sealed determination through the assembly-wired
+    `TaxSealReader` (none wired: refused): identity, fingerprints, date, every
+    original fact and the elected components (code, rule, base, rate lines,
+    amount, and the sealed prior-tax amounts a dependency base folds in) must equal what the caller offered, and the rows are built from
+    Tax's values;
+  - one Tax determination backs one live invoice for late freezes
+    (`withholding_freeze_determination_in_use`; a voided invoice releases it).
+    The service refuses first, and the admission trigger enforces it for
+    `late_freeze` rows under an advisory lock on (plane, tenant, determination),
+    reading liveness through the same `has_live_invoice_issuance` rule the
+    receivable-backing resolution uses (SQLSTATE 23505);
+  - the frozen total is capped at outstanding plus withholding already accepted.
+  The rows carry the bound line's obligation and are the same append-only rows
+  issuance writes (`origin = 'late_freeze'`, with command id, actor, reason and
+  the determination reference); the command never mutates the invoice.
+  Idempotent on `command_id`; refused when components exist, for a credit note,
+  void or non-live invoice, or when the determination is not as of the issue
+  date. Tenant plane only; the platform plane stays fail-closed
+  (`withholding_freeze_platform_unsupported`). A component's document and
+  obligation must be a line of that document (composite key on `document_lines`)
+  and a document has a single freeze (same origin and command id, serialized by
+  the document row lock in the admission trigger; `command_id` is NOT NULL for
+  every origin, issue rows carrying `issue:<document id>`). Afterwards the
+  discharge foreign key, cap guard and credit-draw cap apply unchanged.
+- B2: new permission `billing.withholding.freeze` (manifest `PermissionSpec`,
+  default role `admin`) and two assembly-wired ports, `ActorPermissionReader` and
+  `TaxSealReader` (`TaxDeterminationSealV1`, `TaxSealedComponentV1`,
+  `TaxSealedLineV1`). The command refuses with no reader wired. `holds` authorizes
+  the actor the caller names, not the caller: the route must use
+  `permission_guard("billing.withholding.freeze")`, pass the authenticated party
+  that guard returns as `actor_ref`, and the assembly must wire
+  `ActorPermissionReader` over `dotmac_kernel.deps.authorize_party`. When the
+  assembly installs billing, its explicit `starter.admin` grant list must add the
+  permission by hand.
+- B2: an opening-imported invoice (it has an `opening_receivable_bases` row) is
+  refused with `withholding_freeze_opening_import_unavailable`, detected
+  structurally. It has no line source and billing accounts carry no party
+  reference; the branch waits for a party mapping from the dotmac_sub_thin
+  composition.
+- B2: `apply_available_credit` may draw at most the invoice's outstanding
+  receivable less its undischarged frozen withholding
+  (`credit_exceeds_non_withholding_room`), so credit is drawn before the
+  discharge and can never consume the reserved withholding. Cash allocation and
+  non-cash credit are unchanged.
+- B2: add `WithholdingCashRequirementV1` (salvaged from the superseded #1006,
+  without its tax code): a read-only quote of cash required from an invoice total
+  and a Tax-owned withholding amount.
+
 ## 0.1.0a11 — UNRELEASED (rolled into a12)
 
 - Breaking for adapters: `NumberingProvider.allocate` now also receives a
