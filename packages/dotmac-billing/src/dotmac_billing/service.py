@@ -3427,8 +3427,8 @@ def freeze_issued_invoice_withholding(
     wired ``tax_seal`` reader that the determination exists with the same
     result fingerprint and date; with no reader wired the command refuses. The
     rows carry the bound line's obligation. It writes the same append-only
-    component rows issuance writes and never touches the invoice. Idempotent on ``command_id``; refused
-    when components exist, for a credit note or void invoice, for V1 evidence,
+    component rows issuance writes and never touches the invoice. Idempotent on
+    ``command_id``; refused when components exist, for a credit note or void invoice, for V1 evidence,
     when the determination is not as of the issue date, or when the frozen
     withholding would exceed what is outstanding plus what was already withheld.
     """
