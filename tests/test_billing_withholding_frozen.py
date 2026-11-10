@@ -22,6 +22,7 @@ from dotmac_billing.commands import (
     ReverseWithholdingDischarge,
     TaxDeterminationSealV1,
     TaxSealedComponentV1,
+    TaxSealedDependencyV1,
     TaxSealedLineV1,
 )
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
@@ -530,6 +531,12 @@ def _sealed(item):
                         ln.sequence, ln.taxable_amount, ln.rate, ln.tax_amount
                     )
                     for ln in c.lines
+                ),
+                dependency_components=tuple(
+                    TaxSealedDependencyV1(
+                        d.determination_set_id, d.determination_id, d.tax_amount
+                    )
+                    for d in c.dependency_components
                 ),
             )
             for c in result.components
@@ -1140,7 +1147,9 @@ def test_no_tax_reader_wired_refuses_the_freeze(scratch):
         session.rollback()
 
 
-@pytest.mark.parametrize("fault", ["unknown", "fingerprint", "date", "amount"])
+@pytest.mark.parametrize(
+    "fault", ["unknown", "fingerprint", "date", "amount", "dependency"]
+)
 def test_tax_must_confirm_the_determination(scratch, fault):
     from datetime import timedelta
 
@@ -1159,6 +1168,23 @@ def test_tax_must_confirm_the_determination(scratch, fault):
             seals.items[key] = replace(
                 seal,
                 components=(replace(seal.components[0], tax_amount=_money("1.00")),),
+            )
+        elif fault == "dependency":
+            # Tax sealed a smaller prior tax than the caller's evidence offers.
+            seal = seals.items[key]
+            component = seal.components[0]
+            assert component.dependency_components
+            seals.items[key] = replace(
+                seal,
+                components=(
+                    replace(
+                        component,
+                        dependency_components=tuple(
+                            replace(d, tax_amount=_money("1.00"))
+                            for d in component.dependency_components
+                        ),
+                    ),
+                ),
             )
         elif fault == "fingerprint":
             seals.items[key] = replace(
