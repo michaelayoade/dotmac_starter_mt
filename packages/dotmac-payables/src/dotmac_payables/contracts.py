@@ -58,12 +58,6 @@ def _required(value: str, label: str, maximum: int) -> str:
     return normalized
 
 
-def _optional_document_number(value: str | None) -> str | None:
-    if value is None or not value.strip():
-        return None
-    return _required(value, "supplier document number", 120)
-
-
 def _currency(value: str) -> str:
     currency = _required(value, "currency code", 3).upper()
     if len(currency) != 3:
@@ -146,7 +140,7 @@ class CreateSupplierInvoice:
     number: str
     supplier_ref: str
     supplier_name_snapshot: str
-    supplier_document_number: str | None
+    supplier_document_number: str
     invoice_date: date
     received_date: date
     currency_code: str
@@ -190,8 +184,8 @@ class CreateSupplierInvoice:
             "supplier_name_snapshot": _required(
                 self.supplier_name_snapshot, "supplier name snapshot", 255
             ),
-            "supplier_document_number": _optional_document_number(
-                self.supplier_document_number
+            "supplier_document_number": _required(
+                self.supplier_document_number, "supplier document number", 120
             ),
             "invoice_date": self.invoice_date.isoformat(),
             "received_date": self.received_date.isoformat(),
@@ -212,7 +206,7 @@ class CreateCreditNote:
     number: str
     supplier_ref: str
     supplier_name_snapshot: str
-    supplier_document_number: str | None
+    supplier_document_number: str
     credit_date: date
     currency_code: str
     exchange_rate: Decimal
@@ -234,8 +228,8 @@ class CreateCreditNote:
             "supplier_name_snapshot": _required(
                 self.supplier_name_snapshot, "supplier name snapshot", 255
             ),
-            "supplier_document_number": _optional_document_number(
-                self.supplier_document_number
+            "supplier_document_number": _required(
+                self.supplier_document_number, "supplier document number", 120
             ),
             "credit_date": self.credit_date.isoformat(),
             "currency_code": _currency(self.currency_code),

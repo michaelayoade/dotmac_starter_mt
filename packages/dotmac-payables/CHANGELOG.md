@@ -2,10 +2,10 @@
 
 ## 0.1.0a2 — unreleased
 
-- Supplier-issued document numbers are optional on supplier invoices and
-  credit notes. Absent or blank input is stored as NULL; internal document
-  numbers remain required, and supplier-document duplicate checks apply only
-  when a number is supplied.
+- Historical or imported supplier invoices and credit notes whose
+  supplier-issued document number was never captured may persist that absence
+  as NULL. New documents created through the service contracts still require
+  the supplier document number; internal document numbers remain required.
 - Adds `pa_0002_optional_supplier_doc`, which makes both persisted
   `supplier_document_number` columns nullable.
 

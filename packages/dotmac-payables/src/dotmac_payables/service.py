@@ -188,23 +188,15 @@ def create_invoice(
     ):
         raise InvalidAmount("rounded payment schedule must equal the invoice total")
 
-    supplier_document_number = (
-        str(payload["supplier_document_number"])
-        if payload["supplier_document_number"] is not None
-        else None
-    )
-
     def operation(session: Session) -> Mapping[str, object]:
-        existing = None
-        if supplier_document_number is not None:
-            existing = session.scalar(
-                select(SupplierInvoice).where(
-                    SupplierInvoice.tenant_id == tenant_id,
-                    SupplierInvoice.supplier_ref == str(payload["supplier_ref"]),
-                    SupplierInvoice.supplier_document_number
-                    == supplier_document_number,
-                )
+        existing = session.scalar(
+            select(SupplierInvoice).where(
+                SupplierInvoice.tenant_id == tenant_id,
+                SupplierInvoice.supplier_ref == str(payload["supplier_ref"]),
+                SupplierInvoice.supplier_document_number
+                == str(payload["supplier_document_number"]),
             )
+        )
         if existing is not None:
             if existing.request_fingerprint != request_fingerprint:
                 raise Conflict("supplier document identity names a different invoice")
@@ -214,7 +206,7 @@ def create_invoice(
             number=str(payload["number"]),
             supplier_ref=str(payload["supplier_ref"]),
             supplier_name_snapshot=str(payload["supplier_name_snapshot"]),
-            supplier_document_number=supplier_document_number,
+            supplier_document_number=str(payload["supplier_document_number"]),
             invoice_date=command.invoice_date,
             received_date=command.received_date,
             currency_code=str(payload["currency_code"]),
@@ -429,22 +421,15 @@ def create_credit_note(
     tax = _money(sum((values[3] for values in normalized_lines), Decimal("0")))
     total = _money(subtotal + tax)
 
-    supplier_document_number = (
-        str(payload["supplier_document_number"])
-        if payload["supplier_document_number"] is not None
-        else None
-    )
-
     def operation(session: Session) -> Mapping[str, object]:
-        existing = None
-        if supplier_document_number is not None:
-            existing = session.scalar(
-                select(CreditNote).where(
-                    CreditNote.tenant_id == tenant_id,
-                    CreditNote.supplier_ref == str(payload["supplier_ref"]),
-                    CreditNote.supplier_document_number == supplier_document_number,
-                )
+        existing = session.scalar(
+            select(CreditNote).where(
+                CreditNote.tenant_id == tenant_id,
+                CreditNote.supplier_ref == str(payload["supplier_ref"]),
+                CreditNote.supplier_document_number
+                == str(payload["supplier_document_number"]),
             )
+        )
         if existing is not None:
             if existing.request_fingerprint != request_fingerprint:
                 raise Conflict(
@@ -457,7 +442,7 @@ def create_credit_note(
             number=str(payload["number"]),
             supplier_ref=str(payload["supplier_ref"]),
             supplier_name_snapshot=str(payload["supplier_name_snapshot"]),
-            supplier_document_number=supplier_document_number,
+            supplier_document_number=str(payload["supplier_document_number"]),
             credit_date=command.credit_date,
             currency_code=str(payload["currency_code"]),
             exchange_rate=command.exchange_rate,

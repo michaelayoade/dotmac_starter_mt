@@ -1,4 +1,4 @@
-"""Make supplier-issued document numbers optional.
+"""Allow uncaptured supplier-issued document numbers to persist as NULL.
 
 Revision ID: pa_0002_optional_supplier_doc
 Revises: pa_0001_payables
