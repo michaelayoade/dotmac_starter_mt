@@ -414,7 +414,8 @@ def test_the_overlap_guard_is_a_plain_trigger_with_no_extension(
     unique = set(
         admin.scalars(
             text(
-                "SELECT indexname FROM pg_indexes WHERE schemaname = 'mod_subscriptions' "
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = 'mod_subscriptions' "
                 "AND indexdef LIKE 'CREATE UNIQUE INDEX%' "
                 "AND indexdef LIKE '%WHERE%cancelled%' AND indexname IN "
                 "('uq_occurrences_correction', 'uq_platform_occurrences_correction')"
