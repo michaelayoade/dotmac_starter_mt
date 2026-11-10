@@ -38,15 +38,8 @@
     "Regenerate: make published-source-drift-baseline"
   ],
   "released_total": 83,
-  "drifted_total": 3,
+  "drifted_total": 2,
   "drifted": [
-    {
-      "distribution": "dotmac-billing",
-      "version": "0.1.0a11",
-      "tag": "dotmac-billing-v0.1.0a11",
-      "published_tree": "63d612f7420b20a0118882f3d5faedda9d22c14e",
-      "head_tree": "58106076fab93cf95aa7644cba4466a94e7b1ec2"
-    },
     {
       "distribution": "dotmac-brand-profiles",
       "version": "0.1.0a1",
