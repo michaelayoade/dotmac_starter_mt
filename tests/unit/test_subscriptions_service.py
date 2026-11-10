@@ -1038,19 +1038,13 @@ def test_a_held_renewal_stages_no_output_until_the_owner_confirms(
     assert replay.replayed is True and replay.staged_output is not None
 
 
-def test_a_capped_hold_has_no_registered_owner_and_fails_closed(
+def test_a_capped_hold_has_no_registered_owner_so_generation_refuses_it(
     db: Session, registry: SubscriptionVocabularyRegistry
 ) -> None:
-    occurrence_id, _ = _held_occurrence(
-        db, registry, hold=OccurrenceValidityHold.capped
-    )
-    port = FakeOwnerEvidence()
     with pytest.raises(SubscriptionDataError) as refused:
-        _resolve_validity(db, _evidence(occurrence_id), port)
+        _held_occurrence(db, registry, hold=OccurrenceValidityHold.capped)
     assert refused.value.code == "occurrences.hold_owner_unregistered"
-    assert port.calls == []
-    stored = db.get(PlatformRecurringChargeOccurrence, occurrence_id)
-    assert stored is not None and stored.state == "pending_validity"
+    assert db.scalars(select(PlatformRecurringChargeOccurrence)).all() == []
 
 
 def test_hold_owners_are_checked_against_installed_module_codes() -> None:
@@ -1080,6 +1074,12 @@ def test_hold_owners_are_checked_against_installed_module_codes() -> None:
         (product, billing), validity_hold_owners={"capped": "product"}
     )
     assert named.require_validity_hold_owner("capped") == "product"
+    # The stored mapping is read-only, and direct construction is checked too.
+    with pytest.raises(TypeError):
+        both.validity_hold_owners["capped"] = "product"  # type: ignore[index]
+    with pytest.raises(SubscriptionDataError) as direct:
+        SubscriptionVocabularyRegistry({}, {}, {}, {"capped": "ghost"})
+    assert direct.value.code == "vocabulary.unknown_hold_owner"
 
 
 def test_a_rejected_hold_is_cancelled_and_never_staged(

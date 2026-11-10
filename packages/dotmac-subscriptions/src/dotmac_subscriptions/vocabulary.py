@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final
 
 from dotmac_kernel.modules import AnyManifest
@@ -83,7 +84,31 @@ class SubscriptionVocabularyRegistry:
     #: ``validity_hold`` value -> the module code entitled to evidence it.  A
     #: hold with no entry FAILS CLOSED: it cannot be resolved until an owner is
     #: registered.  DEFAULTED for the same released-construction reason as above.
-    validity_hold_owners: dict[str, str] = field(default_factory=dict)
+    validity_hold_owners: Mapping[str, str] = field(default_factory=dict)
+    #: The installed module codes the hold owners were checked against.
+    installed_modules: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        # Direct construction is held to the same rule as `from_manifests`: a
+        # hold names a real hold reason and an installed module, and the stored
+        # mapping is read-only.
+        for hold, owner in self.validity_hold_owners.items():
+            if hold not in KNOWN_VALIDITY_HOLDS:
+                raise SubscriptionDataError(
+                    "vocabulary.unknown_validity_hold",
+                    f"validity hold {hold!r} is not a hold reason.",
+                )
+            if owner not in self.installed_modules:
+                raise SubscriptionDataError(
+                    "vocabulary.unknown_hold_owner",
+                    f"validity hold {hold!r} names owner {owner!r}, which is not "
+                    "an installed module code.",
+                )
+        object.__setattr__(
+            self,
+            "validity_hold_owners",
+            MappingProxyType(dict(self.validity_hold_owners)),
+        )
 
     @classmethod
     def from_manifests(
@@ -149,6 +174,7 @@ class SubscriptionVocabularyRegistry:
             obligation_sources,
             billing_treatment_reasons,
             hold_owners,
+            frozenset(installed),
         )
 
     @staticmethod

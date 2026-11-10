@@ -1624,6 +1624,10 @@ def generate_recurring_charge(
         )
     registry.require_charge_model(line.charge_model_code)
     registry.require_obligation_source(line.source_code)
+    if command.validity_hold is not None:
+        # Refuse up front: a hold nobody may resolve would block its coverage
+        # forever.
+        registry.require_validity_hold_owner(command.validity_hold.value)
     cadence = _cadence_from(version)
     contract_start = _stored_utc(version.starts_at)
     contract_end = _stored_utc(version.ends_at) if version.ends_at is not None else None
