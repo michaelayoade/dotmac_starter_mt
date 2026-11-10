@@ -186,7 +186,7 @@ def _scan_details(node: object, path: str, depth: int, found: list[str]) -> None
 
 
 def _forbidden(key: str) -> bool:
-    # NFKC first, so a compatibility spelling (fullwidth `ｌａｔ`, ligatures)
+    # NFKC first, so a compatibility spelling (fullwidth letters, ligatures)
     # folds to the plain key before the casefold; casefold, not lower, so
     # case-insensitive equivalents beyond ASCII also match.
     folded = unicodedata.normalize("NFKC", key).casefold()
