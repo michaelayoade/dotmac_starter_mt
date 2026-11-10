@@ -221,6 +221,7 @@ from lane3_execution import TopologyRefused, load_topology
 from lane3_exposure_evidence import (
     ExposureEvidenceRefused,
     exposure_calls_digest,
+    require_exposure_join,
     serialize_exposure_calls,
 )
 from lane3_exposure_recording import (
@@ -2091,6 +2092,19 @@ def run(
                 "no --evidence-bundle: a v2 receipt binds the age-encrypted "
                 "evidence bundle as uploaded, and this run was given none"
             )
+        # When this run carries the private exposure records, the receipt
+        # is refused unless they completely join the authorized plan's
+        # reconciliations. Recording is best-effort, so this is the one
+        # place a missing record stops being a note and becomes a refusal:
+        # a receipt over incomplete exposure evidence would publish a
+        # proof its own bundle cannot support.
+        if getattr(args, "exposure_calls_out", ""):
+            try:
+                require_exposure_join(
+                    ctx.exposure_calls, execution_plan.exposure_reconciliations
+                )
+            except ExposureEvidenceRefused as exc:
+                raise receipt_v2.ReceiptRefused(str(exc)) from exc
         receipt = receipt_v2.assemble_receipt(
             foundation_revision=args.foundation_revision,
             foundation_artifact_digest=args.foundation_artifact,

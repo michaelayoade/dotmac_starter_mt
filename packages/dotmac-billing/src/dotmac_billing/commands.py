@@ -29,6 +29,7 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV1,
     WithholdingTaxEvidenceV2,
 )
+from dotmac_billing.opening_variance_contracts import OpeningVarianceResolutionRefV1
 
 
 class NumberingProvider(Protocol):
@@ -129,6 +130,9 @@ class IssueCreditNote:
     document_profile_version: str
     tax_snapshots: tuple[AppliedTaxSnapshotV1, ...] = ()
     fx_snapshot: AppliedFxSnapshotV1 | None = None
+    #: Set only by a governed opening-variance resolution (W-V2): the credit
+    #: note's own transaction appends the resolution event.
+    resolves_variance_ref: OpeningVarianceResolutionRefV1 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +234,7 @@ class GrantNonCashCredit:
     apply_on_issue: bool = False
     replaces_grant_id: UUID | None = None
     replaces_effect_id: UUID | None = None
+    resolves_variance_ref: OpeningVarianceResolutionRefV1 | None = None
 
 
 @dataclass(frozen=True, slots=True)

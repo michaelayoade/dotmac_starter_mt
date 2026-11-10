@@ -48,20 +48,20 @@ All notable changes follow Semantic Versioning.
   an `authority_switch` participant inside the seal savepoint; its
   `OpeningAuthoritySwitchReceiptV1` is stored append-only. `opening_lane` is the
   import-specific assembly authority port.
-- ST-4: opening admissibility as data (`opening_admissibility`): a reviewed rules
+- ST-4 (A10 gate and held-draft rules superseded by the ST-4c projection below):
+  opening admissibility as data (`opening_admissibility`): a reviewed rules
   document (digest-identified, closed schema) plus the A10 account classes
   decide account-level admissibility (A10 `opening_exact` and post-cutover
   `match`; D-2). Every census blocking code is blocking: no rule relaxes,
   drops or carries a finding, and an unlisted code is blocking. Every held
   partition has exactly one reason from a closed, rules-ordered set. Every
   member account of a reseller partition must pass A10. A held partition that
-  did not fail structurally stays in the frozen manifest with a digest-bound
-  `held:<reason>` disposition marker (validators refuse its import with
-  `partition_held`, never block the others); structural failures stay out
-  (governed correction). `admissibility.json` records the route and the exact
-  archived totals. A manifest with held-marked partitions cannot be sealed
-  until the variance ledger (ST-4c): the seal refuses a hold list that omits a
-  held-marked partition or repeats one (`opening_hold_list_invalid`). Drafts
+  is not admitted leaves the manifest and is routed to governed correction; the
+  decision record (`admissibility.json`) lists every routed-out partition with
+  its reason, rows and stated lane figures, plus the exact archived totals.
+  There is no manifest-marked hold (ST-4c, Q1): the seal's hold list equals the
+  typed operational holds (`target_not_pristine`, `import_refused`) exactly
+  (`opening_hold_list_invalid`). Drafts
   are excluded and archived (X1; accounts whose A10 cause is a draft allocation
   are held), V1 gates only status-open documents, D-3 needs a supplied original
   for each, and reseller option A re-keys a managed subscriber's invoices and
@@ -85,6 +85,72 @@ All notable changes follow Semantic Versioning.
   providers. Rehearsal and production audiences are disjoint namespaces.
   Import reversal is never granted. Provision/seal verifiers and Gap C
   (cash lots) are not part of this change.
+
+- ST-4c: opening variance ledger (bi_0014; a11, unreleased). The opening never
+  adjusts what it transfers: per partition and lane, `source = transferred +
+  sum(variance)` exactly in minor units, no tolerance, no netting. A variance
+  (`OpeningVarianceV1`) is an append-only typed record with structural identity
+  (window, account, import receipt, currency, lane, basis, reason, source), a
+  closed reason policy enforced in Python and SQL, and a lifecycle
+  (`recorded -> resolving -> partially_resolved|resolved`, terminal
+  `voided_by_import_reversal`). `ledger_lane` (the Sub AR lane) is the only
+  money basis; `document_residual`, `stored_balance` and `rebuild` are memo
+  bases. Equations E1 (per lane), E2, E3, E4 (`rebuild = T_net + sum V`, with
+  `T_net = T_receivable - sum(lot residuals)`; rebuild basis is receivable-lane
+  only) and the per-partition count control are checked at window admission
+  (`opening_manifest_unclosed`), at import, and by the seal in SQL over every
+  control partition minus the held ones. `opening_control_report` is the
+  closure report Finance acknowledges; cumulative flow fields appear as history
+  rows with no equation. Resolution is per record: `position_corrected`
+  (credit note, or a grant applied on issue, for a receivable-lane
+  customer-adverse variance only), `recognised` (`recognise_opening_variance`;
+  never on a customer-adverse variance; GL class per lane), `evidence_confirmed`
+  (memo bases only). Every resolution needs the Approvals port and the database
+  checks maker-checker parity with hold admission. A posting group a resolution
+  references cannot be reversed (`variance_resolution_locked`).
+  Breaking: `OpeningManifestV2` gains `measures`, `variances` and
+  `batch_controls` in place, so its shape and fingerprint change in a11 and an
+  a10-produced manifest is refused (`partition_measures_missing`). A V5 fact
+  embeds the whole V2 manifest, so V5 payload bytes for new imports differ from
+  a10 (no V5 fact exists anywhere: zero opening import receipts); the opening
+  has never run (zero rows in the opening tables on Sub production and staging).
+  A partition with cash lots keeps its credit under the cash control: a
+  non-zero unapplied-credit or funding figure, or a credit/funding variance,
+  is refused (`credit_transfer_unsupported`) until Gap C (ST-4b). B7 and
+  B1/IssueCharge are not resolution primitives yet.
+- ST-4c: the projection carries findings instead of dropping or blocking them.
+  `carry_as_variance` is a third rules policy (fixed code to reason map, never
+  chosen by the rules document): invoice-level `residual_mismatch` ->
+  `stored_balance_difference`, `excluded_nonzero_residue` ->
+  `closed_invoice_residue`, `negative_residual` -> `negative_residue`, an open
+  invoice with `invoice_provenance`, `duplicate_identity`, `source_after_cutoff`,
+  `currency_precision`, `settlement_provenance`, `original_evidence_missing`,
+  `status_residual_conflict` or `v1_vat_evidence_missing` ->
+  `item_not_transferred:<code>` (the item is excluded from T and its residual
+  carried), account-level mismatch -> `lane_document_difference`, `unbacked_lane`
+  -> `lane_not_transferred:<lane>`. The adapter converts the plan to exact minor
+  units: at most one `unexplained_difference` remainder per partition, lane and
+  basis, T never adjusted, unattributed control rows in batch scope (no GL fact).
+  A10 is no longer an admission gate (W-V1): the new drafter input
+  `billing.opening.a10-account-rebuild.v1` (`{account_id, currency, rebuild_net,
+  opening_class, post_cause}`, NGN only, exact decimal, credit-positive) gives
+  `rebuild_minor = -to_minor(rebuild_net)`, one attributed rebuild memo variance
+  per partition (`rebuild_<class>`, else `rebuild_<cause>`, else
+  `unexplained_difference`), `a10_missing` / `a10_currency_unsupported` control
+  gaps, and `a10_rebuild_required` when the input is absent. The decision record
+  adds the routed-out reconciliation (census = manifest + batch + routed-out, by
+  invoice rows and by currency and lane) and binds its digest. The read-only
+  converter `scripts/billing_opening_a10_rebuild_converter.py` turns the A10
+  classified CSV into that input. Not yet carried: reseller fold
+  (`reseller_fold_unavailable`) and settlement-level `draft_allocation`
+  itemisation; both stay routed out or fall to the lane remainder.
+- ST-4c: Add distinct AccountingFactV6 (`billing.accounting.fact.v6`) for ledger-lane opening-variance recorded/voided/recognised/position-corrected facts on effect-free posting groups; V1-V5 classes and literals unchanged; V5 payload carries the a11 manifest. Each fact sits on its own posting group of the same kind;
+  `opening_variance_recorded` and `_voided` are written by the opening principal,
+  the other two online. `opening_variance_events.fact_posting_group_id` (unique,
+  checked at commit) binds each event to its group. The voided fact links the
+  recorded one with `reverses_fact_id`; the group's `reverses_group_id` stays NULL.
+  `get_accounting_fact_v6` is the verified reader. The three
+  `billing.opening.variance.*` outbox types are dropped.
 
 ## 0.1.0a10 — released
 

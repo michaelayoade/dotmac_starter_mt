@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -29,10 +30,13 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, MappedColumn, declared_attr, mapped_column
 
 SCHEMA = module_schema("billing")
 MONEY = Numeric(20, 6)
+# jsonb on PostgreSQL (the migration's type), plain JSON on SQLite metadata builds
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 
 def money_column(
@@ -2608,6 +2612,371 @@ class PlatformOpeningAuthoritySwitchReceipt(Base, _SwitchReceiptColumns):
     )
 
 
+class _VarianceColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    scope_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    billing_account_id: Mapped[UUID | None] = mapped_column(Uuid())
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    lane: Mapped[str] = mapped_column(String(32), nullable=False)
+    basis: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(96), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    import_receipt_id: Mapped[UUID | None] = mapped_column(Uuid())
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    rules_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+_VARIANCE_IDENTITY = (
+    "window_id",
+    "billing_account_id",
+    "import_receipt_id",
+    "currency",
+    "lane",
+    "basis",
+    "reason_code",
+    "source_kind",
+    "source_ref",
+)
+
+
+class OpeningVariance(Base, _WindowTenantRow, _VarianceColumns):
+    __tablename__ = "opening_variances"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            *_VARIANCE_IDENTITY,
+            name="uq_opening_variances_identity",
+            postgresql_nulls_not_distinct=True,
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_opening_variances_id"),
+        UniqueConstraint(
+            "tenant_id", "id", "billing_account_id", name="uq_opening_variances_account"
+        ),
+        CheckConstraint("amount_minor <> 0", name="ck_opening_variances_nonzero"),
+        CheckConstraint(
+            "lane IN ('receivable','customer_credit','prepaid_funding') AND basis IN "
+            "('ledger_lane','document_residual','stored_balance','rebuild') AND "
+            "source_kind IN ('invoice','settlement','lane','ledger_entry',"
+            "'credit_note','payment','control_row','rebuild_account','partition_remainder')",
+            name="ck_opening_variances_closed",
+        ),
+        CheckConstraint(
+            "(scope_level = 'partition' AND billing_account_id IS NOT NULL "
+            "AND import_receipt_id IS NOT NULL) OR (scope_level = 'batch' "
+            "AND billing_account_id IS NULL AND import_receipt_id IS NULL)",
+            name="ck_opening_variances_scope",
+        ),
+        CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_opening_variances_precision"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "import_receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.opening_import_receipts.tenant_id",
+                f"{SCHEMA}.opening_import_receipts.id",
+                f"{SCHEMA}.opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningVariance(Base, _VarianceColumns):
+    __tablename__ = "platform_opening_variances"
+    __table_args__ = (
+        UniqueConstraint(
+            *_VARIANCE_IDENTITY,
+            name="uq_platform_opening_variances_identity",
+            postgresql_nulls_not_distinct=True,
+        ),
+        UniqueConstraint("id", name="uq_platform_opening_variances_id"),
+        UniqueConstraint(
+            "id", "billing_account_id", name="uq_platform_opening_variances_account"
+        ),
+        CheckConstraint(
+            "amount_minor <> 0", name="ck_platform_opening_variances_nonzero"
+        ),
+        CheckConstraint(
+            "lane IN ('receivable','customer_credit','prepaid_funding') AND basis IN "
+            "('ledger_lane','document_residual','stored_balance','rebuild') AND "
+            "source_kind IN ('invoice','settlement','lane','ledger_entry',"
+            "'credit_note','payment','control_row','rebuild_account','partition_remainder')",
+            name="ck_platform_opening_variances_closed",
+        ),
+        CheckConstraint(
+            "(scope_level = 'partition' AND billing_account_id IS NOT NULL "
+            "AND import_receipt_id IS NOT NULL) OR (scope_level = 'batch' "
+            "AND billing_account_id IS NULL AND import_receipt_id IS NULL)",
+            name="ck_platform_opening_variances_scope",
+        ),
+        CheckConstraint(
+            "minor_units BETWEEN 0 AND 6",
+            name="ck_platform_opening_variances_precision",
+        ),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["import_receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.platform_opening_import_receipts.id",
+                f"{SCHEMA}.platform_opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _VarianceEventColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    variance_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID | None] = mapped_column(Uuid())
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    resolution_kind: Mapped[str | None] = mapped_column(String(32))
+    amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    posting_group_id: Mapped[UUID | None] = mapped_column(Uuid())
+    gl_target_class: Mapped[str | None] = mapped_column(String(32))
+    evidence_ref: Mapped[str | None] = mapped_column(String(255))
+    maker_ref: Mapped[str | None] = mapped_column(String(255))
+    approver_refs: Mapped[list[str] | None] = mapped_column(_JSONB)
+    approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
+    fact_posting_group_id: Mapped[UUID | None] = mapped_column(Uuid())
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+_EVENT_KIND_CHECK = (
+    "kind IN ('recorded','resolving','partially_resolved','resolved',"
+    "'voided_by_import_reversal')"
+)
+_RESOLUTION_CHECK = (
+    "resolution_kind IS NULL OR resolution_kind IN "
+    "('position_corrected','recognised','evidence_confirmed')"
+)
+
+
+class OpeningVarianceEvent(Base, _WindowTenantRow, _VarianceEventColumns):
+    __tablename__ = "opening_variance_events"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "seq", name="uq_opening_variance_events_seq"),
+        UniqueConstraint(
+            "tenant_id",
+            "posting_group_id",
+            name="uq_opening_variance_events_posting_group",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "fact_posting_group_id",
+            name="uq_opening_variance_events_fact_group",
+        ),
+        CheckConstraint(_EVENT_KIND_CHECK, name="ck_opening_variance_events_kind"),
+        CheckConstraint(
+            _RESOLUTION_CHECK, name="ck_opening_variance_events_resolution"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "variance_id"],
+            [f"{SCHEMA}.opening_variances.tenant_id", f"{SCHEMA}.opening_variances.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningVarianceEvent(Base, _VarianceEventColumns):
+    __tablename__ = "platform_opening_variance_events"
+    __table_args__ = (
+        UniqueConstraint("seq", name="uq_platform_opening_variance_events_seq"),
+        UniqueConstraint(
+            "posting_group_id", name="uq_platform_opening_variance_events_posting_group"
+        ),
+        UniqueConstraint(
+            "fact_posting_group_id",
+            name="uq_platform_opening_variance_events_fact_group",
+        ),
+        CheckConstraint(
+            _EVENT_KIND_CHECK, name="ck_platform_opening_variance_events_kind"
+        ),
+        CheckConstraint(
+            _RESOLUTION_CHECK, name="ck_platform_opening_variance_events_resolution"
+        ),
+        ForeignKeyConstraint(
+            ["variance_id"],
+            [f"{SCHEMA}.platform_opening_variances.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _ControlGapColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    basis: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(96), nullable=False)
+    import_receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class OpeningControlGap(Base, _WindowTenantRow, _ControlGapColumns):
+    __tablename__ = "opening_control_gaps"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "window_id",
+            "billing_account_id",
+            "import_receipt_id",
+            "basis",
+            name="uq_opening_control_gaps_identity",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_opening_control_gaps_id"),
+        CheckConstraint("basis = 'rebuild'", name="ck_opening_control_gaps_basis"),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "import_receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.opening_import_receipts.tenant_id",
+                f"{SCHEMA}.opening_import_receipts.id",
+                f"{SCHEMA}.opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningControlGap(Base, _ControlGapColumns):
+    __tablename__ = "platform_opening_control_gaps"
+    __table_args__ = (
+        UniqueConstraint(
+            "window_id",
+            "billing_account_id",
+            "import_receipt_id",
+            "basis",
+            name="uq_platform_opening_control_gaps_identity",
+        ),
+        UniqueConstraint("id", name="uq_platform_opening_control_gaps_id"),
+        CheckConstraint(
+            "basis = 'rebuild'", name="ck_platform_opening_control_gaps_basis"
+        ),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["import_receipt_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.platform_opening_import_receipts.id",
+                f"{SCHEMA}.platform_opening_import_receipts.billing_account_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _ControlGapEventColumns(_EvidenceTime):
+    id: Mapped[UUID] = uuid_pk()
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    gap_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_ref: Mapped[str | None] = mapped_column(String(255))
+    maker_ref: Mapped[str | None] = mapped_column(String(255))
+    approver_refs: Mapped[list[str] | None] = mapped_column(_JSONB)
+    approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class OpeningControlGapEvent(Base, _WindowTenantRow, _ControlGapEventColumns):
+    __tablename__ = "opening_control_gap_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "gap_id", "kind", name="uq_opening_control_gap_events_once"
+        ),
+        UniqueConstraint("tenant_id", "seq", name="uq_opening_control_gap_events_seq"),
+        CheckConstraint(
+            "kind IN ('recorded','resolved','voided_by_import_reversal')",
+            name="ck_opening_control_gap_events_kind",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "gap_id"],
+            [
+                f"{SCHEMA}.opening_control_gaps.tenant_id",
+                f"{SCHEMA}.opening_control_gaps.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformOpeningControlGapEvent(Base, _ControlGapEventColumns):
+    __tablename__ = "platform_opening_control_gap_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "gap_id", "kind", name="uq_platform_opening_control_gap_events_once"
+        ),
+        UniqueConstraint("seq", name="uq_platform_opening_control_gap_events_seq"),
+        CheckConstraint(
+            "kind IN ('recorded','resolved','voided_by_import_reversal')",
+            name="ck_platform_opening_control_gap_events_kind",
+        ),
+        ForeignKeyConstraint(
+            ["gap_id"],
+            [f"{SCHEMA}.platform_opening_control_gaps.id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["window_id"],
+            [f"{SCHEMA}.platform_opening_windows.id"],
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
 class _SettlementEarmarkColumns(_EvidenceTime):
     id: Mapped[UUID] = uuid_pk()
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
@@ -2782,6 +3151,10 @@ TENANT_TABLES = (
     "opening_import_receipts",
     "opening_cash_lots",
     "opening_cash_effects",
+    "opening_variances",
+    "opening_variance_events",
+    "opening_control_gaps",
+    "opening_control_gap_events",
     "cash_source_claims",
     "non_cash_credit_grants",
     "non_cash_credit_effects",
@@ -2822,6 +3195,10 @@ PLATFORM_TABLES = (
     "platform_opening_import_receipts",
     "platform_opening_cash_lots",
     "platform_opening_cash_effects",
+    "platform_opening_variances",
+    "platform_opening_variance_events",
+    "platform_opening_control_gaps",
+    "platform_opening_control_gap_events",
     "platform_cash_source_claims",
     "platform_non_cash_credit_grants",
     "platform_non_cash_credit_effects",

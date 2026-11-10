@@ -33,9 +33,15 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningReplayBindingV1,
 )
 from dotmac_billing.opening_validation import (
-    HELD_REASON_PREFIX,
     _CashManifestAnalysis,
     _payload,
+)
+from dotmac_billing.opening_variance_contracts import OpeningOperationalHoldV1
+from dotmac_billing.opening_variance_validation import (
+    VARIANCE_GOVERNED_LANE_FIELDS,
+    carryable_accounts,
+    check_variances,
+    variance_citations,
 )
 
 #: Public handle for the identity-scoped validation memo (see
@@ -199,6 +205,7 @@ class _ReceivableManifestAnalysis:
         "shared",
         "manifest_blockers",
         "placed",
+        "cited_keys",
         "_fingerprint",
     )
 
@@ -217,8 +224,10 @@ class _ReceivableManifestAnalysis:
                 manifest.counts,
                 manifest.controls,
                 manifest.cash_lots,
-            )
+            ),
+            honor_held_marker=False,
         )
+        self.cited_keys = variance_citations(manifest)
         self.failures: dict[str, list[str]] = {}
         # The same findings, keyed by the partition they are about (None: the
         # manifest as a whole), so a report can place each where it belongs.
@@ -269,11 +278,13 @@ class _ReceivableManifestAnalysis:
                     and reference in self.ar_keys
                 ):
                     continue
-                if code == "unsupported_lane" and reference in {
-                    "collectible_receivable_minor",
-                    "open_ar_minor",
-                }:
-                    continue
+                if (
+                    code == "unsupported_lane"
+                    and reference in VARIANCE_GOVERNED_LANE_FIELDS
+                ):
+                    continue  # governed by the lane equation (E1), not zero
+                if code == "excluded_nonzero_residue" and reference in self.cited_keys:
+                    continue  # carried as a variance that cites this exact row
                 kept.setdefault(code, []).append(reference)
         return kept
 
@@ -553,29 +564,9 @@ class _ReceivableManifestAnalysis:
         for key, count in history_keys.items():
             if count != 1:
                 block("historical_discharge_duplicate", str(key))
-        held = self.cash.held_partitions
         for control in manifest.controls:
-            if control.partition in held:
-                continue  # held: no receivable is imported; routed post-seal
             ctx[0] = control.partition
             key = control.partition.source_account_key
-            if (
-                control.collectible_receivable_minor != ar_totals[control.partition]
-                or control.open_ar_minor != ar_totals[control.partition]
-            ):
-                block("receivable_control_mismatch", key)
-            for field in fields(control):
-                if (
-                    field.name
-                    not in {
-                        "partition",
-                        "available_cash_credit_minor",
-                        "collectible_receivable_minor",
-                        "open_ar_minor",
-                    }
-                    and getattr(control, field.name) != 0
-                ):
-                    block("unsupported_lane", f"{key}:{field.name}")
             try:
                 money_from_minor(
                     control.open_ar_minor,
@@ -589,6 +580,33 @@ class _ReceivableManifestAnalysis:
                 )
             except OpeningEvidenceError:
                 block("currency_precision_invalid", key)
+
+        def at(part: OpeningPartitionV1 | None, code: str, reference: str) -> None:
+            ctx[0] = part
+            block(code, reference)
+
+        check_variances(manifest, ar_totals, at)
+        ctx[0] = None
+
+
+def opening_manifest_variance_blockers(
+    manifest: OpeningManifestV2,
+) -> tuple[OpeningBlockerV1, ...]:
+    """The closure, count, citation, duplicate and batch findings of the manifest.
+
+    Run at window admission (``opening_manifest_unclosed``): a manifest whose
+    variance ledger does not close never becomes a window.
+    """
+    ar_totals: Counter[OpeningPartitionV1] = Counter()
+    for item in manifest.receivables:
+        ar_totals[item.partition] += item.residual_minor
+    found: dict[str, list[str]] = {}
+
+    def block(_part: OpeningPartitionV1 | None, code: str, reference: str) -> None:
+        found.setdefault(code, []).append(reference)
+
+    check_variances(manifest, ar_totals, block)
+    return _freeze(found)
 
 
 def _analysis_of(manifest: OpeningManifestV2) -> _ReceivableManifestAnalysis:
@@ -689,39 +707,27 @@ def _freeze(failures: dict[str, list[str]]) -> tuple[OpeningBlockerV1, ...]:
     )
 
 
-def opening_manifest_held_residuals(manifest: OpeningManifestV2) -> dict[UUID, int]:
-    """Open residual (minor units) of each held-marked partition, by account id.
-
-    A partition is held when its open dispositions carry the digest-bound
-    ``held:`` marker. The same set must be the sealed hold list.
-    """
-    held: dict[UUID, int] = {}
-    for item in manifest.dispositions:
-        if item.disposition == "blocking" and item.reason.startswith(
-            HELD_REASON_PREFIX
-        ):
-            account = item.partition.account_id
-            held[account] = held.get(account, 0) + item.residual_minor
-    return held
-
-
 def require_hold_list_covers_manifest(
-    manifest: OpeningManifestV2, held_account_ids: Collection[UUID]
+    manifest: OpeningManifestV2,
+    held_account_ids: Collection[UUID],
+    operational_holds: Collection[OpeningOperationalHoldV1] = (),
 ) -> None:
-    """Refuse a seal whose hold list omits a held-marked partition or repeats one.
+    """The sealed hold list equals the typed operational holds exactly.
 
-    Every held-marked partition must be listed (otherwise it is neither imported
-    nor held). Listing an unmarked, positive partition is a legitimate
-    operational hold, so the other direction is not checked here; the seal
-    separately requires every listed partition to be positive.
+    Partitions without an authoritative lane figure never enter the manifest
+    (routed to governed correction), so there is no manifest-marked hold. Every
+    listed account carries one typed operational reason, and is carryable.
     """
     listed = set(held_account_ids)
+    operational = [h.account_id for h in operational_holds]
     if (
         len(listed) != len(held_account_ids)
-        or not set(opening_manifest_held_residuals(manifest)) <= listed
+        or len(set(operational)) != len(operational)
+        or listed != set(operational)
+        or not listed <= carryable_accounts(manifest)
     ):
         raise OpeningEvidenceError(
-            "sealed hold list must cover every held-marked partition exactly once"
+            "sealed hold list must equal the typed operational holds"
         )
 
 
