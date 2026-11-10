@@ -31,6 +31,13 @@
   above 4096x4096, at zero, or when the header is malformed.
 - Rendering still imports no brand, files or storage owner; brand reaches it as
   frozen snapshots only.
+- Adds `AccountStatementFactV1` (period, opening/closing balances, ordered
+  entries with supplied running balances, parties, optional payment
+  instructions, the same frozen `EmbeddedLogoAssetV3`), its lossless projection
+  (`project_statement_v1`), exact `StatementTemplateCatalogV1` selection and a
+  data-only HTML serializer. Every amount is formatted as supplied; nothing is
+  summed or reconciled here. Statement PDF/service orchestration is not part of
+  this change.
 - Source candidate only: release, install-back, Sub qualification and product
   reconciler adoption remain separate work.
 

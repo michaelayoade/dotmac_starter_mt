@@ -18,6 +18,7 @@ from dotmac_document_rendering.contracts_v2 import DocumentProjectionV2
 from dotmac_document_rendering.contracts_v3 import (
     DATA_ONLY_RESOURCE_POLICY,
     DocumentProjectionV3,
+    EmbeddedLogoAssetV3,
     PdfEngineV3,
     RenderedDocumentV3,
     RenderRequestV3,
@@ -65,13 +66,34 @@ def _v2_view(projection: DocumentProjectionV3) -> DocumentProjectionV2:
 
 
 def _check_logo(projection: DocumentProjectionV3, logo_content: bytes | None) -> None:
-    if projection.brand_logo is None:
+    check_logo_v3(projection.brand_logo, logo_content)
+
+
+def check_logo_v3(
+    asset: EmbeddedLogoAssetV3 | None, logo_content: bytes | None
+) -> None:
+    """Refuse missing, unexpected or unverified logo bytes."""
+    if asset is None:
         if logo_content is not None:
             raise FactShapeInvalid("logo bytes supplied for a fact without a logo")
         return
     if logo_content is None:
         raise FactIncomplete("the fact freezes a brand logo but no bytes were supplied")
-    verify_logo_content_v3(projection.brand_logo, logo_content)
+    verify_logo_content_v3(asset, logo_content)
+
+
+def embed_verified_logo_v3(
+    html: str, asset: EmbeddedLogoAssetV3 | None, logo_content: bytes | None
+) -> str:
+    """Place the one verified data: image first in the body, or change nothing."""
+    check_logo_v3(asset, logo_content)
+    if asset is None or logo_content is None:
+        return html
+    head, separator, tail = html.partition(_BODY_OPEN)
+    if not separator:
+        raise FactShapeInvalid("document markup has no body to place the logo in")
+    uri = data_uri_for_logo_v3(asset, logo_content)
+    return f'{head}{separator}<img alt="" src="{uri}">{tail}'
 
 
 def html_from_projection_v3(
@@ -84,14 +106,9 @@ def html_from_projection_v3(
     if not isinstance(projection, DocumentProjectionV3):
         raise FactShapeInvalid("projection must use the V3 immutable contract")
     projection_digest_v3(projection)  # validate every nested projection leaf
-    _check_logo(projection, logo_content)
+    check_logo_v3(projection.brand_logo, logo_content)
     html = html_from_projection_v2(_v2_view(projection), stylesheet=stylesheet)
-    if projection.brand_logo is not None and logo_content is not None:
-        head, separator, tail = html.partition(_BODY_OPEN)
-        if not separator:
-            raise FactShapeInvalid("document markup has no body to place the logo in")
-        uri = data_uri_for_logo_v3(projection.brand_logo, logo_content)
-        html = f'{head}{separator}<img alt="" src="{uri}">{tail}'
+    html = embed_verified_logo_v3(html, projection.brand_logo, logo_content)
     problems = html_data_only_violations_v3(
         html, max_images=0 if projection.brand_logo is None else 1
     )
@@ -313,6 +330,8 @@ class PdfDocumentRendererV3:
 
 __all__ = [
     "DeterministicHtmlRendererV3",
+    "check_logo_v3",
+    "embed_verified_logo_v3",
     "InMemoryDocumentRendererV3",
     "PdfDocumentRendererV3",
     "html_from_projection_v3",

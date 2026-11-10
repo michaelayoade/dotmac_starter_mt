@@ -81,3 +81,11 @@ every field V2 projects is identical; the differences are the frozen
 projected as plain text. The Kernel floor stays `>=0.1.0a103`. Catalogs and
 profile bindings are the V2 `TemplateCatalogV2`. A V3 renderer or PDF engine
 must declare `resource_policy == "data-only"`.
+
+## Account statement source candidate
+
+`AccountStatementFactV1.contract_version == 1` and
+`AccountStatementProjectionV1.projection_contract_version == 1`, with cv1
+domains `dotmac-document-rendering.statement.fact.v1` and
+`.statement.projection.v1`. It is additive within the unreleased `0.1.0a2` and
+uses the same Kernel floor.

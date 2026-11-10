@@ -108,3 +108,17 @@ sees only its own process, so a subprocess or remote engine needs an
 observation point at its own boundary. Passing the kit is necessary, not
 sufficient: a real engine must pass it inside its own sandbox, and its
 declared policy proves nothing by itself.
+
+## Account statements (source candidate)
+
+`AccountStatementFactV1` is a second by-value input: a customer account over a
+period, with the opening balance, ordered entries (each carrying its supplied
+debit, credit and running balance), totals and closing balance. The package
+formats those values and derives none of them; reconciling entries to the
+closing balance belongs to the fact's owner. `StatementTemplateCatalogV1`
+selects a template by exact `(statement_profile_code, statement_profile_version,
+media_type)` binding and requires the statement label set
+(`DEFAULT_ENGLISH_LABELS_STATEMENT_V1`). `project_statement_v1` produces the
+semantic projection and `statement_html_v1` serializes it under the same
+data-only policy and embedded logo rules as V3 invoices. There is no statement
+PDF or orchestration service yet.
