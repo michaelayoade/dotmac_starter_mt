@@ -37,6 +37,26 @@ class StaleObjectRef(FileError):
     """A provider observation no longer describes the stored row."""
 
 
+class InvalidFileRef(FileError):
+    """A file reference was not a canonical UUID (path-like input is refused)."""
+
+
+class ForeignScopeFile(FileError):
+    """The target does not belong to the explicitly requested scope."""
+
+
+class ReadLimitExceeded(FileError):
+    """The object is larger than the caller's read limit."""
+
+
+class IntegrityMismatch(FileError):
+    """The bytes disagree with the recorded size, checksum or detected type."""
+
+
+class ReadTypeNotAllowed(FileError):
+    """The detected media type is outside the caller's allowed set."""
+
+
 class FileState(enum.StrEnum):
     """Repairable physical state; never a domain attachment state."""
 
@@ -100,16 +120,34 @@ class StoredObjectRef:
     checksum_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class VerifiedFile:
+    """Bytes whose size, sha256 and detected type were checked against the row."""
+
+    id: UUID
+    scope: Scope
+    media_type: str
+    size_bytes: int
+    checksum_sha256: str
+    content: bytes
+
+
 __all__ = [
     "FileError",
     "FilePolicy",
     "FileState",
+    "ForeignScopeFile",
+    "IntegrityMismatch",
+    "InvalidFileRef",
     "InvalidFileState",
     "PreparedFile",
     "PreparedFileConflict",
     "ProviderMismatch",
+    "ReadLimitExceeded",
+    "ReadTypeNotAllowed",
     "StaleObjectRef",
     "StoredObjectRef",
     "StoredFileNotFound",
     "UnsafeFile",
+    "VerifiedFile",
 ]
