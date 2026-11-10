@@ -574,7 +574,14 @@ def freeze_issued_invoice_withholding(
     from dotmac_billing import service as billing_service
 
     if isinstance(tax_seal, str):
-        tax_seal = _TaxSeals(command.evidence)
+        # V1 evidence has no commercial source to seal; Tax would hold nothing for
+        # it, and the service must refuse it (and the platform plane) on its own.
+        offered = (
+            (command.evidence,)
+            if hasattr(command.evidence.determination, "commercial_source")
+            else ()
+        )
+        tax_seal = _TaxSeals(*offered)
     if isinstance(permissions, str):
         permissions = _Permissions(command.actor_ref)
     return billing_service.freeze_issued_invoice_withholding(
