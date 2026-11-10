@@ -715,7 +715,8 @@ unreachable until its authorization and settlement bindings exist.
 **Publication evidence has separate private and public consumers.** Starter
 tooling owns `scripts/lane3_evidence_bundle.py` and
 `scripts/lane3_bundle_verification.py` for offline manifest/member integrity
-and exposure-crossing consistency. Private plaintext stays outside runners.
+and exposure-crossing consistency. Offline decryption and verification stay
+outside runners; only the execution boundary produces private evidence.
 `scripts/lane3_offline_result.py` owns the closed public claim and protected
 policy grammars; `scripts/lane3_offline_signature.py` authenticates the original
 claim bytes through fixed, pinned OpenSSH verification and all current bindings.
@@ -731,6 +732,24 @@ nor a parsed claim certifies them. SSHSIG authenticates a trusted custodian's
 claim, not remote code execution or workstation integrity. Actual custody,
 profile qualification and signer enrollment remain separately approved steps.
 No Foundation package byte or version changes are needed by these consumers.
+
+**Evidence is encrypted after execution, before receipt assembly.**
+`scripts/lane3_evidence_finalization.py` owns the protected public-recipient/tool
+policy and bounded age transport adapter. The runner qualifies probe bytes
+from a single read, freezes the actual Executor crossing records, checks their
+existing completeness join, then creates an in-memory USTAR archive containing
+only `manifest.json`, `probe-evidence.json` and `exposure-calls.json`. Exact new
+ciphertext readback is passed into the existing receipt constructor while the
+live plan, grant and outcome remain in the same process. No prebuilt ciphertext
+is accepted. The artifact carrier lists ciphertext explicitly, never raw members.
+
+The encryption policy ships **unenrolled**, with no recipient or tool pin;
+its preflight stops before host contact. No private key, signing, decryption or
+full-proof result producer is introduced. A valid age header is a transport
+check, not cryptographic round-trip evidence. Hosted synthetic adapter tests
+qualify invocation and binding; actual enrolled-tool round-trip and operational
+custody qualification remain owed. The two behavioral rows remain BLOCKED.
+
 
 **A database result is declared before execution and promoted honestly.** The
 transition binds target, plan, starting descriptor and result descriptor.
