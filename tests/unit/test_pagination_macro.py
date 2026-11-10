@@ -49,7 +49,7 @@ class _PaginationLinks(HTMLParser):
         (95, 100, 90, {"Page 1": 0, "Page 9": 80, "Page 10": 90}),
         (95, 1000, 90, {"Page 1": 0, "Page 9": 80, "Page 10": 90}),
         (0, 10, 0, {"Page 1": 0}),
-        (0, 1000, 990, {"Page 1": 0}),
+        (0, 1000, 0, {"Page 1": 0}),
     ],
 )
 def test_table_pagination_stale_offset_has_recovery_links(

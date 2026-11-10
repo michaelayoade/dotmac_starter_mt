@@ -712,6 +712,25 @@ assembly does not compose it into boot or deploy. No Foundation `HostSource`
 provider is composed here, and failed-production recovery is deliberately
 unreachable until its authorization and settlement bindings exist.
 
+**Publication evidence has separate private and public consumers.** Starter
+tooling owns `scripts/lane3_evidence_bundle.py` (the closed plaintext member
+set) and `scripts/lane3_bundle_verification.py` (offline manifest/member
+integrity and recorded exposure-crossing completeness against a concrete V3
+plan). Private plaintext stays outside the publication runner.
+`require_rehearsal.py` requires an authenticated offline-result stage after the
+ordinary selected-run, candidate and receipt checks, before publication
+success. That fixed stage remains unimplemented and returns indeterminate;
+no CLI flag, caller-written PASS or request-selected verifier replaces it.
+
+The plaintext helper does not establish genuine Control consumption, exact
+applied rules, foreign-rule preservation, actual outcomes or negative-target
+compensation. Complete independent joins and authenticated result admission
+remain publication prerequisites. The v1 bundle contains only probe and
+exposure-call documents. Michael selected preparing offline custody for the
+private evidence key; the actual recipient, signing trust and operational
+custody packet remain open. This source introduces no key, grant, provider,
+Foundation package change or operational authority.
+
 **A database result is declared before execution and promoted honestly.** The
 transition binds target, plan, starting descriptor and result descriptor.
 Authorization binds the result; the live starting state is its independent

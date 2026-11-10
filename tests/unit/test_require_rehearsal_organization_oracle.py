@@ -10,6 +10,7 @@ This file proves the wiring:
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import pathlib
@@ -122,7 +123,7 @@ def _main(tmp_path: pathlib.Path, topology: dict[str, Any] | None) -> int:
     )
 
 
-def test_a_receipt_from_the_selected_run_publishes(
+def test_a_green_receipt_cannot_replace_an_authenticated_offline_result(
     subject: Subject,  # noqa: F811
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -135,10 +136,10 @@ def test_a_receipt_from_the_selected_run_publishes(
         ),
     )
     _network(monkeypatch, receipt.canonical_bytes())
-    assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_OK
-    out = capsys.readouterr().out
-    assert f"rehearsal_runner_revision={REVISION}" in out
-    assert f"rehearsal_launcher_revision={LAUNCHER}" in out
+    assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_USAGE
+    captured = capsys.readouterr()
+    assert "authenticated_offline_result_unavailable" in captured.err
+    assert captured.out == ""
     assert (tmp_path / "receipt.json").read_bytes() == receipt.canonical_bytes()
 
 
@@ -190,3 +191,94 @@ def test_the_checked_in_topology_refuses_before_any_network_call(
     assert _main(tmp_path, checked_in) == require_rehearsal.EXIT_REFUSED
     assert calls == []
     assert "REFUSED" in capsys.readouterr().err
+
+
+def test_offline_stage_receives_exact_public_coordinates(
+    subject: Subject,  # noqa: F811
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = _build(subject)
+    _network(monkeypatch, receipt.canonical_bytes())
+    calls = []
+
+    def unavailable(coordinates):
+        calls.append(coordinates)
+        raise require_rehearsal.OfflineResultIndeterminate("PRIVATE_SENTINEL")
+
+    monkeypatch.setattr(
+        require_rehearsal, "_require_authenticated_offline_result", unavailable
+    )
+    assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_USAGE
+    assert calls == [
+        require_rehearsal.OfflineResultCoordinates(
+            repository_id=REPO_ID,
+            run_id=RUN_ID,
+            run_attempt=1,
+            receipt_digest=receipt.sha256_digest(),
+            ciphertext_digest=receipt.content["evidence_bundle_digest"],
+            candidate_artifact_digest=WHEEL,
+            release_revision=REVISION,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "error_type", [RuntimeError, OSError, require_rehearsal.OfflineResultIndeterminate]
+)
+def test_private_boundary_failures_are_sanitized(
+    subject: Subject,  # noqa: F811
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error_type,
+) -> None:
+    _network(monkeypatch, _build(subject).canonical_bytes())
+
+    def unavailable(coordinates):
+        raise error_type("PRIVATE_SENTINEL")
+
+    monkeypatch.setattr(
+        require_rehearsal, "_require_authenticated_offline_result", unavailable
+    )
+    assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_USAGE
+    captured = capsys.readouterr()
+    assert "PRIVATE_SENTINEL" not in captured.err
+    assert "authenticated_offline_result_unavailable" in captured.err
+    assert captured.out == ""
+
+
+def test_deleting_mandatory_stage_exposes_a_false_success(
+    subject: Subject,  # noqa: F811
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _network(monkeypatch, _build(subject).canonical_bytes())
+    assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_USAGE
+    tree = ast.parse((REPO / "scripts" / "require_rehearsal.py").read_text())
+    removed = 0
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "_require_authenticated_offline_result"
+        ):
+            node.value = ast.Constant(None)
+            removed += 1
+    assert removed == 1
+    main_node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+    )
+    mutant = ast.Module(body=[main_node], type_ignores=[])
+    namespace = {**vars(require_rehearsal), "__name__": require_rehearsal.__name__}
+    exec(  # noqa: S102 - execute only the planted in-tree main function
+        compile(ast.fix_missing_locations(mutant), "oracle_sensitivity_mutant", "exec"),
+        namespace,
+    )
+    monkeypatch.setattr(require_rehearsal, "main", namespace["main"])
+    with pytest.raises(AssertionError):
+        assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_USAGE
+    assert _main(tmp_path, TOPOLOGY) == require_rehearsal.EXIT_OK

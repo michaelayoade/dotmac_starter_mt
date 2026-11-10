@@ -88,3 +88,41 @@ def test_parse_refuses_unknown_schema_and_non_json() -> None:
 
     with pytest.raises(bundle.EvidenceBundleRefused, match="UTF-8 JSON"):
         bundle.parse_manifest(b"\xff no")
+
+
+def test_whole_plaintext_bundle_joins() -> None:
+    members = _members()
+    bundle.require_plaintext_bundle(bundle.build_manifest(members), members)
+
+
+@pytest.mark.parametrize("member", sorted(bundle.BUNDLE_MEMBERS))
+@pytest.mark.parametrize("mutation", ["missing", "length", "digest", "type"])
+def test_whole_plaintext_bundle_refuses_changed_members(member, mutation) -> None:
+    members = _members()
+    manifest = bundle.build_manifest(members)
+    if mutation == "missing":
+        del members[member]
+    elif mutation == "length":
+        members[member] += b" "
+    elif mutation == "digest":
+        members[member] = b"x" * len(members[member])
+    else:
+        members[member] = True
+    with pytest.raises(bundle.EvidenceBundleRefused):
+        bundle.require_plaintext_bundle(manifest, members)
+
+
+def test_whole_plaintext_bundle_refuses_extras_and_noncanonical_manifest() -> None:
+    members = _members()
+    manifest = bundle.build_manifest(members)
+    with pytest.raises(bundle.EvidenceBundleRefused):
+        bundle.require_plaintext_bundle(manifest, {**members, "private-host": b"x"})
+    with pytest.raises(bundle.EvidenceBundleRefused):
+        bundle.require_plaintext_bundle(manifest + b" ", members)
+
+
+def test_manifest_digest_must_be_lowercase_hex() -> None:
+    document = json.loads(bundle.build_manifest(_members()))
+    document["members"][0]["digest"] = "z" * 64
+    with pytest.raises(bundle.EvidenceBundleRefused, match="digest"):
+        bundle.parse_manifest(bundle._canonical(document))
