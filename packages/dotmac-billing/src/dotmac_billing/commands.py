@@ -30,16 +30,41 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV2,
 )
 from dotmac_billing.opening_variance_contracts import OpeningVarianceResolutionRefV1
-from dotmac_billing.tax_dependency_evidence import InvoiceTaxEvidenceV2
+from dotmac_billing.tax_dependency_evidence import (
+    InvoiceTaxEvidenceV2,
+    TaxCommercialSourceEvidenceV1,
+)
+
+WITHHOLDING_FREEZE_PERMISSION = "billing.withholding.freeze"
+
+
+class ActorPermissionReader(Protocol):
+    """Assembly adapter over the kernel permission decision (``authorize_party``).
+
+    Billing records an actor reference and cannot itself attest who holds a
+    permission, so the late-freeze command asks the wired reader whether the
+    recorded actor holds ``WITHHOLDING_FREEZE_PERMISSION``. With no reader wired
+    the command refuses.
+    """
+
+    def holds(self, *, scope: Scope, actor_ref: str, code: str) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
 class TaxDeterminationSealV1:
-    """What dotmac-tax holds, sealed, for one determination set."""
+    """What dotmac-tax holds, sealed, for one determination set.
+
+    The commercial source and the original facts are Tax's own statement of what
+    the determination was made for, so a line is bound by Tax's word and not by
+    the caller's.
+    """
 
     determination_set_id: UUID
     result_fingerprint: str
     occurred_on: date
+    commercial_source: TaxCommercialSourceEvidenceV1
+    source_amount: Money
+    counterparty_ref: str | None = None
 
 
 class TaxSealReader(Protocol):
@@ -242,8 +267,13 @@ class FreezeIssuedInvoiceWithholding:
     referenced prior tax for a dependency-tax base), dotmac-tax must confirm the
     determination through the wired ``TaxSealReader`` (no reader, no freeze), and
     the frozen total is capped at the outstanding amount plus withholding already
-    accepted. The frozen rows carry that line's obligation. Idempotent on
-    ``command_id``.
+    accepted. The frozen rows carry that line's obligation. Any issued invoice
+    without a freeze is eligible, but only for an actor who holds
+    ``WITHHOLDING_FREEZE_PERMISSION`` (checked through the wired
+    ``ActorPermissionReader``); the actor, command id and reason are recorded on
+    every row. ``line_id`` names the line explicitly; it is required for a line
+    whose retained Tax evidence is V1, and then Tax must confirm the commercial
+    source and original facts. Idempotent on ``command_id``.
     """
 
     scope: Scope
@@ -253,6 +283,9 @@ class FreezeIssuedInvoiceWithholding:
     actor_ref: str
     reason: str
     evidence: InvoiceTaxEvidenceV2
+    # The invoice line the permission-holder names. Required when that line's
+    # retained Tax evidence is V1 (it carries no commercial source to find it by).
+    line_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,7 +378,9 @@ __all__ = [
     "DeallocationCommand",
     "IssueCreditNote",
     "IssueDocument",
+    "ActorPermissionReader",
     "NumberingProvider",
+    "WITHHOLDING_FREEZE_PERMISSION",
     "TaxDeterminationSealV1",
     "TaxSealReader",
     "ReallocationCommand",

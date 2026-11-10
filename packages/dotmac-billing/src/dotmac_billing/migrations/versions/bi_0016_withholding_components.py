@@ -24,10 +24,10 @@ violates it the constraint stays ``NOT VALID`` with a comment naming the manual
 exceptions review. No row is backfilled, repaired or rewritten.
 
 A row is written either at issue (``origin = 'issue'``, bound to its rated
-obligation) or by the governed late-freeze command for an invoice issued before
-this migration or imported as an open item (``origin = 'late_freeze'``, carrying
-the command id, actor and reason; the obligation may be absent). Both are the
-same append-only structure.
+obligation, with the issue's own command id so every freeze has a key) or by the
+governed late-freeze command for an invoice issued before this migration
+(``origin = 'late_freeze'``, carrying the command id, actor and reason; the
+obligation is the bound invoice line's). Both are the same append-only structure.
 
 The online role needs SELECT and INSERT on the new table (the issuing path).
 No downgrade.
@@ -169,7 +169,7 @@ def _elements(platform: bool) -> tuple[SchemaItem, ...]:
         ),
         sa.CheckConstraint(
             "(origin = 'issue' AND obligation_id IS NOT NULL "
-            "AND command_id IS NULL AND actor_ref IS NULL AND reason IS NULL) "
+            "AND command_id IS NOT NULL AND actor_ref IS NULL AND reason IS NULL) "
             "OR (origin = 'late_freeze' AND command_id IS NOT NULL "
             "AND actor_ref IS NOT NULL AND reason IS NOT NULL)",
             name=f"ck_{table}_origin",

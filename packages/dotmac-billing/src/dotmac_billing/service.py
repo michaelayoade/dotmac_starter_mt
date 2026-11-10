@@ -37,7 +37,9 @@ from dotmac_billing._opening_values import (
 )
 from dotmac_billing._receivable_backing import resolve_receivable_backing
 from dotmac_billing.commands import (
+    WITHHOLDING_FREEZE_PERMISSION,
     AcceptWithholdingDischarge,
+    ActorPermissionReader,
     AllocationCommand,
     ApplyAvailableCreditCommand,
     ApplyNonCashCredit,
@@ -3266,7 +3268,10 @@ def _freeze_withholding_components(
                         obligation_id=obligation.id,
                         result=result,
                         component=component,
-                        origin={"origin": "issue"},
+                        origin={
+                            "origin": "issue",
+                            "command_id": f"issue:{document.id}",
+                        },
                     )
                 )
                 frozen += 1
@@ -3283,6 +3288,7 @@ def _bind_freeze_to_invoice_line(
     document: _DocumentRow,
     evidence: InvoiceTaxEvidenceV2,
     issue_date: Any,
+    line_id: UUID | None = None,
 ) -> tuple[Any, Money]:
     """The invoice line whose commercial source the Tax determination describes.
 
@@ -3313,12 +3319,41 @@ def _bind_freeze_to_invoice_line(
     for line in lines:
         if line.obligation_id is None:
             continue
+        if line_id is not None and line.id != line_id:
+            continue
         obligation = _one(
             db, scope=scope, model=plane.obligation, row_id=line.obligation_id
         )
         payload = obligation.tax_evidence
         if not _is_dependency_evidence_payload(payload):
-            # V1-era retained evidence carries no commercial source to bind.
+            # V1-era retained evidence carries no commercial source, so it is
+            # bound only through an explicitly named line, and only on facts
+            # that equal the retained ones (Tax's seal then confirms the source).
+            if line_id is None or payload is None:
+                continue
+            try:
+                v1_items = _decode_tax_evidence(
+                    payload,
+                    scope=scope,
+                    tax_amount=_money(
+                        obligation.tax_amount,
+                        obligation.currency,
+                        obligation.minor_units,
+                    ),
+                )
+            except BillingRuleViolation:
+                continue
+            v1_amount: Money | None = None
+            for item in v1_items:
+                if _original_facts(item.determination) != facts:
+                    raise BillingRuleViolation(
+                        "withholding_freeze_facts_differ",
+                        "the Tax determination describes different original facts "
+                        "than the invoice line retained",
+                    )
+                v1_amount = item.determination.source_amount
+            if v1_amount is not None:
+                matches.append((obligation, v1_amount))
             continue
         try:
             retained = cast(
@@ -3413,6 +3448,7 @@ def freeze_issued_invoice_withholding(
     scope: Scope,
     command: FreezeIssuedInvoiceWithholding,
     tax_seal: TaxSealReader | None = None,
+    permissions: ActorPermissionReader | None = None,
 ) -> tuple[Any, ...]:
     """Freeze withholding for an issued invoice that has none frozen (tenant plane).
 
@@ -3439,6 +3475,11 @@ def freeze_issued_invoice_withholding(
             "withholding_freeze_platform_unsupported",
             "Tax evidence is tenant-only; the platform plane stays fail-closed",
         )
+    if permissions is None:
+        raise BillingRuleViolation(
+            "withholding_freeze_permission_unavailable",
+            "no permission reader is wired; the freeze cannot be authorized",
+        )
     if tax_seal is None:
         raise BillingRuleViolation(
             "withholding_freeze_tax_seal_unavailable",
@@ -3455,6 +3496,13 @@ def freeze_issued_invoice_withholding(
                 "withholding_freeze_evidence_required",
                 "freeze requires bounded command id, actor and reason",
             )
+    if not permissions.holds(
+        scope=scope, actor_ref=command.actor_ref, code=WITHHOLDING_FREEZE_PERMISSION
+    ):
+        raise BillingRuleViolation(
+            "withholding_freeze_permission_denied",
+            "the actor does not hold the withholding freeze permission",
+        )
     plane = _models(scope)
     account = _one(
         db,
@@ -3532,6 +3580,9 @@ def freeze_issued_invoice_withholding(
             or seal.determination_set_id != result.determination_set_id
             or seal.result_fingerprint != result.result_fingerprint
             or seal.occurred_on != result.occurred_on
+            or seal.commercial_source != result.commercial_source
+            or seal.source_amount != result.source_amount
+            or seal.counterparty_ref != result.counterparty_ref
         ):
             raise BillingRuleViolation(
                 "withholding_freeze_tax_seal_mismatch",
@@ -3555,6 +3606,7 @@ def freeze_issued_invoice_withholding(
             document=document,
             evidence=evidence,
             issue_date=issue_date,
+            line_id=command.line_id,
         )
         for c in elected:
             expected = source_amount.amount
