@@ -2472,6 +2472,7 @@
           "dotmac_payables/manifest.py",
           "dotmac_payables/migrations/__init__.py",
           "dotmac_payables/migrations/versions/pa_0001_payables.py",
+          "dotmac_payables/migrations/versions/pa_0002_optional_supplier_doc.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],

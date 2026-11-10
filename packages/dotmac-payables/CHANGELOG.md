@@ -1,5 +1,14 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a2 — unreleased
+
+- Historical or imported supplier invoices and credit notes whose
+  supplier-issued document number was never captured may persist that absence
+  as NULL. New documents created through the service contracts still require
+  the supplier document number; internal document numbers remain required.
+- Adds `pa_0002_optional_supplier_doc`, which makes both persisted
+  `supplier_document_number` columns nullable.
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and
