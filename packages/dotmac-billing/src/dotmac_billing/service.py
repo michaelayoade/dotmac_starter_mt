@@ -50,6 +50,7 @@ from dotmac_billing.commands import (
     IssueCreditNote,
     IssueDocument,
     NumberingProvider,
+    TaxSealReader,
     ReallocationCommand,
     ReduceNonCashCreditGrant,
     RefundCommand,
@@ -3281,13 +3282,18 @@ def _bind_freeze_to_invoice_line(
     plane: _PlaneModels,
     document: _DocumentRow,
     evidence: InvoiceTaxEvidenceV2,
-) -> Any:
-    """The invoice line (its obligation) whose commercial source the Tax
-    determination describes; refuses when none or more than one matches.
+    issue_date: Any,
+) -> tuple[Any, Money]:
+    """The invoice line whose commercial source the Tax determination describes.
 
-    The determination's commercial source must be declared by exactly one line's
-    retained Tax evidence, and the original facts it states must equal the facts
-    retained for that source on the line. Returns that line's obligation.
+    Exactly one line must declare the determination's commercial source AND
+    retain at least one result of that source whose original facts are equal to
+    the determination's (a line that merely has no conflicting result does not
+    qualify). The fresh evidence is then validated together with that line's
+    retained principal evidence against the line's own declared sources, so the
+    source binding is checked on the line, not on the evidence itself. Retained
+    results are compared as of the freeze date (the date is checked separately).
+    Returns the line's obligation and the source amount its facts state.
     """
 
     wanted = evidence.determination.commercial_source
@@ -3303,7 +3309,7 @@ def _bind_freeze_to_invoice_line(
             )
         ).scalars()
     )
-    matches: list[Any] = []
+    matches: list[tuple[Any, Money]] = []
     for line in lines:
         if line.obligation_id is None:
             continue
@@ -3312,13 +3318,19 @@ def _bind_freeze_to_invoice_line(
         )
         payload = obligation.tax_evidence
         if not _is_dependency_evidence_payload(payload):
+            # V1-era retained evidence carries no commercial source to bind.
             continue
         try:
-            retained = _decode_tax_evidence(
-                payload,
-                scope=scope,
-                tax_amount=_money(
-                    obligation.tax_amount, obligation.currency, obligation.minor_units
+            retained = cast(
+                tuple[InvoiceTaxEvidenceV2, ...],
+                _decode_tax_evidence(
+                    payload,
+                    scope=scope,
+                    tax_amount=_money(
+                        obligation.tax_amount,
+                        obligation.currency,
+                        obligation.minor_units,
+                    ),
                 ),
             )
             declared = _decode(
@@ -3329,22 +3341,51 @@ def _bind_freeze_to_invoice_line(
             continue
         if wanted not in declared:
             continue
-        for item in cast(tuple[InvoiceTaxEvidenceV2, ...], retained):
+        positive: Money | None = None
+        for item in retained:
             for result in (item.determination, *item.prior_determinations):
-                if result.commercial_source == wanted and (
-                    _original_facts(result) != facts
-                ):
+                if result.commercial_source != wanted:
+                    continue
+                if _original_facts(result) != facts:
                     raise BillingRuleViolation(
                         "withholding_freeze_facts_differ",
                         "the Tax determination describes different original facts "
                         "than the invoice line retained",
                     )
-        matches.append(obligation)
-    if len({row.id for row in matches}) != 1:
+                positive = result.source_amount
+        if positive is None:
+            continue
+        try:
+            validate_commercial_source_binding(
+                (
+                    *(
+                        replace(
+                            item,
+                            determination=replace(
+                                item.determination, occurred_on=issue_date
+                            ),
+                            prior_determinations=tuple(
+                                replace(prior, occurred_on=issue_date)
+                                for prior in item.prior_determinations
+                            ),
+                        )
+                        for item in retained
+                        if item.determination.commercial_source in declared
+                    ),
+                    evidence,
+                ),
+                commercial_sources=declared,
+            )
+        except (ValueError, TypeError) as exc:
+            raise BillingRuleViolation(
+                "tax_commercial_source_mismatch", str(exc)
+            ) from exc
+        matches.append((obligation, positive))
+    if len({row.id for row, _ in matches}) != 1:
         raise BillingRuleViolation(
             "withholding_freeze_unbound",
             "the Tax determination must name the commercial source of exactly one "
-            "line of this invoice",
+            "line of this invoice and match the facts that line retained",
         )
     return matches[0]
 
@@ -3367,7 +3408,11 @@ def _original_facts(result: Any) -> tuple[object, ...]:
 
 
 def freeze_issued_invoice_withholding(
-    db: Session, *, scope: Scope, command: FreezeIssuedInvoiceWithholding
+    db: Session,
+    *,
+    scope: Scope,
+    command: FreezeIssuedInvoiceWithholding,
+    tax_seal: TaxSealReader | None = None,
 ) -> tuple[Any, ...]:
     """Freeze withholding for an issued invoice that has none frozen (tenant plane).
 
@@ -3377,9 +3422,12 @@ def freeze_issued_invoice_withholding(
     determination's commercial source must be one of the invoice's own line
     sources, the original facts it describes (tenant, source amount, recognition
     basis, counterparty, supply, place) must equal the facts retained on that
-    line, and the frozen base is capped at that line. The rows carry the bound
-    line's obligation. It writes the same append-only component rows issuance
-    writes and never touches the invoice. Idempotent on ``command_id``; refused
+    line, each frozen base equals that line's source amount (plus the referenced
+    prior tax for a dependency-tax base), and dotmac-tax must confirm through the
+    wired ``tax_seal`` reader that the determination exists with the same
+    result fingerprint and date; with no reader wired the command refuses. The
+    rows carry the bound line's obligation. It writes the same append-only
+    component rows issuance writes and never touches the invoice. Idempotent on ``command_id``; refused
     when components exist, for a credit note or void invoice, for V1 evidence,
     when the determination is not as of the issue date, or when the frozen
     withholding would exceed what is outstanding plus what was already withheld.
@@ -3389,6 +3437,11 @@ def freeze_issued_invoice_withholding(
         raise BillingRuleViolation(
             "withholding_freeze_platform_unsupported",
             "Tax evidence is tenant-only; the platform plane stays fail-closed",
+        )
+    if tax_seal is None:
+        raise BillingRuleViolation(
+            "withholding_freeze_tax_seal_unavailable",
+            "no dotmac-tax reader is wired; a freeze cannot be confirmed",
         )
     _require_scope_matches(routed=scope, declared=command.scope)
     for text, maximum in (
@@ -3470,6 +3523,19 @@ def freeze_issued_invoice_withholding(
                 "withholding_freeze_not_as_of_issue",
                 "the Tax determination must be evaluated as of the invoice issue date",
             )
+        seal = tax_seal.read_seal(
+            scope=scope, determination_set_id=result.determination_set_id
+        )
+        if (
+            seal is None
+            or seal.determination_set_id != result.determination_set_id
+            or seal.result_fingerprint != result.result_fingerprint
+            or seal.occurred_on != result.occurred_on
+        ):
+            raise BillingRuleViolation(
+                "withholding_freeze_tax_seal_mismatch",
+                "dotmac-tax does not confirm this determination, fingerprint and date",
+            )
         elected = tuple(c for c in result.components if _is_elected_withholding(c))
         if not elected:
             raise BillingRuleViolation(
@@ -3481,31 +3547,27 @@ def freeze_issued_invoice_withholding(
                 "withholding_freeze_currency",
                 "withholding currency differs from the invoice",
             )
-        bound = _bind_freeze_to_invoice_line(
-            session, scope=scope, plane=plane, document=document, evidence=evidence
+        bound, source_amount = _bind_freeze_to_invoice_line(
+            session,
+            scope=scope,
+            plane=plane,
+            document=document,
+            evidence=evidence,
+            issue_date=issue_date,
         )
-        line_net = Decimal(bound.pre_tax_amount)
-        line_gross = Decimal(bound.total_amount)
-        base_total = Decimal(0)
         for c in elected:
-            base_total += c.base_amount.amount
-            # A base that folds in a dependency tax may reach the line's gross;
-            # any other base stays within the line's net.
-            limit = (
-                line_gross
-                if c.calculation_base_code == "source_plus_dependency_tax"
-                else line_net
-            )
-            if c.base_amount.amount > limit:
+            expected = source_amount.amount
+            if c.calculation_base_code == "source_plus_dependency_tax":
+                expected += sum(
+                    (d.tax_amount.amount for d in c.dependency_components),
+                    Decimal(0),
+                )
+            if c.base_amount.amount != expected:
                 raise BillingRuleViolation(
                     "withholding_freeze_base_exceeds_line",
-                    "a withholding base exceeds the invoice line it is bound to",
+                    "a withholding base differs from the bound line's source "
+                    "amount (plus its referenced prior tax)",
                 )
-        if base_total > line_gross:
-            raise BillingRuleViolation(
-                "withholding_freeze_base_exceeds_line",
-                "the total withholding base exceeds the invoice line it is bound to",
-            )
         total = sum((c.tax_amount.amount for c in elected), Decimal(0))
         # Older finance records stay correctable: withholding already accepted
         # under earlier rules reduced the outstanding amount, so it is added

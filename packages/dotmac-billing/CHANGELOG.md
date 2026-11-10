@@ -43,9 +43,11 @@ chain after `bi_0014_opening_variance_ledger`.
   determination evaluated as of the invoice's issue date (election = its party
   classification). The amounts are Tax's but not trusted: the determination must
   name the commercial source of exactly one line of the invoice, its original
-  facts must equal that line's retained facts, the base is capped at the line
-  (net, or gross for a dependency-tax base) and the frozen total at outstanding
-  plus withholding already accepted. The rows carry that line's obligation. It
+  facts must equal facts that line positively retained, each base equals the
+  line's source amount (plus the referenced prior tax for a dependency-tax
+  base), dotmac-tax must confirm the determination (set id, result fingerprint,
+  date) through the assembly-wired `TaxSealReader` (none wired: refused), and the
+  frozen total is capped at outstanding plus withholding already accepted. The rows carry that line's obligation. It
   writes the same append-only component rows issuance writes
   (`origin = 'late_freeze'`, with command id, actor, reason and the
   determination reference); it never mutates the invoice. Idempotent on
