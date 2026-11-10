@@ -41,7 +41,7 @@ from uuid import UUID, uuid5
 from dotmac_billing.opening_admissibility import (
     AdmissibilityError,
     AdmissibilityProjection,
-    parse_a10_classes,
+    parse_a10_input,
     parse_admissibility_rules,
     parse_reseller_map,
     project_census,
@@ -585,16 +585,19 @@ def project_admissibility(
 ) -> AdmissibilityProjection:
     """Evaluate the reviewed rules; D-3 is left to the adapter (no originals yet)."""
     try:
+        classes, rebuild_rows = parse_a10_input(a10_payload)
         return project_census(
             census,
             rules=parse_admissibility_rules(rules_payload),
-            a10=parse_a10_classes(a10_payload),
+            a10=classes,
             reseller=(
                 None
                 if reseller_payload is None
                 else parse_reseller_map(reseller_payload)
             ),
             original_invoice_ids=None,
+            rebuild=rebuild_rows,
+            require_rebuild=True,  # never a silent all-gap run
         )
     except AdmissibilityError as exc:
         raise _bad(exc.code) from None

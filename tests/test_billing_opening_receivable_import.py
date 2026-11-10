@@ -42,6 +42,7 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from tests import billing_opening_variance_fixtures as variance_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
@@ -150,6 +151,9 @@ def _command(session, scope, account_id):
         ),
         receivables=items,
         cash_lots=lots,
+        measures=tuple(
+            replace(value, partition=partition) for value in cmd.manifest.measures
+        ),
     )
     return replace(
         cmd, scope=scope, partition=partition, target=target, manifest=manifest
@@ -1541,13 +1545,17 @@ def test_raw_sql_cash_draw_capacity_uses_residual_not_original_invoice_gross(
             else value
             for value in cmd.manifest.dispositions
         )
-        manifest = replace(
-            cmd.manifest,
-            cash_lots=(abundant, second_lot),
-            dispositions=dispositions,
-            controls=(
-                replace(cmd.manifest.controls[0], available_cash_credit_minor=20000),
-            ),
+        manifest = variance_fixture.with_exact_measures(
+            replace(
+                cmd.manifest,
+                cash_lots=(abundant, second_lot),
+                dispositions=dispositions,
+                controls=(
+                    replace(
+                        cmd.manifest.controls[0], available_cash_credit_minor=20000
+                    ),
+                ),
+            )
         )
         cash._prepare_window(db, scope, replace(cmd, manifest=manifest))
         receipt = cash._import_command(
