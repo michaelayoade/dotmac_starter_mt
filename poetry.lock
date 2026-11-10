@@ -1860,7 +1860,7 @@ url = "packages/dotmac-records"
 
 [[package]]
 name = "dotmac-referrals"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant referral programmes, attribution, conversion and reward-request evidence"
 optional = false
 python-versions = ">=3.11,<3.14"

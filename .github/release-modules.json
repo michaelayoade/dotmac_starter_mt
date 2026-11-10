@@ -2888,7 +2888,8 @@
           "dotmac_referrals/models.py",
           "dotmac_referrals/service.py",
           "dotmac_referrals/migrations/__init__.py",
-          "dotmac_referrals/migrations/versions/rf_0001_referrals.py"
+          "dotmac_referrals/migrations/versions/rf_0001_referrals.py",
+          "dotmac_referrals/migrations/versions/rf_0002_service_location_ref.py"
         ],
         "forbidden_prefixes": [
           "app/",
