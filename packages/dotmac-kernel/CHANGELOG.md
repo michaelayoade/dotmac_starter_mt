@@ -6,6 +6,24 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a109 — Release inventory
+
+This inventories proposed source after the published and tagged `0.1.0a108`
+(source marker `0.1.0a108+dev`). It allocates no version and proves no
+publication; protected release authorization remains required.
+
+### Added
+
+- Audit coordinate canary: `write_audit_event` and `write_platform_audit_event`
+  refuse, with the typed `AuditDetailsCoordinateError`, any `details` document
+  that carries a coordinate-like key (`lat`, `lng`, `lon`, `latitude`,
+  `longitude`, `coordinates`, `geo`, `point`; case-insensitive, exact) at any
+  depth, before anything is added to the session. The error names key paths and
+  never values. Nesting deeper than `AUDIT_DETAILS_MAX_DEPTH` is refused rather
+  than skipped. **Adopter note:** a product that records a position in audit
+  details now fails at the write; record an opaque reference instead. The
+  Starter census found no in-repo producer.
+
 ## 0.1.0a108 — Release inventory
 
 Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`
