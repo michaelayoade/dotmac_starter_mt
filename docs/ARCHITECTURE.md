@@ -713,23 +713,24 @@ provider is composed here, and failed-production recovery is deliberately
 unreachable until its authorization and settlement bindings exist.
 
 **Publication evidence has separate private and public consumers.** Starter
-tooling owns `scripts/lane3_evidence_bundle.py` (the closed plaintext member
-set) and `scripts/lane3_bundle_verification.py` (offline manifest/member
-integrity and recorded exposure-crossing completeness against a concrete V3
-plan). Private plaintext stays outside the publication runner.
-`require_rehearsal.py` requires an authenticated offline-result stage after the
-ordinary selected-run, candidate and receipt checks, before publication
-success. That fixed stage remains unimplemented and returns indeterminate;
-no CLI flag, caller-written PASS or request-selected verifier replaces it.
+tooling owns `scripts/lane3_evidence_bundle.py` and
+`scripts/lane3_bundle_verification.py` for offline manifest/member integrity
+and exposure-crossing consistency. Private plaintext stays outside runners.
+`scripts/lane3_offline_result.py` owns the closed public claim and protected
+policy grammars; `scripts/lane3_offline_signature.py` authenticates the original
+claim bytes through fixed, pinned OpenSSH verification and all current bindings.
+`require_rehearsal.py` requires that consumer after its existing selected-run,
+candidate and receipt checks. Public workflow inputs carry only bounded result
+and signature bytes; they select no trust root, executable or verification time.
 
-The plaintext helper does not establish genuine Control consumption, exact
-applied rules, foreign-rule preservation, actual outcomes or negative-target
-compensation. Complete independent joins and authenticated result admission
-remain publication prerequisites. The v1 bundle contains only probe and
-exposure-call documents. Michael selected preparing offline custody for the
-private evidence key; the actual recipient, signing trust and operational
-custody packet remain open. This source introduces no key, grant, provider,
-Foundation package change or operational authority.
+The checked-in policy is **unenrolled**, with no key, tool or verifier profile
+pin. Publication remains indeterminate. Complete private Control, outcome,
+exact-rule, foreign-preservation and negative-target compensation checks still
+belong to the unimplemented offline orchestrator. Neither the plaintext helper
+nor a parsed claim certifies them. SSHSIG authenticates a trusted custodian's
+claim, not remote code execution or workstation integrity. Actual custody,
+profile qualification and signer enrollment remain separately approved steps.
+No Foundation package byte or version changes are needed by these consumers.
 
 **A database result is declared before execution and promoted honestly.** The
 transition binds target, plan, starting descriptor and result descriptor.
