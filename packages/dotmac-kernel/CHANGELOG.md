@@ -6,6 +6,31 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a109 — Proposed release inventory
+
+Inventory the proposed successor to verified `0.1.0a108`; the source marker
+remains `0.1.0a108+dev`. This heading allocates no version and proves no
+publication or consumer adoption. Protected release authorization, independent
+artifact verification and consumer qualification remain separate gates.
+
+### Added
+
+- Shared pagination and lifecycle page components, including invitation and
+  password-reset presentation. Product route, token, mail and transaction
+  authority remains with each consumer.
+- Public per-render product filters through isolated template overlays, with
+  canonical filter collision refusal and no shared bytecode-cache writes.
+- Portable request-feedback assets and toast presentation using the existing
+  CSP-compatible Alpine build and fixed generic HTMX failure messages.
+
+### Fixed
+
+- Stale pagination offsets now describe the actual empty result and provide a
+  route back to the last valid page without rewriting the requested offset.
+
+Hosted source checks and consumer runtime proofs are required before these
+surfaces can be claimed as qualified or adopted.
+
 ## 0.1.0a108 — Release inventory
 
 Add immutable `InlineScriptHashV1` and route-bound `BrowserDocumentPolicyV1`

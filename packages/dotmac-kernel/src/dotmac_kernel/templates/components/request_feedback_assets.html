@@ -1,0 +1,6 @@
+{# Include once in the document head. The product supplies Dotmac UI role
+   tokens and its own HTMX/CSRF assets. Do not load a second Alpine instance.
+   components.js must register alpine:init before the deferred CSP core runs. #}
+<link rel="stylesheet" href="{{ static_asset_url('/static/css/toasts.css') }}">
+<script src="{{ static_asset_url('/static/js/components.js') }}"></script>
+<script defer src="{{ static_asset_url('/static/js/alpine.min.js') }}"></script>

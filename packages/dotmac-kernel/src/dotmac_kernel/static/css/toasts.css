@@ -1,0 +1,101 @@
+/* Shared request-feedback widget. Every rule stays inside the toast region;
+   this stylesheet deliberately supplies no page reset or theme binding. */
+#toast-container {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+}
+
+#toast-container .toast {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 24rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid;
+    border-radius: var(--dmui-radius-lg);
+    box-shadow: var(--dmui-shadow-lg);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    pointer-events: auto;
+}
+
+#toast-container .toast--success {
+    background-color: var(--dmui-status-positive-surface);
+    border-color: var(--dmui-status-positive-border);
+    color: var(--dmui-status-positive-foreground);
+}
+
+#toast-container .toast--error {
+    background-color: var(--dmui-status-negative-surface);
+    border-color: var(--dmui-status-negative-border);
+    color: var(--dmui-status-negative-foreground);
+}
+
+#toast-container .toast--warning {
+    background-color: var(--dmui-status-warning-surface);
+    border-color: var(--dmui-status-warning-border);
+    color: var(--dmui-status-warning-foreground);
+}
+
+#toast-container .toast--info {
+    background-color: var(--dmui-status-info-surface);
+    border-color: var(--dmui-status-info-border);
+    color: var(--dmui-status-info-foreground);
+}
+
+#toast-container .toast-close {
+    display: flex;
+    flex-shrink: 0;
+    margin: 0 0 0 0.5rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+#toast-container .toast-close:hover {
+    opacity: 0.75;
+}
+
+#toast-container .toast-close:focus-visible {
+    outline: var(--dmui-focus-ring-width) solid var(--dmui-focus-ring-color);
+    outline-offset: var(--dmui-focus-ring-offset);
+}
+
+#toast-container .toast-close-icon {
+    display: block;
+    width: 1rem;
+    height: 1rem;
+}
+
+#toast-container .toast-enter {
+    transition-property: opacity, transform;
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+#toast-container .toast-leave {
+    transition-property: opacity, transform;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+#toast-container .toast-shifted {
+    transform: translateY(0.5rem);
+    opacity: 0;
+}
+
+#toast-container .toast-resting {
+    transform: translateY(0);
+    opacity: 1;
+}

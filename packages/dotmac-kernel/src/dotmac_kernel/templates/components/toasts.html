@@ -1,0 +1,38 @@
+{# Shared request-feedback region. Include once near body end, paired with
+   components/request_feedback_assets.html in the head. Existing components.js
+   owns toastStore and the event bridge; messages always render as text. #}
+<!-- Toast notifications, driven by `toastStore` (static/js/components.js)
+     and the `show-toast` window event (dispatched via
+     `window.showToast(message, type)` or an `HX-Trigger: {"showToast":
+     {...}}` response header). -->
+<div id="toast-container"
+     x-data="toastStore"
+     x-on:show-toast.window="addToast($event.detail)"
+     role="status"
+     aria-live="polite"
+     aria-atomic="true"
+     class="toast-region">
+    <template x-for="toast in toasts" :key="toast.id">
+        <div x-show="toast.visible"
+             x-transition:enter="toast-enter"
+             x-transition:enter-start="toast-shifted"
+             x-transition:enter-end="toast-resting"
+             x-transition:leave="toast-leave"
+             x-transition:leave-start="toast-resting"
+             x-transition:leave-end="toast-shifted"
+             :class="{
+                 'toast--success': isSuccess(toast),
+                 'toast--error': isError(toast),
+                 'toast--warning': isWarning(toast),
+                 'toast--info': isInfo(toast)
+             }"
+             class="toast">
+            <span x-text="toast.message"></span>
+            <button x-on:click="removeToast(toast.id)" aria-label="Dismiss notification" type="button" class="toast-close">
+                <svg class="toast-close-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+    </template>
+</div>

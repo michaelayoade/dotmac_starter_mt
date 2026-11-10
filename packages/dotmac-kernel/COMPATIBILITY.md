@@ -67,6 +67,29 @@ This extension is unpublished and awaits hosted and installed-artifact
 qualification; [the source inventory](../../docs/inventories/ui-build-once-20261110.md)
 records the Academy caller and related ERP/Sub owners.
 
+## Request-feedback partials
+
+Products using the canonical `render` composition may include
+`components/request_feedback_assets.html` **once in the document head**, and
+`components/toasts.html` **once near the body end**. Kernel `base.html` already
+includes both. The head partial links `/static/css/toasts.css`, loads
+`/static/js/components.js`, then defers the existing CSP
+`/static/js/alpine.min.js`, with Kernel-owned content hashes. Mount Kernel's
+public `static_dir()` at `/static` in the product's declared asset composition.
+The consumer supplies the existing Dotmac UI role-token stylesheet and retains
+its own HTMX and CSRF assets; it need not load Kernel `main.css` or a CSS reset.
+Do not mix another Alpine instance or duplicate a submit-on-change listener.
+
+`components.js` remains the sole toast/feedback behavior owner. `show-toast`
+events, `window.showToast`, and the existing HX-Trigger bridge drive the live
+region; responseError/sendError emit a fixed opaque failure message. Messages
+use x-text, not HTML. The scoped stylesheet owns only `#toast-container` and
+its descendants. Toast status roles, dismissal and transitions are preserved.
+The shared dark store changes no product theme without an explicit binding.
+These extracted partials are unpublished and await hosted/browser and verified
+installed-artifact acceptance; source and consumer gaps are recorded in the
+[UI inventory](../../docs/inventories/ui-build-once-20261110.md).
+
 ## Settings: the minimal core, and everything else
 
 Nine modules carry settings — `settings_resolver`, `settings_models`,

@@ -129,3 +129,47 @@ optional application through public request scope when selecting the default
 surface. Normal FastAPI scopes preserve their default surface; a bare request
 uses the existing empty-surface fallback. A dedicated hosted canary covers this
 bounded exception to preserving the old no-filter rendering path.
+
+
+## Reusable request-feedback presentation — inventory before factoring
+
+The concrete donor is Kernel
+`e6cc646a0d3dfea3b1933261e493ec7ed790684f:packages/dotmac-kernel/src/dotmac_kernel/templates/base.html`:
+it contains one `toastStore` region, x-text message rendering, role/status live
+announcements, type-specific role-token colors, a dismiss control and
+300ms enter / 200ms leave classes. The same revision's
+`static/js/components.js` owns the store, `show-toast` bridge, fixed opaque
+responseError/sendError message, and delegated submit-on-change listener.
+`static/js/alpine.min.js` is the existing vendored CSP build; no evaluator,
+library or global CSP change is introduced.
+
+Academy C9 `c9cc6cb12c28992106e9a6b7324df6d6478a71b9:templates/base.html`
+loads product CSS/HTMX and product csrf.js/academy.js; its standalone
+`templates/login.html` loads product csrf.js. Neither composes Kernel's feedback
+assets or toast region. Read-only `git grep` over C9's template tree found no
+x-data/x-on/x-show/x-for/x-text/x-bind/x-model/x-transition attributes. Its
+`static/academy.js` still owns a delegated `data-submit-on-change` listener.
+A Kernel dependency pin by itself therefore does not adopt feedback, and
+loading shared JS without retiring that local listener duplicates submission.
+
+Factoring preserves the existing Kernel owner: public
+`components/request_feedback_assets.html` includes the scoped widget CSS,
+components.js and then deferred CSP Alpine; public `components/toasts.html`
+contains the single shared widget definition. Kernel base composes those same
+partials. `static/css/toasts.css` scopes all rules under `#toast-container`,
+using existing status/radius/shadow/focus roles and the same widget spacing and
+transition durations; it contains no page reset, global selectors or palette.
+Products include the head assets exactly once and the region once near body end,
+provide the existing Dotmac UI token stylesheet, and retain their own HTMX/CSRF
+bridges. They must not load a second Alpine or duplicate delegated handlers.
+No Kernel main.css/Tailwind preflight is required by these feedback partials.
+The dark store remains available but does not bind or change a product theme
+unless product markup explicitly uses it.
+
+Hosted `tests/unit/test_request_feedback.py` qualifies real base/partial asset
+references/order, single widget composition, scoped CSS, x-text safety, package
+asset paths and a Node canary over the actual components.js (opaque failures,
+one delegated submission, preserved toast lifecycle). Those tests are authored,
+not executed locally. Published-artifact adoption and real browser acceptance
+remain future gates; no release, Academy cutover or local-handler retirement is
+claimed by this source preparation.
