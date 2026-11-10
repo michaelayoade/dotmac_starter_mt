@@ -253,3 +253,31 @@ def test_current_version_callback_replaces_the_ledger_scan(
         current_version=lambda session: 5,
     )
     assert result.verdict is ImportVerdict.UPDATED and effect.seen[-1] == frozenset({5})
+
+
+def test_callback_replay_of_an_older_version_is_unchanged_or_conflict_not_stale(
+    db: Session, tenant_row: Tenant
+) -> None:
+    effect = Effect()
+    principal = key(tenant_row, "imports.invoices:write")
+
+    def go(version: int, content: dict[str, object], latest: int):
+        return import_record(
+            db,
+            DECL,
+            principal=principal,
+            external_ref="INV-7",
+            version=version,
+            content=content,
+            apply=effect,
+            current_version=lambda session: latest,
+        )
+
+    assert go(1, {"a": 1}, 0).verdict is ImportVerdict.CREATED
+    assert go(2, {"a": 2}, 1).verdict is ImportVerdict.UPDATED
+    # the receiver now reports v2 as current; v1 replays from the ledger
+    assert go(1, {"a": 1}, 2).verdict is ImportVerdict.UNCHANGED
+    assert go(1, {"a": 99}, 2).verdict is ImportVerdict.CONFLICT
+    # a never-seen lower version is still stale
+    assert go(0 + 3, {"a": 3}, 5).verdict is ImportVerdict.STALE
+    assert effect.calls == 2

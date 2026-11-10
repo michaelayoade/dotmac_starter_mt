@@ -64,7 +64,11 @@ from dotmac_kernel.idempotency import (
 )
 from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_kernel.machine_auth import MachinePrincipal
-from dotmac_kernel.resource_api import ResourceDeclaration, check_session_tenant
+from dotmac_kernel.resource_api import (
+    ResourceDeclaration,
+    check_session_tenant,
+    require_read_committed,
+)
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
@@ -190,9 +194,23 @@ def _lock_reference(
     """
     if db.get_bind().dialect.name != "postgresql":
         return
+    require_read_committed(db)
     db.execute(
         sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
         {"k": f"{tenant_id}|{scope}|{external_ref}"},
+    )
+
+
+def _exact_key_recorded(db: Session, *, tenant_id: Any, scope: str, key: str) -> bool:
+    return (
+        db.execute(
+            select(IdempotencyRecord.id).where(
+                IdempotencyRecord.tenant_id == tenant_id,
+                IdempotencyRecord.scope == scope,
+                IdempotencyRecord.key == key,
+            )
+        ).first()
+        is not None
     )
 
 
@@ -287,6 +305,13 @@ def import_record(
     if current_version is not None:
         latest = current_version(db)
         seen: set[int] = {latest} if latest else set()
+        # The callback only knows the highest version. If this exact version is
+        # already in the ledger, let the ledger answer (unchanged or conflict)
+        # rather than reporting a replayed older version as stale.
+        if version not in seen and _exact_key_recorded(
+            db, tenant_id=principal.tenant_id, scope=scope, key=key
+        ):
+            seen.add(version)
     else:
         seen = _versions_seen(
             db, tenant_id=principal.tenant_id, scope=scope, external_ref=external_ref

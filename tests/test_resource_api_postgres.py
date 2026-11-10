@@ -232,6 +232,65 @@ def test_open_transaction_fences_the_feed_until_it_ends(engine, tenant) -> None:
     other.close()
 
 
+def test_two_pages_in_one_reader_transaction_see_a_transaction_started_between(
+    engine, tenant
+) -> None:
+    """Without pg_stat_clear_snapshot the second page fences on a stale view and
+    serves a row whose earlier-stamped sibling then commits behind the cursor."""
+    decl = declaration(unseen_sessions="horizon_only")
+    key_ = reader_key(tenant)
+    reader = new_session(engine, tenant)
+    open_tx = other = None
+    try:
+        first = changes_page(reader, decl, principal=key_)  # reader transaction opens
+        # Created only now: a session's first statement starts its transaction.
+        open_tx = new_session(engine, tenant)  # T starts after the first call
+        other = new_session(engine, tenant)
+        time.sleep(0.2)
+        late = insert_widget(open_tx, tenant)  # stamped inside T, not yet committed
+        later = insert_widget(other, tenant)  # stamped after `late`, committed
+        other.commit()
+        time.sleep(HORIZON.total_seconds() + 0.5)
+        # SAME reader transaction, no rollback between the two reads.
+        second = changes_page(reader, decl, principal=key_, after=first.next_cursor)
+        assert str(later) not in [i.id for i in second.items]
+        open_tx.commit()
+        time.sleep(HORIZON.total_seconds() + 0.5)
+        third = changes_page(reader, decl, principal=key_, after=first.next_cursor)
+        assert [i.id for i in third.items] == [str(late), str(later)]
+    finally:
+        for s_ in (reader, open_tx, other):
+            if s_ is not None:
+                s_.rollback()
+                s_.close()
+
+
+def test_fence_and_lock_refuse_outside_read_committed(engine, tenant) -> None:
+    decl = declaration(unseen_sessions="horizon_only")
+    repeatable = sessionmaker(bind=engine)()
+    try:
+        repeatable.execute(sa.text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+        repeatable.execute(
+            sa.text("SELECT set_config('app.current_tenant', :t, true)"),
+            {"t": str(tenant)},
+        )
+        with pytest.raises(ResourceUnavailableError):
+            changes_page(repeatable, decl, principal=reader_key(tenant))
+        with pytest.raises(ResourceUnavailableError):
+            import_record(
+                repeatable,
+                decl,
+                principal=reader_key(tenant, "imports.widgets:write"),
+                external_ref="R-1",
+                version=1,
+                content={"a": 1},
+                apply=lambda session, seen: {"x": "y"},
+            )
+    finally:
+        repeatable.rollback()
+        repeatable.close()
+
+
 def test_horizon_is_the_database_clock_not_the_reader_clock(engine, tenant) -> None:
     decl = declaration(unseen_sessions="horizon_only")
     with new_session(engine, tenant) as db:

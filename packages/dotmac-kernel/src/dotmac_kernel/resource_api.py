@@ -36,8 +36,12 @@ absolute:
    call raises ``ResourceUnavailableError`` rather than claim completeness it
    cannot know) or ``"horizon_only"`` (an explicit choice to rely on the
    hold-back alone; the page and summary say so in ``fence``). The kit does not
-   require, and nothing should grant, ``pg_read_all_stats``; make the reader
-   role a member of the writer roles instead if it must see them. Not
+   require, and nothing should grant, ``pg_read_all_stats``, and the reader must
+   NOT be made a member of the writer roles (that hands it every privilege the
+   writers hold). The ways to make sessions visible, each needing Michael's
+   approval, are: (a) the reader and the writers are the same runtime role;
+   (b) a narrow SECURITY DEFINER fence function (client backends only, no query
+   text); or (c) ``horizon_only`` declared per resource. Not
    PostgreSQL (the unit-test SQLite): hold-back only, ``fence`` says so.
 3. **Trigger stamping (B3).** ``updated_at`` and ``version`` are stamped by a
    database trigger (``stamping_trigger_ddl``), not by application code. The
@@ -305,7 +309,7 @@ def stamping_trigger_ddl(
     updated, version = _ident(updated_at_column), _ident(version_column)
     return (
         f"CREATE OR REPLACE FUNCTION {function}() RETURNS trigger "
-        "LANGUAGE plpgsql AS $$ BEGIN "
+        "LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$ BEGIN "
         "IF TG_OP = 'INSERT' THEN "
         f"NEW.{version} := 1; NEW.{updated} := clock_timestamp(); "
         f"ELSIF NEW IS DISTINCT FROM OLD THEN "
@@ -470,6 +474,23 @@ def decode_cursor(resource: str, cursor: str) -> tuple[datetime, str]:
 # --- settle bound (B1, B2) ----------------------------------------------------
 
 
+def require_read_committed(db: Session) -> None:
+    """Refuse unless the transaction is READ COMMITTED (PostgreSQL only).
+
+    The settle fence and the import lock are correct only when each statement
+    sees a fresh snapshot: under REPEATABLE READ an earlier SELECT fixes the
+    snapshot before the bound is computed or the lock is taken.
+    """
+    level = db.execute(
+        sa.text("SELECT current_setting('transaction_isolation')")
+    ).scalar_one()
+    if level != "read committed":
+        raise ResourceUnavailableError(
+            f"transaction isolation is {level!r}; the settle fence and import "
+            "lock require 'read committed'"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class SettleBound:
     horizon: datetime
@@ -506,15 +527,20 @@ def settle_bound(
     """
     seconds = declaration.settle_horizon.total_seconds()
     if db.get_bind().dialect.name == "postgresql":
+        require_read_committed(db)
+        # pg_stat_activity is snapshotted once per transaction; a reader paging
+        # twice in one transaction would otherwise fence on a stale view.
+        db.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
         row = db.execute(_PG_BOUND, {"secs": seconds}).one()
         fence = "pg_stat_activity"
         if row.unseen:
             if declaration.unseen_sessions == "refuse":
                 raise ResourceUnavailableError(
                     f"{row.unseen} session(s) in this database are not visible to "
-                    "the reader role, so open transactions cannot be fenced; make "
-                    "the reader a member of the writer roles, or declare "
-                    "unseen_sessions='horizon_only' to rely on the hold-back alone"
+                    "the reader role, so open transactions cannot be fenced. Options, "
+                    "each needing approval: reader and writers share one runtime role; "
+                    "a narrow SECURITY DEFINER fence function; or "
+                    "unseen_sessions='horizon_only' on the resource"
                 )
             fence = "horizon_only_unseen_sessions"
         return SettleBound(
@@ -800,6 +826,7 @@ __all__ = [
     "drop_stamping_trigger_ddl",
     "encode_cursor",
     "require_read",
+    "require_read_committed",
     "settle_bound",
     "stamping_trigger_ddl",
     "stamping_trigger_installed",

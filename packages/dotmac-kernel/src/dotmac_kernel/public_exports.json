@@ -1389,6 +1389,7 @@
         "drop_stamping_trigger_ddl",
         "encode_cursor",
         "require_read",
+        "require_read_committed",
         "settle_bound",
         "stamping_trigger_ddl",
         "stamping_trigger_installed",

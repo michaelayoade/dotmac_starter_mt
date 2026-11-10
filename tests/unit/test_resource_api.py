@@ -471,6 +471,7 @@ def test_stamping_trigger_ddl_is_schema_qualified_and_validated() -> None:
     assert "mod_billing.dotmac_stamp_invoices()" in create
     assert "version := 1" in create and "OLD.version + 1" in create
     assert "clock_timestamp()" in create
+    assert "SET search_path = pg_catalog, pg_temp" in create
     assert "ON mod_billing.invoices" in trigger and "BEFORE INSERT OR UPDATE" in trigger
     assert len(drop_stamping_trigger_ddl("invoices", schema="mod_billing")) == 2
     for bad in ("Invoices", "a;drop", "a b", ""):

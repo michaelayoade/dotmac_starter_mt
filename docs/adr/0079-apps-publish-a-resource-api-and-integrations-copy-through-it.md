@@ -50,8 +50,13 @@ non-Starter API.
      cannot fence them, and the declaration chooses: `refuse` (default, fail
      safe: the call errors rather than claim completeness) or `horizon_only` (an
      explicit choice, reported in the page as `fence`). `pg_read_all_stats` is
-     neither required nor to be granted; make the reader role a member of the
-     writer roles if it must see them.
+     neither required nor to be granted, and the reader must not be made a
+     member of the writer roles (that hands it their privileges). Making
+     sessions visible is a decision for Michael among: (a) reader and writers
+     are the same runtime role; (b) a narrow SECURITY DEFINER fence function
+     (client backends only, no query text); (c) `horizon_only` per resource.
+     The fence and the import lock require READ COMMITTED and refuse otherwise;
+     the session view is refreshed (`pg_stat_clear_snapshot`) on every call.
    - `updated_at` and `version` of a published resource are stamped by a
      database trigger (`stamping_trigger_ddl`), not by application code. The
      kernel `TimestampMixin` does not qualify: its `onupdate` uses the writer's
