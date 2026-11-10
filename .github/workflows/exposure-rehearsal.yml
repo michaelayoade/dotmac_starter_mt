@@ -204,6 +204,7 @@ jobs:
       # `if: always()` so a FAILED rehearsal still publishes its receipt. A
       # failure that records nothing is indistinguishable from a run that never
       # happened, and the next person re-runs instead of reading why.
+      # Raw probe/exposure/manifest bytes remain private; only ciphertext travels.
       - name: Publish the receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -211,7 +212,7 @@ jobs:
           name: lane3-rehearsal-receipt
           path: |
             receipt.json
-            probe-evidence.json
+            evidence-bundle.age
             docs/inventories/deployment-exposure-rehearsal-status.md
           if-no-files-found: error
 
