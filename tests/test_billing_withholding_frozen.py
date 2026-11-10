@@ -806,6 +806,33 @@ def test_a_determination_with_other_original_facts_is_refused(scratch):
         session.rollback()
 
 
+def test_a_base_above_the_bound_line_is_refused(scratch):
+    """The Tax component contract pins a dependency base to source plus prior tax.
+
+    A base of 500.00 on a 100.00 source with 7.50 of prior tax is refused when the
+    evidence is built, before the service could ever see it; the service then
+    compares the (valid) base with the bound line's source amount as a second guard.
+    """
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        _, invoice_id, tax = _v2_invoice(session, scope)
+        late = _late(session, invoice_id, tax)
+        component = late.determination.components[0]
+        component = replace(
+            component,
+            base_amount=_money("500.00"),
+            lines=(replace(component.lines[0], taxable_amount=_money("500.00")),),
+        )
+        with pytest.raises(ValueError, match="dependency base differs"):
+            replace(
+                late,
+                determination=replace(late.determination, components=(component,)),
+            )
+        assert _components(session, invoice_id) == []
+        session.rollback()
+
+
 def test_withholding_already_accepted_under_old_rules_does_not_block_a_freeze(
     scratch, monkeypatch
 ):
