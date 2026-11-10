@@ -555,7 +555,8 @@ def test_runner_phase_failures_and_exact_object_handoff(
     monkeypatch.setattr(runner, "prepare_authorization", prepare)
     monkeypatch.setattr(runner, "load_lease", load_lease)
     monkeypatch.setattr(runner, "deployment_lock", lock)
-    monkeypatch.setattr(runner, "_load_probe_evidence", lambda *a: {})
+    monkeypatch.setattr(runner, "_capture_probe_evidence", lambda *a: (b"{}", {}))
+    monkeypatch.setattr(runner.evidence_finalization, "prepare_encryption", object)
     monkeypatch.setattr(runner, "_qualify", lambda *a: None)
     monkeypatch.setattr(runner, "require_inside_probe_harness", lambda *a, **k: None)
     # Factory failures use the real guarded builder: an out-of-builder factory
