@@ -446,6 +446,68 @@ them red):
 4. Where the JIT provisioner runs, and its owner.
 5. Certificate and token TTLs, after measurement.
 
+### Adopted-path evidence consumption status (2026-11-10)
+
+The [approved publication direction](inventories/foundation-publication-gate-ruling-20261107.md)
+uses the adopted keyless/OpenBao JWT/cosign-SLSA trust path while preserving
+behavioral proof. Gate-0 D as designed is retired; the historical broker,
+coordinator and privileged-runner proposals above grant no provisioning scope.
+
+Michael selected **preparing the offline-custody design** on 2026-11-10. The
+private evidence key remains outside all runners, as proposed in section 5.
+The actual public recipient and private-key custody location under decision 2
+still belong in the concrete operational packet. No key creation, enrollment,
+provisioning, release or deployment was authorized by the design selection.
+
+The bounded plaintext consumer is offline-only: it verifies the closed
+manifest/member set and exposure-crossing completeness. The public publication
+oracle instead requires an authenticated offline verification result. That
+fixed stage is unimplemented and returns indeterminate. Complete independent
+Control/outcome/compensation joins remain required before any result can
+certify a rehearsal. Eligible receipt metadata alone cannot make publication
+pass, and private plaintext is not a public-runner input.
+
+### Prepared offline-result design (not implemented)
+
+Use a dedicated offline Ed25519 signing key, separate from the `age` decryption
+key and existing CP, candidate and host keys. The proposed maintained signature
+mechanism is [OpenSSH SSHSIG](https://man.openbsd.org/ssh-keygen#ALLOWED_SIGNERS),
+with fixed namespace `foundation-rehearsal-verification-v1@dotmac.io` and signer
+principal `foundation-offline-verifier@dotmac.io`. These are purpose identifiers,
+not assertions that an email account or enrolled key exists.
+
+A pinned offline verifier checks ciphertext identity before decryption, checks
+its approved source/tool profile, then performs every required private evidence
+join. Only after success may it create a closed canonical public result bound
+to the selected repository/run/attempt, evidence artifact, receipt/ciphertext
+and candidate digests, release revision, verifier profile and verification
+policy, with verification and expiry times. No private paths, addresses, raw
+observations, free text or caller-supplied check results leave that boundary.
+The plaintext helper alone cannot produce this complete result.
+
+The public oracle authenticates the detached signature with a protected-main
+public signer policy and mandatory revocation file, and independently matches
+every expected coordinate and current profile/policy standing. Neither result
+nor workflow input selects the trust root, verifier executable or verification
+time. Initial proposed limits are 24 hours result lifetime and five minutes
+future-clock tolerance; these need refusal proofs before operational use.
+Two bounded public base64 workflow inputs, decoded through fixed Python file
+handling, can transport result and signature without a new service or registry.
+They remain untrusted evidence until signature and binding checks pass.
+
+This signature authenticates the trusted offline principal; it does not prove
+actual code execution or workstation integrity. Michael must control that
+boundary and run the pinned verifier. Existing cosign/SLSA artifact proofs and
+OpenBao identity proofs keep their separate purposes. Existing host/candidate
+attestations cannot be repurposed to certify bundle contents.
+
+The result schema, signature adapter, public trust/profile policy and offline
+orchestrator still require source implementation and hosted negative proofs.
+The operational packet must identify actual tool pins, public recipient and
+signing-key enrollment, custody procedure, revocation/recovery and cleanup.
+This design creates no key and enrolls no signer. Publication stays unavailable
+until all required evidence and current trust checks are implemented and pass.
+
 ## 12. D4 scope: producing `RehearsalReceipt.v2` (added 2026-10-06)
 
 D4 stays separate from Packet D (§ 10). This section fixes only its first

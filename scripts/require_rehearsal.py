@@ -80,6 +80,7 @@ surface, every call refuses (docs/LANE3_EXECUTION_TOPOLOGY.md § 9).
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import io
 import json
 import os
@@ -329,6 +330,38 @@ def _receipt_bytes(repo: str, run_id: int, artifact: str, token: str) -> bytes:
         ) from exc
 
 
+@dataclasses.dataclass(frozen=True)
+class OfflineResultCoordinates:
+    """Public immutable inputs for a future authenticated offline result join."""
+
+    repository_id: int
+    run_id: int
+    run_attempt: int
+    receipt_digest: str
+    ciphertext_digest: str
+    candidate_artifact_digest: str
+    release_revision: str
+
+
+class OfflineResultIndeterminate(ValueError):
+    """The authenticated offline-result consumer is not implemented."""
+
+
+def _require_authenticated_offline_result(
+    coordinates: OfflineResultCoordinates,
+) -> None:
+    """Refuse until a reviewed authenticated public-result consumer exists.
+
+    The private key and decrypted evidence stay outside all runners. This
+    public oracle must never acquire a raw bundle, plan or plaintext file.
+    Future implementation must authenticate a topology-free result and join
+    its immutable coordinates internally; caller PASS strings confer nothing.
+    """
+    raise OfflineResultIndeterminate(
+        "authenticated_offline_result_consumer_unimplemented"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="require_rehearsal.py",
@@ -473,6 +506,26 @@ def main(argv: list[str] | None = None) -> int:
     except (SpecError, TypeError, ValueError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
+
+    try:
+        _require_authenticated_offline_result(
+            OfflineResultCoordinates(
+                repository_id=topology.execution_repository_id,
+                run_id=int(proof["run_id"]),
+                run_attempt=attempt,
+                receipt_digest=receipt.sha256_digest(),
+                ciphertext_digest=receipt.content["evidence_bundle_digest"],
+                candidate_artifact_digest=receipt.foundation_artifact_digest,
+                release_revision=args.sha,
+            )
+        )
+    except Exception:
+        # Authentication/transport failures may contain private diagnostics.
+        # The fixed unavailable boundary never turns one into public output.
+        print(
+            "INDETERMINATE: authenticated_offline_result_unavailable", file=sys.stderr
+        )
+        return EXIT_USAGE
 
     print(f"rehearsal_run_id={proof['run_id']}")
     print(f"rehearsal_run_attempt={attempt}")
