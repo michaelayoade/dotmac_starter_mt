@@ -32,6 +32,28 @@
   and a new unique `(tenant, corrects_occurrence_id)` gives an occurrence at most
   one successor. A trigger cannot be `NOT VALID`, so existing overlapping current
   occurrences or duplicate corrections make the upgrade refuse before any DDL.
+- Add the `pending_validity` occurrence state (`su_0006_pending_validity`) for
+  capped or prepaid renewals. `GenerateRecurringChargeCommand.validity_hold`
+  (`capped` | `prepaid`) stores the occurrence at `pending_validity`: it blocks
+  its coverage but stages no rated output, and `OccurrenceResult.staged_output`
+  is `None`. Only `resolve_occurrence_validity` leaves the hold, from the OWNER's
+  evidence (owner code, evidence reference, resolved-at, command id: typed
+  columns, NULL until resolution, no JSON). `confirmed` moves it to `emitted` and
+  stages the output then; `rejected` cancels it and frees its coverage. The only
+  permitted transition is `pending_validity -> emitted | cancelled`;
+  `emitted -> cancelled` stays forbidden. `freeze_occurrence_content` is replaced
+  (every other column must stay equal; the acknowledgement rule is kept) and the
+  downgrade restores the su_0001 body verbatim. `occurrences_for_contract` now
+  lists emitted occurrences only, and a non-cash grant requires an emitted
+  occurrence. Subscriptions holds no cap, balance or tax logic.
+  `resolve_occurrence_validity` now takes `owner_evidence: OwnerEvidencePort`
+  (verified inside the locked operation) and `registry`, which binds each hold
+  to its owner (`SubscriptionVocabularyRegistry.validity_hold_owners`: prepaid ->
+  `billing` when billing is installed; `capped` is unregistered and fails closed
+  until an owner is named), stamps the resolution instant from the database
+  clock (`resolved_at` is no longer an input), requires `actor_ref` (recorded as
+  `validity_actor_ref`), and the database requires `emitted_at = resolved_at` on
+  confirmation and a resolution instant not later than the database clock.
 - `su_0003` and earlier keep their released bytes.
 
 ## 0.1.0a3

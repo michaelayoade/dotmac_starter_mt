@@ -22,6 +22,8 @@ from dotmac_subscriptions.lifecycle import (
     BillingArrangementDecisionStatus,
     BillingArrangementStatus,
     BillingTreatment,
+    OccurrenceValidityHold,
+    OccurrenceValidityOutcome,
 )
 from dotmac_subscriptions.values import ExactAmount
 
@@ -130,6 +132,10 @@ class GenerateRecurringChargeCommand:
     correlation_id: UUID
     coverage: tuple[datetime, datetime] | None = None
     corrects_occurrence_id: UUID | None = None
+    #: Hold a capped or prepaid renewal at ``pending_validity``: the occurrence
+    #: is stored and blocks its coverage but stages no rated output until the
+    #: owner's evidence resolves it (``resolve_occurrence_validity``).
+    validity_hold: OccurrenceValidityHold | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,7 +313,40 @@ class EndContractVersionResult:
 class OccurrenceResult:
     occurrence_id: UUID
     replayed: bool
-    staged_output: RatedObligationOutputV1
+    #: ``None`` while the occurrence is held at ``pending_validity``.
+    staged_output: RatedObligationOutputV1 | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResolveOccurrenceValidityCommand:
+    """The owner's evidence about one held occurrence.
+
+    ``owner_code`` names the module or product that owns the cap or the
+    prepayment and ``evidence_ref`` is that owner's own identifier for the
+    evidence. Subscriptions records both and interprets neither: it holds no
+    cap, balance or tax logic.  The resolution instant is stamped by the
+    database clock, never supplied by the caller.
+    """
+
+    scope: Scope
+    occurrence_id: UUID
+    outcome: OccurrenceValidityOutcome
+    owner_code: str
+    evidence_ref: UUID
+    command_id: UUID
+    correlation_id: UUID
+    idempotency_key: str
+    #: Who resolved it, recorded on the occurrence beside the owner's evidence.
+    actor_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class OccurrenceValidityResult:
+    occurrence_id: UUID
+    outcome: OccurrenceValidityOutcome
+    replayed: bool
+    #: The rated output, staged now. ``None`` when the owner rejected the hold.
+    staged_output: RatedObligationOutputV1 | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,6 +358,33 @@ class TimerScheduleResult:
 @dataclass(frozen=True, slots=True)
 class TimerCancelResult:
     canceled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerEvidenceVerdict:
+    """The owner's own answer about one evidence reference."""
+
+    verified: bool
+
+
+class OwnerEvidencePort(Protocol):
+    """Assembly adapter over the module that owns the cap or the prepayment.
+
+    Called inside the locked resolution so the evidence is checked against the
+    owner, not trusted from the caller.  Subscriptions does not interpret it.
+    """
+
+    def verify(
+        self,
+        db: Session,
+        *,
+        scope: Scope,
+        owner_code: str,
+        evidence_ref: UUID,
+        occurrence_id: UUID,
+        hold_reason: str,
+        confirmed: bool,
+    ) -> OwnerEvidenceVerdict: ...
 
 
 class DurableTimerPort(Protocol):
@@ -353,6 +419,8 @@ __all__ = [
     "ContractLineInput",
     "ContractVersionResult",
     "DurableTimerPort",
+    "OwnerEvidencePort",
+    "OwnerEvidenceVerdict",
     "EndContractVersionCommand",
     "EndContractVersionResult",
     "GenerateRecurringChargeCommand",

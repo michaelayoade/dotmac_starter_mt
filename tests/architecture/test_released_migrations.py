@@ -8478,6 +8478,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
+    # `su_0006` adds the pending_validity occurrence state.
     # `su_0004` makes a catalog_price line name and equal its published offer
     # price; `su_0005` adds the line coverage-overlap trigger and correction uniqueness.
     # Still editable: no released tag (a3 is the latest) carries either.
@@ -8485,6 +8486,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
         {
             "su_0004_catalog_price_line.py",
             "su_0005_line_coverage_overlap.py",
+            "su_0006_pending_validity.py",
         }
     ),
     # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
