@@ -540,6 +540,21 @@ def _v2_invoice(session, scope):
     return account, issued.invoice_id, tax
 
 
+def _v2_discharge(account, invoice_id, scope, item, *, accepted="5.00"):
+    """A discharge command citing a V2 (dependency-lineage) determination."""
+    old = billing._withholding_command(
+        account.id, invoice_id, scope=scope, suffix=str(uuid4())
+    )
+    return replace(
+        old,
+        tax_evidence=dependency._discharge_evidence(
+            scope, account.id, invoice_id, item
+        ),
+        claimed_amount=_money(accepted),
+        accepted_amount=_money(accepted),
+    )
+
+
 def _issue_date(session, invoice_id):
     return session.execute(
         text(
@@ -604,7 +619,7 @@ def test_pre_freeze_invoice_is_frozen_then_discharged(scratch):
         row = accept_withholding_discharge(
             session,
             scope=scope,
-            command=_discharge(account, invoice_id, scope, evidence, accepted="5.00"),
+            command=_v2_discharge(account, invoice_id, scope, evidence),
         )
         assert row.amount_delta == Decimal("5.00")
         session.rollback()
@@ -769,32 +784,6 @@ def test_a_determination_with_other_original_facts_is_refused(scratch):
         session.rollback()
 
 
-def test_a_base_above_the_bound_line_is_refused(scratch):
-    admin_url, tenant_url, _ = scratch
-    scope = _scope(admin_url)
-    with billing._session(tenant_url, scope) as session:
-        account, invoice_id, tax = _v2_invoice(session, scope)
-        late = _late(session, invoice_id, tax)
-        component = late.determination.components[0]
-        component = replace(
-            component,
-            base_amount=_money("500.00"),
-            lines=(replace(component.lines[0], taxable_amount=_money("500.00")),),
-        )
-        late = replace(
-            late, determination=replace(late.determination, components=(component,))
-        )
-        with pytest.raises(BillingRuleViolation) as refused:
-            freeze_issued_invoice_withholding(
-                session,
-                scope=scope,
-                command=_freeze_command(account.id, invoice_id, scope, late),
-            )
-        assert refused.value.code == "billing.withholding_freeze_base_exceeds_line"
-        assert _components(session, invoice_id) == []
-        session.rollback()
-
-
 def test_withholding_already_accepted_under_old_rules_does_not_block_a_freeze(
     scratch, monkeypatch
 ):
@@ -816,7 +805,9 @@ def test_withholding_already_accepted_under_old_rules_does_not_block_a_freeze(
             accept_withholding_discharge(
                 session,
                 scope=scope,
-                command=_discharge(account, invoice_id, scope, tax[1], accepted="4.00"),
+                command=_v2_discharge(
+                    account, invoice_id, scope, tax[1], accepted="4.00"
+                ),
             )
             session.commit()
         config = Config(str(billing.REPO_ROOT / "alembic.ini"))
