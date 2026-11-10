@@ -1,5 +1,14 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a2 — unreleased
+
+- Supplier-issued document numbers are optional on supplier invoices and
+  credit notes. Absent or blank input is stored as NULL; internal document
+  numbers remain required, and supplier-document duplicate checks apply only
+  when a number is supplied.
+- Adds `pa_0002_optional_supplier_doc`, which makes both persisted
+  `supplier_document_number` columns nullable.
+
 ## 0.1.0a1 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

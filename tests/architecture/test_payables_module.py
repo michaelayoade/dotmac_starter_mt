@@ -12,6 +12,7 @@ from dotmac_payables.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/pa_0001_payables.py"
+SECOND_MIGRATION = ROOT / "migrations/versions/pa_0002_optional_supplier_doc.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -93,6 +94,22 @@ def test_migration_proves_rls_and_immutable_observations() -> None:
         "accounting_receipts",
     ):
         assert f"{table}_immutable" in source
+
+
+def test_supplier_document_number_is_optional_in_model_and_migration() -> None:
+    assert models.SupplierInvoice.__table__.c.supplier_document_number.nullable is True
+    assert models.CreditNote.__table__.c.supplier_document_number.nullable is True
+
+    source = SECOND_MIGRATION.read_text(encoding="utf-8")
+    assert 'down_revision = "pa_0001_payables"' in source
+    for table in ("supplier_invoices", "credit_notes"):
+        assert f'"{table}"' in source
+    assert '_TABLES = ("supplier_invoices", "credit_notes")' in source
+    assert "for table in _TABLES" in source
+    assert "for table in reversed(_TABLES)" in source
+    assert source.count('"supplier_document_number"') >= 2
+    assert source.count("nullable=True") == 1
+    assert source.count("nullable=False") == 1
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:

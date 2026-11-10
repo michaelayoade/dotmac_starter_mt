@@ -119,6 +119,74 @@ def _approved_invoice(db: Session):
     return scope, invoice
 
 
+def test_missing_supplier_document_numbers_are_optional_not_duplicates(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT)
+    first = create_invoice(
+        db,
+        scope=scope,
+        command=replace(
+            _invoice_command(),
+            number="PINV-2026-0002",
+            supplier_document_number=None,
+        ),
+        idempotency_key="invoice:missing-doc:1",
+        idempotency_expires_at=None,
+        recorded_at=NOW,
+    )
+    second = create_invoice(
+        db,
+        scope=scope,
+        command=replace(
+            _invoice_command(),
+            number="PINV-2026-0003",
+            supplier_document_number="   ",
+        ),
+        idempotency_key="invoice:missing-doc:2",
+        idempotency_expires_at=None,
+        recorded_at=NOW,
+    )
+
+    assert first.supplier_document_number is None
+    assert second.supplier_document_number is None
+    assert db.scalar(select(func.count()).select_from(models.SupplierInvoice)) == 2
+
+
+def test_missing_supplier_document_number_is_optional_for_credit_notes(
+    db: Session,
+) -> None:
+    scope, invoice = _approved_invoice(db)
+    credit = create_credit_note(
+        db,
+        scope=scope,
+        command=CreateCreditNote(
+            number="PCN-2026-0002",
+            supplier_ref=invoice.supplier_ref,
+            supplier_name_snapshot=invoice.supplier_name_snapshot,
+            supplier_document_number=None,
+            credit_date=date(2026, 8, 5),
+            currency_code="NGN",
+            exchange_rate=Decimal("1"),
+            liability_account_ref="account:2100",
+            original_invoice_id=invoice.id,
+            lines=(
+                PayableLineInput(
+                    description="Returned cable",
+                    quantity=Decimal("1"),
+                    unit_price=Decimal("200"),
+                    posting_account_ref="account:5100",
+                ),
+            ),
+        ),
+        idempotency_key="credit:missing-doc:1",
+        idempotency_expires_at=None,
+        recorded_at=NOW,
+    )
+
+    assert credit.supplier_document_number is None
+
+
 def test_invoice_approval_recognizes_liability_and_due_obligation(db: Session) -> None:
     _, invoice = _approved_invoice(db)
     obligation = db.scalar(select(models.PaymentObligation))
