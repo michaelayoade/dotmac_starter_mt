@@ -366,6 +366,7 @@ def _contract_digest(command: RecordSubscriptionContractVersionCommand) -> str:
                     "offer_version_id": str(line.offer_version_id),
                     "offer_version": line.offer_version,
                     "entitlement_codes": list(line.entitlement_codes),
+                    "price_key": line.price_key,
                 }
                 for line in command.lines
             ],
@@ -778,6 +779,64 @@ def _validate_line(
         )
 
 
+def _require_published_price(
+    session: Session,
+    *,
+    plane: _PlaneModels,
+    scope: Scope,
+    offer_version: OfferVersionRow,
+    line: ContractLineInput,
+) -> None:
+    """Refuse a line whose price is not the published offer-version price.
+
+    A ``catalog_price`` line must name ``(offer_version, price_key)`` and copy
+    that immutable ``OfferVersionPrice`` exactly. A ``contract_price`` line is
+    the only price and must not name a catalogue key. PostgreSQL repeats this
+    rule with a composite foreign key and a trigger, so a writer that bypasses
+    this function is refused by the table.
+    """
+    if offer_version.pricing_mode != OfferPricingMode.catalog_price.value:
+        if line.price_key is not None:
+            raise SubscriptionDataError(
+                "contracts.price_key_not_allowed",
+                "A contract-priced offer version has no catalogue price to name.",
+            )
+        return
+    if not line.price_key:
+        raise SubscriptionDataError(
+            "contracts.catalog_price_key_required",
+            "A catalog-priced line must name the offer version's price_key.",
+        )
+    price = cast(
+        PriceRow | None,
+        session.execute(
+            _scoped(
+                select(plane.price).where(
+                    plane.price.offer_version_id == offer_version.id,
+                    plane.price.price_key == line.price_key,
+                ),
+                scope,
+                plane.price,
+            )
+        ).scalar_one_or_none(),
+    )
+    if price is None:
+        raise SubscriptionDataError(
+            "contracts.catalog_price_not_found",
+            "The named price_key is not on the referenced offer version.",
+        )
+    if (
+        price.charge_model_code != line.charge_model_code
+        or Decimal(price.amount) != line.unit_price.amount
+        or price.currency != line.unit_price.currency
+        or price.scale != line.unit_price.scale
+    ):
+        raise SubscriptionDataError(
+            "contracts.catalog_price_mismatch",
+            "A catalog-priced line must equal the published offer-version price.",
+        )
+
+
 def record_contract_version(
     db: Session,
     command: RecordSubscriptionContractVersionCommand,
@@ -1030,6 +1089,13 @@ def record_contract_version(
                     "contracts.offer_charge_model_mismatch",
                     "Contract line and offer version must use one charge model.",
                 )
+            _require_published_price(
+                session,
+                plane=plane,
+                scope=command.scope,
+                offer_version=offer_version,
+                line=line_input,
+            )
             line_key = line_input.contract_line_key or uuid4()
             line_keys.append(line_key)
             session.add(
@@ -1050,6 +1116,7 @@ def record_contract_version(
                     scale=line_input.unit_price.scale,
                     offer_version_id=line_input.offer_version_id,
                     offer_version=line_input.offer_version,
+                    price_key=line_input.price_key,
                     entitlement_codes=list(line_input.entitlement_codes),
                 )
             )
