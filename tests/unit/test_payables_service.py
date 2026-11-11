@@ -443,6 +443,28 @@ def test_historical_admission_requires_trusted_verifier(db: Session) -> None:
         )
 
 
+def test_historical_admission_refuses_scoped_session(db: Session) -> None:
+    from dotmac_payables import (
+        HistoricalUnpaidInvoiceCommand,
+        admit_historical_unpaid_invoice,
+    )
+    from sqlalchemy.orm import scoped_session
+
+    command = HistoricalUnpaidInvoiceCommand(
+        "legacy", "opaque-1", uuid.uuid4(), "a" * 64, "cv1:" + "b" * 64
+    )
+    with pytest.raises(InvalidTransition, match="plain Session"):
+        admit_historical_unpaid_invoice(
+            scoped_session(lambda: db),  # type: ignore[arg-type]
+            scope=TenantScope(TENANT),
+            command=command,
+            verifier=type("V", (), {"verify": lambda *_a, **_k: None})(),  # type: ignore[arg-type]
+            idempotency_key="historical",
+            idempotency_expires_at=None,
+            admitted_at=NOW,
+        )
+
+
 def test_approved_without_owner_recognition_has_no_accounting_consequence(
     db: Session,
 ) -> None:

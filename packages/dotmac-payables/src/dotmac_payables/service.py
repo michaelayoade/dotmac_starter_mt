@@ -7,7 +7,7 @@ settlement only as an immutable observation from the payment owner.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import fields
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -18,7 +18,7 @@ from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.semantic_encoding import canonical_instant
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, scoped_session
 
 from dotmac_payables.contracts import (
     AccountingConsequence,
@@ -1090,6 +1090,8 @@ def admit_historical_unpaid_invoice(
     if verifier is None or not callable(getattr(verifier, "verify", None)):
         raise InvalidTransition("historical admission requires a trusted verifier")
     canonical_instant(admitted_at)
+    if not isinstance(db, Session) or isinstance(db, scoped_session):
+        raise InvalidTransition("historical admission requires a plain Session")
     # All invoice writers and accounting guards share this lock. Verify the
     # immutable destination facts under it, rather than admitting a stale proof.
     locked = _invoice(db, scope.tenant_id, command.invoice_id, lock=True)
@@ -1110,9 +1112,12 @@ def admit_historical_unpaid_invoice(
     evidence = None
     try:
         with db.begin_nested() as savepoint:
-            event.listen(db, "after_flush", _saw_flush)
-            event.listen(db, "before_commit", _refuse_commit)
+            registered: list[tuple[str, Callable[..., object]]] = []
             try:
+                event.listen(db, "after_flush", _saw_flush)
+                registered.append(("after_flush", _saw_flush))
+                event.listen(db, "before_commit", _refuse_commit)
+                registered.append(("before_commit", _refuse_commit))
                 with db.no_autoflush:
                     evidence = verifier.verify(
                         scope=scope, command=command, destination=db
@@ -1124,8 +1129,8 @@ def admit_historical_unpaid_invoice(
                     ):
                         wrote.append(True)
             finally:
-                event.remove(db, "before_commit", _refuse_commit)
-                event.remove(db, "after_flush", _saw_flush)
+                for name, fn in reversed(registered):
+                    event.remove(db, name, fn)
             raise _DiscardVerifierSavepoint
     except _DiscardVerifierSavepoint:
         pass

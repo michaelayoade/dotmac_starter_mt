@@ -7,6 +7,7 @@
   permanent immutable receipt, and recognize the full original obligation
   without approving again or producing duplicate imported GL consequences.
 - Require kernel a103 for versioned cv1 semantic evidence fingerprints.
+- Historical admission refuses a `scoped_session`; callers must pass a plain `Session`.
 
 ## 0.1.0a2 — 2026-11-10
 

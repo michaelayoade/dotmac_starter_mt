@@ -20,8 +20,10 @@ runs in a discarded savepoint. Callers must roll back their entire transaction
 on any refusal; a verifier calling `Session.rollback()` can already abort it.
 This is not a sandbox for direct Connection or raw SQL/DBAPI transaction control, advisory locks,
 sequence `nextval`, or effects outside the database.
-This package trusts the evidence the verifier returns. Each assembly
-must supply and review its concrete verifier before enabling a call site.
+This package trusts the evidence the verifier returns. The ERP verifier
+implementation does not exist yet and needs its own architect review before
+any ERP call site is enabled; each assembly must supply and review its concrete
+verifier.
 Commands bind source identity, frozen snapshot
 SHA-256, destination invoice and complete cv1 evidence fingerprint. Permanent
 receipts preserve replay after kernel key retention and later real settlement.
