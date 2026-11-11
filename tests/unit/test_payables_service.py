@@ -418,3 +418,231 @@ def test_accounting_receipt_is_separate_from_invoice_lifecycle(db: Session) -> N
             idempotency_expires_at=None,
             recorded_at=NOW,
         )
+
+
+def test_historical_admission_requires_trusted_verifier(db: Session) -> None:
+    from dotmac_payables import (
+        HistoricalUnpaidInvoiceCommand,
+        admit_historical_unpaid_invoice,
+    )
+
+    command = HistoricalUnpaidInvoiceCommand(
+        "legacy", "opaque-1", uuid.uuid4(), "a" * 64, "cv1:" + "b" * 64
+    )
+    with pytest.raises(InvalidTransition, match="verifier"):
+        admit_historical_unpaid_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=command,
+            verifier=None,
+            idempotency_key="historical",
+            idempotency_expires_at=None,
+            admitted_at=NOW,
+        )
+
+
+def test_approved_without_owner_recognition_has_no_accounting_consequence(
+    db: Session,
+) -> None:
+    scope, invoice = _approved_invoice(db)
+    from sqlalchemy import delete
+
+    db.execute(delete(models.LiabilityEvent))
+    with pytest.raises(InvalidTransition, match="recognition"):
+        build_invoice_accounting_consequence(
+            db, tenant_id=scope.tenant_id, invoice_id=invoice.id
+        )
+
+
+def _historical_case(db: Session):
+    from dotmac_payables import (
+        HistoricalUnpaidInvoiceCommand,
+        HistoricalUnpaidInvoiceEvidence,
+    )
+    from dotmac_payables.contracts import InvoiceStatus
+
+    invoice = create_invoice(
+        db,
+        scope=TenantScope(TENANT),
+        command=_invoice_command(),
+        idempotency_key="historical-create",
+        idempotency_expires_at=None,
+        recorded_at=NOW,
+    )
+    invoice.status = InvoiceStatus.APPROVED
+    db.flush()
+    names = (
+        "number",
+        "supplier_ref",
+        "supplier_name_snapshot",
+        "supplier_document_number",
+        "invoice_date",
+        "received_date",
+        "currency_code",
+        "exchange_rate",
+        "subtotal",
+        "tax_amount",
+        "total_amount",
+        "liability_account_ref",
+        "procurement_ref",
+        "receipt_evidence_fingerprint",
+        "submitted_by",
+        "submitted_at",
+        "approved_by",
+        "approved_at",
+        "approval_reference",
+    )
+    evidence = HistoricalUnpaidInvoiceEvidence(
+        tenant_id=TENANT,
+        invoice_id=invoice.id,
+        source_owner="legacy",
+        source_invoice_id="source:1",
+        source_snapshot_sha256="a" * 64,
+        source_status="POSTED",
+        invoice_type="STANDARD",
+        paid_amount=Decimal(0),
+        allocation_count=0,
+        withholding_tax_amount=Decimal(0),
+        prepayment_amount=Decimal(0),
+        due_date=date(2026, 8, 31),
+        original_posted_at=NOW,
+        source_journal_ref="source:journal",
+        destination_journal_ref="destination:journal",
+        accounting_evidence_fingerprint="cv1:" + "b" * 64,
+        facts_fingerprint="cv1:" + "c" * 64,
+        **{name: getattr(invoice, name) for name in names},
+    )
+    command = HistoricalUnpaidInvoiceCommand(
+        "legacy", "source:1", invoice.id, "a" * 64, evidence.fingerprint()
+    )
+    return invoice, evidence, command
+
+
+class _HistoricalVerifier:
+    def __init__(self, evidence):
+        self.evidence = evidence
+
+    def verify(self, *, scope, command, destination):
+        return self.evidence
+
+
+def _admit(db, evidence, command, key="historical-admit"):
+    from dotmac_payables import admit_historical_unpaid_invoice
+
+    return admit_historical_unpaid_invoice(
+        db,
+        scope=TenantScope(TENANT),
+        command=command,
+        verifier=_HistoricalVerifier(evidence),
+        idempotency_key=key,
+        idempotency_expires_at=None,
+        admitted_at=NOW,
+    )
+
+
+def test_historical_replay_preserves_invoice_after_settlement_and_key_expiry(
+    db: Session,
+) -> None:
+    from sqlalchemy import delete
+
+    invoice, evidence, command = _historical_case(db)
+    before = {c.name: getattr(invoice, c.name) for c in invoice.__table__.columns}
+    receipt = _admit(db, evidence, command)
+    obligation = db.get(models.PaymentObligation, receipt.obligation_id)
+    assert (
+        obligation.original_amount
+        == obligation.outstanding_amount
+        == evidence.total_amount
+    )
+    event = db.get(models.LiabilityEvent, receipt.event_id)
+    assert event.event_kind == "historical_invoice_recognized"
+    assert event.occurred_at == NOW
+    assert receipt.evidence["approved_by"] is None
+    assert {
+        c.name: getattr(invoice, c.name) for c in invoice.__table__.columns
+    } == before
+    with pytest.raises(InvalidTransition, match="imported accounting"):
+        build_invoice_accounting_consequence(
+            db, tenant_id=TENANT, invoice_id=invoice.id
+        )
+    record_settlement(
+        db,
+        scope=TenantScope(TENANT),
+        command=SettlementObservationInput(
+            obligation_id=obligation.id,
+            source_owner="payments",
+            source_reference="settled:1",
+            source_version="1",
+            source_fingerprint="d" * 64,
+            amount=evidence.total_amount,
+            occurred_at=NOW,
+            currency_code="NGN",
+        ),
+        idempotency_key="settle:historical",
+        idempotency_expires_at=None,
+        recorded_at=NOW,
+    )
+    db.execute(delete(IdempotencyRecord))
+    assert _admit(db, evidence, command, "fresh-key").id == receipt.id
+    assert obligation.outstanding_amount == 0
+    assert db.scalar(select(func.count()).select_from(models.PaymentObligation)) == 1
+    changed = replace(evidence, facts_fingerprint="cv1:" + "e" * 64)
+    with pytest.raises(PayablesError, match="permanent historical"):
+        _admit(
+            db,
+            changed,
+            replace(command, evidence_fingerprint=changed.fingerprint()),
+            "changed-key",
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"source_status": "APPROVED"},
+        {"invoice_type": "CREDIT_NOTE"},
+        {"paid_amount": Decimal("1")},
+        {"allocation_count": 1},
+        {"withholding_tax_amount": Decimal("1")},
+        {"prepayment_amount": Decimal("1")},
+        {"total_amount": Decimal("1075.001")},
+        {"total_amount": Decimal("NaN")},
+        {"supplier_document_number": None},
+        {"due_date": date(2026, 9, 1)},
+        {"approved_by": "invented:actor"},
+        {"subtotal": Decimal("1001")},
+    ],
+)
+def test_historical_admission_refuses_ineligible_or_changed_evidence(
+    db: Session, change
+) -> None:
+    _, evidence, command = _historical_case(db)
+    altered = replace(evidence, **change)
+    # NaN is refused by cv1 itself before the owner could persist it.
+    with pytest.raises(ValueError):
+        _admit(
+            db, altered, replace(command, evidence_fingerprint=altered.fingerprint())
+        )
+    assert (
+        db.scalar(select(func.count()).select_from(models.HistoricalInvoiceReceipt))
+        == 0
+    )
+    assert db.scalar(select(func.count()).select_from(models.PaymentObligation)) == 0
+
+
+def test_historical_receipt_insert_failure_rolls_back_recognition(
+    db: Session, monkeypatch
+) -> None:
+    _, evidence, command = _historical_case(db)
+    original = db.add
+
+    def refuse_receipt(row, *args, **kwargs):
+        if isinstance(row, models.HistoricalInvoiceReceipt):
+            raise ValueError("receipt unavailable")
+        return original(row, *args, **kwargs)
+
+    monkeypatch.setattr(db, "add", refuse_receipt)
+    with pytest.raises(ValueError, match="receipt unavailable"):
+        _admit(db, evidence, command)
+    assert db.scalar(select(func.count()).select_from(models.PaymentObligation)) == 0
+    assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0

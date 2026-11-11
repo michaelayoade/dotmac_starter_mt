@@ -358,3 +358,340 @@ def test_database_refuses_evidence_rewrite_even_for_admin(
             )
         transaction.rollback()
     engine.dispose()
+
+
+def test_empty_historical_receipt_migration_can_downgrade(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from importlib import import_module
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    migration = import_module(
+        "dotmac_payables.migrations.versions.pa_0003_historical_invoice"
+    )
+    engine = create_engine(migrated_finance[0])
+    with engine.begin() as conn:
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.downgrade()
+        assert (
+            conn.scalar(
+                text("SELECT to_regclass('mod_payables.historical_invoice_receipts')")
+            )
+            is None
+        )
+    engine.dispose()
+
+
+def test_historical_admission_concurrency_rls_fk_and_admin_immutability(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import fields, replace
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables import (
+        Conflict,
+        HistoricalInvoiceReceipt,
+        HistoricalUnpaidInvoiceCommand,
+        HistoricalUnpaidInvoiceEvidence,
+        LiabilityEvent,
+        PaymentObligation,
+        SupplierInvoice,
+        admit_historical_unpaid_invoice,
+    )
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    admin_url, app_url = migrated_finance
+    tenant_a, tenant_b = _seed_tenants(admin_url)
+    admin = create_engine(admin_url)
+    app = create_engine(app_url)
+    now = datetime(2026, 11, 11, tzinfo=UTC)
+    with Session(admin) as db, db.begin():
+        invoice = db.scalar(
+            select(SupplierInvoice).where(SupplierInvoice.tenant_id == tenant_a)
+        )
+        assert invoice is not None
+        invoice.status = "SUBMITTED"
+        db.flush()
+        invoice.status = "APPROVED"
+        db.flush()
+        invoice_id = invoice.id
+        supplied = {
+            "tenant_id": tenant_a,
+            "invoice_id": invoice_id,
+            "source_owner": "legacy",
+            "source_invoice_id": "original:1",
+            "source_snapshot_sha256": "a" * 64,
+            "source_status": "POSTED",
+            "invoice_type": "STANDARD",
+            "paid_amount": Decimal(0),
+            "allocation_count": 0,
+            "withholding_tax_amount": Decimal(0),
+            "prepayment_amount": Decimal(0),
+            "due_date": date(2026, 8, 31),
+            "original_posted_at": now,
+            "source_journal_ref": "source:journal",
+            "destination_journal_ref": "destination:journal",
+            "accounting_evidence_fingerprint": "cv1:" + "b" * 64,
+            "facts_fingerprint": "cv1:" + "c" * 64,
+        }
+        evidence = HistoricalUnpaidInvoiceEvidence(
+            **{
+                field.name: supplied[field.name]
+                if field.name in supplied
+                else getattr(invoice, field.name)
+                for field in fields(HistoricalUnpaidInvoiceEvidence)
+            }
+        )
+    command = HistoricalUnpaidInvoiceCommand(
+        "legacy", "original:1", invoice_id, "a" * 64, evidence.fingerprint()
+    )
+
+    class Verifier:
+        def verify(self, *, scope, command, destination):
+            return evidence
+
+    def admit(key):
+        with Session(app) as db, db.begin():
+            db.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_a)},
+            )
+            receipt = admit_historical_unpaid_invoice(
+                db,
+                scope=TenantScope(tenant_a),
+                command=command,
+                verifier=Verifier(),
+                idempotency_key=key,
+                idempotency_expires_at=None,
+                admitted_at=now,
+            )
+            return receipt.id
+
+    # Independent keys contend on the permanent invoice identity.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        winners = list(pool.map(admit, ("concurrent-a", "concurrent-b")))
+    assert winners[0] == winners[1]
+    with app.begin() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, true)"),
+            {"tenant": str(tenant_b)},
+        )
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM mod_payables.historical_invoice_receipts")
+            )
+            == 0
+        )
+        with pytest.raises(DBAPIError), conn.begin_nested():
+            conn.execute(
+                text(
+                    "UPDATE mod_payables.historical_invoice_receipts "
+                    "SET source_owner='forged'"
+                )
+            )
+    with admin.begin() as conn:
+        from importlib import import_module
+
+        from alembic.migration import MigrationContext
+        from alembic.operations import Operations
+
+        migration = import_module(
+            "dotmac_payables.migrations.versions.pa_0003_historical_invoice"
+        )
+        with Operations.context(MigrationContext.configure(conn)):
+            with pytest.raises(RuntimeError, match="forward correction"):
+                migration.downgrade()
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT length(fingerprint) FROM public.idempotency_records "
+                    "WHERE scope='payables.admit_historical_unpaid_invoice' LIMIT 1"
+                )
+            )
+            == 64
+        )
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT length(evidence_fingerprint) "
+                    "FROM mod_payables.historical_invoice_receipts LIMIT 1"
+                )
+            )
+            == 68
+        )
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM mod_payables.historical_invoice_receipts")
+            )
+            == 1
+        )
+        assert (
+            conn.scalar(text("SELECT count(*) FROM mod_payables.payment_obligations"))
+            == 1
+        )
+        for mutation in (
+            "UPDATE mod_payables.historical_invoice_receipts SET source_owner='forged'",
+            "DELETE FROM mod_payables.historical_invoice_receipts",
+        ):
+            with pytest.raises(DBAPIError), conn.begin_nested():
+                conn.execute(text(mutation))
+        invoice_b = conn.scalar(
+            select(SupplierInvoice.id).where(SupplierInvoice.tenant_id == tenant_b)
+        )
+        obligation_b, event_b = uuid.uuid4(), uuid.uuid4()
+        conn.execute(
+            PaymentObligation.__table__.insert().values(
+                id=obligation_b,
+                tenant_id=tenant_b,
+                invoice_id=invoice_b,
+                sequence=1,
+                due_date=date(2026, 8, 31),
+                currency_code="NGN",
+                original_amount=100,
+                outstanding_amount=100,
+                status="OPEN",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        conn.execute(
+            LiabilityEvent.__table__.insert().values(
+                id=event_b,
+                tenant_id=tenant_b,
+                obligation_id=obligation_b,
+                event_kind="historical_invoice_recognized",
+                document_kind="supplier_invoice",
+                document_id=invoice_b,
+                supplier_ref="party:bravo",
+                currency_code="NGN",
+                amount=100,
+                source_reference="bravo",
+                source_fingerprint="a" * 64,
+                occurred_at=now,
+            )
+        )
+        original = dict(
+            conn.execute(select(HistoricalInvoiceReceipt.__table__)).mappings().one()
+        )
+        valid = {
+            **original,
+            "id": uuid.uuid4(),
+            "tenant_id": tenant_b,
+            "invoice_id": invoice_b,
+            "obligation_id": obligation_b,
+            "event_id": event_b,
+        }
+        # Exactly one reference crosses tenants per case; assert its own FK.
+        for column in ("invoice_id", "obligation_id", "event_id"):
+            with pytest.raises(DBAPIError) as caught, conn.begin_nested():
+                conn.execute(
+                    HistoricalInvoiceReceipt.__table__.insert().values(
+                        **{**valid, column: original[column]}
+                    )
+                )
+            assert caught.value.orig.diag.constraint_name == (
+                "fk_historical_invoice_receipts_" + column.removesuffix("_id")
+            )
+    race_evidence = {}
+    with admin.begin() as conn:
+        header = dict(
+            conn.execute(
+                select(SupplierInvoice.__table__).where(
+                    SupplierInvoice.id == invoice_id
+                )
+            )
+            .mappings()
+            .one()
+        )
+        for sequence in (1, 2):
+            candidate = {
+                **header,
+                "id": uuid.uuid4(),
+                "number": f"race-{sequence}",
+                "supplier_document_number": f"race-source-{sequence}",
+            }
+            conn.execute(
+                SupplierInvoice.__table__.insert().values(
+                    **{**candidate, "status": "DRAFT"}
+                )
+            )
+            for state in ("SUBMITTED", "APPROVED"):
+                conn.execute(
+                    SupplierInvoice.__table__.update()
+                    .where(SupplierInvoice.id == candidate["id"])
+                    .values(status=state)
+                )
+            race_evidence[candidate["id"]] = replace(
+                evidence,
+                invoice_id=candidate["id"],
+                number=candidate["number"],
+                supplier_document_number=candidate["supplier_document_number"],
+                source_invoice_id="shared-race-source",
+            )
+
+    class RaceVerifier:
+        def verify(self, *, scope, command, destination):
+            return race_evidence[command.invoice_id]
+
+    def race_admit(candidate_id):
+        candidate_evidence = race_evidence[candidate_id]
+        candidate_command = replace(
+            command,
+            invoice_id=candidate_id,
+            source_invoice_id="shared-race-source",
+            evidence_fingerprint=candidate_evidence.fingerprint(),
+        )
+        with Session(app) as db, db.begin():
+            db.execute(
+                text("SELECT set_config('app.current_tenant', :tenant, true)"),
+                {"tenant": str(tenant_a)},
+            )
+            try:
+                admit_historical_unpaid_invoice(
+                    db,
+                    scope=TenantScope(tenant_a),
+                    command=candidate_command,
+                    verifier=RaceVerifier(),
+                    idempotency_key=str(candidate_id),
+                    idempotency_expires_at=None,
+                    admitted_at=now,
+                )
+                return "admitted"
+            except Conflict:
+                assert (
+                    db.scalar(text("SELECT public.app_current_tenant_id()")) == tenant_a
+                )
+                assert (
+                    db.scalar(
+                        select(SupplierInvoice.id).where(
+                            SupplierInvoice.id == candidate_id
+                        )
+                    )
+                    == candidate_id
+                )
+                return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(race_admit, race_evidence)) == ["admitted", "conflict"]
+    with admin.connect() as conn:
+        for model, column in (
+            (HistoricalInvoiceReceipt, HistoricalInvoiceReceipt.invoice_id),
+            (PaymentObligation, PaymentObligation.invoice_id),
+            (LiabilityEvent, LiabilityEvent.document_id),
+        ):
+            assert (
+                len(
+                    list(
+                        conn.scalars(select(model.id).where(column.in_(race_evidence)))
+                    )
+                )
+                == 1
+            )
+    admin.dispose()
+    app.dispose()
