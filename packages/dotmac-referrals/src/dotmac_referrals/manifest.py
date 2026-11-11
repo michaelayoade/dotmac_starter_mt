@@ -11,7 +11,7 @@ from dotmac_referrals.models import TABLES
 
 module = ModuleManifest(
     code="referrals",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="referrals",
     migration_prefix="rf",

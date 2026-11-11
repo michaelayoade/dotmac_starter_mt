@@ -2060,6 +2060,54 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-billing ──
+    "dotmac-billing-v0.1.0a11": (
+        "dotmac-billing",
+        "8be175cc8bc470753e7edbc359f8415564c9f39f",
+        {
+            "bi_0001_billing.py": (
+                "f82a962e7c0745cf11e2c8187042a5af412dd80a254be5b2e0975d0c7aa36373"
+            ),
+            "bi_0002_multiline.py": (
+                "08fd8d9e2c4f5586180066a831df93dc61b153178e61b7c07aa41aac8ea019c9"
+            ),
+            "bi_0003_issued_line_freeze.py": (
+                "ffcd0231cce9a4c7a0b1db668b258e8728d44e74a63d876ff5bbd9c574ed6f8f"
+            ),
+            "bi_0004_withholding_discharge.py": (
+                "348eb9a16c9eb84dca542a3ab004445d1ff52c3a74f5ef4427d073cdfb9fc9a3"
+            ),
+            "bi_0005_non_cash_credit.py": (
+                "2179d2fc20f2ea24378255f70d4da21223dcf9d2b3dc12b738334c483c338c3f"
+            ),
+            "bi_0006_cash_source_claim.py": (
+                "a9d26132d0825532831d463e5f0a661a866780c68ec6f69c7b307e4b7f0acff5"
+            ),
+            "bi_0007_opening_cash.py": (
+                "5e1cba7a3674fb03d6ed0b349c04a992e03a1bc9230ddcd44c004484b172f654"
+            ),
+            "bi_0008_opening_receivables.py": (
+                "d9b70b73c1265e1f9713c0751bbedbade65b0a26702ec1c162149f4e0d133ba1"
+            ),
+            "bi_0009_opening_window.py": (
+                "04e32fd5fa1e90ebf98c50d577349aa82feb4bf2453cd3b3dcc79ad3d9cd7f47"
+            ),
+            "bi_0010_line_source_key.py": (
+                "1ebbc2ef6ffc34abfb9789f51230321dc2ca977f1643f58de4cf2203c8d8a4fe"
+            ),
+            "bi_0011_settlement_earmarks.py": (
+                "0ce8eea45e33d38267884a860ae9550cc72f170dd71972385d2fe549e9bb1913"
+            ),
+            "bi_0012_tax_evidence.py": (
+                "47b6becfaa74ce741d31e453a036f54734f737284aadee8ec2aadca709d00ab8"
+            ),
+            "bi_0013_opening_hold_admission.py": (
+                "b4aee71233f5469ddc4a8f426e550b4febb7422a441bb4c4d07d4e98c12e8671"
+            ),
+            "bi_0014_opening_variance_ledger.py": (
+                "3e9ee0f6297b1449f93eb4208e66862ada215a16615ff35cbee286a0e6b7b6d9"
+            ),
+        },
+    ),
     "dotmac-billing-v0.1.0a10": (
         "dotmac-billing",
         "6005ead65713a422271b68beea6a0da7c7c766a3",
@@ -2514,6 +2562,102 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     # fleet pins one, so an in-place edit to any file here reaches more
     # databases this repository cannot inspect than every module lineage
     # combined.
+    "dotmac-kernel-v0.1.0a108": (
+        "dotmac-kernel",
+        "0e322f0247129cdbf6480ddffc61383d6690b924",
+        {
+            "20260504_0001_initial_tenant_schema.py": (
+                "f7dbbf89ea2c4fe0526b77c390dc72942ea04b39e68aff62c635069ecb00746b"
+            ),
+            "20260717_0002_settings_table.py": (
+                "19bde6949e5b227278de6d0b32c83fce9b0fb9d492097ec354bc76cfaf0b08db"
+            ),
+            "20260717_0003_party_identity.py": (
+                "5c7774f57391c7cc86e934e1ebcb48ff95169ae0681e6c3f1e5ffa30746ae2b2"
+            ),
+            "20260717_0004_custom_fields.py": (
+                "79750341f1ddd65c86a1e51896154857d4e2add726c220e97c17dd5c8bd1a27f"
+            ),
+            "20260718_0005_single_email_authority.py": (
+                "4515c454bff012df792be0deb00df3a96d90220e8a97c672eaf46d55746260e0"
+            ),
+            "20260718_0006_display_setting_domain.py": (
+                "99fa5abcb2bbf48f0a808ab7e3c321ffad36c47550b5e57f7205228e45815c5c"
+            ),
+            "20260730_0007_platform_identity.py": (
+                "b70d3cb83f40420f2b269df133d082fcfc8496c88041799a902edf12352001be"
+            ),
+            "20260730_0008_outbox_inbox.py": (
+                "86722eca15bc1a44a0e2bca5da2fc7198989603f595557405d65354872328043"
+            ),
+            "20260730_0009_platform_audit_inbox.py": (
+                "b68ed88472f4e5b44478b51a25ed87a9ba93e0915233f81935bc6afbff22984a"
+            ),
+            "20260731_0010_tenant_entitlements.py": (
+                "41ab63a8a765811f08fdcc68a87ce7df0b9f4c58eebb3aaa50cddd42b5761fcd"
+            ),
+            "20260731_0011_outbox_relay_leasing.py": (
+                "b1ac5cd7aab8cd80ad96fb2c98d319c85f027cf519230bfe6409082bce2006f6"
+            ),
+            "20260731_0012_platform_outbox.py": (
+                "00a54b8c94a9b297b502c32af6562d9eeba56ab9dfeb8cc11663b011d7fcf085"
+            ),
+            "20260807_0013_feature_flag_overrides.py": (
+                "0b0e3602ee1bf363d34e93925bbceee6783c3966dbb2f08b996880bfb9aad4c2"
+            ),
+            "20260807_0014_open_setting_domains.py": (
+                "e410b0b05e71768498cb65c83ed44fe4a93aba59e4325391cf6da7f9cf3d09fb"
+            ),
+            "20260808_0015_open_value_types.py": (
+                "d866b7c09050e45cb153071bde951e1988c8d73c42dff4c398c7ca947ead4627"
+            ),
+            "20260808_0016_setting_scope_depth.py": (
+                "fc4ac2f104b12a2d7e08d49530379a2fd4071b41968aadf83436373f294d2599"
+            ),
+            "20260808_0017_history_actor.py": (
+                "cad05a8a96df3999c3acd6f7bc259745e1b8ce0070f358a46f9bf0e4f849da17"
+            ),
+            "20260810_0018_idempotency_one_owner.py": (
+                "8e4776b6a1528a4ddf7fde07d6af2c9a3adf44ba5e8d52795f9715fbe108779e"
+            ),
+            "20260810_0019_communication_consent.py": (
+                "d88619f7cd4f7cf464113e25a05354b317a15aa06f9823c016ec97cae30cd687"
+            ),
+            "20260810_0020_delivery_receipts.py": (
+                "e4b497623a50c733e8a0b3c97b2aa539c0b3a07a29f0f441d3cb2a43985b4ae0"
+            ),
+            "20260811_0021_setting_scope_alignment.py": (
+                "36d223b100554c2b485281fb2cae7ee54af07b582af08618d84a964ec1710a15"
+            ),
+            "20260812_0022_party_role_grants.py": (
+                "69b525286e71ea76d2a51a5f5482d29cd511448a0ea939be0955c3f2b89b3fc6"
+            ),
+            "20260812_0023_audit_actor_and_forensics.py": (
+                "2b72e48ebeec9cce92b4d8d96b0da6052a99301d247db40b617e370379eb8444"
+            ),
+            "20260814_0024_external_identity_bindings.py": (
+                "fa7875d51524b3bd1a01b2e27b0f32a3521fdd1316b96b08f3cea09c738d3bef"
+            ),
+            "20260816_0025_session_provenance.py": (
+                "179d452235332892efb078fd14b2e84ab13709c797515b6681c41a25d7cd8083"
+            ),
+            "20260816_0026_platform_audit_log.py": (
+                "6d54d2f910509015481e9322abae2fa669a0fb260406d2845979ed8ea5218d18"
+            ),
+            "20260822_0027_machine_credential.py": (
+                "2b6511e955f947203a838c3a1b57c967da149b1f238a9aef4f17ccf900a636ea"
+            ),
+            "20260824_0028_machine_attribution.py": (
+                "baa27e0134ae97ac5b6f10c7d0f47e391187589fa8a7cb8ee70f81eaa8b3e01c"
+            ),
+            "20261017_0029_audit_history_shape.py": (
+                "142f59aab75517a1f4ca19fc614a4877fbf80e81fcf372351cb547245e86cb20"
+            ),
+            "20261017_0030_credential_tenant_key.py": (
+                "053b6a7e15df5da43e185e84e921878ab8f93d8503fee825c24cacff3a8cc9a0"
+            ),
+        },
+    ),
     "dotmac-kernel-v0.1.0a107": (
         "dotmac-kernel",
         "8c12998b57a31b5cf4a3e296d092460f97e638ba",
@@ -7696,6 +7840,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a2": (
+        "dotmac-payables",
+        "a9b777d6caa5aead4f89a767a9118508958deeb7",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a1": (
         "dotmac-payables",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -8334,10 +8490,26 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
-    "dotmac-subscriptions": frozenset(),
-    # `bi_0013` adds the sealed hold list guards and post-seal hold admission
-    # audit table; still editable until billing 0.1.0a11 is tagged.
-    "dotmac-billing": frozenset({"bi_0013_opening_hold_admission.py"}),
+    # `su_0006` adds the pending_validity occurrence state.
+    # `su_0004` makes a catalog_price line name and equal its published offer
+    # price; `su_0005` adds the line coverage-overlap trigger and correction uniqueness.
+    # Still editable: no released tag (a3 is the latest) carries either.
+    "dotmac-subscriptions": frozenset(
+        {
+            "su_0004_catalog_price_line.py",
+            "su_0005_line_coverage_overlap.py",
+            "su_0006_pending_validity.py",
+        }
+    ),
+    # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
+    # frozen. `bi_0015` and `bi_0016` are a12's, still editable until a12 is tagged.
+    "dotmac-billing": frozenset(
+        {
+            # a12 (the a11 number is published): B lane, still unreleased.
+            "bi_0015_line_price_version_fk.py",
+            "bi_0016_withholding_components.py",
+        }
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8355,9 +8527,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
-    # Tenant-qualified credential key remains editable until a verified published
-    # tag carries this revision and its digest is recorded above.
-    "dotmac-kernel": frozenset(),
+    # `0031_rate_limit_buckets` (the shared anonymous-route rate-limit counters)
+    # remains editable until a verified published tag carries it and its digest
+    # is recorded above.
+    "dotmac-kernel": frozenset({"20261109_0031_rate_limit_buckets.py"}),
     "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
@@ -8388,15 +8561,21 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-payables": frozenset(),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
-    "dotmac-positioning": frozenset(),
+    # `po_0002` adds neutral observation retention holds; still editable until
+    # `dotmac-positioning` 0.2.0a2 is tagged.
+    "dotmac-positioning": frozenset({"po_0002_observation_holds.py"}),
     "dotmac-procurement": frozenset(),
     "dotmac-projects": frozenset(),
     "dotmac-publishing": frozenset(),
     "dotmac-records": frozenset(),
-    "dotmac-referrals": frozenset(),
+    # `rf_0002` adds the opaque service-location ref; still editable until
+    # `dotmac-referrals` 0.1.0a2 is tagged.
+    "dotmac-referrals": frozenset({"rf_0002_service_location_ref.py"}),
     "dotmac-release-catalog": frozenset(),
     "dotmac-reseller-management": frozenset(),
-    "dotmac-service-orders": frozenset(),
+    # `so_0002` adds the opaque service-location ref; still editable until
+    # `dotmac-service-orders` 0.1.0a2 is tagged.
+    "dotmac-service-orders": frozenset({"so_0002_service_location_ref.py"}),
     "dotmac-sites": frozenset(),
     "dotmac-surveys": frozenset(),
     "dotmac-web-analytics": frozenset(),

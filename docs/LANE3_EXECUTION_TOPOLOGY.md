@@ -446,6 +446,120 @@ them red):
 4. Where the JIT provisioner runs, and its owner.
 5. Certificate and token TTLs, after measurement.
 
+### Adopted-path evidence consumption status (2026-11-10)
+
+The [approved publication direction](inventories/foundation-publication-gate-ruling-20261107.md)
+uses the adopted keyless/OpenBao JWT/cosign-SLSA trust path while preserving
+behavioral proof. Gate-0 D as designed is retired; the historical broker,
+coordinator and privileged-runner proposals above grant no provisioning scope.
+
+Michael selected **preparing the offline-custody design** on 2026-11-10. The
+private evidence key remains outside all runners, as proposed in section 5.
+The actual public recipient and private-key custody location under decision 2
+still belong in the concrete operational packet. No key creation, enrollment,
+provisioning, release or deployment was authorized by the design selection.
+
+The bounded plaintext consumer is offline-only: it verifies the closed
+manifest/member set and exposure-crossing completeness. The public publication
+oracle instead requires an authenticated offline verification result. Its
+public consumer is implemented with an unenrolled policy, so it remains
+indeterminate. Complete independent
+Control/outcome/compensation joins remain required before any result can
+certify a rehearsal. Eligible receipt metadata alone cannot make publication
+pass, and private plaintext is not a public-runner input.
+
+### Public offline-result authentication (source; unenrolled)
+
+Use a dedicated offline Ed25519 signing key, separate from the `age` decryption
+key and existing CP, candidate and host keys. The proposed maintained signature
+mechanism is [OpenSSH SSHSIG](https://man.openbsd.org/ssh-keygen#ALLOWED_SIGNERS),
+with fixed namespace `foundation-rehearsal-verification-v1@dotmac.io` and signer
+principal `foundation-offline-verifier@dotmac.io`. These are purpose identifiers,
+not assertions that an email account or enrolled key exists.
+
+The complete offline orchestrator remains unimplemented. It must check
+ciphertext identity before decryption, its approved source/tool profile and
+every required private evidence join before creating any verified result. The
+plaintext helper alone cannot produce one.
+
+The implemented `lane3.offline-verification-result.v1` public claim binds the
+selected repository/run/attempt, SDK-canonical receipt digest, ciphertext digest,
+CandidateArtifact.v1 record digest, release revision, verifier source/profile
+and current policy digests, verification time and expiry. The artifact-record
+digest is not the wheel file SHA. No independently unverified evidence artifact
+ID or wheel SHA is added to this contract; actual retrieval/provenance and
+recorded distribution bytes remain full offline-verifier prerequisites. No
+private paths, addresses, raw observations, free text or supplied check results
+belong in the public claim.
+
+The public oracle authenticates the detached signature with a protected-main
+policy, signer file and mandatory revocation file. Their exact hashes, fixed
+namespace/principal, current source/profile, all expected coordinates and expiry
+must match. The fixed `/usr/bin/ssh-keygen` must be a safe root-owned regular
+file matching the enrolled tool hash. Result and workflow input select no trust
+root, executable or verification time. Maximum result age/lifetime is 24 hours;
+future-clock tolerance is five minutes. OpenSSH applies signer validity and
+revocations at current verification time.
+
+Two bounded public base64 inputs enter the release step through environment
+values, never shell interpolation. Strict decoding and authentication precede
+retention of the exact public result, signature and receipt in a named release
+artifact. The existing candidate-distribution artifact remains separate. No
+new service or result registry is introduced.
+
+The publisher receives the seven independent build-oracle coordinates through
+fixed job outputs. After preparation and a fresh protected-main assertion, it
+re-authenticates that selected public decision immediately before upload. A
+fresh post-signature clock check rejects expiry during queue or verification.
+This narrow recheck does not select a newer rehearsal API run; API selection
+and admission remain the original build-side oracle's responsibility.
+
+This signature authenticates the trusted offline principal; it does not prove
+actual code execution or workstation integrity. Michael must control that
+boundary and run the pinned verifier. Existing cosign/SLSA artifact proofs and
+OpenBao identity proofs keep their separate purposes. Existing host/candidate
+attestations cannot be repurposed to certify bundle contents.
+
+Hosted synthetic-key tests are authored for the result parser, signature
+adapter and public oracle wiring; execution remains required. The shipped
+policy is `unenrolled`, its three enrollment pins are null, and both public
+trust files are empty. Missing revocations never mean success. This source
+creates no production key and enrolls no signer.
+
+### Late evidence transport (source; unenrolled)
+
+The runner no longer accepts a prebuilt encrypted bundle. Its external probe
+bytes are read once for qualification and retained unchanged in memory. After
+execution, it freezes the actual Executor crossing records and applies the
+existing completeness join, then the fixed finalizer builds the V1 manifest
+and a deterministic uncompressed USTAR archive with exactly `manifest.json`,
+`probe-evidence.json` and `exposure-calls.json`. Encryption happens before receipt
+assembly in the same process that holds the genuine plan, grant and outcome.
+The receipt binds the exact newly written ciphertext read back by the finalizer.
+
+`docs/inventories/lane3-evidence-encryption-policy.json` is protected source,
+not a dispatch input. Its initial `unenrolled` state has no public recipient or
+age executable hash. Before any host contact, preflight requires enrollment and
+safe fixed `/usr/bin/age` matching its pin. Enrollment remains Michael's separate
+operational decision. The adapter uses only the public native X25519 recipient;
+there is no private key, signing or decryption operation. Plaintext archive bytes
+remain in memory, process diagnostics are suppressed, and ciphertext output is
+exclusive, private-mode and read back with bounds. The collector uses an invocation-owned
+private temporary directory and exclusive file creation, removed on script exit. Uploads enumerate only
+ciphertext plus existing receipt/status and terminal records, never raw members.
+
+These are transport checks. The age header is not an independent encryption
+proof; enrolled-tool encrypt/decrypt round-trip is still owed. There is no
+complete offline proof producer and no behavioral PASS from this finalizer;
+Control/outcome/exact-rule/foreign-preservation/negative-target joins and both
+BLOCKED rehearsal items remain outstanding.
+
+The complete offline verifier, private evidence joins and actual operational
+packet remain open. That packet must identify tool/profile pins, public age
+recipient and signing-key enrollment, custody procedure, revocation/recovery,
+cleanup and live negative proofs. Publication stays unavailable until every
+required evidence and current trust check is implemented, qualified and enrolled.
+
 ## 12. D4 scope: producing `RehearsalReceipt.v2` (added 2026-10-06)
 
 D4 stays separate from Packet D (§ 10). This section fixes only its first
@@ -568,8 +682,10 @@ admitted launcher change. C4 needs B5 and Gate-0. C5 needs C4.
   - It takes the plan only from `lane3_receipt_v2.acquire_execution_plan`, and
     `establish_authorization` issues the grant against that plan.
   - It drives `execute_authorized_plan` at the transaction phase, and assembles
-    with `assemble_receipt` from the encrypted `--evidence-bundle` and
-    `--probe-vantage-ref`.
+    with `assemble_receipt` from current-run evidence finalized into the new
+    `--evidence-bundle-out` ciphertext. The vantage reference derives from
+    bound topology; neither a prebuilt ciphertext nor a supplied vantage
+    reference is accepted.
   - All of those refuse today. With the checked-in topology a run is
     UNANSWERABLE (exit 2) before the descriptor; with an admitted topology it is
     UNANSWERABLE at the plan, before the lease. D4 refusals map onto this

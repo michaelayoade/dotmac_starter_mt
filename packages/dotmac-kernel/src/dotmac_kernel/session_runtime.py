@@ -216,6 +216,8 @@ class DatabaseRuntime:
             platform_engine if platform_engine is not None else engine
         )
         self._legacy_tenant_settings = self._validate_legacy(legacy_tenant_settings)
+        self._bounded: dict[tuple[int, float], sessionmaker[Session]] = {}
+        self._bounded_lock = threading.Lock()
         self._tenant_lookup = tenant_lookup or _default_tenant_lookup
 
         self._session_factory = sessionmaker(
@@ -461,6 +463,78 @@ class DatabaseRuntime:
             raise
         finally:
             db.close()
+
+    # ── bounded side-channel pool ───────────────────────────────────────────
+
+    def _bounded_factory(
+        self, pool_size: int, pool_timeout: float
+    ) -> sessionmaker[Session]:
+        key = (pool_size, pool_timeout)
+        with self._bounded_lock:
+            cached = self._bounded.get(key)
+            if cached is None:
+                engine = create_engine(
+                    self._platform_engine.url,
+                    pool_pre_ping=True,
+                    hide_parameters=True,
+                    echo=False,
+                    pool_size=pool_size,
+                    max_overflow=0,
+                    pool_timeout=pool_timeout,
+                    pool_recycle=300,
+                )
+                cached = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+                self._bounded[key] = cached
+            return cached
+
+    @contextmanager
+    def bounded_platform_session(
+        self,
+        *,
+        pool_size: int = 4,
+        pool_timeout: float = 0.5,
+        statement_timeout_ms: int = 500,
+    ) -> Generator[Session, None, None]:
+        """A platform-credential session on a DEDICATED, bounded pool.
+
+        For a high-volume side channel (the anonymous-route rate limiter) that
+        must not be able to exhaust `platform_engine`, which serves the control
+        plane on a deliberately tiny pool. The pool is built lazily from the
+        platform engine's URL (connection options a product set on its own
+        engine, such as a custom `creator`, do not carry over), has no overflow,
+        and fails the checkout after `pool_timeout` seconds rather than queueing.
+        On PostgreSQL each transaction also runs under
+        `SET LOCAL statement_timeout`, so a stalled statement cannot hold a
+        connection. Commit on success, rollback on error, close always. It is a
+        bounded variant of `platform_session`, not a second authority: this
+        module still owns every session construction.
+        """
+        if pool_size < 1 or pool_timeout <= 0 or statement_timeout_ms < 1:
+            raise ValueError(
+                "pool_size, pool_timeout and statement_timeout_ms must be positive"
+            )
+        factory = self._bounded_factory(pool_size, pool_timeout)
+        db = factory()
+        try:
+            if factory.kw["bind"].dialect.name == "postgresql":
+                db.execute(
+                    text("SELECT set_config('statement_timeout', :ms, true)"),
+                    {"ms": str(statement_timeout_ms)},
+                )
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def dispose_bounded_pools(self) -> None:
+        """Close every bounded pool (test teardown, orderly shutdown)."""
+        with self._bounded_lock:
+            for factory in self._bounded.values():
+                factory.kw["bind"].dispose()
+            self._bounded.clear()
 
     # ── non-request boundaries ──────────────────────────────────────────────
 

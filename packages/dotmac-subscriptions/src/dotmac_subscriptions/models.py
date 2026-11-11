@@ -145,6 +145,9 @@ class _ContractLineColumns:
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     scale: Mapped[int] = mapped_column(Integer, nullable=False)
     offer_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Names the published OfferVersionPrice a catalog_price line copies. NULL
+    # only for a contract_price line (su_0004 enforces both directions).
+    price_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     entitlement_codes: Mapped[list[str]] = mapped_column(
         _JSON, nullable=False, default=list
     )
@@ -199,6 +202,19 @@ class _OccurrenceColumns:
     )
     command_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     correlation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    # su_0006: why a capped/prepaid renewal is held at pending_validity, and the
+    # owner's typed evidence that resolved it. The evidence columns are NULL
+    # until resolution; there is no JSON.
+    validity_hold_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    validity_owner_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    validity_evidence_ref: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    validity_resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    validity_resolution_command_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), nullable=True
+    )
+    validity_actor_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -475,6 +491,16 @@ class SubscriptionContractLine(Base, _ContractLineColumns):
             name="fk_contract_lines_offer_version",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "offer_version_id", "price_key"],
+            [
+                f"{SCHEMA}.offer_version_prices.tenant_id",
+                f"{SCHEMA}.offer_version_prices.offer_version_id",
+                f"{SCHEMA}.offer_version_prices.price_key",
+            ],
+            name="fk_contract_lines_catalog_price",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "tenant_id",
             "contract_version_id",
@@ -575,8 +601,38 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
         ),
         CheckConstraint("generation > 0", name="ck_occurrences_generation"),
         CheckConstraint(
-            "state IN ('scheduled', 'due', 'emitted', 'cancelled')",
+            "state IN ('scheduled', 'due', 'emitted', 'cancelled', "
+            "'pending_validity')",
             name="ck_occurrences_state",
+        ),
+        CheckConstraint(
+            "validity_hold_reason IS NULL OR "
+            "validity_hold_reason IN ('capped', 'prepaid')",
+            name="ck_occurrences_validity_hold",
+        ),
+        CheckConstraint(
+            "(state = 'pending_validity' AND validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NULL AND validity_evidence_ref IS NULL "
+            "AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
+            "OR (state <> 'pending_validity' AND "
+            "((validity_hold_reason IS NULL AND validity_owner_code IS NULL "
+            "AND validity_evidence_ref IS NULL AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
+            "OR (validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NOT NULL "
+            "AND validity_evidence_ref IS NOT NULL "
+            "AND validity_resolved_at IS NOT NULL "
+            "AND validity_resolution_command_id IS NOT NULL "
+            "AND validity_actor_ref IS NOT NULL)))",
+            name="ck_occurrences_validity_evidence",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "validity_resolution_command_id",
+            name="uq_occurrences_validity_command",
         ),
         CheckConstraint(
             "amount_scale >= 0 AND amount_scale <= 6", name="ck_occurrences_scale"
@@ -588,6 +644,23 @@ class RecurringChargeOccurrence(Base, _OccurrenceColumns):
             "period_start",
         ),
         Index("ix_occurrences_unacknowledged", "tenant_id", "output_acknowledged_at"),
+        # At most one successor per occurrence, as Billing's obligation
+        # correction. The coverage-overlap trigger itself is migration-owned.
+        Index(
+            "uq_occurrences_correction",
+            "tenant_id",
+            "corrects_occurrence_id",
+            unique=True,
+            postgresql_where=sa.text("state <> 'cancelled'"),
+            sqlite_where=sa.text("state <> 'cancelled'"),
+        ),
+        Index(
+            "ix_occurrences_line_coverage",
+            "tenant_id",
+            "contract_id",
+            "contract_line_key",
+            "rating_coverage_start",
+        ),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()
@@ -911,6 +984,15 @@ class PlatformSubscriptionContractVersion(Base, _ContractVersionColumns):
 class PlatformSubscriptionContractLine(Base, _ContractLineColumns):
     __tablename__ = "platform_subscription_contract_lines"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["offer_version_id", "price_key"],
+            [
+                f"{SCHEMA}.platform_offer_version_prices.offer_version_id",
+                f"{SCHEMA}.platform_offer_version_prices.price_key",
+            ],
+            name="fk_platform_contract_lines_catalog_price",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "contract_version_id",
             "contract_line_key",
@@ -998,8 +1080,37 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
         ),
         CheckConstraint("generation > 0", name="ck_platform_occurrences_generation"),
         CheckConstraint(
-            "state IN ('scheduled', 'due', 'emitted', 'cancelled')",
+            "state IN ('scheduled', 'due', 'emitted', 'cancelled', "
+            "'pending_validity')",
             name="ck_platform_occurrences_state",
+        ),
+        CheckConstraint(
+            "validity_hold_reason IS NULL OR "
+            "validity_hold_reason IN ('capped', 'prepaid')",
+            name="ck_platform_occurrences_validity_hold",
+        ),
+        CheckConstraint(
+            "(state = 'pending_validity' AND validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NULL AND validity_evidence_ref IS NULL "
+            "AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
+            "OR (state <> 'pending_validity' AND "
+            "((validity_hold_reason IS NULL AND validity_owner_code IS NULL "
+            "AND validity_evidence_ref IS NULL AND validity_resolved_at IS NULL "
+            "AND validity_resolution_command_id IS NULL "
+            "AND validity_actor_ref IS NULL) "
+            "OR (validity_hold_reason IS NOT NULL "
+            "AND validity_owner_code IS NOT NULL "
+            "AND validity_evidence_ref IS NOT NULL "
+            "AND validity_resolved_at IS NOT NULL "
+            "AND validity_resolution_command_id IS NOT NULL "
+            "AND validity_actor_ref IS NOT NULL)))",
+            name="ck_platform_occurrences_validity_evidence",
+        ),
+        UniqueConstraint(
+            "validity_resolution_command_id",
+            name="uq_platform_occurrences_validity_command",
         ),
         CheckConstraint(
             "amount_scale >= 0 AND amount_scale <= 6",
@@ -1009,6 +1120,19 @@ class PlatformRecurringChargeOccurrence(Base, _OccurrenceColumns):
             "ix_platform_occurrences_contract", "contract_version_id", "period_start"
         ),
         Index("ix_platform_occurrences_unacknowledged", "output_acknowledged_at"),
+        Index(
+            "uq_platform_occurrences_correction",
+            "corrects_occurrence_id",
+            unique=True,
+            postgresql_where=sa.text("state <> 'cancelled'"),
+            sqlite_where=sa.text("state <> 'cancelled'"),
+        ),
+        Index(
+            "ix_platform_occurrences_line_coverage",
+            "contract_id",
+            "contract_line_key",
+            "rating_coverage_start",
+        ),
         schema_table_args(SCHEMA),
     )
     id: Mapped[UUID] = uuid_pk()

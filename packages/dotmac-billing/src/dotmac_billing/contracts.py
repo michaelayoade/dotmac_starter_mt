@@ -1076,6 +1076,45 @@ class WithholdingTaxEvidenceV1:
 
 
 @dataclass(frozen=True, slots=True)
+class WithholdingCashRequirementV1:
+    """Billing-owned cash requirement from a Tax-owned withholding amount.
+
+    A quote is not accepted withholding, cash, credit, or a posting. The
+    withholding amount is whatever a dotmac-tax determination produced; this
+    value only subtracts it from the invoice total.
+    """
+
+    invoice_total: Money
+    withholding_amount: Money
+    cash_required: Money = field(init=False)
+
+    def __post_init__(self) -> None:
+        total, withheld = self.invoice_total, self.withholding_amount
+        if (
+            type(total) is not Money
+            or type(withheld) is not Money
+            or total.currency != withheld.currency
+            or total.amount <= 0
+            or withheld.amount <= 0
+            or withheld.amount >= total.amount
+        ):
+            raise BillingRuleViolation(
+                "withholding_quote_invalid",
+                "withholding must leave positive exact cash",
+            )
+        from decimal import localcontext
+
+        from dotmac_billing._opening_values import cash_decimal_context
+
+        with localcontext(cash_decimal_context()):
+            object.__setattr__(
+                self,
+                "cash_required",
+                Money(total.amount - withheld.amount, total.currency),
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class WithholdingCertificateObservationV1:
     source_owner: str
     observation_ref: str
@@ -1391,6 +1430,7 @@ __all__ = [
     "InvoiceDocumentFactV3",
     "StoredInvoiceDocumentFactV3",
     "WithholdingTaxEvidenceV2",
+    "WithholdingCashRequirementV1",
     "IssueRatedInvoiceV1",
     "IssuedRatedInvoiceV1",
     "ObligationSourceRegistry",

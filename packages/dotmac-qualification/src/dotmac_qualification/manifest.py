@@ -8,7 +8,7 @@ from dotmac_qualification.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="qualification",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="qual",
     migration_prefix="qu",

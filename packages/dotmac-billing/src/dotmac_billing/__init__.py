@@ -1,5 +1,13 @@
 """Public Billing contracts, queries and owner commands."""
 
+from dotmac_billing.account_statement import (
+    AccountStatementLineV1,
+    AccountStatementV1,
+    GetAccountStatementV1,
+    StatementBalancesV1,
+    compute_account_statement_digest,
+    get_account_statement,
+)
 from dotmac_billing.authority import (
     AuthorityBinding,
     BillingPlane,
@@ -11,6 +19,7 @@ from dotmac_billing.authority import (
 from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
     ApplyNonCashCredit,
+    FreezeIssuedInvoiceWithholding,
     GrantNonCashCredit,
     NumberingProvider,
     ReduceNonCashCreditGrant,
@@ -76,6 +85,7 @@ from dotmac_billing.contracts import (
     StoredInvoiceDocumentFactV1,
     StoredInvoiceDocumentFactV2,
     StoredInvoiceDocumentFactV3,
+    WithholdingCashRequirementV1,
     WithholdingCertificateObservationV1,
     WithholdingDischargeEffectV1,
     WithholdingTaxEvidenceV1,
@@ -269,6 +279,8 @@ from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
 )
+from dotmac_billing.opening_variance import get_accounting_fact_v6
+from dotmac_billing.opening_variance_contracts import AccountingFactV6
 from dotmac_billing.opening_verification import (
     ProfileBoundAuthorityReaderV1,
     SignedOpeningImportGrantProviderV2,
@@ -346,7 +358,7 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a11"
+__version__ = "0.1.0a12"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
@@ -374,6 +386,12 @@ __all__ = [
     "get_document_exposure",
     "get_document_withholding_evidence",
     "list_accounting_facts",
+    "AccountStatementLineV1",
+    "AccountStatementV1",
+    "GetAccountStatementV1",
+    "StatementBalancesV1",
+    "compute_account_statement_digest",
+    "get_account_statement",
     "summarize_accounting_fact_window",
     "AccountingFactWindowSummaryV1",
     "SummarizeAccountingFactWindowV1",
@@ -546,11 +564,13 @@ __all__ = [
     "ReceivableExposureV2",
     "OpeningImportReceiptV2",
     "AccountingFactV5",
+    "AccountingFactV6",
     "get_opening_import_receipt_v2",
     "get_opening_receivable_basis",
     "get_opening_receivable_position",
     "get_opening_receivable_exposure",
     "get_accounting_fact_v5",
+    "get_accounting_fact_v6",
     "opening_manifest_fingerprint_v2",
     "opening_account_command_digest_v2",
     "opening_withholding_component_identity",
@@ -620,10 +640,12 @@ __all__ = [
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
     "AcceptWithholdingDischarge",
+    "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
     "AccountingFactV2",
     "WithholdingTaxEvidenceV1",
     "WithholdingTaxLineV1",
+    "WithholdingCashRequirementV1",
     "WithholdingCertificateObservationV1",
     "WithholdingDischargeEffectV1",
     "get_withholding_discharge",

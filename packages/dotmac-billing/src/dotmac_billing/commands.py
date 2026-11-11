@@ -29,6 +29,106 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV1,
     WithholdingTaxEvidenceV2,
 )
+from dotmac_billing.opening_variance_contracts import OpeningVarianceResolutionRefV1
+from dotmac_billing.tax_dependency_evidence import (
+    InvoiceTaxEvidenceV2,
+    TaxCommercialSourceEvidenceV1,
+)
+
+WITHHOLDING_FREEZE_PERMISSION = "billing.withholding.freeze"
+
+
+class ActorPermissionReader(Protocol):
+    """Assembly adapter over the kernel permission decision (``authorize_party``).
+
+    Billing records an actor reference and cannot itself attest who holds a
+    permission, so the late-freeze command asks the wired reader whether the
+    recorded actor holds ``WITHHOLDING_FREEZE_PERMISSION``. With no reader wired
+    the command refuses.
+
+    ``holds`` authorizes the actor the CALLER names; it does not authenticate
+    the caller. The assembly therefore must (1) put the route behind
+    ``permission_guard("billing.withholding.freeze", ...)``, (2) pass the
+    authenticated party that guard returns as ``actor_ref`` and never a value
+    from the request, and (3) wire this reader over
+    ``dotmac_kernel.deps.authorize_party``.
+    """
+
+    def holds(self, *, scope: Scope, actor_ref: str, code: str) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class TaxSealedLineV1:
+    sequence: int
+    taxable_amount: Money
+    rate: Decimal | None
+    tax_amount: Money
+
+
+@dataclass(frozen=True, slots=True)
+class TaxSealedDependencyV1:
+    """A prior tax a dependency-tax base folds in, with the amount Tax sealed."""
+
+    determination_set_id: UUID
+    determination_id: UUID
+    tax_amount: Money
+
+
+@dataclass(frozen=True, slots=True)
+class TaxSealedComponentV1:
+    """One elected withholding component exactly as dotmac-tax sealed it."""
+
+    determination_id: UUID
+    tax_code_id: UUID
+    rule_id: UUID
+    rule_version: int
+    treatment_code: str
+    calculation_base_code: str
+    party_category: str | None
+    party_classification_id: UUID
+    base_amount: Money
+    tax_amount: Money
+    lines: tuple[TaxSealedLineV1, ...]
+    dependency_components: tuple[TaxSealedDependencyV1, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TaxDeterminationSealV1:
+    """The determination dotmac-tax holds, sealed, for one determination set.
+
+    Tax returns the sealed result, not a yes or no: the identity, fingerprints,
+    date, every original fact and the elected withholding components (code,
+    rule, base, rate lines, amount). The late freeze requires every component
+    and fact the caller offered to equal this and builds the frozen rows from
+    these values, so a real set id cannot be paired with an invented amount.
+    """
+
+    determination_set_id: UUID
+    result_fingerprint: str
+    source_fingerprint: str
+    occurred_on: date
+    determined_at: datetime
+    tenant_id: UUID
+    commercial_source: TaxCommercialSourceEvidenceV1
+    source_amount: Money
+    recognition_basis_code: str
+    counterparty_ref: str | None
+    supply_ref: str | None
+    place_ref: str | None
+    components: tuple[TaxSealedComponentV1, ...]
+
+
+class TaxSealReader(Protocol):
+    """Assembly adapter over the independently owned dotmac-tax capability.
+
+    ``read_seal`` returns the sealed identity Tax holds for a determination set,
+    or ``None`` when Tax has no such set. It is read-only and tenant-scoped. The
+    late-freeze command refuses when no reader is wired.
+    """
+
+    def read_seal(
+        self, *, scope: Scope, determination_set_id: UUID
+    ) -> TaxDeterminationSealV1 | None: ...
 
 
 class NumberingProvider(Protocol):
@@ -129,6 +229,9 @@ class IssueCreditNote:
     document_profile_version: str
     tax_snapshots: tuple[AppliedTaxSnapshotV1, ...] = ()
     fx_snapshot: AppliedFxSnapshotV1 | None = None
+    #: Set only by a governed opening-variance resolution (W-V2): the credit
+    #: note's own transaction appends the resolution event.
+    resolves_variance_ref: OpeningVarianceResolutionRefV1 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +306,43 @@ class AcceptWithholdingDischarge:
 
 
 @dataclass(frozen=True, slots=True)
+class FreezeIssuedInvoiceWithholding:
+    """Freeze withholding for an issued invoice that has no frozen components.
+
+    ``evidence`` is a V2 dotmac-tax determination, evaluated as of the invoice's
+    issue date (purpose ``expected_withholding``); the election is its party
+    classification. The caller does supply Tax-owned amounts, so Billing does
+    not trust them: the determination must name the commercial source of
+    exactly one line of this invoice, its original facts must equal the facts
+    that line retained, each base equals that line's source amount (plus the
+    referenced prior tax for a dependency-tax base), dotmac-tax must confirm the
+    determination through the wired ``TaxSealReader`` (no reader, no freeze), and
+    the frozen total is capped at the outstanding amount plus withholding already
+    accepted. The frozen rows carry that line's obligation. Any issued invoice
+    without a freeze is eligible, but only for an actor who holds
+    ``WITHHOLDING_FREEZE_PERMISSION`` (checked through the wired
+    ``ActorPermissionReader``); the actor, command id and reason are recorded on
+    every row. The actor must be the authenticated party returned by the route's
+    ``permission_guard("billing.withholding.freeze")``; the reader authorizes the
+    actor named, it does not authenticate the caller. ``line_id`` names the line
+    explicitly; it is required for a line
+    whose retained Tax evidence is V1, and then Tax must confirm the commercial
+    source and original facts. Idempotent on ``command_id``.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    command_id: str
+    actor_ref: str
+    reason: str
+    evidence: InvoiceTaxEvidenceV2
+    # The invoice line the permission-holder names. Required when that line's
+    # retained Tax evidence is V1 (it carries no commercial source to find it by).
+    line_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ReverseWithholdingDischarge:
     scope: Scope
     discharge_id: UUID
@@ -230,6 +370,7 @@ class GrantNonCashCredit:
     apply_on_issue: bool = False
     replaces_grant_id: UUID | None = None
     replaces_effect_id: UUID | None = None
+    resolves_variance_ref: OpeningVarianceResolutionRefV1 | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,6 +422,7 @@ __all__ = [
     "ReverseNonCashCreditApplication",
     "ReduceNonCashCreditGrant",
     "AcceptWithholdingDischarge",
+    "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
     "AllocationCommand",
     "ApplyAvailableCreditCommand",
@@ -290,7 +432,14 @@ __all__ = [
     "DeallocationCommand",
     "IssueCreditNote",
     "IssueDocument",
+    "ActorPermissionReader",
     "NumberingProvider",
+    "WITHHOLDING_FREEZE_PERMISSION",
+    "TaxDeterminationSealV1",
+    "TaxSealedComponentV1",
+    "TaxSealedDependencyV1",
+    "TaxSealedLineV1",
+    "TaxSealReader",
     "ReallocationCommand",
     "RefundCommand",
     "ReversePostingGroupCommand",

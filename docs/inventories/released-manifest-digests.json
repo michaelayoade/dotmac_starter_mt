@@ -184,6 +184,17 @@
         "capabilities": [
           "payments.settlement.observation.v1"
         ]
+      },
+      "0.1.0a3": {
+        "tag": "dotmac-connector-paystack-v0.1.0a3",
+        "peeled_commit": "669bc2fbec797e5ef48521061829f5fbee6622c9",
+        "release_run": "42875633648",
+        "manifest_digest": "71b6108edc6cd8321885d90511d188c1e4fb6861d143fc2123f4fb4a44cd2bbc",
+        "spi_range": ">=1.4,<2.0",
+        "capabilities": [
+          "payments.refund.v1",
+          "payments.settlement.observation.v1"
+        ]
       }
     },
     "dotmac-connector-remita": {

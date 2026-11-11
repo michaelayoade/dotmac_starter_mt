@@ -1,0 +1,1385 @@
+{
+ "digest": "4f52df7b0392148349c9140d1e03ce605c0e38ff2dbdf7fa88eb771e451c4c44",
+ "payload": {
+  "billing_account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+  "committed_at": "2026-11-08T16:22:51.958651+00:00",
+  "corrects_posting_group_id": null,
+  "effect_kind": "opening_account_imported",
+  "effects": [
+   {
+    "amount_delta": {
+     "amount": "60.00",
+     "currency": "NGN",
+     "minor_units": 2
+    },
+    "lane": "available_credit"
+   },
+   {
+    "amount_delta": {
+     "amount": "120.00",
+     "currency": "NGN",
+     "minor_units": 2
+    },
+    "lane": "receivable"
+   }
+  ],
+  "fact_id": "e58a9eee-d494-40ab-a258-ae9fd0c9e766",
+  "fact_version": 5,
+  "import_receipt": {
+   "basis_ids": [
+    "bd54d276-9bc5-4c7e-8f91-d79b031b8abc",
+    "dee1f00b-02f3-4eca-af74-42c6c3d357e1"
+   ],
+   "billing_account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+   "lot_ids": [
+    "59fc5ac2-4ac0-4e5c-bc11-0e97572a4dbf",
+    "d88ea0c0-42aa-4282-85eb-25aec062b26f"
+   ],
+   "manifest": {
+    "batch_controls": [],
+    "capture": {
+     "account_mapping_version": "mapping:v1",
+     "captured_at": "2026-10-13T00:00:00+00:00",
+     "cash_mapping_version": "cash-mapping:v1",
+     "economic_cutoff": "2026-10-13T00:00:00+00:00",
+     "installation_id": "installation:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+     "isolation": "repeatable_read",
+     "population_version": "population:v1",
+     "recorded_cutoff": "2026-10-13T00:00:00+00:00",
+     "schema_heads": [
+      "schema:1"
+     ],
+     "snapshot_id": "snapshot:1",
+     "source_authority_ref": "source-authority:1",
+     "source_repository_sha": "repo-sha",
+     "source_system": "sub"
+    },
+    "cash_lots": [
+     {
+      "confirmation": {
+       "cash_amount_minor": 10000,
+       "currency": "NGN",
+       "economic_at": "2026-10-13T00:00:00+00:00",
+       "evidence_digest": "confirmation-digest",
+       "evidence_kind": "provider_settled",
+       "owner": "payments.confirmation",
+       "precision": 2,
+       "recorded_at": "2026-10-13T00:00:00+00:00",
+       "reference": "confirmation:1",
+       "version": "v1"
+      },
+      "consumptions": [
+       {
+        "amount_minor": 4000,
+        "economic_at": "2026-10-13T00:00:00+00:00",
+        "kind": "allocation",
+        "ledger_ref": "ledger:1",
+        "recorded_at": "2026-10-13T00:00:00+00:00",
+        "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+        "reverses_ref": null,
+        "target_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0"
+       }
+      ],
+      "gross_minor": 10000,
+      "lot_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:lot:0",
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "residual_minor": 6000,
+      "source_identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+       "kind": "payment"
+      },
+      "source_settlement_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+      "source_system": "legacy-payments"
+     },
+     {
+      "confirmation": {
+       "cash_amount_minor": 2000,
+       "currency": "NGN",
+       "economic_at": "2026-10-13T00:00:00+00:00",
+       "evidence_digest": "confirmation-digest",
+       "evidence_kind": "provider_settled",
+       "owner": "payments.confirmation",
+       "precision": 2,
+       "recorded_at": "2026-10-13T00:00:00+00:00",
+       "reference": "confirmation:1",
+       "version": "v1"
+      },
+      "consumptions": [
+       {
+        "amount_minor": 2000,
+        "economic_at": "2026-10-13T00:00:00+00:00",
+        "kind": "allocation",
+        "ledger_ref": "ledger:1",
+        "recorded_at": "2026-10-13T00:00:00+00:00",
+        "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+        "reverses_ref": null,
+        "target_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1"
+       }
+      ],
+      "gross_minor": 2000,
+      "lot_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:lot:1",
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "residual_minor": 0,
+      "source_identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+       "kind": "payment"
+      },
+      "source_settlement_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+      "source_system": "legacy-payments"
+     }
+    ],
+    "controls": [
+     {
+      "adjustment_total_minor": 0,
+      "available_cash_credit_minor": 6000,
+      "available_non_cash_credit_minor": 0,
+      "collectible_receivable_minor": 11600,
+      "open_ar_minor": 11600,
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "prepaid_funding_consumed_minor": 0,
+      "prepaid_funding_reserved_minor": 0,
+      "refunded_total_minor": 0,
+      "unapplied_customer_credit_minor": 0,
+      "written_off_total_minor": 9
+     }
+    ],
+    "counts": {
+     "blocking": 0,
+     "eligible": 4,
+     "excluded": 0,
+     "population": 4
+    },
+    "dispositions": [
+     {
+      "disposition": "eligible",
+      "identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+       "kind": "invoice"
+      },
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "reason": "open invoice",
+      "residual_minor": 7000
+     },
+     {
+      "disposition": "eligible",
+      "identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+       "kind": "payment"
+      },
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "reason": "cash lot",
+      "residual_minor": 6000
+     },
+     {
+      "disposition": "eligible",
+      "identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+       "kind": "invoice"
+      },
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "reason": "open invoice",
+      "residual_minor": 5000
+     },
+     {
+      "disposition": "eligible",
+      "identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+       "kind": "payment"
+      },
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "reason": "cash lot",
+      "residual_minor": 0
+     }
+    ],
+    "measures": [
+     {
+      "archived_rows": 0,
+      "carried_rows": 0,
+      "document_residual_minor": 12000,
+      "excluded_rows": 0,
+      "non_carryable_rows": 0,
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "population_rows": 4,
+      "rebuild_gap_reason": null,
+      "rebuild_minor": 6000,
+      "stored_balance_minor": 12500,
+      "transferred_rows": 4
+     }
+    ],
+    "population": [
+     {
+      "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+      "kind": "invoice"
+     },
+     {
+      "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+      "kind": "payment"
+     },
+     {
+      "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+      "kind": "invoice"
+     },
+     {
+      "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+      "kind": "payment"
+     }
+    ],
+    "receivables": [
+     {
+      "collection": {
+       "collection_timing": null,
+       "due_at": null,
+       "due_date_basis": {
+        "derivation_policy": null,
+        "derivation_version": null,
+        "effective_at": null,
+        "evidence_ref": "due:unknown:0",
+        "issued_at": null,
+        "override_actor": null,
+        "override_evidence_ref": null,
+        "override_reason": null,
+        "payment_terms_code": null,
+        "payment_terms_version": null,
+        "source_authority": "legacy",
+        "status": "unknown_unverified",
+        "supersedes_basis_ref": null,
+        "timezone": null
+       },
+       "evidence_ref": "collection:0",
+       "mapping_version": "collection-mapping:1",
+       "service_period": {
+        "ends_at": null,
+        "starts_at": null,
+        "status": "unknown_unverified"
+       },
+       "service_ref": null,
+       "source_authority": "legacy",
+       "status": "unknown_unverified",
+       "subject_ref": null
+      },
+      "historical_discharges": [
+       {
+        "amount_minor": 4000,
+        "economic_at": "2026-10-13T00:00:00+00:00",
+        "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "payment",
+        "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:payment:0",
+        "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+        "live_operation": "billing.settlement.accept",
+        "mapping_version": "mapping:1",
+        "recorded_at": "2026-10-13T00:00:00+00:00",
+        "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+        "replay_bindings": [],
+        "reverses_ref": null,
+        "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+        "source_system": "legacy-payments",
+        "tax_evidence_ref": "tax:payment:0",
+        "tax_snapshots": []
+       },
+       {
+        "amount_minor": 1000,
+        "economic_at": "2026-10-13T00:00:00+00:00",
+        "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "withholding",
+        "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:withholding:0",
+        "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:0",
+        "live_operation": "billing.withholding.accept",
+        "mapping_version": "mapping:1",
+        "recorded_at": "2026-10-13T00:00:00+00:00",
+        "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:withholding:0",
+        "replay_bindings": [
+         {
+          "component_ref": null,
+          "determination_ref": null,
+          "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "operation": "billing.withholding.accept",
+          "source_owner": "customer-remittance",
+          "source_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:0"
+         },
+         {
+          "component_ref": "component:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+          "determination_ref": "tax-set:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+          "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "operation": "billing.withholding.tax_component",
+          "source_owner": "dotmac-tax",
+          "source_ref": "f0e491ea8abce03703bba4947512d60ab7f77877f6a6fc0140853fd30957062d"
+         }
+        ],
+        "reverses_ref": null,
+        "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:0",
+        "source_system": "customer-remittance",
+        "tax_evidence_ref": "tax:withholding:0",
+        "tax_snapshots": [
+         {
+          "jurisdiction_code": "NGA",
+          "policy_id": "historic-wht-policy",
+          "policy_version": "7",
+          "rate": "0.2",
+          "tax_amount": {
+           "amount": "10.00",
+           "currency": "NGN",
+           "minor_units": 2
+          },
+          "taxable_basis": {
+           "amount": "50.00",
+           "currency": "NGN",
+           "minor_units": 2
+          },
+          "treatment_code": "withholding"
+         }
+        ]
+       }
+      ],
+      "original": {
+       "brand_asset": {
+        "file_id": null,
+        "status": "none"
+       },
+       "customer": {
+        "address": {
+         "city": null,
+         "country_code": "NGA",
+         "line_one": "Customer street",
+         "line_two": null,
+         "postal_code": null,
+         "region": null
+        },
+        "legal_name": "Original Customer",
+        "registered_identifiers": [],
+        "trading_name": null
+       },
+       "document_number": "LEGACY-0",
+       "document_profile_code": "invoice.standard",
+       "document_profile_version": "1",
+       "documentary_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "documentary_reference": "archive:invoice:0",
+       "fx_evidence_ref": "fx:not-applicable:NGN",
+       "fx_snapshot": null,
+       "grand_total": {
+        "amount": "120.00",
+        "currency": "NGN",
+        "minor_units": 2
+       },
+       "issued_at": "2026-10-13T00:00:00+00:00",
+       "locale": "en-NG",
+       "party_tax_identities": [
+        {
+         "country_code": "NGA",
+         "identity_type": "tax_id",
+         "identity_value": "historic-tax-id",
+         "party_role": "seller",
+         "source_authority": "party",
+         "source_version": "7"
+        }
+       ],
+       "payment_instructions": {
+        "account_name": "Original Seller",
+        "account_reference": "documentary-account",
+        "bank_name": "Original bank",
+        "method_code": "bank_transfer",
+        "narrative": null,
+        "routing_code": null
+       },
+       "seller": {
+        "address": {
+         "city": null,
+         "country_code": "NGA",
+         "line_one": "Seller street",
+         "line_two": null,
+         "postal_code": null,
+         "region": null
+        },
+        "legal_name": "Original Seller",
+        "registered_identifiers": [],
+        "trading_name": null
+       },
+       "subtotal": {
+        "amount": "110.00",
+        "currency": "NGN",
+        "minor_units": 2
+       },
+       "tax_evidence_ref": "tax-document:0",
+       "tax_snapshots": [
+        {
+         "jurisdiction_code": "NGA",
+         "policy_id": "historic-policy",
+         "policy_version": "7",
+         "rate": "0.2",
+         "tax_amount": {
+          "amount": "10.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "taxable_basis": {
+          "amount": "50.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "treatment_code": "vat"
+        }
+       ],
+       "tax_total": {
+        "amount": "10.00",
+        "currency": "NGN",
+        "minor_units": 2
+       },
+       "timezone": "Africa/Lagos"
+      },
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "receivable_mapping_version": "ar-mapping:1",
+      "residual_minor": 7000,
+      "source_evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "source_identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+       "kind": "invoice"
+      },
+      "source_invoice_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+      "source_resolver_version": "resolver:1",
+      "tax_mapping_version": "tax-mapping:1"
+     },
+     {
+      "collection": {
+       "collection_timing": null,
+       "due_at": null,
+       "due_date_basis": {
+        "derivation_policy": null,
+        "derivation_version": null,
+        "effective_at": null,
+        "evidence_ref": "due:unknown:1",
+        "issued_at": null,
+        "override_actor": null,
+        "override_evidence_ref": null,
+        "override_reason": null,
+        "payment_terms_code": null,
+        "payment_terms_version": null,
+        "source_authority": "legacy",
+        "status": "unknown_unverified",
+        "supersedes_basis_ref": null,
+        "timezone": null
+       },
+       "evidence_ref": "collection:1",
+       "mapping_version": "collection-mapping:1",
+       "service_period": {
+        "ends_at": null,
+        "starts_at": null,
+        "status": "unknown_unverified"
+       },
+       "service_ref": null,
+       "source_authority": "legacy",
+       "status": "unknown_unverified",
+       "subject_ref": null
+      },
+      "historical_discharges": [
+       {
+        "amount_minor": 2000,
+        "economic_at": "2026-10-13T00:00:00+00:00",
+        "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "payment",
+        "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:payment:1",
+        "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+        "live_operation": "billing.settlement.accept",
+        "mapping_version": "mapping:1",
+        "recorded_at": "2026-10-13T00:00:00+00:00",
+        "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+        "replay_bindings": [],
+        "reverses_ref": null,
+        "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+        "source_system": "legacy-payments",
+        "tax_evidence_ref": "tax:payment:1",
+        "tax_snapshots": []
+       },
+       {
+        "amount_minor": 1000,
+        "economic_at": "2026-10-13T00:00:00+00:00",
+        "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "withholding",
+        "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:withholding:1",
+        "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:1",
+        "live_operation": "billing.withholding.accept",
+        "mapping_version": "mapping:1",
+        "recorded_at": "2026-10-13T00:00:00+00:00",
+        "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:withholding:1",
+        "replay_bindings": [
+         {
+          "component_ref": null,
+          "determination_ref": null,
+          "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "operation": "billing.withholding.accept",
+          "source_owner": "customer-remittance",
+          "source_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:1"
+         },
+         {
+          "component_ref": "component:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+          "determination_ref": "tax-set:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+          "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "operation": "billing.withholding.tax_component",
+          "source_owner": "dotmac-tax",
+          "source_ref": "0fb268f90a1b2d8455441548f71f03a16da3c4009ffbbb624500090d35f4257b"
+         }
+        ],
+        "reverses_ref": null,
+        "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:1",
+        "source_system": "customer-remittance",
+        "tax_evidence_ref": "tax:withholding:1",
+        "tax_snapshots": [
+         {
+          "jurisdiction_code": "NGA",
+          "policy_id": "historic-wht-policy",
+          "policy_version": "7",
+          "rate": "0.2",
+          "tax_amount": {
+           "amount": "10.00",
+           "currency": "NGN",
+           "minor_units": 2
+          },
+          "taxable_basis": {
+           "amount": "50.00",
+           "currency": "NGN",
+           "minor_units": 2
+          },
+          "treatment_code": "withholding"
+         }
+        ]
+       }
+      ],
+      "original": {
+       "brand_asset": {
+        "file_id": null,
+        "status": "none"
+       },
+       "customer": {
+        "address": {
+         "city": null,
+         "country_code": "NGA",
+         "line_one": "Customer street",
+         "line_two": null,
+         "postal_code": null,
+         "region": null
+        },
+        "legal_name": "Original Customer",
+        "registered_identifiers": [],
+        "trading_name": null
+       },
+       "document_number": "LEGACY-1",
+       "document_profile_code": "invoice.standard",
+       "document_profile_version": "1",
+       "documentary_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "documentary_reference": "archive:invoice:1",
+       "fx_evidence_ref": "fx:not-applicable:NGN",
+       "fx_snapshot": null,
+       "grand_total": {
+        "amount": "80.00",
+        "currency": "NGN",
+        "minor_units": 2
+       },
+       "issued_at": "2026-10-13T00:00:00+00:00",
+       "locale": "en-NG",
+       "party_tax_identities": [
+        {
+         "country_code": "NGA",
+         "identity_type": "tax_id",
+         "identity_value": "historic-tax-id",
+         "party_role": "seller",
+         "source_authority": "party",
+         "source_version": "7"
+        }
+       ],
+       "payment_instructions": {
+        "account_name": "Original Seller",
+        "account_reference": "documentary-account",
+        "bank_name": "Original bank",
+        "method_code": "bank_transfer",
+        "narrative": null,
+        "routing_code": null
+       },
+       "seller": {
+        "address": {
+         "city": null,
+         "country_code": "NGA",
+         "line_one": "Seller street",
+         "line_two": null,
+         "postal_code": null,
+         "region": null
+        },
+        "legal_name": "Original Seller",
+        "registered_identifiers": [],
+        "trading_name": null
+       },
+       "subtotal": {
+        "amount": "70.00",
+        "currency": "NGN",
+        "minor_units": 2
+       },
+       "tax_evidence_ref": "tax-document:1",
+       "tax_snapshots": [
+        {
+         "jurisdiction_code": "NGA",
+         "policy_id": "historic-policy",
+         "policy_version": "7",
+         "rate": "0.2",
+         "tax_amount": {
+          "amount": "10.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "taxable_basis": {
+          "amount": "50.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "treatment_code": "vat"
+        }
+       ],
+       "tax_total": {
+        "amount": "10.00",
+        "currency": "NGN",
+        "minor_units": 2
+       },
+       "timezone": "Africa/Lagos"
+      },
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "receivable_mapping_version": "ar-mapping:1",
+      "residual_minor": 5000,
+      "source_evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "source_identity": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+       "kind": "invoice"
+      },
+      "source_invoice_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+      "source_resolver_version": "resolver:1",
+      "tax_mapping_version": "tax-mapping:1"
+     }
+    ],
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    },
+    "variances": [
+     {
+      "amount_minor": -700,
+      "basis": "ledger_lane",
+      "currency": "NGN",
+      "evidence_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "lane": "receivable",
+      "level": "partition",
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "precision": 2,
+      "reason_code": "lane_document_difference",
+      "rules_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "source": {
+       "key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "kind": "lane"
+      }
+     },
+     {
+      "amount_minor": 300,
+      "basis": "ledger_lane",
+      "currency": "NGN",
+      "evidence_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "lane": "receivable",
+      "level": "partition",
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "precision": 2,
+      "reason_code": "lane_document_difference",
+      "rules_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "source": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+       "kind": "invoice"
+      }
+     },
+     {
+      "amount_minor": 500,
+      "basis": "stored_balance",
+      "currency": "NGN",
+      "evidence_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "lane": "receivable",
+      "level": "partition",
+      "partition": {
+       "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+       "currency": "NGN",
+       "precision": 2,
+       "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+      },
+      "precision": 2,
+      "reason_code": "stored_balance_difference",
+      "rules_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "source": {
+       "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+       "kind": "invoice"
+      }
+     }
+    ]
+   },
+   "manifest_fingerprint": "63383e91afd02943e1b942e206edbaae1b7e1934bc5dd79654c148c61775960f",
+   "occurred_at": "2026-10-13T00:00:00+00:00",
+   "original_receipt_id": null,
+   "partition": {
+    "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "currency": "NGN",
+    "precision": 2,
+    "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+   },
+   "posting_group_id": "e9cc1483-a1cf-4598-ae03-ba64b7103b00",
+   "receipt_id": "e9d5c7c5-b0c8-461f-878f-1b72b809475a",
+   "receipt_kind": "import",
+   "recorded_at": "2026-11-08T16:22:51.840730+00:00",
+   "request_digest": "f45f3b15fcd3d6d1f4f473c5acb9cc548d90fee4ec66cb7dfc6f7bd1876b0695",
+   "request_identity": "8c556c63-cb81-4d02-9da3-3850a5cc6766",
+   "scope": {
+    "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+   },
+   "target": {
+    "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "currency": "NGN",
+    "expected_position_fingerprint": "1840a91182a7f205f5dea417349235db8a314cd3187b43054b2be022ca36a12e",
+    "posting_watermark": "none",
+    "precision": 2,
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    }
+   },
+   "total_receivable": {
+    "amount": "120.00",
+    "currency": "NGN",
+    "minor_units": 2
+   },
+   "total_residual": {
+    "amount": "60.00",
+    "currency": "NGN",
+    "minor_units": 2
+   },
+   "verification": {
+    "cash_lifecycle_proof_ref": "cash-proof:qualified",
+    "command_digest": "f45f3b15fcd3d6d1f4f473c5acb9cc548d90fee4ec66cb7dfc6f7bd1876b0695",
+    "documentary_tax_mapping_proof_ref": "tax-mapping-proof:qualified",
+    "historical_discharge_mapping_proof_ref": "discharge-mapping-proof:qualified",
+    "installation_id": "installation:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "manifest_fingerprint": "63383e91afd02943e1b942e206edbaae1b7e1934bc5dd79654c148c61775960f",
+    "migration_authority_proof_ref": "migration-proof:qualified",
+    "migration_authority_ref": "migration-authority:qualified",
+    "operation": "billing.opening.import.v2",
+    "partition": {
+     "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+     "currency": "NGN",
+     "precision": 2,
+     "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+    },
+    "receivable_lifecycle_proof_ref": "ar-proof:qualified",
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    },
+    "source_authority_ref": "source-authority:1",
+    "source_binding_proof_ref": "source-proof:qualified",
+    "target": {
+     "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+     "currency": "NGN",
+     "expected_position_fingerprint": "1840a91182a7f205f5dea417349235db8a314cd3187b43054b2be022ca36a12e",
+     "posting_watermark": "none",
+     "precision": 2,
+     "scope": {
+      "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+     }
+    }
+   }
+  },
+  "occurred_at": "2026-10-13T00:00:00+00:00",
+  "opening_cash_effects": [
+   {
+    "amount": {
+     "amount": "60.00",
+     "currency": "NGN",
+     "minor_units": 2
+    },
+    "authorization_ref": "migration-authority:qualified",
+    "billing_account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "document_id": null,
+    "effect_id": "8b928a64-cd82-4809-a7a8-32a696d202fb",
+    "effect_kind": "recognition",
+    "lot_id": "59fc5ac2-4ac0-4e5c-bc11-0e97572a4dbf",
+    "movement_evidence": null,
+    "movement_verification": null,
+    "occurred_at": "2026-10-13T00:00:00+00:00",
+    "original_effect_id": null,
+    "posting_group_id": "e9cc1483-a1cf-4598-ae03-ba64b7103b00",
+    "recorded_at": "2026-11-08T16:22:51.847235+00:00",
+    "request_digest": "f45f3b15fcd3d6d1f4f473c5acb9cc548d90fee4ec66cb7dfc6f7bd1876b0695",
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    },
+    "sequence": 1,
+    "source_ref": "8c556c63-cb81-4d02-9da3-3850a5cc6766"
+   },
+   {
+    "amount": {
+     "amount": "0.00",
+     "currency": "NGN",
+     "minor_units": 2
+    },
+    "authorization_ref": "migration-authority:qualified",
+    "billing_account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "document_id": null,
+    "effect_id": "ef8f9d0c-7a2c-48b1-834f-77b1334a12b0",
+    "effect_kind": "recognition",
+    "lot_id": "d88ea0c0-42aa-4282-85eb-25aec062b26f",
+    "movement_evidence": null,
+    "movement_verification": null,
+    "occurred_at": "2026-10-13T00:00:00+00:00",
+    "original_effect_id": null,
+    "posting_group_id": "e9cc1483-a1cf-4598-ae03-ba64b7103b00",
+    "recorded_at": "2026-11-08T16:22:51.847411+00:00",
+    "request_digest": "f45f3b15fcd3d6d1f4f473c5acb9cc548d90fee4ec66cb7dfc6f7bd1876b0695",
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    },
+    "sequence": 2,
+    "source_ref": "8c556c63-cb81-4d02-9da3-3850a5cc6766"
+   }
+  ],
+  "posting_group_id": "e9cc1483-a1cf-4598-ae03-ba64b7103b00",
+  "receivable_bases": [
+   {
+    "basis_id": "bd54d276-9bc5-4c7e-8f91-d79b031b8abc",
+    "billing_account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "document_id": "5056b517-2a31-4d29-b2a7-3a43c1a3b5a3",
+    "initial_receivable": {
+     "amount": "70.00",
+     "currency": "NGN",
+     "minor_units": 2
+    },
+    "installation_id": "installation:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "manifest_fingerprint": "63383e91afd02943e1b942e206edbaae1b7e1934bc5dd79654c148c61775960f",
+    "posting_group_id": "e9cc1483-a1cf-4598-ae03-ba64b7103b00",
+    "receipt_id": "e9d5c7c5-b0c8-461f-878f-1b72b809475a",
+    "recorded_at": "2026-11-08T16:22:51.840730+00:00",
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    },
+    "sequence": 1,
+    "source": {
+     "collection": {
+      "collection_timing": null,
+      "due_at": null,
+      "due_date_basis": {
+       "derivation_policy": null,
+       "derivation_version": null,
+       "effective_at": null,
+       "evidence_ref": "due:unknown:0",
+       "issued_at": null,
+       "override_actor": null,
+       "override_evidence_ref": null,
+       "override_reason": null,
+       "payment_terms_code": null,
+       "payment_terms_version": null,
+       "source_authority": "legacy",
+       "status": "unknown_unverified",
+       "supersedes_basis_ref": null,
+       "timezone": null
+      },
+      "evidence_ref": "collection:0",
+      "mapping_version": "collection-mapping:1",
+      "service_period": {
+       "ends_at": null,
+       "starts_at": null,
+       "status": "unknown_unverified"
+      },
+      "service_ref": null,
+      "source_authority": "legacy",
+      "status": "unknown_unverified",
+      "subject_ref": null
+     },
+     "historical_discharges": [
+      {
+       "amount_minor": 4000,
+       "economic_at": "2026-10-13T00:00:00+00:00",
+       "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "kind": "payment",
+       "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:payment:0",
+       "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+       "live_operation": "billing.settlement.accept",
+       "mapping_version": "mapping:1",
+       "recorded_at": "2026-10-13T00:00:00+00:00",
+       "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+       "replay_bindings": [],
+       "reverses_ref": null,
+       "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:0",
+       "source_system": "legacy-payments",
+       "tax_evidence_ref": "tax:payment:0",
+       "tax_snapshots": []
+      },
+      {
+       "amount_minor": 1000,
+       "economic_at": "2026-10-13T00:00:00+00:00",
+       "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "kind": "withholding",
+       "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:withholding:0",
+       "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:0",
+       "live_operation": "billing.withholding.accept",
+       "mapping_version": "mapping:1",
+       "recorded_at": "2026-10-13T00:00:00+00:00",
+       "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:withholding:0",
+       "replay_bindings": [
+        {
+         "component_ref": null,
+         "determination_ref": null,
+         "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "operation": "billing.withholding.accept",
+         "source_owner": "customer-remittance",
+         "source_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:0"
+        },
+        {
+         "component_ref": "component:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+         "determination_ref": "tax-set:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+         "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "operation": "billing.withholding.tax_component",
+         "source_owner": "dotmac-tax",
+         "source_ref": "f0e491ea8abce03703bba4947512d60ab7f77877f6a6fc0140853fd30957062d"
+        }
+       ],
+       "reverses_ref": null,
+       "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:0",
+       "source_system": "customer-remittance",
+       "tax_evidence_ref": "tax:withholding:0",
+       "tax_snapshots": [
+        {
+         "jurisdiction_code": "NGA",
+         "policy_id": "historic-wht-policy",
+         "policy_version": "7",
+         "rate": "0.2",
+         "tax_amount": {
+          "amount": "10.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "taxable_basis": {
+          "amount": "50.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "treatment_code": "withholding"
+        }
+       ]
+      }
+     ],
+     "original": {
+      "brand_asset": {
+       "file_id": null,
+       "status": "none"
+      },
+      "customer": {
+       "address": {
+        "city": null,
+        "country_code": "NGA",
+        "line_one": "Customer street",
+        "line_two": null,
+        "postal_code": null,
+        "region": null
+       },
+       "legal_name": "Original Customer",
+       "registered_identifiers": [],
+       "trading_name": null
+      },
+      "document_number": "LEGACY-0",
+      "document_profile_code": "invoice.standard",
+      "document_profile_version": "1",
+      "documentary_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "documentary_reference": "archive:invoice:0",
+      "fx_evidence_ref": "fx:not-applicable:NGN",
+      "fx_snapshot": null,
+      "grand_total": {
+       "amount": "120.00",
+       "currency": "NGN",
+       "minor_units": 2
+      },
+      "issued_at": "2026-10-13T00:00:00+00:00",
+      "locale": "en-NG",
+      "party_tax_identities": [
+       {
+        "country_code": "NGA",
+        "identity_type": "tax_id",
+        "identity_value": "historic-tax-id",
+        "party_role": "seller",
+        "source_authority": "party",
+        "source_version": "7"
+       }
+      ],
+      "payment_instructions": {
+       "account_name": "Original Seller",
+       "account_reference": "documentary-account",
+       "bank_name": "Original bank",
+       "method_code": "bank_transfer",
+       "narrative": null,
+       "routing_code": null
+      },
+      "seller": {
+       "address": {
+        "city": null,
+        "country_code": "NGA",
+        "line_one": "Seller street",
+        "line_two": null,
+        "postal_code": null,
+        "region": null
+       },
+       "legal_name": "Original Seller",
+       "registered_identifiers": [],
+       "trading_name": null
+      },
+      "subtotal": {
+       "amount": "110.00",
+       "currency": "NGN",
+       "minor_units": 2
+      },
+      "tax_evidence_ref": "tax-document:0",
+      "tax_snapshots": [
+       {
+        "jurisdiction_code": "NGA",
+        "policy_id": "historic-policy",
+        "policy_version": "7",
+        "rate": "0.2",
+        "tax_amount": {
+         "amount": "10.00",
+         "currency": "NGN",
+         "minor_units": 2
+        },
+        "taxable_basis": {
+         "amount": "50.00",
+         "currency": "NGN",
+         "minor_units": 2
+        },
+        "treatment_code": "vat"
+       }
+      ],
+      "tax_total": {
+       "amount": "10.00",
+       "currency": "NGN",
+       "minor_units": 2
+      },
+      "timezone": "Africa/Lagos"
+     },
+     "partition": {
+      "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+      "currency": "NGN",
+      "precision": 2,
+      "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+     },
+     "receivable_mapping_version": "ar-mapping:1",
+     "residual_minor": 7000,
+     "source_evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "source_identity": {
+      "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+      "kind": "invoice"
+     },
+     "source_invoice_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+     "source_resolver_version": "resolver:1",
+     "tax_mapping_version": "tax-mapping:1"
+    },
+    "source_invoice_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:0",
+    "source_system": "sub",
+    "source_version": 1
+   },
+   {
+    "basis_id": "dee1f00b-02f3-4eca-af74-42c6c3d357e1",
+    "billing_account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "document_id": "3ebb4ce9-73f9-4872-87c2-63dc6084882d",
+    "initial_receivable": {
+     "amount": "50.00",
+     "currency": "NGN",
+     "minor_units": 2
+    },
+    "installation_id": "installation:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+    "manifest_fingerprint": "63383e91afd02943e1b942e206edbaae1b7e1934bc5dd79654c148c61775960f",
+    "posting_group_id": "e9cc1483-a1cf-4598-ae03-ba64b7103b00",
+    "receipt_id": "e9d5c7c5-b0c8-461f-878f-1b72b809475a",
+    "recorded_at": "2026-11-08T16:22:51.840730+00:00",
+    "scope": {
+     "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+    },
+    "sequence": 2,
+    "source": {
+     "collection": {
+      "collection_timing": null,
+      "due_at": null,
+      "due_date_basis": {
+       "derivation_policy": null,
+       "derivation_version": null,
+       "effective_at": null,
+       "evidence_ref": "due:unknown:1",
+       "issued_at": null,
+       "override_actor": null,
+       "override_evidence_ref": null,
+       "override_reason": null,
+       "payment_terms_code": null,
+       "payment_terms_version": null,
+       "source_authority": "legacy",
+       "status": "unknown_unverified",
+       "supersedes_basis_ref": null,
+       "timezone": null
+      },
+      "evidence_ref": "collection:1",
+      "mapping_version": "collection-mapping:1",
+      "service_period": {
+       "ends_at": null,
+       "starts_at": null,
+       "status": "unknown_unverified"
+      },
+      "service_ref": null,
+      "source_authority": "legacy",
+      "status": "unknown_unverified",
+      "subject_ref": null
+     },
+     "historical_discharges": [
+      {
+       "amount_minor": 2000,
+       "economic_at": "2026-10-13T00:00:00+00:00",
+       "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "kind": "payment",
+       "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:payment:1",
+       "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+       "live_operation": "billing.settlement.accept",
+       "mapping_version": "mapping:1",
+       "recorded_at": "2026-10-13T00:00:00+00:00",
+       "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+       "replay_bindings": [],
+       "reverses_ref": null,
+       "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:payment:1",
+       "source_system": "legacy-payments",
+       "tax_evidence_ref": "tax:payment:1",
+       "tax_snapshots": []
+      },
+      {
+       "amount_minor": 1000,
+       "economic_at": "2026-10-13T00:00:00+00:00",
+       "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "kind": "withholding",
+       "ledger_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:ledger:withholding:1",
+       "live_identity": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:1",
+       "live_operation": "billing.withholding.accept",
+       "mapping_version": "mapping:1",
+       "recorded_at": "2026-10-13T00:00:00+00:00",
+       "reference": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:withholding:1",
+       "replay_bindings": [
+        {
+         "component_ref": null,
+         "determination_ref": null,
+         "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "operation": "billing.withholding.accept",
+         "source_owner": "customer-remittance",
+         "source_ref": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:1"
+        },
+        {
+         "component_ref": "component:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+         "determination_ref": "tax-set:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+         "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "operation": "billing.withholding.tax_component",
+         "source_owner": "dotmac-tax",
+         "source_ref": "0fb268f90a1b2d8455441548f71f03a16da3c4009ffbbb624500090d35f4257b"
+        }
+       ],
+       "reverses_ref": null,
+       "source_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:wht:1",
+       "source_system": "customer-remittance",
+       "tax_evidence_ref": "tax:withholding:1",
+       "tax_snapshots": [
+        {
+         "jurisdiction_code": "NGA",
+         "policy_id": "historic-wht-policy",
+         "policy_version": "7",
+         "rate": "0.2",
+         "tax_amount": {
+          "amount": "10.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "taxable_basis": {
+          "amount": "50.00",
+          "currency": "NGN",
+          "minor_units": 2
+         },
+         "treatment_code": "withholding"
+        }
+       ]
+      }
+     ],
+     "original": {
+      "brand_asset": {
+       "file_id": null,
+       "status": "none"
+      },
+      "customer": {
+       "address": {
+        "city": null,
+        "country_code": "NGA",
+        "line_one": "Customer street",
+        "line_two": null,
+        "postal_code": null,
+        "region": null
+       },
+       "legal_name": "Original Customer",
+       "registered_identifiers": [],
+       "trading_name": null
+      },
+      "document_number": "LEGACY-1",
+      "document_profile_code": "invoice.standard",
+      "document_profile_version": "1",
+      "documentary_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "documentary_reference": "archive:invoice:1",
+      "fx_evidence_ref": "fx:not-applicable:NGN",
+      "fx_snapshot": null,
+      "grand_total": {
+       "amount": "80.00",
+       "currency": "NGN",
+       "minor_units": 2
+      },
+      "issued_at": "2026-10-13T00:00:00+00:00",
+      "locale": "en-NG",
+      "party_tax_identities": [
+       {
+        "country_code": "NGA",
+        "identity_type": "tax_id",
+        "identity_value": "historic-tax-id",
+        "party_role": "seller",
+        "source_authority": "party",
+        "source_version": "7"
+       }
+      ],
+      "payment_instructions": {
+       "account_name": "Original Seller",
+       "account_reference": "documentary-account",
+       "bank_name": "Original bank",
+       "method_code": "bank_transfer",
+       "narrative": null,
+       "routing_code": null
+      },
+      "seller": {
+       "address": {
+        "city": null,
+        "country_code": "NGA",
+        "line_one": "Seller street",
+        "line_two": null,
+        "postal_code": null,
+        "region": null
+       },
+       "legal_name": "Original Seller",
+       "registered_identifiers": [],
+       "trading_name": null
+      },
+      "subtotal": {
+       "amount": "70.00",
+       "currency": "NGN",
+       "minor_units": 2
+      },
+      "tax_evidence_ref": "tax-document:1",
+      "tax_snapshots": [
+       {
+        "jurisdiction_code": "NGA",
+        "policy_id": "historic-policy",
+        "policy_version": "7",
+        "rate": "0.2",
+        "tax_amount": {
+         "amount": "10.00",
+         "currency": "NGN",
+         "minor_units": 2
+        },
+        "taxable_basis": {
+         "amount": "50.00",
+         "currency": "NGN",
+         "minor_units": 2
+        },
+        "treatment_code": "vat"
+       }
+      ],
+      "tax_total": {
+       "amount": "10.00",
+       "currency": "NGN",
+       "minor_units": 2
+      },
+      "timezone": "Africa/Lagos"
+     },
+     "partition": {
+      "account_id": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476",
+      "currency": "NGN",
+      "precision": 2,
+      "source_account_key": "account:e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476"
+     },
+     "receivable_mapping_version": "ar-mapping:1",
+     "residual_minor": 5000,
+     "source_evidence_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "source_identity": {
+      "key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+      "kind": "invoice"
+     },
+     "source_invoice_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+     "source_resolver_version": "resolver:1",
+     "tax_mapping_version": "tax-mapping:1"
+    },
+    "source_invoice_key": "e4bc6ab9-8b7f-490c-9c67-ce8a8a3e0476:invoice:1",
+    "source_system": "sub",
+    "source_version": 1
+   }
+  ],
+  "scope": {
+   "tenant_id": "3827fd43-8fbe-425d-8fa5-52781bee4b0c"
+  },
+  "source_authority": "internal",
+  "source_ref": "8c556c63-cb81-4d02-9da3-3850a5cc6766",
+  "source_system": "dotmac-billing"
+ }
+}

@@ -74,6 +74,16 @@ on:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
         type: string
+      offline_result_b64:
+        description: "Public canonical offline verification result, base64; never private evidence"
+        required: false
+        type: string
+        default: ""
+      offline_signature_b64:
+        description: "Detached SSHSIG for the public offline result, base64"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -116,6 +126,13 @@ jobs:
     outputs:
       package_dir: ${{ steps.resolve.outputs.package_dir }}
       tag: ${{ steps.resolve.outputs.tag }}
+      offline_repository_id: ${{ steps.rehearsal.outputs.rehearsal_execution_repository_id }}
+      offline_run_id: ${{ steps.rehearsal.outputs.rehearsal_run_id }}
+      offline_run_attempt: ${{ steps.rehearsal.outputs.rehearsal_run_attempt }}
+      offline_receipt_digest: ${{ steps.rehearsal.outputs.rehearsal_receipt_digest }}
+      offline_ciphertext_digest: ${{ steps.rehearsal.outputs.rehearsal_evidence_bundle_digest }}
+      offline_candidate_artifact_digest: ${{ steps.rehearsal.outputs.rehearsed_artifact_digest }}
+      offline_release_revision: ${{ steps.rehearsal.outputs.release_revision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -281,6 +298,9 @@ jobs:
         id: rehearsal
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Evidence only: no input selects a verifier or trust policy.
+          LANE3_OFFLINE_RESULT_B64: ${{ inputs.offline_result_b64 }}
+          LANE3_OFFLINE_SIGNATURE_B64: ${{ inputs.offline_signature_b64 }}
         # The oracle SELECTS the run and READS its receipt in one process, from
         # the pinned organization execution workflow named in
         # `.github/lane3-execution.json` (ADR-0070, amendment 2026-10-05). No
@@ -377,6 +397,19 @@ jobs:
           path: candidate-dist/*
           retention-days: 90
 
+      - name: Retain authenticated public offline verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foundation-offline-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .rehearsal/receipt.json
+            .rehearsal/offline-result.json
+            .rehearsal/offline-result.sshsig
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+
+
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -465,8 +498,19 @@ jobs:
         env:
           TWINE_USERNAME: ci-publisher
           TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+          LANE3_OFFLINE_RESULT_B64: ${{ inputs.offline_result_b64 }}
+          LANE3_OFFLINE_SIGNATURE_B64: ${{ inputs.offline_signature_b64 }}
+          FOUNDATION_EXPECTED_REPOSITORY_ID: ${{ needs.build.outputs.offline_repository_id }}
+          FOUNDATION_EXPECTED_RUN_ID: ${{ needs.build.outputs.offline_run_id }}
+          FOUNDATION_EXPECTED_RUN_ATTEMPT: ${{ needs.build.outputs.offline_run_attempt }}
+          FOUNDATION_EXPECTED_RECEIPT_DIGEST: ${{ needs.build.outputs.offline_receipt_digest }}
+          FOUNDATION_EXPECTED_CIPHERTEXT_DIGEST: ${{ needs.build.outputs.offline_ciphertext_digest }}
+          FOUNDATION_EXPECTED_CANDIDATE_ARTIFACT_DIGEST: ${{ needs.build.outputs.offline_candidate_artifact_digest }}
+          FOUNDATION_EXPECTED_RELEASE_REVISION: ${{ needs.build.outputs.offline_release_revision }}
         run: |
           python -m pip install --quiet twine
+          bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+          python -E -P scripts/recheck_offline_result.py
           python -m twine upload \
             --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
 

@@ -233,7 +233,7 @@ Two rules travel with it:
 | `dotmac_kernel.testing.licensing` | `FakeLicenceSigner` (ephemeral in-memory Ed25519 test signer — the ONLY signer in the kernel; needs the `cryptography` dependency at instantiation) |
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
 | `dotmac_kernel.web_deps` | `require_web_party`, `require_web_auth`, `require_web_permission`, `TENANT_COOKIE_AUTHENTICATION`, `TenantCookieAuthenticationProvider`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
-| `dotmac_kernel.web_surfaces` | The interactive-browser composition contract: `WebFacetMount`, `WebSurfaceContribution`, `WebSurfaceRegistry`, `AuthenticationProfileBinding`, `BrowserAuthenticationProvider`, `BrowserCredentialTransport`, `BrowserSecurityPlane`, `BrowserSessionPolicy`, browser-capability, template/static namespace, navigation, route-reference and request `SurfaceContext` types, their validation errors, plus `qualified_route_name`, `surface_route_name` and `surface_path` |
+| `dotmac_kernel.web_surfaces` | The interactive-browser composition contract: `WebFacetMount`, `WebSurfaceContribution`, `WebSurfaceRegistry`, `AuthenticationProfileBinding`, `BrowserAuthenticationProvider`, `BrowserCredentialTransport`, `BrowserSecurityPlane`, `BrowserSessionPolicy`, `InlineScriptHashV1`, `BrowserDocumentPolicyV1`, browser-capability, template/static namespace, navigation, route-reference and request `SurfaceContext` types, their validation errors, plus `qualified_route_name`, `surface_route_name` and `surface_path` |
 
 ### Module manifest and registry (`dotmac_kernel.modules`)
 
@@ -767,7 +767,7 @@ A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAs
 (`name`, `modules`, `module_planes`, `setting_defaults`, `branding`, `providers`, `tenancy`,
 `platform_surface_enabled`, `web_enabled`, `startup_checks`, `startup_hooks`,
 `ui_contract_version`, `web_facets`, `authentication_profiles`,
-`browser_capabilities`, `security_policy`, `disabled_modules`, `assembly_template_dir`,
+`browser_capabilities`, `browser_document_policies`, `security_policy`, `disabled_modules`, `assembly_template_dir`,
 `assembly_static_dir`, `packaged_static_dirs`, `packaged_template_dirs`,
 `stylesheets`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
@@ -802,6 +802,65 @@ application construction. The raw seam is refused entirely if an enabled
 surface uses a browser capability with typed `BrowserSecurityRequirement`s.
 Only active capability providers contribute those requirements; unused
 providers cannot widen CSP, and modules cannot contribute directives or origins.
+
+**Reviewed document scripts.** `browser_document_policies` is an
+assembly-owned tuple of `BrowserDocumentPolicyV1(facet, route, inline_scripts)`.
+Its `WebRouteRef` must resolve to one authenticated, bounded GET document route;
+entry, login/logout, public, unknown, duplicate and path/custom-converter
+bindings are refused. Each `InlineScriptHashV1(sha256)` contains the canonical
+base64 encoding of exactly 32 SHA-256 digest bytes. The adopter pins reviewed
+script bytes in source; this API neither downloads assets nor hashes arbitrary
+upstream responses. Empty declarations preserve the existing behavior, and
+API-only composition ignores the declarations. Active declarations require the
+Kernel security-header writer; disabling it in favor of an external proxy is
+refused for this opt-in.
+
+The source gate admits only **FastAPI 0.140.13 and Starlette 1.10.0**, the
+actual Academy framework pair. Hosted CI owns qualification of this exact runtime pair. Active
+declarations under another or malformed runtime pair refuse construction. The
+Kernel's broader dependency range remains supported without this opt-in. Expanding the
+feature's qualified runtime requires hosted lifecycle evidence; version-mocked
+refusal canaries do not establish that evidence.
+
+The security owner first computes the existing validated global policy `B`.
+An opted-in policy requires its `script-src` to be exactly `'self'`; it cannot
+reopen an operator's `'none'` decision. Only the bound, authenticated GET's
+successful `text/html` response receives a policy with that directive replaced
+by the reviewed hashes. Every other directive, including stricter product image
+sources, remains unchanged. There are no raw per-route policies, path-prefix
+selection, nonce injection, `unsafe-inline`, `unsafe-eval`, wildcard origins,
+or changes to frame, worker or WebSocket policy. Authorization and provider
+asset ownership remain with the existing owners.
+
+Selection uses the composition's private binding and the exact request scope
+after authentication/admission, with the existing facet principal checked against
+the bound facet and security plane. An independent first request-scope dependency
+encloses the covered request/response boundary; missing or misplaced guards refuse
+construction. Missing, spoofed or replayed context, pre-start dependency/endpoint
+errors, redirects, other status codes and other response types retain `B`. Existing
+downstream CSP fields are preserved and intersected with `B` on a conflict;
+they are never stripped to enable a grant. Only byte-identical copies of the
+selected policy may be collapsed. Unhandled errors produced outside the
+middleware retain their existing framework behavior; this feature does not
+claim to add headers after a response has started.
+
+Authentication and admission decisions must be complete before the provider
+returns or yields its principal. Cleanup failures after response start cannot
+retract already-sent headers and must not produce another response start. This
+contract does not assert that all request-scope commits or cleanup completed
+before delivery. The hosted compatibility lane captures actual ASGI messages
+on the installed target pair; mocked version refusals are separate unit tests.
+
+The disjoint hosted `console-document-policy` job runs the actual-framework
+suite in `tests/compatibility`; ordinary unit tests cover metadata refusal and
+inactive behavior under the reference lock. A mutation-tested architecture
+canary keeps the isolated hash-locked install, full suite selector, execution
+evidence and build dependency connected. No skipped test is accepted as
+compatibility evidence.
+
+This contract description is not publication or adoption evidence.
+Consumer asset pinning, installed-artifact admission and genuine terminal
+rendering/WebSocket/input acceptance remain separate gates.
 
 **Presentation-package composition (0.1.0a13).** `packaged_static_dirs` and
 `stylesheets` are the two slots an assembly fills to adopt an installed
@@ -1890,3 +1949,96 @@ failed-SAVEPOINT latch prevents a caller catching a post-DML primitive exception
 from releasing partial effects; rollback clears that scope, retaining earlier
 root work. Hosted tests also require a subsequent ordinary SAVEPOINT to release
 after recoverable failures, ruling out a falsely healthy but poisoned root.
+
+
+## Audit coordinate canary — 2026-11-09, source only
+
+`dotmac_kernel.audit` gains `AUDIT_FORBIDDEN_DETAIL_KEYS`,
+`AUDIT_DETAILS_MAX_DEPTH`, `AuditDetailsCoordinateError` (a `ValueError`) and
+`refuse_coordinate_details`. `write_audit_event` and
+`write_platform_audit_event` (and the private connection writer, which shares
+`_current_audit_event_values`) call it after the action-vocabulary check and
+before anything touches the session, so a refused write leaves no partial state.
+
+**Known gap: the offline history import is NOT covered.** `identity_history.py`
+inserts historical audit `details` directly and does not pass through the
+canary, so a coordinate-like key in imported history is not refused. This change
+does not alter that module. A coordinate-key census of the source data is
+required before any history import runs, pending Michael's ruling on whether the
+import must route through the canary.
+
+The forbidden key list is exactly `lat`, `lng`, `lon`, `latitude`, `longitude`,
+`coordinates`, `geo`, `point`, compared case-insensitively and in full: `latency`
+and `geometry_version` are not refused, and values are never inspected. Mappings,
+lists, tuples and sets are walked; nesting deeper than
+`AUDIT_DETAILS_MAX_DEPTH` (32) is refused because an uninspected subtree is where
+a coordinate would hide. The error carries `key_paths` and never a value.
+
+Adopter note: a product that records a position inside audit details now raises
+at the write. Record the opaque reference of the position (owned by the module
+that holds it) instead. Extending the key list is a contract change. The Starter
+census (every `app/` and `packages/*/src` audit write, by AST) found no producer.
+Source only: no version is allocated and no product adoption is qualified.
+
+
+## Anonymous-route rate limit — 2026-11-09, source only
+
+New settings (all env-driven): `ANONYMOUS_RATE_LIMIT_ROUTES` (comma-separated
+route templates as declared on the router, each optionally `METHOD /template`;
+empty default = feature off), `ANONYMOUS_RATE_LIMIT_REQUESTS` (10),
+`ANONYMOUS_RATE_LIMIT_WINDOW_SECONDS` (60), `ANONYMOUS_RATE_LIMIT_STORE`
+(`postgres` default, or `memory`). Counted per tenant, client address and route,
+in addition to the unchanged global limiter.
+
+**Client address.** The trusted-proxy address from `RequestEvidenceContextV1`
+(`X-Forwarded-For` / `X-Real-IP` honoured only from a peer inside the declared
+`TrustedProxyPolicy`); the transport peer when the assembly declares no
+`request_evidence`. The limit keys an IPv6 client by its /64. With anonymous
+rules declared and no `request_evidence`, `create_app` raises
+`AnonymousRateLimitConfigurationError` in production (every caller would share
+the proxy's bucket) and warns elsewhere.
+The global limiter still keys on the transport peer (unchanged).
+
+**Store.** `PostgresRateLimitStore` counts in `public.rate_limit_buckets`
+(migration `0031_rate_limit_buckets`, platform-catalog posture: no RLS, granted to
+`platform_api`/`app_admin`, revoked from `app_user`; only a SHA-256 of the key is
+stored: an HMAC-SHA256 under `ANONYMOUS_RATE_LIMIT_KEY_SECRET`, which production
+requires (>= 32 bytes, distinct from the JWT, session and CSRF secrets; resolved
+by name through `Settings`, rotating it resets open windows). It counts through
+`DatabaseRuntime.bounded_platform_session`: a dedicated pool (4 connections, no
+overflow, 0.5 s checkout timeout, 500 ms statement timeout) built from the
+platform engine's URL, so `PLATFORM_DATABASE_URL` must be set and TLS must be
+expressed in the DSN. Pool or statement timeouts answer 503. The global limiter
+runs before it, and a key already over budget is refused from an in-process
+cache without a database round trip. Fixed windows: up to 2x the budget across a window boundary.
+
+**Adopter upgrade note.** (1) Upgrading changes nothing until routes are
+declared. (2) Apply migration 0031 to every database before declaring routes;
+until then a declared route answers 503 (fail closed), not unlimited.
+(3) Production refuses `ANONYMOUS_RATE_LIMIT_STORE=memory` when routes are
+declared, raising `AnonymousRateLimitStoreError` from `create_app` and reporting
+it from `validate_settings`; a custom store must declare `shared = True`.
+(4) Declare `request_evidence` with the trusted proxies so the key is the real
+client; production refuses to build the app without it. (4a) Every declared rule
+must equal a route template the application serves (include and mount prefixes
+included); production refuses to start otherwise, other environments warn. (5) The reference deployment declares no routes yet; enabling its login
+routes is a deploy-configuration step. Source only: no version allocated, no
+adoption qualified; PostgreSQL grants and migration are covered by hosted CI.
+
+
+## Client address derivation — 2026-11-09, source only (behaviour change)
+
+`TrustedProxyPolicy.client_address` (and so `RequestEvidence.client_address`)
+changed from "leftmost `X-Forwarded-For` entry" to "first untrusted hop walking
+from the right". A proxy appends to the header, so everything left of its own
+entry is client-supplied; the old rule let any caller choose the address the
+audit trail, structured logs and the anonymous rate limit recorded for them. The
+new rule returns the nearest address a trusted proxy actually observed, requires
+it to be a bare IP address (no port, brackets, zone id or empty entry; IPv4-mapped
+IPv6 is reported as IPv4), and falls back to the transport peer for an
+unreadable chain or one made only of trusted hops. Repeated `X-Forwarded-For`
+lines are now one comma-joined chain. CSRF does not read the client address.
+Adopter note: a product that relied on the leftmost entry to see through a
+multi-proxy chain must list every proxy in its `TrustedProxyPolicy`; an
+unlisted proxy is now the reported client. `X-Real-IP` remains the fallback only
+when no `X-Forwarded-For` is present.

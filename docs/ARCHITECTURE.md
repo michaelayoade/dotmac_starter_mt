@@ -712,6 +712,45 @@ assembly does not compose it into boot or deploy. No Foundation `HostSource`
 provider is composed here, and failed-production recovery is deliberately
 unreachable until its authorization and settlement bindings exist.
 
+**Publication evidence has separate private and public consumers.** Starter
+tooling owns `scripts/lane3_evidence_bundle.py` and
+`scripts/lane3_bundle_verification.py` for offline manifest/member integrity
+and exposure-crossing consistency. Offline decryption and verification stay
+outside runners; only the execution boundary produces private evidence.
+`scripts/lane3_offline_result.py` owns the closed public claim and protected
+policy grammars; `scripts/lane3_offline_signature.py` authenticates the original
+claim bytes through fixed, pinned OpenSSH verification and all current bindings.
+`require_rehearsal.py` requires that consumer after its existing selected-run,
+candidate and receipt checks. Public workflow inputs carry only bounded result
+and signature bytes; they select no trust root, executable or verification time.
+
+The checked-in policy is **unenrolled**, with no key, tool or verifier profile
+pin. Publication remains indeterminate. Complete private Control, outcome,
+exact-rule, foreign-preservation and negative-target compensation checks still
+belong to the unimplemented offline orchestrator. Neither the plaintext helper
+nor a parsed claim certifies them. SSHSIG authenticates a trusted custodian's
+claim, not remote code execution or workstation integrity. Actual custody,
+profile qualification and signer enrollment remain separately approved steps.
+No Foundation package byte or version changes are needed by these consumers.
+
+**Evidence is encrypted after execution, before receipt assembly.**
+`scripts/lane3_evidence_finalization.py` owns the protected public-recipient/tool
+policy and bounded age transport adapter. The runner qualifies probe bytes
+from a single read, freezes the actual Executor crossing records, checks their
+existing completeness join, then creates an in-memory USTAR archive containing
+only `manifest.json`, `probe-evidence.json` and `exposure-calls.json`. Exact new
+ciphertext readback is passed into the existing receipt constructor while the
+live plan, grant and outcome remain in the same process. No prebuilt ciphertext
+is accepted. The artifact carrier lists ciphertext explicitly, never raw members.
+
+The encryption policy ships **unenrolled**, with no recipient or tool pin;
+its preflight stops before host contact. No private key, signing, decryption or
+full-proof result producer is introduced. A valid age header is a transport
+check, not cryptographic round-trip evidence. Hosted synthetic adapter tests
+qualify invocation and binding; actual enrolled-tool round-trip and operational
+custody qualification remain owed. The two behavioral rows remain BLOCKED.
+
+
 **A database result is declared before execution and promoted honestly.** The
 transition binds target, plan, starting descriptor and result descriptor.
 Authorization binds the result; the live starting state is its independent
@@ -1525,6 +1564,7 @@ decision, and a coordinate is not a consequence. Products own consequences.
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Position observations and projections | `dotmac-positioning` (`mod_pos`, tenant plane only) | Owns no vehicle lifecycle, work-order lifecycle, attendance consequence, provider transport or map presentation |
+| Neutral retention hold on an observation (opaque holder reference, honoured by prune) | `dotmac-positioning` (`mod_pos.observation_holds`, 0.2.0a2) | Holds carry no subject, address, decision or consequence; the holder owns what its reference means (ADR-0039) |
 | A durable unit's AUTHORITATIVE location | `dotmac-assets` | Reads no observation; positioning never overwrites it — a product asks the asset owner to move it when policy permits |
 | Subject links, applicability, policy and every business consequence — geofence action, SLA, dispatch, billing | the adopting product (Sub is cutover 1, ERP cutover 2) | Imports no positioning persistence; links a local subject to an opaque tracked-unit id |
 | Static plant, GIS and map coordinates | `dotmac-fiber-plant`, `dotmac-network-inventory`, `dotmac-network-topology` | Carrying a coordinate does not make state position evidence; these are fixed infrastructure, not tracked units |
@@ -1960,6 +2000,19 @@ every strict-baseline directive and may only remove sources; a partial or wider
 policy fails application construction. The baseline uses the vendored Alpine
 CSP build and therefore grants neither `script-src 'unsafe-inline'` nor
 `'unsafe-eval'`.
+
+Console-document script policy remains in the same Kernel
+browser-composition and response-security owners (`web_surfaces`, `web_runtime`,
+`app_factory`, `middleware/security_headers`). Its bounded contract selects
+reviewed static script hashes only for a resolved authenticated GET HTML document
+route. Academy keeps console authorization, proxying, provider assets and worker
+execution. The negative ERP/Sub/Academy source inventory is recorded in
+`docs/inventories/console-csp-source-observations.json` and the Kernel extraction
+dossier; it is not a production extraction or installed-adoption claim. Active
+document declarations currently require exact FastAPI 0.140.13 and Starlette
+1.10.0 response-start lifecycle semantics; other runtime pairs fail closed for
+this opt-in only.
+Ordinary policy and any stricter downstream CSP restrictions remain intact.
 
 Template security governance consumes the same composition declaration: the
 architecture sweep derives roots from `ProductAssemblySpec`, its installed
@@ -2680,7 +2733,7 @@ made concrete — every model has exactly one declared owner.
 | `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
 | `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
 | `ReferralProgramme` / `ReferralProgrammeVersion` | `mod_referrals.referral_programmes`, `referral_programme_versions` | `dotmac-referrals` optional module | Tenant referral policy identity and immutable active-policy snapshot, product-first from Sub. Party, Customer, Sales and Billing remain opaque collaborators (ADR-0040). |
-| `ReferralCode` / `Referral` / `ReferralConversion` | `mod_referrals.referral_codes`, `referrals`, `referral_conversions` | `dotmac-referrals` optional module | Finite invitation identity, idempotent source attribution and evidence-bound conversion. The conversion writes a provider-neutral reward request to the kernel outbox; it never creates a lead/customer or applies a credit. |
+| `ReferralCode` / `Referral` / `ReferralConversion` | `mod_referrals.referral_codes`, `referrals`, `referral_conversions` | `dotmac-referrals` optional module | Finite invitation identity, idempotent source attribution (capture V2 may carry an opaque `service_location_ref`; no coordinates or address) and evidence-bound conversion. The conversion writes a provider-neutral reward request to the kernel outbox; it never creates a lead/customer or applies a credit. |
 | `ResellerAccount` / `ResellerAuthorityRevision` | `mod_reseller.reseller_accounts`, `reseller_authority_revisions` | `dotmac-reseller-management` optional module | Product-first from Sub: tenant reseller identity, cycle-safe hierarchy, active/suspended/retired lifecycle and immutable least-privilege delegated authority. Party roles are opaque references; Commercial Agreements and Entitlement Allocation remain independent owners (ADR-0040). |
 | `ResellerMemberBinding` / `ResellerCustomerAccountBinding` | `mod_reseller.reseller_member_bindings`, `reseller_customer_account_bindings` | `dotmac-reseller-management` optional module | Tenant-scoped bindings to opaque member and customer-account identities. They authorize no login and copy no Party or Customer state; commissions, payouts, invoices and customer lifecycle do not enter this namespace. |
 | `Form` / `FormVersion` / `FormSection` / `FormField` / `FormFieldOption` | `mod_forms.forms`, `form_versions`, `form_sections`, `form_fields`, `form_field_options` | `dotmac-forms` optional module | Product-first port of ERP's seven-table reusable form definition owner. Published versions freeze an exact digest; subject meaning and file bytes remain opaque external references (ADR-0040). |
@@ -2706,7 +2759,7 @@ made concrete — every model has exactly one declared owner.
 | `ResponsePolicy` / `ResponseTarget` / `ResponseClock` / `ResponseClockPause` / `ResponseObservation` | `mod_sla.*` declared tables | `dotmac-response-obligations` optional module | One promise about time on one opaque subject, extracted product-first from Sub's already entity-generic SLA policy/target/clock/breach tables. The stored `due_at` is moved by a resume rather than derived at read time, so the sweep reads the front of an index instead of rescanning, and a PAUSED clock is never swept. Late completion settles as BREACHED, not MET. A breach carries no status: `dotmac-operational-escalations` owns whether it should escalate and who answered, `dotmac-durable-timers` owns scheduling, Messaging owns delivery, and business hours arrive as an `OUTSIDE_BUSINESS_HOURS` pause rather than a second calendar engine (ADR-0060). |
 | `WorkforceTeam` / `WorkforceSkill` / `TeamMembership` / `WorkerSkill` / `WorkforceShift` / `WorkforceAvailability` / `DispatchDecision` | `mod_workforce.*` declared tables | `dotmac-workforce` optional module | Workforce scheduling and dispatch adjudicated from Sub, ERP and CRM. Workers and work are opaque references; People, payroll, attendance consequences, Inbox presence, Work Order lifecycle and route execution remain with their owning systems. |
 | `FXRateType` / `FXRateSource` / `FXSelectionPolicy` / `FXRateObservation` / `FXRateDetermination` | `mod_fx_policy.*` declared tables | `dotmac-fx-policy` optional module | Effective FX observations, source provenance, selection policy and determination evidence extracted ERP-first. Kernel owns Money/ExchangeRate values; Billing, Tax, Accounting and provider adapters retain their distinct decisions and consequences. |
-| `ServiceOrder` | `mod_serviceorders.service_orders` | `dotmac-service-orders` optional module | Product-first from Sub: the service-delivery order between a sold commercial order and a usable service. Customer, commercial-order, specification and service identifiers are opaque references; the commercial order, fulfillment saga, field work and realized service keep their own owners. |
+| `ServiceOrder` | `mod_serviceorders.service_orders` | `dotmac-service-orders` optional module | Product-first from Sub: the service-delivery order between a sold commercial order and a usable service. Customer, commercial-order, specification, service and service-location identifiers are opaque references (install, reconnect and change orders must name a service-location ref through open V2; no address or coordinates are held); the commercial order, fulfillment saga, field work and realized service keep their own owners. |
 | `ServiceOrderReadinessDecision` / `ServiceOrderReadinessCheck` | `mod_serviceorders.service_order_readiness_decisions`, `mod_serviceorders.service_order_readiness_checks` | `dotmac-service-orders` optional module | Append-only activation-readiness decision and the normalized checks it was made from, at most one per kind. Sub's rule is kept — a failed delivery run is terminal, any other failure blocks — while its direct reads of Projects, Tasks, Work Orders and IP Assignments become caller-supplied observations. |
 | `PaymentIntent` | `mod_payments.payment_intents` | `dotmac-payments` optional module | Product-first from Sub's `topup_intents`: an intent to pay, idempotent on its own reference, with exact `Numeric(20, 6)` money and a required ISO-4217 code plus explicit currency `minor_units` (0–6). Legacy NULL scale remains unresolved. Existing Sub `GatewayTopupIntentFlow.prepaid_period_purchase` qualifies `PURCHASE_FUNDING`: a nonblank exact opaque purchase/obligation target before invoices exist. Tenant-only `pm_0004_purchase_funding` extends the purpose CHECK and protects its purpose/target from mutation; checkout purpose grants no cash qualification, credit or ledger posting. Published a2 is preserved; proposed a3 is unpublished and runtime acceptance is pending. It owns no receivable — Billing decides what a confirmed payment settles. |
 | `PaymentTransferProof` / `PaymentConfirmation` | `mod_payments.payment_transfer_proofs`, `mod_payments.payment_confirmations` | `dotmac-payments` optional module | Bank-transfer evidence with its review, and the append-only correlation between an intent and one external settlement fact. Uniqueness on (tenant, provider type, external reference) is unconditional, closing the partial-index gap that left Sub's CRM-origin payments needing a second index. |
@@ -2793,7 +2846,7 @@ write:
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Subscription complimentary/sponsored arrangements and non-cash grants | `dotmac_subscriptions.treatments` is the sole writer on both declared planes through `approve_billing_arrangement`, `revoke_billing_arrangement` and `record_non_cash_grant`. Approval is fingerprint-bound to a preview, replay is resolved before the preview runs, and `resolve_billing_arrangement` answers `standard`, `effective` or `protected_drift` — the last suppresses customer charging while refusing a grant rather than fabricating coverage. Sub keeps its own arrangement writer until ledger items G5/G6 complete the backfill, shadow and cutover; no product is claimed as cut over. |
-| Subscription offers, versions, prices, contracts, lines and recurring occurrences | `dotmac_subscriptions.service` is the sole writer on both declared planes through its typed publish/withdraw, record/end, resolve, generate and acknowledge operations. It uses the caller's session and flushes only. The occurrence and Subscriptions-owned `RatedObligationOutputV1` stage atomically; Billing owns only its distinct `AcceptRatedObligationV1` input, and access/Billing owners are assembly-wired consumers, never sibling imports. No product is claimed as cut over. |
+| Subscription offers, versions, prices, contracts, lines and recurring occurrences | `dotmac_subscriptions.service` is the sole writer on both declared planes through its typed publish/withdraw, record/end, resolve, generate and acknowledge operations. It uses the caller's session and flushes only. The occurrence and Subscriptions-owned `RatedObligationOutputV1` stage atomically; a `catalog_price` line must name and equal its published offer-version price (service, composite FK and trigger, `su_0004`) and one contract line is never charged twice for an instant (coverage-overlap trigger on the su_0001 pattern, `su_0005`); a capped or prepaid renewal is held at `pending_validity` with no staged output until `resolve_occurrence_validity` records the owner's evidence (`su_0006`); Billing owns only its distinct `AcceptRatedObligationV1` input, and access/Billing owners are assembly-wired consumers, never sibling imports. No product is claimed as cut over. |
 | Billing obligations, documents, settlements, withholding discharges, posting effects, account positions, invoice exposures, official artifact relations and accounting facts | `dotmac_billing.service` is the sole writer on both declared planes through its typed accept/issue/void/credit/allocation/correction/rebuild/artifact-record/artifact-repair operations. It uses the caller's session and flushes only, and every emitted kernel-outbox routing code is declared by its module manifest. Dedicated withholding accept/reverse commands reduce only AR and append exact corrections; V2 accounting facts carry their distinct evidence while V1 remains unchanged. Ordinary non-cash grants, source-specific applications, partial application reversals and unused reductions append immutable typed evidence on a separate balance lane; their AccountingFactV3 and four-balance ReceivablePositionV2 preserve historical V1 and WHT V2 meaning. Every subsequent posting group produces a fresh V2 position. Grant/effect and exact V2 queries verify stored scalar evidence without autoflush or live configuration reconstruction. Finance permission and genuine Tax-evidence mapping belong to the trusted adopter. Billing owns both aggregate and exposure financial state; Collections receives only an assembly-translated `ReceivableExposureV1`, and ERP receives immutable accounting facts. |
 | Billing confirmed-cash receipt identity | `dotmac_billing.service.accept_settlement` creates and verifies immutable cash-source claims within its existing caller-owned idempotent operation. Exact source-system/key uniqueness spans accounts in each scope; deferred database completeness and structural FKs bind every settlement to its claim. No separate reservation API or opening funding writer is introduced. |
 | Billing opening window, admissions and seal | `dotmac_billing.service` owns technical provisioning, verified import admission and `seal_opening_window`; `bi_0009_opening_window` owns structural immutability, scope uniqueness, role closure and database guards. The assembly independently qualifies each operation and the restricted migration principal; the caller alone completes its outer transaction. No ordinary runtime writer can open or reopen the migration window. |
@@ -2808,7 +2861,7 @@ write:
 | Editorial plans, content items, variants and creative relations | `dotmac_content.service` — plan/item create, get, list, count and guarded update; variant creation; plan/item creative attachment; immutable snapshot construction. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. Backoffice authorizes actors, `dotmac-files` owns bytes, publishing owns releases, `dotmac-campaigns` owns outbound progression, and Integrator owns provider transport; none is a parallel content writer. |
 | Publication releases, deliveries, attempts and normalized observations | `dotmac_publishing.service` — idempotent immutable request creation and typed timer scheduling; stale-safe due dispatch; one outbox intent per target attempt; receipt-deduplicated observation recording; explicit partial/all-failed reconciliation; failed-target retry and pre-dispatch cancellation. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. An assembly supplies timer storage, Backoffice owns authorization/target policy, content/sites own editable sources, kernel owns idempotency/outbox, and Integrator owns bindings, providers, credentials and transport; none is a parallel publication writer. |
 | Outbound campaign identity and recipient progression | `dotmac_campaigns.service` — `create_campaign`/`revise_campaign`, `ingest_audience`, `schedule_campaign`, `accept_due_work`, `record_observation`, pause/resume/cancel/complete, `authorize_delivery`, `request_unsubscribe`, counter rebuild and publication/privacy repair. Every path receives and flushes the caller session. Kernel consent decides eligibility, kernel idempotency owns replay, kernel outbox owns publication, Durable Timers owns due-work mechanics, and product adapters supply audience/render/sender/Sales facts; none is a parallel campaigns writer (ADR-0056). |
-| Referral programmes, codes, attribution and conversions | `dotmac_referrals.service` — `create_programme`, `issue_code`, `capture_referral`, and `record_conversion`. Every call receives an explicit tenant scope and caller session; conversion evidence and its reward-request outbox fact flush atomically. Party, Customer, Lead and Billing mutations remain outside the module (ADR-0040). |
+| Referral programmes, codes, attribution and conversions | `dotmac_referrals.service` — `create_programme`, `issue_code`, `capture_referral` / `capture_referral_v2`, and `record_conversion`. Every call receives an explicit tenant scope and caller session; conversion evidence and its reward-request outbox fact flush atomically. Party, Customer, Lead and Billing mutations remain outside the module (ADR-0040). |
 | Reseller account identity, hierarchy, delegated authority, bindings and lifecycle | `dotmac_reseller_management.service` — `create_account`, `set_parent`, `publish_authority`, `bind_member`, `bind_customer_account`, and `transition_account`. The owner receives an explicit tenant scope and caller session, rejects hierarchy cycles and authority broader than the parent revision, and flushes provider-neutral status facts through the kernel outbox. Party, Customer, Commercial Agreements, Entitlement Allocation, authentication, commissions, payouts and invoices remain outside the module (ADR-0040). |
 | Reusable form definitions, versions, fields/options, submissions and answer snapshots | `dotmac_forms.service` — `create_form`, `create_draft_version`, `add_section`, `add_field`, `add_option`, `publish_version`, and `submit_form`. Published definitions are digest-frozen; stable submission keys conflict on different content. Subject lifecycle, file bytes, rendering and consequences remain outside the module (ADR-0040). |
 | User-authored workflow execution, checkpoint claims/results and repair evidence | `dotmac_workflow_runtime.service` — `start_execution`, `claim_checkpoint`, `settle_checkpoint`, and `record_repair`. Checkpoints advance strictly in order under finite leases and bounded attempts; a terminal failure resumes only from explicit repair evidence. Definition authoring, timers, transport and every domain/provider effect remain assembly-owned (ADR-0040). |
@@ -4209,7 +4262,9 @@ imported invoices share one internal backing resolver; original historical
 payments, WHT and credits remain documentary evidence and never become new
 current allocations or cash. Generic document void refuses imported backing.
 
-Opening recognition/unwind publish distinct `AccountingFactV5`. Genuine
+Opening recognition/unwind publish distinct `AccountingFactV5`; ledger-lane
+opening-variance facts publish the distinct `AccountingFactV6`
+(`billing.accounting.fact.v6`) on effect-free posting groups. Genuine
 post-import allocations, WHT, non-cash and cash-lot operations keep their
 existing V1–V4 accounting contracts and publish separate imported
 `ReceivableExposureV2`; no synthetic obligation, due basis or native exposure

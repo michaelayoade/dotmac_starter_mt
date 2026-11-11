@@ -147,6 +147,8 @@ check: poetry-lock-check lint lint-imports type-check security migration-gate ui
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
 	poetry run pytest tests/unit tests/architecture -q
+# The actual-framework document-policy module is mandatory in the separate
+# console-document-policy CI job; all other compatibility modules stay collected.
 test-integration: ## Postgres RLS tests (needs test-db-up)
 	@test "$$CI" = true && test -n "$$IDENTITY_GRAPH_DATABASE_URL" && test -n "$$IDENTITY_REFERENCE_DATABASE_URL" || { echo "Hosted identity graph configuration required" >&2; exit 1; }
 	TEST_DATABASE_URL=postgresql+psycopg://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
@@ -154,7 +156,7 @@ test-integration: ## Postgres RLS tests (needs test-db-up)
 	TEST_MIGRATION_DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	IDENTITY_REFERENCE_DATABASE_URL="$$IDENTITY_REFERENCE_DATABASE_URL" \
 	IDENTITY_GRAPH_DATABASE_URL="$$IDENTITY_GRAPH_DATABASE_URL" \
-	poetry run pytest tests -q --ignore=tests/unit --ignore=tests/architecture --junitxml="$(INTEGRATION_JUNIT)"
+	poetry run pytest tests -q --ignore=tests/unit --ignore=tests/architecture --ignore=tests/compatibility/test_browser_document_policy.py --junitxml="$(INTEGRATION_JUNIT)"
 test: test-unit ## Default test suite
 test-cov: ## Unit tests with coverage
 	poetry run pytest tests/unit tests/architecture --cov=app --cov-report=term-missing

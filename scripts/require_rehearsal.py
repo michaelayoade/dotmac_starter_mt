@@ -80,6 +80,8 @@ surface, every call refuses (docs/LANE3_EXECUTION_TOPOLOGY.md § 9).
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import io
 import json
 import os
@@ -96,6 +98,19 @@ from typing import Any
 # resolves to THIS checkout's copy and nothing ambient.
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from lane3_offline_result import (  # noqa: E402
+    MAX_POLICY_BYTES,
+    MAX_RESULT_BYTES,
+    MAX_REVOCATIONS_BYTES,
+    MAX_SIGNATURE_BYTES,
+    MAX_SIGNERS_BYTES,
+    OfflineResultCoordinates,
+    OfflineResultRefused,
+    OfflineResultUnavailable,
+    parse_policy,
+    require_result_bindings,
+)
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
@@ -329,6 +344,100 @@ def _receipt_bytes(repo: str, run_id: int, artifact: str, token: str) -> bytes:
         ) from exc
 
 
+# Protected source owns trust; workflow inputs carry public evidence only.
+_OFFLINE_POLICY_ROOT = _ROOT / "docs" / "inventories"
+_OFFLINE_EVIDENCE_DIR = _ROOT / ".rehearsal"
+_RESULT_ENV = "LANE3_OFFLINE_RESULT_B64"
+_SIGNATURE_ENV = "LANE3_OFFLINE_SIGNATURE_B64"
+
+# Preserve the public unavailable classification used by existing callers.
+OfflineResultIndeterminate = OfflineResultUnavailable
+
+
+def _read_policy_file(path: pathlib.Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as source:
+            payload = source.read(limit + 1)
+    except OSError:
+        raise OfflineResultUnavailable("offline_policy.unavailable") from None
+    if len(payload) > limit:
+        raise OfflineResultRefused("offline_policy.too_large")
+    return payload
+
+
+def _load_offline_policy():
+    return parse_policy(
+        _read_policy_file(
+            _OFFLINE_POLICY_ROOT / "lane3-offline-verifier-policy.json",
+            MAX_POLICY_BYTES,
+        ),
+        _read_policy_file(
+            _OFFLINE_POLICY_ROOT / "lane3-offline-verifier.allowed_signers",
+            MAX_SIGNERS_BYTES,
+        ),
+        _read_policy_file(
+            _OFFLINE_POLICY_ROOT / "lane3-offline-verifier.revoked_keys",
+            MAX_REVOCATIONS_BYTES,
+        ),
+    )
+
+
+def _decode_public_input(name: str, limit: int) -> bytes:
+    encoded = os.environ.get(name, "")
+    if not encoded:
+        raise OfflineResultUnavailable("offline_result.input_unavailable")
+    if len(encoded) > 4 * ((limit + 2) // 3):
+        raise OfflineResultRefused("offline_result.input_too_large")
+    try:
+        payload = base64.b64decode(encoded.encode("ascii"), validate=True)
+    except (UnicodeError, ValueError, binascii.Error):
+        raise OfflineResultRefused("offline_result.invalid_encoding") from None
+    if (
+        not payload
+        or len(payload) > limit
+        or base64.b64encode(payload).decode("ascii") != encoded
+    ):
+        raise OfflineResultRefused("offline_result.invalid_encoding")
+    return payload
+
+
+def _require_authenticated_offline_result(
+    coordinates: OfflineResultCoordinates,
+) -> None:
+    """Authenticate public claims against fixed protected trust and bindings.
+
+    Signature verification authenticates the enrolled custodian, not remote
+    code execution. Complete private verification and custody enrollment are
+    separate prerequisites; the shipped policy is deliberately unenrolled.
+    """
+    policy = _load_offline_policy()
+    if policy.state != "enrolled":
+        raise OfflineResultUnavailable("offline_policy.unenrolled")
+    payload = _decode_public_input(_RESULT_ENV, MAX_RESULT_BYTES)
+    signature = _decode_public_input(_SIGNATURE_ENV, MAX_SIGNATURE_BYTES)
+    from lane3_offline_signature import require_authenticated_result
+
+    result = require_authenticated_result(
+        payload,
+        signature,
+        expected=coordinates,
+        policy=policy,
+        now=datetime.now(UTC),
+    )
+    # Cryptographic execution may consume validity time. Recheck the same
+    # bindings with a fresh clock before accepting or retaining the result.
+    require_result_bindings(
+        result, expected=coordinates, policy=policy, now=datetime.now(UTC)
+    )
+    # Only authenticated, topology-free public bytes enter release evidence.
+    try:
+        _OFFLINE_EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+        (_OFFLINE_EVIDENCE_DIR / "offline-result.json").write_bytes(payload)
+        (_OFFLINE_EVIDENCE_DIR / "offline-result.sshsig").write_bytes(signature)
+    except OSError:
+        raise OfflineResultUnavailable("offline_result.retention_unavailable") from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="require_rehearsal.py",
@@ -474,6 +583,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
 
+    try:
+        _require_authenticated_offline_result(
+            OfflineResultCoordinates(
+                repository_id=topology.execution_repository_id,
+                run_id=int(proof["run_id"]),
+                run_attempt=attempt,
+                receipt_digest=receipt.sha256_digest(),
+                ciphertext_digest=receipt.content["evidence_bundle_digest"],
+                candidate_artifact_digest=receipt.foundation_artifact_digest,
+                release_revision=args.sha,
+            )
+        )
+    except OfflineResultRefused:
+        print("REFUSED: authenticated_offline_result_refused", file=sys.stderr)
+        return EXIT_REFUSED
+    except Exception:
+        # Authentication/transport failures may contain private diagnostics.
+        # The fixed unavailable boundary never turns one into public output.
+        print(
+            "INDETERMINATE: authenticated_offline_result_unavailable", file=sys.stderr
+        )
+        return EXIT_USAGE
+
     print(f"rehearsal_run_id={proof['run_id']}")
     print(f"rehearsal_run_attempt={attempt}")
     print(f"rehearsal_execution_repository_id={topology.execution_repository_id}")
@@ -481,6 +613,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"rehearsal_launcher_revision={selected.get('launcher_sha')}")
     print(f"rehearsal_lane={receipt.lane}")
     print(f"rehearsal_receipt_digest={receipt.sha256_digest()}")
+    print(
+        f"rehearsal_evidence_bundle_digest={receipt.content['evidence_bundle_digest']}"
+    )
     print(f"rehearsal_execution_plan_digest={receipt.execution_plan_digest}")
     # All THREE revisions, named separately, on the record that decides the
     # publish. A reader comparing them should not have to join two files.

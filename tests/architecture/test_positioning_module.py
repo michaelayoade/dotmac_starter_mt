@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "packages/dotmac-positioning"
 SOURCE = PACKAGE / "src/dotmac_positioning"
 MIGRATION = SOURCE / "migrations/versions/po_0001_positioning.py"
+HOLDS_MIGRATION = SOURCE / "migrations/versions/po_0002_observation_holds.py"
 MAKEFILE = ROOT / "Makefile"
 
 
@@ -305,11 +306,12 @@ def test_shared_schema_has_no_product_subject_or_consequence_columns() -> None:
 def test_migration_creates_rls_and_grants_for_every_declared_table() -> None:
     from dotmac_positioning.models import TENANT_TABLES
 
-    source = MIGRATION.read_text(encoding="utf-8")
+    root_source = MIGRATION.read_text(encoding="utf-8")
+    source = root_source + HOLDS_MIGRATION.read_text(encoding="utf-8")
     statements = re.sub(r"\s+", " ", re.sub(r'"\s*\n\s*"', "", source))
-    assert 'revision = "po_0001_positioning"' in source
-    assert "down_revision = None" in source
-    assert 'branch_labels = ("positioning",)' in source
+    assert 'revision = "po_0001_positioning"' in root_source
+    assert "down_revision = None" in root_source
+    assert 'branch_labels = ("positioning",)' in root_source
     assert (
         'REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")' in source
     )
@@ -340,3 +342,39 @@ def test_positioning_lineage_passes_the_composed_migration_gate() -> None:
     )
     assert report.ok, report.render()
     assert report.attribution["po_0001_positioning"]["owner"] == "positioning"
+    assert report.attribution["po_0002_observation_holds"]["owner"] == "positioning"
+
+
+def test_observation_holds_are_neutral_restricting_and_ref_only() -> None:
+    from dotmac_positioning.models import ObservationHold
+
+    columns = {column.name for column in ObservationHold.__table__.columns}
+    assert columns == {
+        "id",
+        "tenant_id",
+        "observation_id",
+        "hold_ref",
+        "placed_at",
+        "created_at",
+        "updated_at",
+    }
+    foreign_keys = {
+        constraint.name: constraint.ondelete
+        for constraint in ObservationHold.__table__.foreign_key_constraints
+    }
+    # Nothing, including a cascade, may delete a held observation.
+    assert foreign_keys["fk_observation_holds_observation"] == "RESTRICT"
+
+    migration = HOLDS_MIGRATION.read_text(encoding="utf-8")
+    assert 'down_revision = "po_0001_positioning"' in migration
+    assert "branch_labels = None" in migration
+    assert 'ondelete="RESTRICT"' in migration
+
+
+def test_prune_honours_holds_in_the_retention_statement() -> None:
+    source = (SOURCE / "service.py").read_text(encoding="utf-8")
+    prune = source[source.index("def prune_observations(") :]
+    prune = prune[: prune.index("\ndef ")]
+    assert "ObservationHold" in prune
+
+    assert "not_in(held_ids)" in prune

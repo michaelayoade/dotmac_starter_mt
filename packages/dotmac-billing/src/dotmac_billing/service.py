@@ -10,6 +10,7 @@ from enum import Enum
 from functools import wraps
 from typing import Any, Literal, ParamSpec, TypeVar, cast
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.idempotency import (
@@ -36,7 +37,9 @@ from dotmac_billing._opening_values import (
 )
 from dotmac_billing._receivable_backing import resolve_receivable_backing
 from dotmac_billing.commands import (
+    WITHHOLDING_FREEZE_PERMISSION,
     AcceptWithholdingDischarge,
+    ActorPermissionReader,
     AllocationCommand,
     ApplyAvailableCreditCommand,
     ApplyNonCashCredit,
@@ -44,6 +47,7 @@ from dotmac_billing.commands import (
     CreateMultiLineDraftDocument,
     DeallocationCommand,
     DraftDocumentLine,
+    FreezeIssuedInvoiceWithholding,
     GrantNonCashCredit,
     IssueCreditNote,
     IssueDocument,
@@ -54,6 +58,8 @@ from dotmac_billing.commands import (
     ReverseNonCashCreditApplication,
     ReversePostingGroupCommand,
     ReverseWithholdingDischarge,
+    TaxDeterminationSealV1,
+    TaxSealReader,
 )
 from dotmac_billing.contracts import (
     DOCUMENT_FACT_CONTRACT,
@@ -194,6 +200,7 @@ from dotmac_billing.opening_receivable_validation import (
     opening_account_command_digest_v2,
     opening_account_import_blockers_v2,
     opening_manifest_fingerprint_v2,
+    opening_manifest_variance_blockers,
     opening_withholding_component_identity,
     require_hold_list_covers_manifest,
     verify_opening_account_import_v2,
@@ -202,6 +209,32 @@ from dotmac_billing.opening_validation import (
     opening_manifest_fingerprint,
     preview_opening_account_import,
 )
+from dotmac_billing.opening_variance import (
+    ApprovalEvidence,
+    VarianceFactRequest,
+    record_batch_variances,
+    record_partition_variances,
+    require_group_not_variance_resolution,
+    require_recognisable,
+    require_resolution_primitive,
+    resolve_variance,
+    void_partition_variances,
+)
+from dotmac_billing.opening_variance_contracts import (
+    VARIANCE_APPROVAL_SUBJECT_TYPE,
+    AccountingFactV6,
+    ConfirmOpeningVarianceEvidenceV1,
+    OpeningVarianceApprovalPort,
+    OpeningVarianceApprovalV1,
+    OpeningVarianceFactBlockV1,
+    OpeningVarianceResolutionFactV1,
+    OpeningVarianceResolutionRefV1,
+    RecogniseOpeningVarianceV1,
+    is_customer_adverse,
+    variance_approval_subject_id,
+    variance_resolution_content_digest,
+)
+from dotmac_billing.opening_variance_validation import carryable_accounts
 from dotmac_billing.opening_window_contracts import (
     OpeningAuthoritySwitchContextV1,
     OpeningAuthoritySwitchParticipant,
@@ -244,6 +277,10 @@ from dotmac_billing.tax_evidence import (
 _AccountingEffectKind = Literal[
     "opening_account_imported",
     "opening_account_import_reversed",
+    "opening_variance_recorded",
+    "opening_variance_voided",
+    "opening_variance_recognised",
+    "opening_variance_position_corrected",
     "opening_cash_imported",
     "opening_cash_applied",
     "cash_credit_draw_reversed",
@@ -329,6 +366,7 @@ class _PlaneModels:
     non_cash_grant: Any
     non_cash_effect: Any
     position_fact_v2: Any
+    wht_component: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +409,7 @@ _TENANT = _PlaneModels(
     models.NonCashCreditGrant,
     models.NonCashCreditEffect,
     models.ReceivablePositionFactV2,
+    models.DocumentWithholdingComponent,
 )
 _PLATFORM = _PlaneModels(
     models.PlatformBillingAccount,
@@ -398,7 +437,12 @@ _PLATFORM = _PlaneModels(
     models.PlatformNonCashCreditGrant,
     models.PlatformNonCashCreditEffect,
     models.PlatformReceivablePositionFactV2,
+    models.PlatformDocumentWithholdingComponent,
 )
+
+# Withholding applicability, rate and amount come only from a dotmac-tax
+# determination; Billing freezes and verifies, it never decides.
+WITHHOLDING_TAX_OWNER = "dotmac-tax"
 
 
 def _models(scope: Scope) -> _PlaneModels:
@@ -1996,9 +2040,14 @@ def _post_group(
     opening_effects: tuple[OpeningCashEffectV1, ...] = (),
     cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
     corrects_posting_group_id: UUID | None = None,
+    variance_fact: VarianceFactRequest | None = None,
     _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
     plane = _models(scope)
+    if reverses_group_id is not None:
+        require_group_not_variance_resolution(
+            db, scope=scope, group_id=reverses_group_id
+        )
     allocation_inputs = tuple(
         replace(item, allocation_id=item.allocation_id or uuid4())
         for item in allocations
@@ -2390,8 +2439,66 @@ def _post_group(
         | AccountingFactV3
         | AccountingFactV4
         | AccountingFactV5
+        | AccountingFactV6
     )
-    if isinstance(opening_receipt, OpeningImportReceiptV2):
+    if variance_fact is not None:
+        if variance_fact.reverses_group_id is not None:
+            reverses_fact_id = db.execute(
+                _where_scope(
+                    select(plane.accounting_fact.id).where(
+                        plane.accounting_fact.posting_group_id
+                        == variance_fact.reverses_group_id
+                    ),
+                    scope,
+                    plane.accounting_fact,
+                )
+            ).scalar_one()
+        resolution = None
+        if variance_fact.resolution_kind is not None:
+            resolution = OpeningVarianceResolutionFactV1(
+                cast(Any, variance_fact.resolution_kind),
+                cast(Any, variance_fact.resolved_state),
+                cast(Any, variance_fact.gl_target_class),
+                variance_fact.corrected_by_posting_group_id,
+                cast(UUID, variance_fact.approval_request_id),
+                cast(str, variance_fact.maker_ref),
+                variance_fact.approver_refs,
+            )
+        fact_amount = money_from_minor(
+            variance_fact.amount_minor, currency, minor_units
+        )
+        typed_fact = AccountingFactV6(
+            scope,
+            "dotmac-billing",
+            accounting_fact_id,
+            6,
+            account_id,
+            group_id,
+            source_ref,
+            "internal",
+            cast(Any, kind),
+            occurred_at,
+            observed_at,
+            OpeningVarianceFactBlockV1(
+                variance_fact.variance_id,
+                variance_fact.window_id,
+                variance_fact.event_id,
+                variance_fact.event_seq,
+                cast(Any, variance_fact.lane),
+                "ledger_lane",
+                variance_fact.reason_code,
+                variance_fact.source_kind,
+                variance_fact.source_ref,
+                fact_amount,
+                is_customer_adverse(variance_fact.lane, variance_fact.amount_minor),
+                variance_fact.import_receipt_id,
+                variance_fact.evidence_digest,
+                variance_fact.rules_digest,
+            ),
+            resolution,
+            reverses_fact_id,
+        )
+    elif isinstance(opening_receipt, OpeningImportReceiptV2):
         typed_fact = AccountingFactV5(
             scope,
             "dotmac-billing",
@@ -2615,7 +2722,14 @@ def _post_group(
         )
     )
     db.flush()
-    if isinstance(typed_fact, AccountingFactV5):
+    if isinstance(typed_fact, AccountingFactV6):
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v6",
+            payload=fact_payload,
+        )
+    elif isinstance(typed_fact, AccountingFactV5):
         _emit(
             db,
             scope=scope,
@@ -3048,6 +3162,719 @@ def _document_fact(
     return cast(_DocumentFactRow, fact)
 
 
+def _is_elected_withholding(component: Any) -> bool:
+    """Positive and evidenced by a Tax party classification (the election)."""
+
+    return bool(
+        component.tax_amount.amount > 0
+        and component.party_classification_id is not None
+    )
+
+
+def _frozen_component_row(
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    document: _DocumentRow,
+    obligation_id: UUID | None,
+    result: Any,
+    component: Any,
+    origin: dict[str, object],
+) -> Any:
+    """One structural frozen-component row; values are the Tax result verbatim."""
+
+    currency = component.tax_amount.currency
+    return plane.wht_component(
+        **_values(
+            scope,
+            {
+                "id": uuid4(),
+                "billing_account_id": document.billing_account_id,
+                "document_id": document.id,
+                "obligation_id": obligation_id,
+                "tax_source_owner": WITHHOLDING_TAX_OWNER,
+                "determination_ref": str(result.determination_set_id),
+                "component_ref": str(component.determination_id),
+                "tax_code_id": component.tax_code_id,
+                "rule_id": component.rule_id,
+                "rule_version": component.rule_version,
+                "treatment_code": component.treatment_code,
+                "party_category": component.party_category,
+                "party_classification_id": component.party_classification_id,
+                "base_amount": component.base_amount.amount,
+                "tax_amount": component.tax_amount.amount,
+                "currency": currency.code,
+                "minor_units": currency.minor_units,
+                "source_fingerprint": result.source_fingerprint,
+                "result_fingerprint": result.result_fingerprint,
+                "determined_at": result.determined_at,
+                **origin,
+            },
+        )
+    )
+
+
+def _freeze_withholding_components(
+    db: Session, *, scope: Scope, plane: _PlaneModels, document: _DocumentRow
+) -> int:
+    """Freeze every elected expected-withholding component as a structural row.
+
+    Only a positive component whose dotmac-tax determination carries a party
+    classification (the election) is frozen. The row copies the Tax result;
+    nothing is selected or calculated here. An invoice with no such component
+    has nothing a discharge could ever reference.
+    """
+
+    if document.document_kind != "invoice":
+        return 0
+    lines = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.line)
+                .where(plane.line.document_id == document.id)
+                .order_by(plane.line.line_number),
+                scope,
+                plane.line,
+            )
+        ).scalars()
+    )
+    frozen = 0
+    for line in lines:
+        if line.obligation_id is None:
+            continue
+        obligation = _one(
+            db, scope=scope, model=plane.obligation, row_id=line.obligation_id
+        )
+        if obligation.tax_evidence is None:
+            continue
+        evidence = _decode_tax_evidence(
+            obligation.tax_evidence,
+            scope=scope,
+            tax_amount=_money(
+                obligation.tax_amount, obligation.currency, obligation.minor_units
+            ),
+        )
+        for item in evidence:
+            if item.purpose != "expected_withholding":
+                continue
+            result = item.determination
+            for component in result.components:
+                if not _is_elected_withholding(component):
+                    continue
+                db.add(
+                    _frozen_component_row(
+                        scope=scope,
+                        plane=plane,
+                        document=document,
+                        obligation_id=obligation.id,
+                        result=result,
+                        component=component,
+                        origin={
+                            "origin": "issue",
+                            "command_id": f"issue:{document.id}",
+                        },
+                    )
+                )
+                frozen += 1
+    if frozen:
+        db.flush()
+    return frozen
+
+
+def _bind_freeze_to_invoice_line(
+    db: Session,
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    document: _DocumentRow,
+    evidence: InvoiceTaxEvidenceV2,
+    issue_date: Any,
+    line_id: UUID | None = None,
+) -> tuple[Any, Money]:
+    """The invoice line whose commercial source the Tax determination describes.
+
+    Exactly one line must declare the determination's commercial source AND
+    retain at least one result of that source whose original facts are equal to
+    the determination's (a line that merely has no conflicting result does not
+    qualify). The fresh evidence is then validated together with that line's
+    retained principal evidence against the line's own declared sources, so the
+    source binding is checked on the line, not on the evidence itself. Retained
+    results are compared as of the freeze date (the date is checked separately).
+    Returns the line's obligation and the source amount its facts state.
+    """
+
+    wanted = evidence.determination.commercial_source
+    facts = _original_facts(evidence.determination)
+    lines = tuple(
+        db.execute(
+            _where_scope(
+                select(plane.line)
+                .where(plane.line.document_id == document.id)
+                .order_by(plane.line.line_number),
+                scope,
+                plane.line,
+            )
+        ).scalars()
+    )
+    matches: list[tuple[Any, Money]] = []
+    for line in lines:
+        if line.obligation_id is None:
+            continue
+        if line_id is not None and line.id != line_id:
+            continue
+        obligation = _one(
+            db, scope=scope, model=plane.obligation, row_id=line.obligation_id
+        )
+        payload = obligation.tax_evidence
+        if not _is_dependency_evidence_payload(payload):
+            # V1-era retained evidence carries no commercial source, so it is
+            # bound only through an explicitly named line, and only on facts
+            # that equal the retained ones (Tax's seal then confirms the source).
+            if line_id is None or payload is None:
+                continue
+            try:
+                v1_items = _decode_tax_evidence(
+                    payload,
+                    scope=scope,
+                    tax_amount=_money(
+                        obligation.tax_amount,
+                        obligation.currency,
+                        obligation.minor_units,
+                    ),
+                )
+            except BillingRuleViolation:
+                continue
+            v1_amount: Money | None = None
+            for item in v1_items:
+                if _original_facts(item.determination) != facts:
+                    raise BillingRuleViolation(
+                        "withholding_freeze_facts_differ",
+                        "the Tax determination describes different original facts "
+                        "than the invoice line retained",
+                    )
+                v1_amount = item.determination.source_amount
+            if v1_amount is not None:
+                matches.append((obligation, v1_amount))
+            continue
+        try:
+            retained = cast(
+                tuple[InvoiceTaxEvidenceV2, ...],
+                _decode_tax_evidence(
+                    payload,
+                    scope=scope,
+                    tax_amount=_money(
+                        obligation.tax_amount,
+                        obligation.currency,
+                        obligation.minor_units,
+                    ),
+                ),
+            )
+            declared = _decode(
+                payload[0]["commercial_sources"],
+                tuple[TaxCommercialSourceEvidenceV1, ...],
+            )
+        except (BillingRuleViolation, ValueError, TypeError, KeyError):
+            continue
+        if wanted not in declared:
+            continue
+        positive: Money | None = None
+        for item in retained:
+            for result in (item.determination, *item.prior_determinations):
+                if result.commercial_source != wanted:
+                    continue
+                if _original_facts(result) != facts:
+                    raise BillingRuleViolation(
+                        "withholding_freeze_facts_differ",
+                        "the Tax determination describes different original facts "
+                        "than the invoice line retained",
+                    )
+                positive = result.source_amount
+        if positive is None:
+            continue
+        try:
+            validate_commercial_source_binding(
+                (
+                    *(
+                        replace(
+                            item,
+                            determination=replace(
+                                item.determination, occurred_on=issue_date
+                            ),
+                            prior_determinations=tuple(
+                                replace(prior, occurred_on=issue_date)
+                                for prior in item.prior_determinations
+                            ),
+                        )
+                        for item in retained
+                        if item.determination.commercial_source in declared
+                    ),
+                    evidence,
+                ),
+                commercial_sources=declared,
+            )
+        except (ValueError, TypeError) as exc:
+            raise BillingRuleViolation(
+                "tax_commercial_source_mismatch", str(exc)
+            ) from exc
+        matches.append((obligation, positive))
+    if len({row.id for row, _ in matches}) != 1:
+        raise BillingRuleViolation(
+            "withholding_freeze_unbound",
+            "the Tax determination must name the commercial source of exactly one "
+            "line of this invoice and match the facts that line retained",
+        )
+    return matches[0]
+
+
+def _original_facts(result: Any) -> tuple[object, ...]:
+    """The original-fact tuple a commercial source pins, without its date.
+
+    The date is checked separately (it must be the invoice issue date), because
+    the line's retained evidence may have been determined at another instant.
+    """
+
+    return (
+        result.tenant_id,
+        result.source_amount,
+        result.recognition_basis_code,
+        result.counterparty_ref,
+        result.supply_ref,
+        result.place_ref,
+    )
+
+
+def _seal_equals_evidence(
+    seal: TaxDeterminationSealV1, result: Any, elected: tuple[Any, ...]
+) -> bool:
+    """Tax's sealed determination equals what the caller offered, in full."""
+
+    if (
+        seal.determination_set_id != result.determination_set_id
+        or seal.result_fingerprint != result.result_fingerprint
+        or seal.source_fingerprint != result.source_fingerprint
+        or seal.occurred_on != result.occurred_on
+        or seal.determined_at != result.determined_at
+        or seal.tenant_id != result.tenant_id
+        or seal.commercial_source != result.commercial_source
+        or seal.source_amount != result.source_amount
+        or seal.recognition_basis_code != result.recognition_basis_code
+        or seal.counterparty_ref != result.counterparty_ref
+        or seal.supply_ref != result.supply_ref
+        or seal.place_ref != result.place_ref
+    ):
+        return False
+
+    def shape(component: Any) -> tuple[object, ...]:
+        return (
+            component.determination_id,
+            component.tax_code_id,
+            component.rule_id,
+            component.rule_version,
+            component.treatment_code,
+            component.calculation_base_code,
+            component.party_category,
+            component.party_classification_id,
+            component.base_amount,
+            component.tax_amount,
+            tuple(
+                (line.sequence, line.taxable_amount, line.rate, line.tax_amount)
+                for line in component.lines
+            ),
+            tuple(
+                sorted(
+                    (
+                        (d.determination_set_id, d.determination_id, d.tax_amount)
+                        for d in component.dependency_components
+                    ),
+                    key=lambda v: (str(v[0]), str(v[1])),
+                )
+            ),
+        )
+
+    sealed = sorted((shape(c) for c in seal.components), key=lambda v: str(v[0]))
+    offered = sorted((shape(c) for c in elected), key=lambda v: str(v[0]))
+    return bool(sealed) and sealed == offered
+
+
+def _require_determination_not_in_use(
+    db: Session,
+    *,
+    scope: Scope,
+    plane: _PlaneModels,
+    document: _DocumentRow,
+    result: Any,
+) -> None:
+    """One Tax determination backs one live invoice; a voided one releases it."""
+
+    others = db.execute(
+        _where_scope(
+            select(plane.wht_component.document_id)
+            .where(
+                plane.wht_component.tax_source_owner == WITHHOLDING_TAX_OWNER,
+                plane.wht_component.determination_ref
+                == str(result.determination_set_id),
+                plane.wht_component.document_id != document.id,
+            )
+            .distinct(),
+            scope,
+            plane.wht_component,
+        )
+    ).scalars()
+    for other_id in tuple(others):
+        if resolve_receivable_backing(db, scope=scope, document_id=other_id).active:
+            raise BillingRuleViolation(
+                "withholding_freeze_determination_in_use",
+                "this Tax determination is already frozen on another live invoice",
+            )
+
+
+def freeze_issued_invoice_withholding(
+    db: Session,
+    *,
+    scope: Scope,
+    command: FreezeIssuedInvoiceWithholding,
+    tax_seal: TaxSealReader | None = None,
+    permissions: ActorPermissionReader | None = None,
+) -> tuple[Any, ...]:
+    """Freeze withholding for an issued invoice that has none frozen (tenant plane).
+
+    For an invoice issued before components were frozen. The caller supplies a
+    dotmac-tax V2 determination evaluated as of the invoice's issue date; the
+    election is its party classification. Billing does not take it on trust: the
+    determination's commercial source must be one of the invoice's own line
+    sources, the original facts it describes (tenant, source amount, recognition
+    basis, counterparty, supply, place) must equal the facts retained on that
+    line, each frozen base equals that line's source amount (plus the referenced
+    prior tax for a dependency-tax base), and dotmac-tax must confirm through the
+    wired ``tax_seal`` reader that the determination exists with the same
+    result fingerprint and date; with no reader wired the command refuses. The
+    rows carry the bound line's obligation. It writes the same append-only
+    component rows issuance writes and never touches the invoice. Idempotent on
+    ``command_id``; refused when components exist, for a credit note or void
+    invoice, for V1 evidence, when the determination is not as of the issue
+    date, or when the frozen withholding would exceed what is outstanding plus
+    what was already withheld.
+    """
+
+    if not isinstance(scope, TenantScope):
+        raise BillingRuleViolation(
+            "withholding_freeze_platform_unsupported",
+            "Tax evidence is tenant-only; the platform plane stays fail-closed",
+        )
+    if permissions is None:
+        raise BillingRuleViolation(
+            "withholding_freeze_permission_unavailable",
+            "no permission reader is wired; the freeze cannot be authorized",
+        )
+    if tax_seal is None:
+        raise BillingRuleViolation(
+            "withholding_freeze_tax_seal_unavailable",
+            "no dotmac-tax reader is wired; a freeze cannot be confirmed",
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    for text, maximum in (
+        (command.command_id, 255),
+        (command.actor_ref, 255),
+        (command.reason, 2000),
+    ):
+        if not isinstance(text, str) or not text.strip() or len(text) > maximum:
+            raise BillingRuleViolation(
+                "withholding_freeze_evidence_required",
+                "freeze requires bounded command id, actor and reason",
+            )
+    if not permissions.holds(
+        scope=scope, actor_ref=command.actor_ref, code=WITHHOLDING_FREEZE_PERMISSION
+    ):
+        raise BillingRuleViolation(
+            "withholding_freeze_permission_denied",
+            "the actor does not hold the withholding freeze permission",
+        )
+    plane = _models(scope)
+    account = _one(
+        db,
+        scope=scope,
+        model=plane.account,
+        row_id=command.billing_account_id,
+        lock=True,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        document = _one(
+            session,
+            scope=scope,
+            model=plane.document,
+            row_id=command.document_id,
+            lock=True,
+        )
+        basis_model = _receivable_model(scope, "OpeningReceivableBasis")
+        if (
+            session.execute(
+                _where_scope(
+                    select(basis_model.id).where(
+                        basis_model.document_id == document.id
+                    ),
+                    scope,
+                    basis_model,
+                )
+            ).first()
+            is not None
+        ):
+            raise BillingRuleViolation(
+                "withholding_freeze_opening_import_unavailable",
+                "an opening-imported invoice cannot be frozen yet: it has no line "
+                "source and billing holds no party mapping for its account",
+            )
+        _require_credit_target(
+            session, scope=scope, document=document, account_id=account.id
+        )
+        _require_live_invoice_issuance(session, scope=scope, document=document)
+        existing = session.execute(
+            _where_scope(
+                select(plane.wht_component.id).where(
+                    plane.wht_component.document_id == document.id
+                ),
+                scope,
+                plane.wht_component,
+            )
+        ).first()
+        if existing is not None:
+            raise BillingRuleViolation(
+                "withholding_already_frozen",
+                "the invoice already has frozen withholding components",
+            )
+        evidence = command.evidence
+        currency = Currency(document.currency, document.minor_units)
+        try:
+            if not isinstance(evidence, InvoiceTaxEvidenceV2):
+                raise ValueError("freeze requires V2 Tax evidence with its source")
+            if evidence.purpose != "expected_withholding":
+                raise ValueError("freeze requires expected-withholding evidence")
+            validate_commercial_source_binding(
+                (evidence,),
+                commercial_sources=(evidence.determination.commercial_source,),
+            )
+            validate_invoice_tax_evidence_versioned(
+                (evidence,),
+                scope=scope,
+                tax_amount=Money(Decimal(0), currency),
+                v2=True,
+            )
+        except (ValueError, TypeError, DecimalException) as exc:
+            raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
+        result = evidence.determination
+        try:
+            issue_date = document.issued_at.astimezone(
+                ZoneInfo(document.timezone)
+            ).date()
+        except (ValueError, KeyError, ZoneInfoNotFoundError) as exc:
+            raise BillingRuleViolation(
+                "withholding_freeze_issue_date",
+                "the invoice issue date cannot be resolved in its timezone",
+            ) from exc
+        if result.occurred_on != issue_date:
+            raise BillingRuleViolation(
+                "withholding_freeze_not_as_of_issue",
+                "the Tax determination must be evaluated as of the invoice issue date",
+            )
+        seal = tax_seal.read_seal(
+            scope=scope, determination_set_id=result.determination_set_id
+        )
+        elected = tuple(c for c in result.components if _is_elected_withholding(c))
+        if seal is None or not _seal_equals_evidence(seal, result, elected):
+            raise BillingRuleViolation(
+                "withholding_freeze_tax_seal_mismatch",
+                "dotmac-tax does not confirm this determination: identity, "
+                "fingerprints, date, original facts and every elected component "
+                "must equal what Tax sealed",
+            )
+        _require_determination_not_in_use(
+            session, scope=scope, plane=plane, document=document, result=result
+        )
+        if not elected:
+            raise BillingRuleViolation(
+                "withholding_not_elected",
+                "the determination has no elected withholding component",
+            )
+        if any(c.tax_amount.currency != currency for c in elected):
+            raise BillingRuleViolation(
+                "withholding_freeze_currency",
+                "withholding currency differs from the invoice",
+            )
+        bound, source_amount = _bind_freeze_to_invoice_line(
+            session,
+            scope=scope,
+            plane=plane,
+            document=document,
+            evidence=evidence,
+            issue_date=issue_date,
+            line_id=command.line_id,
+        )
+        for c in seal.components:
+            # From Tax's sealed values only: the offered dependency amounts are
+            # proven equal to them above, never trusted on their own.
+            expected = source_amount.amount
+            if c.calculation_base_code == "source_plus_dependency_tax":
+                expected += sum(
+                    (d.tax_amount.amount for d in c.dependency_components),
+                    Decimal(0),
+                )
+            if c.base_amount.amount != expected:
+                raise BillingRuleViolation(
+                    "withholding_freeze_base_exceeds_line",
+                    "a withholding base differs from the bound line's source "
+                    "amount (plus its referenced prior tax)",
+                )
+        total = sum((c.tax_amount.amount for c in elected), Decimal(0))
+        # Older finance records stay correctable: withholding already accepted
+        # under earlier rules reduced the outstanding amount, so it is added
+        # back. The command only computes this bound; it repairs nothing.
+        room = _document_outstanding(
+            session, scope=scope, document=document
+        ) + _document_withheld(session, scope=scope, document_id=document.id)
+        if total > room:
+            raise BillingRuleViolation(
+                "withholding_freeze_exceeds_outstanding",
+                "frozen withholding would exceed the invoice's outstanding "
+                "receivable plus the withholding already accepted",
+            )
+        rows = [
+            _frozen_component_row(
+                scope=scope,
+                plane=plane,
+                document=document,
+                obligation_id=bound.id,
+                result=seal,
+                component=component,
+                origin={
+                    "origin": "late_freeze",
+                    "command_id": command.command_id,
+                    "actor_ref": command.actor_ref,
+                    "reason": command.reason,
+                },
+            )
+            for component in sorted(seal.components, key=lambda c: c.determination_id)
+        ]
+        session.add_all(rows)
+        session.flush()
+        return {"component_ids": [str(row.id) for row in rows]}
+
+    outcome = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.withholding.freeze",
+        key=command.command_id,
+        fingerprint=fingerprint_of(asdict(command)),
+        operation=operation,
+    )
+    ids = [UUID(str(item)) for item in cast(list[str], outcome.result["component_ids"])]
+    return tuple(
+        db.execute(
+            _where_scope(
+                select(plane.wht_component)
+                .where(plane.wht_component.id.in_(ids))
+                .order_by(plane.wht_component.component_ref),
+                scope,
+                plane.wht_component,
+            )
+        ).scalars()
+    )
+
+
+def _undischarged_frozen_withholding(
+    db: Session, *, scope: Scope, document_id: UUID
+) -> Decimal:
+    """Frozen withholding minus accepted discharge, never negative."""
+
+    plane = _models(scope)
+    frozen = Decimal(
+        db.execute(
+            _where_scope(
+                select(
+                    func.coalesce(func.sum(plane.wht_component.tax_amount), 0)
+                ).where(plane.wht_component.document_id == document_id),
+                scope,
+                plane.wht_component,
+            )
+        ).scalar_one()
+    )
+    return max(
+        frozen - _document_withheld(db, scope=scope, document_id=document_id),
+        Decimal(0),
+    )
+
+
+def _require_frozen_withholding(
+    db: Session,
+    *,
+    scope: Scope,
+    command: AcceptWithholdingDischarge,
+    document_id: UUID,
+) -> None:
+    """Refuse a discharge that is not a verified draw on a frozen component."""
+
+    plane = _models(scope)
+    evidence = command.tax_evidence
+    if evidence.source_owner != WITHHOLDING_TAX_OWNER:
+        raise BillingRuleViolation(
+            "withholding_tax_owner",
+            "withholding applicability and rate come only from a dotmac-tax "
+            "determination",
+        )
+    component = db.execute(
+        _where_scope(
+            select(plane.wht_component).where(
+                plane.wht_component.document_id == document_id,
+                plane.wht_component.tax_source_owner == evidence.source_owner,
+                plane.wht_component.determination_ref == evidence.determination_ref,
+                plane.wht_component.component_ref == evidence.component_ref,
+            ),
+            scope,
+            plane.wht_component,
+        )
+    ).scalar_one_or_none()
+    if component is None:
+        raise BillingRuleViolation(
+            "withholding_not_elected",
+            "the invoice has no frozen elected withholding component for this "
+            "determination",
+        )
+    if (
+        component.billing_account_id != command.billing_account_id
+        or Decimal(component.tax_amount) != evidence.amount.amount
+        or component.currency != evidence.amount.currency.code
+        or component.minor_units != evidence.amount.currency.minor_units
+        or component.result_fingerprint != evidence.result_fingerprint
+        or component.source_fingerprint != evidence.source_fingerprint
+        or str(component.rule_id) != evidence.rule_ref
+        or str(component.rule_version) != evidence.rule_version
+    ):
+        raise BillingRuleViolation(
+            "withholding_evidence_differs_from_frozen",
+            "withholding evidence differs from the component frozen at issue",
+        )
+    used = Decimal(
+        db.execute(
+            _where_scope(
+                select(
+                    func.coalesce(func.sum(plane.withholding.amount_delta), 0)
+                ).where(
+                    plane.withholding.document_id == document_id,
+                    plane.withholding.tax_source_owner == evidence.source_owner,
+                    plane.withholding.determination_ref == evidence.determination_ref,
+                    plane.withholding.component_ref == evidence.component_ref,
+                ),
+                scope,
+                plane.withholding,
+            )
+        ).scalar_one()
+    )
+    if used + command.accepted_amount.amount > Decimal(component.tax_amount):
+        raise BillingRuleViolation(
+            "withholding_exceeds_frozen_component",
+            "cumulative accepted withholding exceeds the frozen component",
+        )
+
+
 def issue_document(
     db: Session,
     *,
@@ -3183,6 +4010,9 @@ def issue_document(
             document=document,
             state="issued",
             correlation_id=command.correlation_id,
+        )
+        _freeze_withholding_components(
+            session, scope=scope, plane=plane, document=document
         )
         return {
             "document_id": str(document.id),
@@ -3353,6 +4183,7 @@ def issue_credit_note(
     scope: Scope,
     command: IssueCreditNote,
     numbering: NumberingProvider,
+    approvals: OpeningVarianceApprovalPort | None = None,
 ) -> _DocumentRow:
     plane = _models(scope)
     original_evidence = _one(
@@ -3428,6 +4259,15 @@ def issue_credit_note(
             raise BillingRuleViolation(
                 "credit_exceeds_receivable", "credit note exceeds the open receivable"
             )
+        resolution = _variance_resolution_approval(
+            session,
+            scope=scope,
+            ref=command.resolves_variance_ref,
+            approvals=approvals,
+            primitive="credit_note",
+            apply_on_issue=False,
+            primitive_fingerprint=_primitive_fingerprint(command),
+        )
         document_id = uuid4()
         number = numbering.allocate(
             session,
@@ -3599,6 +4439,15 @@ def issue_credit_note(
             state="issued",
             correlation_id=command.correlation_id,
         )
+        if resolution is not None:
+            _resolve_by_posting_group(
+                session,
+                scope=scope,
+                ref=command.resolves_variance_ref,
+                approval=resolution,
+                group_id=group.id,
+                occurred_at=command.occurred_at,
+            )
         return {"document_id": str(document_id), "posting_group_id": str(group.id)}
 
     outcome = _idempotent(
@@ -4242,7 +5091,11 @@ def _non_cash_effect(
 
 
 def grant_non_cash_credit(
-    db: Session, *, scope: Scope, command: GrantNonCashCredit
+    db: Session,
+    *,
+    scope: Scope,
+    command: GrantNonCashCredit,
+    approvals: OpeningVarianceApprovalPort | None = None,
 ) -> NonCashCreditGrantV1:
     """Grant ordinary non-tax commercial value; adopting assembly authorizes finance.
 
@@ -4263,6 +5116,15 @@ def grant_non_cash_credit(
         )
         if replay is not None:
             return {"grant_id": str(cast(NonCashCreditGrantV1, replay).grant_id)}
+        resolution = _variance_resolution_approval(
+            session,
+            scope=scope,
+            ref=command.resolves_variance_ref,
+            approvals=approvals,
+            primitive="grant",
+            apply_on_issue=command.apply_on_issue,
+            primitive_fingerprint=_primitive_fingerprint(command),
+        )
         account = _one(
             session,
             scope=scope,
@@ -4404,7 +5266,7 @@ def grant_non_cash_credit(
                     non_cash_effects += (applied,)
                     ar_effects = ((EffectLane.RECEIVABLE, -amount),)
                     documents = (invoice.id,)
-        _post_group(
+        grant_group = _post_group(
             session,
             scope=scope,
             account_id=account.id,
@@ -4419,6 +5281,15 @@ def grant_non_cash_credit(
             non_cash_effects=non_cash_effects,
             non_cash_request_digest=digest,
         )
+        if resolution is not None:
+            _resolve_by_posting_group(
+                session,
+                scope=scope,
+                ref=command.resolves_variance_ref,
+                approval=resolution,
+                group_id=grant_group.id,
+                occurred_at=command.occurred_at,
+            )
         return {"grant_id": str(grant.grant_id)}
 
     outcome = _idempotent(
@@ -4731,6 +5602,9 @@ def accept_withholding_discharge(
             session, scope=scope, document=invoice, account_id=account.id
         )
         _require_live_invoice_issuance(session, scope=scope, document=invoice)
+        _require_frozen_withholding(
+            session, scope=scope, command=command, document_id=invoice.id
+        )
         if command.accepted_amount.amount > _document_outstanding(
             session, scope=scope, document=invoice
         ):
@@ -4983,6 +5857,17 @@ def apply_available_credit(
             raise BillingRuleViolation(
                 "credit_insufficient_backing",
                 "insufficient cash-backed available credit",
+            )
+        credit_room = _document_outstanding(
+            session, scope=scope, document=document
+        ) - _undischarged_frozen_withholding(
+            session, scope=scope, document_id=document.id
+        )
+        if command.amount.amount > max(credit_room, Decimal(0)):
+            raise BillingRuleViolation(
+                "credit_exceeds_non_withholding_room",
+                "credit may draw at most the invoice total less frozen "
+                "withholding not yet discharged",
             )
         if command.amount.amount > _document_outstanding(
             session, scope=scope, document=document
@@ -6032,6 +6917,7 @@ __all__ = [
     "reverse_non_cash_credit_application",
     "reduce_non_cash_credit_grant",
     "accept_withholding_discharge",
+    "freeze_issued_invoice_withholding",
     "reverse_withholding_discharge",
     "accept_rated_obligation",
     "accept_settlement",
@@ -6344,6 +7230,14 @@ def provision_opening_window(
         raise BillingRuleViolation(
             "opening_window_manifest", "window requires exact complete manifest"
         )
+    if isinstance(window.manifest, OpeningManifestV2):
+        unclosed = opening_manifest_variance_blockers(window.manifest)
+        if unclosed:
+            raise BillingRuleViolation(
+                "opening_manifest_unclosed",
+                "manifest variance ledger does not close: "
+                + ", ".join(sorted({b.code for b in unclosed})),
+            )
     if verifier is None:
         raise BillingRuleViolation(
             "opening_verifier_unavailable", "trusted provision verifier required"
@@ -6432,6 +7326,285 @@ def _admit_opening_window(
     return window
 
 
+def _primitive_fingerprint(command: object) -> str:
+    """The primitive's own request, without the resolution ref (no circularity:
+    the approver signs a digest that cannot contain the approval request id)."""
+    values = asdict(cast(Any, command))
+    values.pop("resolves_variance_ref", None)
+    values.pop("idempotency_key", None)
+    return fingerprint_of(values)
+
+
+def _variance_resolution_approval(
+    session: Session,
+    *,
+    scope: Scope,
+    ref: OpeningVarianceResolutionRefV1 | None,
+    approvals: OpeningVarianceApprovalPort | None,
+    primitive: str,
+    apply_on_issue: bool,
+    primitive_fingerprint: str,
+) -> OpeningVarianceApprovalV1 | None:
+    """Findings 1 and Q2: a primitive that resolves a variance needs the approvals
+    port and a lane-effect-capable variance BEFORE it posts anything."""
+    if ref is None:
+        return None
+    require_resolution_primitive(
+        session,
+        scope=scope,
+        variance_id=ref.variance_id,
+        primitive=primitive,
+        apply_on_issue=apply_on_issue,
+    )
+    return _require_variance_approval(
+        session,
+        scope=scope,
+        approvals=approvals,
+        request_id=ref.approval_request_id,
+        variance_id=ref.variance_id,
+        content_digest=variance_resolution_content_digest(
+            kind="position_corrected",
+            variance_id=ref.variance_id,
+            amount_minor=ref.amount_minor,
+            detail=primitive_fingerprint,
+            maker_ref=ref.maker_ref,
+        ),
+        maker_ref=ref.maker_ref,
+    )
+
+
+def _resolve_by_posting_group(
+    session: Session,
+    *,
+    scope: Scope,
+    ref: OpeningVarianceResolutionRefV1 | None,
+    approval: OpeningVarianceApprovalV1,
+    group_id: UUID,
+    occurred_at: datetime,
+) -> None:
+    """A governed primitive resolves one variance in its own transaction.
+
+    The database requires a posting group of the same account, currency and
+    lane whose effect equals the amount, and maker-checker evidence equal on the
+    resolving and resolved events.
+    """
+    if ref is None:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "a variance resolution needs its reference"
+        )
+    resolve_variance(
+        session,
+        scope=scope,
+        variance_id=ref.variance_id,
+        resolution_kind="position_corrected",
+        amount_minor=ref.amount_minor,
+        approval=ApprovalEvidence(
+            approval.request_id, ref.maker_ref, approval.approver_refs
+        ),
+        occurred_at=occurred_at,
+        posting_group_id=group_id,
+        emit=lambda request: _post_variance_fact(session, scope=scope, request=request),
+    )
+
+
+def _require_variance_approval(
+    db: Session,
+    *,
+    scope: Scope,
+    approvals: OpeningVarianceApprovalPort | None,
+    request_id: UUID,
+    variance_id: UUID,
+    content_digest: str,
+    maker_ref: str,
+) -> OpeningVarianceApprovalV1:
+    if approvals is None:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "trusted approvals port is required"
+        )
+    try:
+        held = approvals.hold_approval(
+            db,
+            scope=scope,
+            request_id=request_id,
+            subject_type=VARIANCE_APPROVAL_SUBJECT_TYPE,
+            subject_id=variance_approval_subject_id(variance_id),
+            content_digest=content_digest,
+        )
+    except OpeningVerificationUnavailable as exc:
+        raise BillingRuleViolation(
+            "opening_verifier_unavailable", "approval qualification unavailable"
+        ) from exc
+    if (
+        type(held) is not OpeningVarianceApprovalV1
+        or held.request_id != request_id
+        or held.subject_type != VARIANCE_APPROVAL_SUBJECT_TYPE
+        or held.subject_id != variance_approval_subject_id(variance_id)
+        or held.content_digest != content_digest
+    ):
+        raise BillingRuleViolation(
+            "opening_variance_approval_binding",
+            "approval does not bind this variance, kind and amount",
+        )
+    checkers = held.approver_refs
+    if (
+        not checkers
+        or len(set(checkers)) != len(checkers)
+        or held.requester_ref != maker_ref
+        or maker_ref in checkers
+    ):
+        raise BillingRuleViolation(
+            "opening_variance_maker_checker",
+            "maker must be the requester and may not be a checker",
+        )
+    return held
+
+
+def recognise_opening_variance(
+    db: Session,
+    *,
+    scope: Scope,
+    command: RecogniseOpeningVarianceV1,
+    approvals: OpeningVarianceApprovalPort | None = None,
+) -> str:
+    """W-V2 (DV-4): recognise a ledger-lane variance; no customer effect.
+
+    Emits ``opening_variance_recognised`` with a GL target class; the posting
+    package moves the amount out of suspense. Returns ``resolved`` or
+    ``partially_resolved``. The database refuses it on a memo basis.
+    """
+    if type(command) is not RecogniseOpeningVarianceV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected RecogniseOpeningVarianceV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    digest = variance_resolution_content_digest(
+        kind="recognised",
+        variance_id=command.variance_id,
+        amount_minor=command.amount_minor,
+        detail=command.gl_target_class,
+        maker_ref=command.maker_ref,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        require_recognisable(session, scope=scope, variance_id=command.variance_id)
+        held = _require_variance_approval(
+            session,
+            scope=scope,
+            approvals=approvals,
+            request_id=command.approval_request_id,
+            variance_id=command.variance_id,
+            content_digest=digest,
+            maker_ref=command.maker_ref,
+        )
+        outcome = resolve_variance(
+            session,
+            scope=scope,
+            variance_id=command.variance_id,
+            resolution_kind="recognised",
+            amount_minor=command.amount_minor,
+            approval=ApprovalEvidence(
+                held.request_id, command.maker_ref, held.approver_refs
+            ),
+            occurred_at=command.occurred_at,
+            gl_target_class=command.gl_target_class,
+            emit=lambda request: _post_variance_fact(
+                session, scope=scope, request=request
+            ),
+        )
+        return {"state": outcome}
+
+    result = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.variance.recognise.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return str(result.result["state"])
+
+
+def confirm_opening_variance_evidence(
+    db: Session,
+    *,
+    scope: Scope,
+    command: ConfirmOpeningVarianceEvidenceV1,
+    approvals: OpeningVarianceApprovalPort | None = None,
+) -> str:
+    """Memo bases only: record the evidence that the authoritative measure stands."""
+    if type(command) is not ConfirmOpeningVarianceEvidenceV1:
+        raise BillingRuleViolation(
+            "opening_command_invalid", "expected ConfirmOpeningVarianceEvidenceV1"
+        )
+    _require_scope_matches(routed=scope, declared=command.scope)
+    digest = variance_resolution_content_digest(
+        kind="evidence_confirmed",
+        variance_id=command.variance_id,
+        amount_minor=command.amount_minor,
+        detail=command.evidence_ref,
+        maker_ref=command.maker_ref,
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        held = _require_variance_approval(
+            session,
+            scope=scope,
+            approvals=approvals,
+            request_id=command.approval_request_id,
+            variance_id=command.variance_id,
+            content_digest=digest,
+            maker_ref=command.maker_ref,
+        )
+        outcome = resolve_variance(
+            session,
+            scope=scope,
+            variance_id=command.variance_id,
+            resolution_kind="evidence_confirmed",
+            amount_minor=command.amount_minor,
+            approval=ApprovalEvidence(
+                held.request_id, command.maker_ref, held.approver_refs
+            ),
+            occurred_at=command.occurred_at,
+            evidence_ref=command.evidence_ref,
+        )
+        return {"state": outcome}
+
+    result = _idempotent(
+        db,
+        scope=scope,
+        operation_scope="billing.opening.variance.confirm_evidence.v1",
+        key=command.idempotency_key,
+        fingerprint=digest,
+        operation=operation,
+    )
+    return str(result.result["state"])
+
+
+def _post_variance_fact(
+    session: Session, *, scope: Scope, request: VarianceFactRequest
+) -> None:
+    """One effect-free posting group and one AccountingFactV6 (the fact is emitted
+    as ``billing.accounting.fact.v6`` by the normal ``_post_group`` path)."""
+    _post_group(
+        session,
+        scope=scope,
+        account_id=request.account_id,
+        kind=cast(Any, request.effect_kind),
+        currency=request.currency,
+        minor_units=request.precision,
+        source_ref=f"opening-variance-event:{request.event_id}",
+        occurred_at=request.occurred_at,
+        effects=(),
+        opening_group_id=request.group_id,
+        variance_fact=request,
+    )
+
+
+def _sealed_hold_list(db: Session, *, scope: Scope) -> tuple[UUID, ...]:
+    seal = get_opening_window_seal(db, scope=scope)
+    return () if seal is None else seal.command.held_account_ids
+
+
 def seal_opening_window(
     db: Session,
     *,
@@ -6504,14 +7677,15 @@ def seal_opening_window(
         # Only fresh evidence observed under the physical custody lock seals.
         verified = qualify()
         actual = get_opening_window_admissions(session, scope=scope)
-        positive = {
-            item.partition.account_id
-            for item in (
-                *window.manifest.cash_lots,
-                *getattr(window.manifest, "receivables", ()),
-            )
-            if item.residual_minor > 0
-        }
+        if isinstance(window.manifest, OpeningManifestV2):
+            # One carryable definition: T != 0 or any variance on the partition.
+            positive = set(carryable_accounts(window.manifest))
+        else:
+            positive = {
+                item.partition.account_id
+                for item in window.manifest.cash_lots
+                if item.residual_minor > 0
+            }
         held = set(command.held_account_ids)
         if not held <= positive:
             raise BillingRuleViolation(
@@ -6521,13 +7695,20 @@ def seal_opening_window(
         if isinstance(window.manifest, OpeningManifestV2):
             try:
                 require_hold_list_covers_manifest(
-                    window.manifest, command.held_account_ids
+                    window.manifest,
+                    command.held_account_ids,
+                    command.operational_holds,
                 )
             except OpeningEvidenceError as exc:
                 raise BillingRuleViolation(
                     "opening_hold_list_invalid",
-                    "sealed hold list must cover every held-marked partition once",
+                    "sealed hold list must be the manifest holds plus typed "
+                    "operational holds",
                 ) from exc
+        elif command.operational_holds:
+            raise BillingRuleViolation(
+                "opening_hold_list_invalid", "operational holds need a V2 manifest"
+            )
         expected = positive - held
         if {item.billing_account_id for item in actual} != expected or len(
             actual
@@ -6542,6 +7723,18 @@ def seal_opening_window(
         ):
             raise BillingRuleViolation(
                 "opening_window_population", "complete local admissions differ"
+            )
+        if isinstance(window.manifest, OpeningManifestV2):
+            record_batch_variances(
+                session,
+                scope=scope,
+                window_id=window.window_id,
+                manifest=window.manifest,
+                actor=command.authority_ref,
+                occurred_at=command.occurred_at,
+                emit=lambda request: _post_variance_fact(
+                    session, scope=scope, request=request
+                ),
             )
         seal = OpeningWindowSealV1(
             command, verified, population_digest, len(actual), datetime.now(UTC)
@@ -8049,10 +9242,17 @@ def _import_opening_account_v2(
         sum(x.residual_minor for x in sources),
         sum(x.residual_minor for x in items),
     )
-    if cash_minor < 0 or ar_minor < 0 or cash_minor + ar_minor <= 0:
+    partition_variances = tuple(
+        v for v in command.manifest.variances if v.partition == command.partition
+    )
+    if (
+        cash_minor < 0
+        or ar_minor < 0
+        or (cash_minor + ar_minor == 0 and not partition_variances)
+    ):
         raise BillingRuleViolation(
             "opening_partition_nonpositive",
-            "selected complete partition must recognize positive backing",
+            "selected complete partition must carry value (T != 0) or a variance",
         )
     amount = money_from_minor(
         cash_minor, command.partition.currency, command.partition.precision
@@ -8253,6 +9453,21 @@ def _import_opening_account_v2(
             opening_effects=opening,
             opening_bases=tuple(bases),
         )
+        window = get_opening_window(session, scope=scope)
+        if window is not None:
+            record_partition_variances(
+                session,
+                scope=scope,
+                window_id=window.window_id,
+                manifest=command.manifest,
+                partition=command.partition,
+                receipt_id=receipt_id,
+                actor=command.migration_authority_ref,
+                occurred_at=command.occurred_at,
+                emit=lambda request: _post_variance_fact(
+                    session, scope=scope, request=request
+                ),
+            )
         if after_import is not None:
             after_import(session, receipt)
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
@@ -8579,6 +9794,19 @@ def reverse_opening_account_import_v2(
             opening_effects=opening,
             corrects_posting_group_id=original.posting_group_id,
         )
+        window = get_opening_window(session, scope=scope)
+        if window is not None and get_opening_window_seal(session, scope=scope) is None:
+            void_partition_variances(
+                session,
+                scope=scope,
+                window_id=window.window_id,
+                account_id=original.billing_account_id,
+                actor=command.migration_authority_ref,
+                occurred_at=command.occurred_at,
+                emit=lambda request: _post_variance_fact(
+                    session, scope=scope, request=request
+                ),
+            )
         return {"receipt_id": str(receipt_id), "posting_group_id": str(group_id)}
 
     outcome = _idempotent(

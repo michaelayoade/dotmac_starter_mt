@@ -9,19 +9,27 @@ and capabilities, and the existing kernel decision seams evaluate both.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import copy
-from typing import Any
+from typing import Any, Literal, Protocol, cast
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
+from fastapi.params import Depends as DependencyDeclaration
 from fastapi.routing import APIRoute
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.deps import authorize_party, get_db, require_tenant
 from dotmac_kernel.entitlements import is_entitled
-from dotmac_kernel.facet_principal import FacetPrincipal, record_facet_principal
+from dotmac_kernel.facet_principal import (
+    FacetPrincipal,
+    FacetPrincipalError,
+    record_facet_principal,
+    require_facet_principal,
+)
 from dotmac_kernel.middleware.csrf import require_csrf
 from dotmac_kernel.models import Party
 from dotmac_kernel.web_surfaces import (
+    _BROWSER_DOCUMENT_CONTEXT,
     AuthenticationProfileBinding,
     BrowserSecurityPlane,
     RegisteredWebSurface,
@@ -29,8 +37,21 @@ from dotmac_kernel.web_surfaces import (
     SurfaceContext,
     WebFacetMount,
     WebSurfaceRegistry,
+    _ResolvedBrowserDocumentPolicy,
     qualified_route_name,
 )
+
+
+class _RequestScopedDepends(Protocol):
+    """The public 0.140 API used only behind the document runtime-pair gate.
+
+    The Kernel's baseline lock has 0.115 annotations without ``scope``. Keep
+    that broader baseline type-checkable without weakening other Depends calls.
+    """
+
+    def __call__(
+        self, dependency: Callable[..., object], *, scope: Literal["request"]
+    ) -> DependencyDeclaration: ...
 
 
 def _resolved_navigation(
@@ -293,6 +314,37 @@ def _route_context_dependency(
     )
 
 
+def _document_context_dependency(
+    binding: _ResolvedBrowserDocumentPolicy,
+    context: Callable[..., object],
+):
+    def dependency(request: Request, authenticated: Any = Depends(context)):
+        principal = require_facet_principal(request, plane=binding.security_plane)
+        if principal.facet != binding.declaration.facet:
+            raise FacetPrincipalError(
+                "browser document requires the principal from its declared facet"
+            )
+        request.scope[_BROWSER_DOCUMENT_CONTEXT] = (binding, request.scope)
+        return authenticated
+
+    return dependency
+
+
+def _document_lifecycle_dependency(binding: _ResolvedBrowserDocumentPolicy):
+    def dependency(request: Request):
+        try:
+            yield
+        except BaseException:
+            # This request-scope boundary spans validation and Response.__call__.
+            # A pre-start error replacement gets the baseline. After response
+            # start, finalizer failures cannot retract already-sent headers.
+            request.scope.pop(_BROWSER_DOCUMENT_CONTEXT, None)
+            raise
+
+    dependency.__dict__["_dotmac_document_lifecycle"] = binding
+    return dependency
+
+
 def mount_web_surfaces(
     app: FastAPI,
     *,
@@ -330,19 +382,37 @@ def mount_web_surfaces(
                 )
                 one = APIRouter()
                 one.routes.append(route)
-                dependencies = [Depends(require_csrf)]
-                dependencies.append(
-                    Depends(
-                        _route_context_dependency(
-                            registry=registry,
-                            facet=facet,
-                            surface=surface,
-                            route=source_route,
-                            enabled_modules=enabled_modules,
-                            stylesheets=stylesheets,
-                        )
-                    )
+                context_dependency = _route_context_dependency(
+                    registry=registry,
+                    facet=facet,
+                    surface=surface,
+                    route=source_route,
+                    enabled_modules=enabled_modules,
+                    stylesheets=stylesheets,
                 )
+                dependencies = [Depends(require_csrf)]
+                binding = next(
+                    (
+                        value
+                        for value in registry.browser_document_policies
+                        if value.qualified_route == route.name
+                    ),
+                    None,
+                )
+                if binding is not None:
+                    # The nested dependency completes authentication/admission before
+                    # stamping this particular request. No APIRoute object identity
+                    # survives include_router's copying/lazy route contexts.
+                    dependencies.insert(
+                        0,
+                        cast(_RequestScopedDepends, Depends)(
+                            _document_lifecycle_dependency(binding), scope="request"
+                        ),
+                    )
+                    context_dependency = _document_context_dependency(
+                        binding, context_dependency
+                    )
+                dependencies.append(Depends(context_dependency))
                 app.include_router(
                     one,
                     prefix="" if surface.legacy else facet.url_prefix,

@@ -24,6 +24,10 @@ class TrackedUnitNotFound(PositioningError):
     """The named opaque tracked unit does not exist in the tenant scope."""
 
 
+class ObservationNotFound(PositioningError):
+    """The named observation does not exist in the tenant scope."""
+
+
 class SourceAssignmentConflict(PositioningError):
     """A source identity overlaps or reuses an assignment incompatibly."""
 

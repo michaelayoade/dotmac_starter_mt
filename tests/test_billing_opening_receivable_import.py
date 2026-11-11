@@ -42,9 +42,13 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
+from tests import billing_opening_variance_fixtures as variance_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 from tests.unit import test_billing_opening_receivable_contracts as evidence
 
@@ -150,6 +154,9 @@ def _command(session, scope, account_id):
         ),
         receivables=items,
         cash_lots=lots,
+        measures=tuple(
+            replace(value, partition=partition) for value in cmd.manifest.measures
+        ),
     )
     return replace(
         cmd, scope=scope, partition=partition, target=target, manifest=manifest
@@ -803,6 +810,49 @@ def test_mixed_cash_draw_partial_and_full_inverse_restore_imported_basis(
         db.commit()
 
 
+def test_late_freeze_of_an_opening_imported_invoice_has_its_own_refusal(scratch):
+    """Detected structurally (the opening basis row), never by a caller flag."""
+    from dotmac_billing.commands import FreezeIssuedInvoiceWithholding
+
+    from tests import test_billing_tax_dependency_evidence as dependency
+
+    class _Holds:
+        def holds(self, *, scope, actor_ref, code):
+            return True
+
+    class _NoTax:
+        def read_seal(self, *, scope, determination_set_id):
+            raise AssertionError("refused before Tax is asked")
+
+    scope, url = noncash._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as db:
+        account = cash._new_account(db, scope)
+        _, receipt = _import(db, scope, account)
+        cash._seal_window(db, scope)
+        basis = _bases(db, scope, receipt)[0]
+        with pytest.raises(BillingRuleViolation) as refused:
+            s.freeze_issued_invoice_withholding(
+                db,
+                scope=scope,
+                command=FreezeIssuedInvoiceWithholding(
+                    scope,
+                    account,
+                    basis.document_id,
+                    "freeze:opening",
+                    "finance-user:fixture",
+                    "opening imports wait for a party mapping",
+                    dependency._evidence(scope)[1],
+                ),
+                tax_seal=_NoTax(),
+                permissions=_Holds(),
+            )
+        assert (
+            refused.value.code
+            == "billing.withholding_freeze_opening_import_unavailable"
+        )
+        db.rollback()
+
+
 @pytest.mark.parametrize("plane", ["tenant", "platform"])
 def test_withholding_noncash_credit_and_credit_note_room_and_owner_inverses(
     scratch, plane
@@ -814,7 +864,8 @@ def test_withholding_noncash_credit_and_credit_note_room_and_owner_inverses(
         cash._seal_window(db, scope)
         basis = _bases(db, scope, receipt)[0]
         # Historical WHT is documentary; only this new discharge consumes room.
-        wht_cmd = b._withholding_command(
+        wht_cmd = frozen_withholding_command(
+            db,
             account,
             basis.document_id,
             scope=scope,
@@ -927,7 +978,8 @@ def test_one_outer_transaction_preserves_each_draws_historical_source_version(
         wht = s.accept_withholding_discharge(
             db,
             scope=scope,
-            command=b._withholding_command(
+            command=frozen_withholding_command(
+                db,
                 account,
                 basis.document_id,
                 scope=scope,
@@ -1189,7 +1241,8 @@ def test_full_unwind_requires_all_owner_inverses_and_never_releases_natural_clai
         wht = s.accept_withholding_discharge(
             db,
             scope=scope,
-            command=b._withholding_command(
+            command=frozen_withholding_command(
+                db,
                 account,
                 second.document_id,
                 scope=scope,
@@ -1541,13 +1594,17 @@ def test_raw_sql_cash_draw_capacity_uses_residual_not_original_invoice_gross(
             else value
             for value in cmd.manifest.dispositions
         )
-        manifest = replace(
-            cmd.manifest,
-            cash_lots=(abundant, second_lot),
-            dispositions=dispositions,
-            controls=(
-                replace(cmd.manifest.controls[0], available_cash_credit_minor=20000),
-            ),
+        manifest = variance_fixture.with_exact_measures(
+            replace(
+                cmd.manifest,
+                cash_lots=(abundant, second_lot),
+                dispositions=dispositions,
+                controls=(
+                    replace(
+                        cmd.manifest.controls[0], available_cash_credit_minor=20000
+                    ),
+                ),
+            )
         )
         cash._prepare_window(db, scope, replace(cmd, manifest=manifest))
         receipt = cash._import_command(
@@ -2084,6 +2141,11 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
             historical.setattr(
                 s, "_require_historical_source_unclaimed", lambda *args, **kwargs: None
             )
+            # bi7 predates the frozen withholding component table (bi_0016).
+            historical.setattr(s, "_require_frozen_withholding", lambda *a, **k: None)
+            historical.setattr(
+                s, "_undischarged_frozen_withholding", lambda *a, **k: Decimal(0)
+            )
             with b._session(url, scope) as db:
                 account = cash._new_account(db, scope)
                 old_command = cash._command(db, scope, account)
@@ -2550,7 +2612,8 @@ def _source_case(db, scope, kind):
     account, _, invoice = b._seed_invoice(db, scope, suffix=str(uuid4()))
     owner, reference = "customer-care", f"source:{uuid4()}"
     if kind.startswith("withholding"):
-        command = b._withholding_command(
+        command = frozen_withholding_command(
+            db,
             account.id,
             invoice.id,
             scope=scope,

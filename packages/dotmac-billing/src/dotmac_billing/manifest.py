@@ -1,6 +1,7 @@
 """Installable declaration for the dual-plane operational-receivables owner."""
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.permissions import PermissionSpec
 from dotmac_kernel.planes import ModulePlane
 from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
@@ -13,7 +14,7 @@ from dotmac_billing.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="billing",
-    version="0.1.0a11",
+    version="0.1.0a12",
     core=False,
     short_code="billing",
     migration_prefix="bi",
@@ -28,6 +29,7 @@ module = ModuleManifest(
     outbox_event_types=(
         "billing.settlement.earmarked.v1",
         "billing.settlement.earmark.changed.v1",
+        "billing.accounting.fact.v6",
         "billing.accounting.fact.v5",
         "billing.receivable.exposure.v2",
         "billing.accounting.fact.v4",
@@ -44,6 +46,17 @@ module = ModuleManifest(
         "billing.receivable.exposure.v1",
         "billing.receivable.position.v1",
         "billing.settlement.accepted.v1",
+    ),
+    permissions=(
+        PermissionSpec(
+            code="billing.withholding.freeze",
+            description=(
+                "Freeze expected withholding on an already issued invoice that has "
+                "no frozen component. Append-only and Tax-confirmed; the actor, "
+                "command id and reason are recorded on every row."
+            ),
+            default_roles=("admin",),
+        ),
     ),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
     supported_plane_sets=(

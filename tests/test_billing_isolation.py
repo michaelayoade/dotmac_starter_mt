@@ -10,6 +10,7 @@ from __future__ import annotations
 
 # SQL identifiers are fixed tenant/platform test table names; values are bound.
 # ruff: noqa: S608
+import hashlib
 import os
 import threading
 import uuid
@@ -85,6 +86,9 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -113,6 +117,8 @@ def _expected_online_privileges(table_name: str) -> frozenset[str]:
         "opening_window_seals",
         "opening_hold_admissions",
         "opening_authority_switch_receipts",
+        "opening_variances",
+        "opening_control_gaps",
         "opening_cash_lots",
         "opening_receivable_bases",
         "opening_historical_discharge_claims",
@@ -4088,14 +4094,14 @@ def _withholding_command(
 
     evidence = WithholdingTaxEvidenceV1(
         source_owner="dotmac-tax",
-        determination_ref=f"tax-set:{suffix}",
+        determination_ref=str(uuid.uuid5(uuid.NAMESPACE_URL, f"tax-set:{suffix}")),
         source_version="opaque-source-v1",
-        source_fingerprint=f"source:{suffix}",
+        source_fingerprint=hashlib.sha256(f"source:{suffix}".encode()).hexdigest(),
         result_fingerprint="rv1:" + "a" * 64,
         evidence_ref=f"tax-evidence:{suffix}",
         source_ref=f"document:{document_id}",
-        component_ref=f"component:{suffix}",
-        rule_ref="configured-rule",
+        component_ref=str(uuid.uuid5(uuid.NAMESPACE_URL, f"component:{suffix}")),
+        rule_ref=str(uuid.uuid5(uuid.NAMESPACE_URL, "configured-rule")),
         rule_version="1",
         treatment_code="withholding",
         calculation_base_code="subtotal",
@@ -4145,8 +4151,8 @@ def test_withholding_partial_replay_correction_and_bypass_refusal(scratch, plane
     url = tenant_url if plane == "tenant" else platform_url
     with _session(url, scope) as session:
         account, _, invoice = _seed_invoice(session, scope, suffix=f"wht-{plane}")
-        command = _withholding_command(
-            account.id, invoice.id, scope=scope, suffix=plane, accepted="3.00"
+        command = frozen_withholding_command(
+            session, account.id, invoice.id, scope=scope, suffix=plane, accepted="3.00"
         )
         from dotmac_billing.contracts import WithholdingCertificateObservationV1
 
@@ -4346,8 +4352,13 @@ def test_withholding_107500_invoice_102500_cash_5000_discharge(scratch, plane):
                 allocation_model.posting_group_id == cash_group.id
             )
         ).scalar_one()
-        command = _withholding_command(
-            account.id, invoice.id, scope=scope, suffix=f"net-{plane}", claimed="5000"
+        command = frozen_withholding_command(
+            session,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix=f"net-{plane}",
+            claimed="5000",
         )
         command = replace(
             command, settlement_id=cash.id, allocation_id=cash_allocation.id
@@ -4405,7 +4416,9 @@ def test_withholding_cannot_replay_or_post_across_tenants(scratch):
     scope_a, scope_b = TenantScope(left), TenantScope(right)
     with _session(tenant_url, scope_a) as session:
         account, _, invoice = _seed_invoice(session, scope_a, suffix="wht-isolation")
-        command = _withholding_command(account.id, invoice.id, scope=scope_a)
+        command = frozen_withholding_command(
+            session, account.id, invoice.id, scope=scope_a
+        )
         row = accept_withholding_discharge(session, scope=scope_a, command=command)
         discharge_id = row.id
         session.commit()
@@ -4444,9 +4457,12 @@ def test_withholding_rollback_removes_discharge_position_fact_and_retry(scratch,
         account, _, invoice = _seed_invoice(
             session, scope, suffix=f"wht-rollback-{plane}"
         )
-        command = _withholding_command(
-            account.id, invoice.id, scope=scope, suffix=f"rollback-{plane}"
+        command = frozen_withholding_command(
+            session, account.id, invoice.id, scope=scope, suffix=f"rollback-{plane}"
         )
+        # The frozen component is a precondition, not part of the rolled-back
+        # discharge: persist it so the retry below can draw on it.
+        session.commit()
         row = accept_withholding_discharge(session, scope=scope, command=command)
         discharge_id, group_id, account_id = row.id, row.posting_group_id, account.id
         session.rollback()
@@ -4520,8 +4536,13 @@ def test_withholding_and_cash_allocation_serialize_invoice_room(scratch, plane):
             ),
             accepted_confirmation_evidence=frozenset({"provider_settled"}),
         )
-        wht_command = _withholding_command(
-            account.id, invoice.id, scope=scope, suffix=f"race-{plane}", claimed="120"
+        wht_command = frozen_withholding_command(
+            session,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix=f"race-{plane}",
+            claimed="120",
         )
         cash_command = AllocationCommand(
             settlement.id, invoice.id, _money("120"), NOW, f"cash-race:{plane}"
@@ -4587,7 +4608,8 @@ def test_withholding_and_credit_note_serialize_invoice_room(scratch, plane):
         account, _, invoice = _seed_invoice(
             session, scope, suffix=f"wht-credit-race-{plane}"
         )
-        wht_command = _withholding_command(
+        wht_command = frozen_withholding_command(
+            session,
             account.id,
             invoice.id,
             scope=scope,
@@ -4693,8 +4715,8 @@ def test_invoice_generic_reversal_cannot_borrow_another_invoice_ar(scratch, plan
         )
         with pytest.raises(BillingRuleViolation, match="void_document"):
             reverse_posting_group(session, scope=scope, command=reverse)
-        command = _withholding_command(
-            account.id, invoice.id, scope=scope, suffix=f"two-ar-{plane}"
+        command = frozen_withholding_command(
+            session, account.id, invoice.id, scope=scope, suffix=f"two-ar-{plane}"
         )
         row = accept_withholding_discharge(session, scope=scope, command=command)
         with pytest.raises(BillingRuleViolation, match="void_document"):
@@ -4781,8 +4803,13 @@ def test_legacy_invoice_reverse_exact_replay_precedes_new_owner_refusal(scratch,
                 scope=scope,
                 command=replace(command, source_ref="new-invoice-reverse"),
             )
-        wht = _withholding_command(
-            account.id, invoice.id, scope=scope, suffix=f"legacy-reversed-wht-{plane}"
+        wht = frozen_withholding_command(
+            session,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix=f"legacy-reversed-wht-{plane}",
+            direct=True,
         )
         with pytest.raises(BillingRuleViolation, match="structurally bound"):
             accept_withholding_discharge(session, scope=scope, command=wht)
@@ -4820,8 +4847,12 @@ def test_private_generic_reverse_cannot_bypass_withholding_inverse_owner(
         row = accept_withholding_discharge(
             session,
             scope=scope,
-            command=_withholding_command(
-                account.id, invoice.id, scope=scope, suffix=f"private-reverse-{plane}"
+            command=frozen_withholding_command(
+                session,
+                account.id,
+                invoice.id,
+                scope=scope,
+                suffix=f"private-reverse-{plane}",
             ),
         )
         group = (

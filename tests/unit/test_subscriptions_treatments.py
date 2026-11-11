@@ -235,6 +235,7 @@ def _contract(
                     unit_price=ExactAmount(Decimal("100.00"), "EUR", 2),
                     offer_version_id=offer_version_id,
                     offer_version=1,
+                    price_key="access",
                     entitlement_codes=("service.standard",),
                 ),
             ),

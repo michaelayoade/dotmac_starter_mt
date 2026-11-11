@@ -27,8 +27,8 @@ import argparse
 import hashlib
 import sys
 from collections import Counter
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -42,7 +42,9 @@ from dotmac_billing.contracts import (
 )
 from dotmac_billing.opening_admissibility import (
     AdmissibilityError,
-    parse_a10_classes,
+    AdmissibilityProjection,
+    census_measure_figures,
+    parse_a10_input,
     parse_admissibility_rules,
     parse_reseller_map,
     project_census,
@@ -107,6 +109,13 @@ from dotmac_billing.opening_rehearsal_contracts import (
     OpeningRehearsalOriginalEvidenceV1,
     OpeningRehearsalRunV1,
     OpeningSubObservationV2,
+)
+from dotmac_billing.opening_variance_contracts import (
+    AGGREGATE_KINDS,
+    OpeningBatchControlV1,
+    OpeningPartitionMeasuresV1,
+    OpeningVarianceV1,
+    variance_evidence_digest,
 )
 from dotmac_kernel.cache import Scope
 
@@ -413,6 +422,339 @@ def _sequence(value: object, code: str = "malformed_input") -> Sequence[object]:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class LedgerInputsV1:
+    """The variance ledger half of a V2 manifest: measures, variances, batch."""
+
+    measures: tuple[OpeningPartitionMeasuresV1, ...] = ()
+    variances: tuple[OpeningVarianceV1, ...] = ()
+    batch_controls: tuple[OpeningBatchControlV1, ...] = ()
+
+
+#: Derives the ledger half from the manifest it joins (counts come from the
+#: dispositions; figures come from the census, never from this script).
+LedgerFor = Callable[[OpeningManifestV2], LedgerInputsV1]
+
+
+def census_measures_ledger(
+    figures: Mapping[tuple[str, str], tuple[str, str | None]],
+    source_account_of: Mapping[OpeningPartitionV1, UUID],
+    precisions: Mapping[str, int],
+) -> LedgerFor:
+    """Measures from the projection's census figures, with no variance.
+
+    ``rebuild_minor`` stays ``None`` with a typed gap reason: the A10 input
+    deliberately carries no amounts, so E4 cannot be formed (design 2.3(3)). A
+    partition whose figures are missing or inexact gets no measures row, which
+    the validator counts (``partition_measures_missing``).
+    """
+
+    def build(manifest: OpeningManifestV2) -> LedgerInputsV1:
+        rows = []
+        by_partition: dict[OpeningPartitionV1, list[OpeningDispositionV1]] = {}
+        for disposition in manifest.dispositions:
+            by_partition.setdefault(disposition.partition, []).append(disposition)
+        for control in manifest.controls:
+            part = control.partition
+            source = source_account_of.get(part)
+            figure = (
+                None if source is None else figures.get((str(source), part.currency))
+            )
+            if figure is None or figure[1] is None:
+                continue
+            doc = _minor_units(Decimal(figure[0]), precisions.get(part.currency))
+            stored = _minor_units(Decimal(figure[1]), precisions.get(part.currency))
+            if doc is None or stored is None:
+                continue
+            disp = by_partition.get(part, [])
+            eligible = sum(1 for d in disp if d.disposition == "eligible")
+            blocking = sum(1 for d in disp if d.disposition == "blocking")
+            rows.append(
+                OpeningPartitionMeasuresV1(
+                    part,
+                    doc,
+                    stored,
+                    None,
+                    "a10_currency_unsupported"
+                    if part.currency != "NGN"
+                    else "a10_missing",
+                    len(disp),
+                    eligible,
+                    0,
+                    len(disp) - eligible - blocking,
+                    0,
+                    blocking,
+                )
+            )
+        return LedgerInputsV1(tuple(rows))
+
+    return build
+
+
+def census_variance_ledger(
+    projection: AdmissibilityProjection,
+    assembly: AssemblyInputs,
+    precisions: Mapping[str, int],
+) -> LedgerFor:
+    """The full ledger half from a projection plan, in exact minor units.
+
+    Every itemised variance cites a census row; the only residue is at most one
+    ``unexplained_difference`` (or the carried ``lane_document_difference``) per
+    partition, lane and basis, and T is never adjusted. The rebuild basis is
+    ``rebuild_minor = -to_minor(rebuild_net)`` with one attribution variance of
+    exactly ``rebuild_minor - T_net``.
+    """
+    if not projection.rebuild_supplied:
+        raise _malformed("a10_rebuild_required")
+    source_of = {m.partition: m.source_account_id for m in assembly.partitions}
+    identity_of = {
+        m.source_invoice_id: m.source_identity for m in assembly.invoice_mappings
+    }
+    eligible = {UUID(text) for text in projection.eligible_invoice_ids}
+    rules_digest = projection.digests["rules"]
+
+    def build(manifest: OpeningManifestV2) -> LedgerInputsV1:
+        measures: list[OpeningPartitionMeasuresV1] = []
+        variances: list[OpeningVarianceV1] = []
+        # one pass each: the per-partition work below is a dictionary read
+        totals: Counter[OpeningPartitionV1] = Counter()
+        for receivable in manifest.receivables:
+            totals[receivable.partition] += receivable.residual_minor
+        lot_totals: Counter[OpeningPartitionV1] = Counter()
+        for lot in manifest.cash_lots:
+            lot_totals[lot.partition] += lot.residual_minor
+        rows_of: dict[OpeningPartitionV1, list[OpeningDispositionV1]] = {}
+        for disposition in manifest.dispositions:
+            rows_of.setdefault(disposition.partition, []).append(disposition)
+        for control in manifest.controls:
+            part = control.partition
+            source = source_of.get(part)
+            plan = (
+                None
+                if source is None
+                else projection.plans.get((str(source), part.currency))
+            )
+            prec = precisions.get(part.currency)
+            if plan is None or prec is None or plan.stored_balance is None:
+                continue
+            doc = _minor_units(plan.document_residual, prec)
+            stored = _minor_units(plan.stored_balance, prec)
+            if doc is None or stored is None:
+                continue
+            total = totals[part]
+            lots = lot_totals[part]
+            mine: list[OpeningVarianceV1] = []
+
+            def add(
+                lane: str,
+                basis: str,
+                reason: str,
+                kind: str,
+                key: str,
+                amount: int,
+                evidence: object,
+                part: OpeningPartitionV1 = part,
+                prec: int = prec,
+                sink: list[OpeningVarianceV1] = mine,
+            ) -> None:
+                if amount == 0:
+                    return
+                sink.append(
+                    OpeningVarianceV1(
+                        "partition",
+                        part,
+                        part.currency,
+                        prec,
+                        lane,
+                        basis,
+                        reason,
+                        OpeningSourceIdentityV1(kind, key),
+                        amount,
+                        variance_evidence_digest(
+                            {"evidence": evidence, "reason": reason, "amount": amount}
+                        ),
+                        rules_digest,
+                    )
+                )
+
+            ok = True
+            itemised = {"ledger_lane": 0, "document_residual": 0, "stored_balance": 0}
+            for item in plan.items:
+                amount = _minor_units(item.amount, prec)
+                if amount is None:
+                    ok = False
+                    break
+                invoice_id = UUID(item.source_ref)
+                if invoice_id in eligible and invoice_id in identity_of:
+                    key = identity_of[invoice_id].key
+                else:
+                    key = str(invoice_id)
+                itemised[item.basis] += amount
+                add(
+                    item.lane,
+                    item.basis,
+                    item.reason_code,
+                    item.source_kind,
+                    key,
+                    amount,
+                    item.evidence,
+                )
+            if not ok:
+                continue
+            lane_remainder = (
+                control.collectible_receivable_minor - total - itemised["ledger_lane"]
+            )
+            if plan.lane_diff_carried:
+                add(
+                    "receivable",
+                    "ledger_lane",
+                    "lane_document_difference",
+                    "lane",
+                    part.source_account_key,
+                    lane_remainder,
+                    "lane",
+                )
+            else:
+                add(
+                    "receivable",
+                    "ledger_lane",
+                    "unexplained_difference",
+                    "partition_remainder",
+                    part.source_account_key,
+                    lane_remainder,
+                    "lane",
+                )
+            if not lots:
+                add(
+                    "customer_credit",
+                    "ledger_lane",
+                    "lane_not_transferred:customer_credit",
+                    "lane",
+                    part.source_account_key,
+                    control.unapplied_customer_credit_minor,
+                    "credit",
+                )
+                add(
+                    "prepaid_funding",
+                    "ledger_lane",
+                    "lane_not_transferred:prepaid_funding",
+                    "lane",
+                    part.source_account_key,
+                    control.prepaid_funding_reserved_minor,
+                    "funding",
+                )
+            add(
+                "receivable",
+                "document_residual",
+                "unexplained_difference",
+                "partition_remainder",
+                part.source_account_key,
+                doc - total - itemised["document_residual"],
+                "document",
+            )
+            add(
+                "receivable",
+                "stored_balance",
+                "unexplained_difference",
+                "partition_remainder",
+                part.source_account_key,
+                stored - total - itemised["stored_balance"],
+                "stored",
+            )
+            rebuild_minor: int | None = None
+            gap = plan.rebuild_gap_reason
+            if plan.rebuild_net is not None:
+                net = _minor_units(plan.rebuild_net, prec)
+                if net is None:
+                    gap = "a10_missing"
+                else:
+                    rebuild_minor = -net
+                    diff = rebuild_minor - (total - lots)
+                    if plan.rebuild_reason == "unexplained_difference":
+                        add(
+                            "receivable",
+                            "rebuild",
+                            "unexplained_difference",
+                            "partition_remainder",
+                            part.source_account_key,
+                            diff,
+                            "rebuild",
+                        )
+                    else:
+                        add(
+                            "receivable",
+                            "rebuild",
+                            plan.rebuild_reason or "unexplained_difference",
+                            "rebuild_account",
+                            part.source_account_key,
+                            diff,
+                            "rebuild",
+                        )
+            cited = {v.source.key for v in mine if v.source.kind not in AGGREGATE_KINDS}
+            counts: Counter[str] = Counter()
+            for d in rows_of.get(part, ()):
+                counts["population_rows"] += 1
+                if d.disposition == "eligible":
+                    counts["transferred_rows"] += 1
+                elif d.disposition == "blocking":
+                    counts["non_carryable_rows"] += 1
+                elif d.reason == "archived_draft":
+                    counts["archived_rows"] += 1
+                elif d.identity.key in cited:
+                    counts["carried_rows"] += 1
+                else:
+                    counts["excluded_rows"] += 1
+            measures.append(
+                OpeningPartitionMeasuresV1(
+                    part,
+                    doc,
+                    stored,
+                    rebuild_minor,
+                    None if rebuild_minor is not None else (gap or "a10_missing"),
+                    counts["population_rows"],
+                    counts["transferred_rows"],
+                    counts["carried_rows"],
+                    counts["excluded_rows"],
+                    counts["archived_rows"],
+                    counts["non_carryable_rows"],
+                )
+            )
+            variances.extend(mine)
+        batch_controls: list[OpeningBatchControlV1] = []
+        for entry in projection.batch:
+            prec = precisions.get(entry.currency)
+            amount = None if prec is None else _minor_units(entry.amount, prec)
+            if prec is None or not amount:
+                continue
+            batch_controls.append(
+                OpeningBatchControlV1(
+                    entry.currency, prec, entry.lane, entry.basis, amount, ()
+                )
+            )
+            variances.append(
+                OpeningVarianceV1(
+                    "batch",
+                    None,
+                    entry.currency,
+                    prec,
+                    entry.lane,
+                    entry.basis,
+                    "unattributed_source",
+                    OpeningSourceIdentityV1(
+                        "control_row", f"{entry.currency}:{entry.lane}:{entry.basis}"
+                    ),
+                    amount,
+                    variance_evidence_digest(
+                        {"batch": entry.currency, "amount": amount}
+                    ),
+                    rules_digest,
+                )
+            )
+        return LedgerInputsV1(tuple(measures), tuple(variances), tuple(batch_controls))
+
+    return build
+
+
 def _minor_units(amount: Decimal, precision: int | None) -> int | None:
     """Exact Decimal -> minor scaling; ``None`` when it would need rounding."""
     if precision is None or not 0 <= precision <= 6 or not amount.is_finite():
@@ -661,7 +1003,7 @@ def _assemble(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> _AssemblyOutcome:
     # F2: the shared manifest is qualified once; the per-partition commands and
     # the run built around it must not re-walk it (O(N), not O(P x N)).
@@ -673,7 +1015,7 @@ def _assemble(
             original_documents,
             historical_discharges,
             service_refs,
-            held_reasons,
+            ledger_for,
         )
 
 
@@ -686,7 +1028,7 @@ def _assemble_run(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> _AssemblyOutcome:
     precisions = {row.currency: row.precision for row in obs.currency_precisions}
     partition_by_source = {
@@ -823,12 +1165,7 @@ def _assemble_run(
     try:
         for invoice in obs.invoices:
             # Precedence: blocking > excluded > eligible > blocking(unclassified).
-            if held_reasons and invoice.invoice_id in held_reasons:
-                # Held by the admissibility rules: kept in the manifest with a
-                # digest-bound marker, importable only after the seal.
-                disposition = "blocking"
-                reason = held_reasons[invoice.invoice_id]
-            elif invoice.invoice_id in blocking_codes:
+            if invoice.invoice_id in blocking_codes:
                 disposition = "blocking"
                 reason = sorted(blocking_codes[invoice.invoice_id])[0]
             elif invoice.invoice_id in exclusion_reasons:
@@ -1010,6 +1347,17 @@ def _assemble_run(
         )
     except OpeningEvidenceError:
         raise _malformed("malformed_assembly") from None
+    if ledger_for is not None:
+        ledger = ledger_for(manifest)
+        try:
+            manifest = replace(
+                manifest,
+                measures=ledger.measures,
+                variances=ledger.variances,
+                batch_controls=ledger.batch_controls,
+            )
+        except OpeningEvidenceError:
+            raise _malformed("malformed_assembly") from None
     commands: list[ImportOpeningAccountV2] = []
     raw_blockers: list[tuple[OpeningPartitionV1, tuple[OpeningBlockerV1, ...]]] = []
     for partition in distinct_partitions:
@@ -1094,7 +1442,7 @@ def assemble_rehearsal_run(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> OpeningRehearsalRunV1:
     """Build a candidate run, preserving only explicitly supplied typed originals.
 
@@ -1114,7 +1462,7 @@ def assemble_rehearsal_run(
         original_documents,
         historical_discharges,
         service_refs,
-        held_reasons,
+        ledger_for,
     ).run
 
 
@@ -1195,7 +1543,7 @@ def rehearsal_census(
         tuple[UUID, tuple[OpeningHistoricalDischargeV1, ...]], ...
     ] = (),
     service_refs: Mapping[UUID, str] | None = None,
-    held_reasons: Mapping[UUID, str] | None = None,
+    ledger_for: LedgerFor | None = None,
 ) -> OpeningRehearsalCensusV1:
     """Run the census, preserving independently supplied typed originals.
 
@@ -1211,7 +1559,7 @@ def rehearsal_census(
         original_documents,
         historical_discharges,
         service_refs,
-        held_reasons,
+        ledger_for,
     )
     run = outcome.run
     report = report_opening_rehearsal(run)
@@ -1423,29 +1771,43 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reseller = parse_reseller_map(
                         _read_json(Path(args.reseller_map), "malformed_reseller_map")
                     )
+                classes, rebuild_rows = parse_a10_input(
+                    _read_json(Path(args.a10), "malformed_a10_classes")
+                )
                 projection = project_census(
                     census_payload,
                     rules=parse_admissibility_rules(
                         _read_json(Path(args.rules), "malformed_rules")
                     ),
-                    a10=parse_a10_classes(
-                        _read_json(Path(args.a10), "malformed_a10_classes")
-                    ),
+                    a10=classes,
                     reseller=reseller,
                     # D-3: only a supplied, aligned original counts.
                     original_invoice_ids=frozenset(row[0] for row in originals),
+                    rebuild=rebuild_rows,
+                    require_rebuild=True,  # never a silent all-gap run
                 )
             except AdmissibilityError as exc:
                 raise _malformed(exc.code) from None
             payload = projection.census
             service_refs = projection.service_refs
+        observed, _sidecar = load_sub_observation(payload)
+        precisions = {r.currency: r.precision for r in observed.currency_precisions}
+        ledger_for: LedgerFor | None = (
+            census_variance_ledger(projection, assembly, precisions)
+            if projection is not None
+            else census_measures_ledger(
+                census_measure_figures(payload),
+                {m.partition: m.source_account_id for m in assembly.partitions},
+                precisions,
+            )
+        )
         artifact = rehearsal_census(
             payload,
             assembly=assembly,
             original_documents=originals,
             historical_discharges=histories,
             service_refs=service_refs,
-            held_reasons=projection.held_invoice_reasons if projection else None,
+            ledger_for=ledger_for,
         )
         if projection is not None and args.decisions_out:
             Path(args.decisions_out).write_text(

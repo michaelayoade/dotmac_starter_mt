@@ -84,6 +84,7 @@ def test_billing_declares_exactly_the_events_its_module_emits() -> None:
             "billing.accounting.fact.v3",
             "billing.accounting.fact.v4",
             "billing.accounting.fact.v5",
+            "billing.accounting.fact.v6",
             "billing.receivable.exposure.v2",
             "billing.document.artifact.recorded.v1",
             "billing.document.artifact.repaired.v1",

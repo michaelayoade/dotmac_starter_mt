@@ -16,6 +16,7 @@ from dotmac_billing.opening_contracts import (
     _ClosedEvidence,
 )
 from dotmac_billing.opening_receivable_contracts import OpeningManifestV2
+from dotmac_billing.opening_variance_contracts import OpeningOperationalHoldV1
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -133,6 +134,9 @@ class SealOpeningWindowV1(_ClosedEvidence):
     #: Manifest partitions the seal deliberately leaves out of the admitted
     #: population (the sealed hold list). Canonical order: ascending by text.
     held_account_ids: tuple[UUID, ...] = ()
+    #: A typed reason for every listed partition the manifest does NOT mark held
+    #: (an operational hold: target not pristine, import refused). Ascending.
+    operational_holds: tuple[OpeningOperationalHoldV1, ...] = ()
 
     def __post_init__(self) -> None:
         _ClosedEvidence.__post_init__(self)
@@ -140,6 +144,11 @@ class SealOpeningWindowV1(_ClosedEvidence):
         if keys != sorted(set(keys)):
             raise OpeningEvidenceError(
                 "held accounts must be unique and in ascending canonical order"
+            )
+        reasons = [str(item.account_id) for item in self.operational_holds]
+        if reasons != sorted(set(reasons)) or not set(reasons) <= set(keys):
+            raise OpeningEvidenceError(
+                "operational holds must be unique, ascending and listed"
             )
 
 
