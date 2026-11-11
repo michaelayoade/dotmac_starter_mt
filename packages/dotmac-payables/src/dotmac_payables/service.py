@@ -1101,8 +1101,9 @@ def admit_historical_unpaid_invoice(
         if session.new or session.dirty or session.deleted:
             wrote.append(True)
 
+    evidence = None
     try:
-        with db.begin_nested():
+        with db.begin_nested() as savepoint:
             event.listen(db, "after_flush", _saw_flush)
             try:
                 with db.no_autoflush:
@@ -1110,6 +1111,10 @@ def admit_historical_unpaid_invoice(
                         scope=scope, command=command, destination=db
                     )
                     if db.new or db.dirty or db.deleted:
+                        wrote.append(True)
+                    if not savepoint.is_active or (
+                        db.get_nested_transaction() is not savepoint
+                    ):
                         wrote.append(True)
             finally:
                 event.remove(db, "after_flush", _saw_flush)
