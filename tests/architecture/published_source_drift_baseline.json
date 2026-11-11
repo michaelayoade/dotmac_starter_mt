@@ -37,12 +37,8 @@
     "that stops drifting disappears, reason and all.",
     "Regenerate: make published-source-drift-baseline"
   ],
-  "released_total": 76,
-<<<<<<< HEAD
+  "released_total": 75,
   "drifted_total": 1,
-=======
-  "drifted_total": 2,
->>>>>>> 0d092ae1 (chore(payables): refresh rebased publication census)
   "drifted": [
     {
       "distribution": "dotmac-deployment-control",
