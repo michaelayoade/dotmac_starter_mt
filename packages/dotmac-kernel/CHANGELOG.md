@@ -48,6 +48,16 @@ publication; protected release authorization remains required.
   (production refuses to start otherwise, mounts included); production also
   refuses declared rules when the assembly declares no request evidence.
 
+- Resource API kit and idempotent import (ADR-0079): `dotmac_kernel.resource_api`
+  and `dotmac_kernel.source_import`. The cursor codec, a changes feed fenced by
+  the database clock and the oldest open PostgreSQL transaction, the tombstone
+  envelope, the completeness summary with a `since` re-read path and
+  `verify_period`, the exact-scope resource declaration (read and import-write
+  never share a key; contact fields stripped at any depth; tenant checked), the
+  DB stamping-trigger DDL helper, and the idempotent import verdict helper over
+  the existing idempotency ledger (advisory-locked per reference, flat id-map
+  results). No table, migration or route is added.
+
 ### Changed
 
 - **Client address derivation (behaviour change, security fix).**

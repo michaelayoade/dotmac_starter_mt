@@ -3,6 +3,15 @@
 All notable changes to the `dotmac-brand-profiles` distribution. Pre-1.0 the
 surface is still settling — a `0.MINOR` bump may carry breaking changes.
 
+## Unreleased — successor not allocated
+
+Source preparation only (`0.1.0a1+dev`); this is not a release or version
+allocation. The approved N4 tagline addition is optional, at most 255
+characters, DISPLAY and LOCKABLE rather than IDENTITY. Existing `bp_0001`
+remains frozen. The additive `bp_0002_tagline` migration adds a nullable
+column only to selected profile planes, with no backfill. Publication,
+consumer adoption, deployment and the brand flip remain separately gated.
+
 ## 0.1.0a1 — 2026-08-19
 
 First release. Product-first extraction of Sub's `BrandProfile` (ADR-0057 § 2).

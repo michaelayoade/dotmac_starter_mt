@@ -878,13 +878,37 @@ jobs:
   native-compute:
     uses: ./.github/workflows/native-compute.yml
 
+  lane3-evidence-crypto:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install checksum-pinned official age for synthetic qualification
+        shell: bash --noprofile --norc -eo pipefail {0}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf -- "$work"' EXIT
+          curl --fail --location --silent --show-error \
+            https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz \
+            --output "$work/age.tar.gz"
+          echo 'cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10  age.tar.gz' \
+            | (cd "$work" && sha256sum --check --strict)
+          tar -xzf "$work/age.tar.gz" -C "$work" age/age age/age-keygen
+          sudo install --owner=root --group=root --mode=0755 "$work/age/age" /usr/bin/age
+          sudo install --owner=root --group=root --mode=0755 "$work/age/age-keygen" /usr/bin/age-keygen
+      - name: Qualify real encryption with ephemeral synthetic keys
+        run: python3 tests/hosted/lane3_age_roundtrip.py
+
   docker-build:
     runs-on: ubuntu-latest
     # ADR-0006 D1: the composed migration gate must REJECT an incoherent
     # composition before an image exists at all — an image whose lineages
     # collide is an image that corrupts a database on deploy. `quality` carries
     # the `migration-gate` matrix entry, so gating on it is the enforcement.
-    needs: [quality, native-compute, console-document-policy]
+    needs: [quality, native-compute, console-document-policy, lane3-evidence-crypto]
     # Builds the prod image and health-gates it before merge. Port/tag are
     # job-local env, not magic numbers, so they can be bumped in one place.
     env:

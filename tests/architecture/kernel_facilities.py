@@ -132,6 +132,12 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "deletes from the ledger; retention is still the ledger",
     ),
     Facility(
+        "source_import:import_record",
+        "idempotency_ledger.v1",
+        "adapter over execute_once: writes public.idempotency_records under "
+        "scope import:<source>:<type> (ADR-0079)",
+    ),
+    Facility(
         "messaging/inbox:process_once",
         "idempotency_ledger.v1",
         "adapter over execute_once — the ledger has one owner (hard rule 21)",
@@ -398,6 +404,14 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "machine_rotation": (
         "kernel-owned machine identity seam, write side; credential issuance "
         "and rotation are operator/assembly operations, never a module's"
+    ),
+    # Reads the CALLER's own declared model through a ResourceDeclaration and
+    # touches no kernel-owned table, so there is no kernel storage to name a
+    # prerequisite for. The premise is enforceable: the helpers take the model
+    # from the declaration and import no kernel model (ADR-0079).
+    "resource_api": (
+        "reads the adopting module's own declared model; no kernel-owned "
+        "storage, so no cross-module prerequisite"
     ),
     "entitlements": "kernel-owned grants; modules read decisions, not tables",
     "consent": "kernel-owned suppression; delivery reads decisions",

@@ -594,12 +594,18 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     by filename and SHA-256."""
     module = _release_module_script()
     commands: list[list[str]] = []
+    module_version = tomllib.loads(
+        (PROJECT_ROOT / "packages/dotmac-brand-profiles/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+    module_wheel = f"dotmac_brand_profiles-{module_version}-py3-none-any.whl"
     kernel_version = _source_kernel_version()
     kernel_wheel = f"dotmac_kernel-{kernel_version}-py3-none-any.whl"
 
     dirs = {}
     for name, wheel in (
-        ("module-dist", "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl"),
+        ("module-dist", module_wheel),
         ("kernel-dist", kernel_wheel),
         ("first-party-dist", "dotmac_ui-0.1.0a9-py3-none-any.whl"),
     ):
@@ -641,7 +647,7 @@ def test_verify_wheel_installs_every_first_party_wheel_by_exact_path(
     assert "--find-links" not in install
     wheels = [arg for arg in install if arg.endswith(".whl")]
     assert sorted(Path(arg).name for arg in wheels) == [
-        "dotmac_brand_profiles-0.1.0a1-py3-none-any.whl",
+        module_wheel,
         kernel_wheel,
         "dotmac_ui-0.1.0a9-py3-none-any.whl",
     ]

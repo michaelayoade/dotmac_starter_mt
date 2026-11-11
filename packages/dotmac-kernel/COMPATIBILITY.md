@@ -2028,6 +2028,27 @@ from releasing partial effects; rollback clears that scope, retaining earlier
 root work. Hosted tests also require a subsequent ordinary SAVEPOINT to release
 after recoverable failures, ruling out a falsely healthy but poisoned root.
 
+## Resource API kit and idempotent import — source only (ADR-0079)
+
+Two supported modules are added in the unallocated `0.1.0a108+dev` source (listed in the `0.1.0a109` inventory).
+`dotmac_kernel.resource_api` exports `ResourceDeclaration`, `ResourceScopes`,
+`changes_page`, `summarize`, `encode_cursor`/`decode_cursor`, `Tombstone`,
+`ChangeItem`, `ChangesPage`, `ResourceSummary`, `InvalidCursorError`,
+`require_read` and the page/horizon constants. `dotmac_kernel.source_import`
+exports `import_record`, `ImportResult`, `ImportVerdict`, `ImportRefused`,
+`ImportBlocked`, `content_digest` and `import_scope`. Scopes are exact (a
+declaration containing `*` is refused), the cursor is opaque and resource-bound,
+and the import ledger reuses `idempotency_records` with scope
+`import:<source>:<type>`; no table, migration or route is added. Source
+inspection does not qualify hosted execution, publication or adoption.
+
+Amended for review: the horizon is computed in the database and capped at the
+oldest open PostgreSQL transaction; a reader that cannot see other roles'
+sessions refuses unless the declaration chooses `unseen_sessions="horizon_only"`.
+`ResourceDeclaration` requires `stamped_by_trigger=True` (use
+`stamping_trigger_ddl`, verify with `stamping_trigger_installed`). `import_record`
+takes an advisory lock per (tenant, scope, reference), stores only a flat id
+map, and accepts an optional `current_version` callback.
 
 ## Audit coordinate canary — 2026-11-09, source only
 
