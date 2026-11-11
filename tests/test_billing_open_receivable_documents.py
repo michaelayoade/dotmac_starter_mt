@@ -4,6 +4,8 @@ The read returns only open, collectible invoices of one account and currency,
 stays inside the caller's tenant (RLS) on both planes, and pages by a keyset.
 """
 
+# EXPLAIN text below interpolates closed table literals only.
+# ruff: noqa: S608
 from uuid import uuid4
 
 import pytest
@@ -12,6 +14,7 @@ from dotmac_billing import (
     list_open_receivable_documents,
 )
 from dotmac_billing.commands import AllocationCommand
+from dotmac_billing.contracts import DueDateBasisStatus
 from dotmac_billing.errors import BillingRuleViolation
 from dotmac_billing.service import (
     accept_rated_obligation,
@@ -25,6 +28,7 @@ from dotmac_billing.service import (
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.money import Currency
 from dotmac_kernel.planes import ModulePlane
+from sqlalchemy import create_engine, text
 
 from tests import test_billing_isolation as b
 
@@ -155,6 +159,7 @@ def test_reads_only_open_collectible_documents_and_paginates(scratch, plane):
         assert first.due_at == opens[0].due_at and first.due_at is not None
         assert first.issued_at == opens[0].issued_at
         assert first.source_version >= 1
+        assert first.due_at_basis is DueDateBasisStatus.VERIFIED
 
         paged, pages = _walk(session, scope, account.id, 2)
         assert [e.document_id for e in paged] == ids
@@ -218,3 +223,53 @@ def test_invalid_limit_is_refused(scratch):
             list_open_receivable_documents(
                 session, scope=scope, account=uuid4(), currency=NGN, limit=0
             )
+
+
+def test_index_exists_on_both_planes_and_serves_the_read(scratch):
+    admin_url = scratch[0]
+    engine = create_engine(admin_url)
+    expected = {
+        "ix_documents_open_by_account": (
+            "documents",
+            ["tenant_id", "billing_account_id", "issued_at", "id"],
+        ),
+        "ix_platform_documents_open_by_account": (
+            "platform_documents",
+            ["billing_account_id", "issued_at", "id"],
+        ),
+    }
+    try:
+        with engine.connect() as connection:
+            for name, (table, columns) in expected.items():
+                row = connection.execute(
+                    text(
+                        "SELECT indexdef FROM pg_indexes "
+                        "WHERE schemaname = 'mod_billing' AND tablename = :t "
+                        "AND indexname = :n"
+                    ),
+                    {"t": table, "n": name},
+                ).scalar_one()
+                assert f"({', '.join(columns)})" in row
+                assert "document_kind" in row and "issued_at IS NOT NULL" in row
+        # The planner may prefer a scan on an empty table; forbid a sequential
+        # scan so the plan shows the index is usable for the read's predicate.
+        with engine.begin() as connection:
+            connection.execute(text("SET LOCAL enable_seqscan = off"))
+            for name, (table, columns) in expected.items():
+                tenant = "tenant_id = :tenant AND " if "tenant_id" in columns else ""
+                plan = "\n".join(
+                    connection.execute(
+                        text(
+                            "EXPLAIN SELECT issued_at, id FROM "
+                            f"mod_billing.{table} WHERE {tenant}"
+                            "billing_account_id = :account "
+                            "AND document_kind = 'invoice' "
+                            "AND issued_at IS NOT NULL AND currency = 'NGN' "
+                            "AND minor_units = 2 ORDER BY issued_at, id LIMIT 10"
+                        ),
+                        {"tenant": uuid4(), "account": uuid4()},
+                    ).scalars()
+                )
+                assert name in plan, plan
+    finally:
+        engine.dispose()

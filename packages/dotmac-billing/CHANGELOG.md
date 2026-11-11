@@ -108,7 +108,9 @@ chain after `bi_0014_opening_variance_ledger`.
   `__all__`, so a composing app can call them under ADR 0024 §14. Functions:
   `accept_settlement`, `allocate_settlement`, `accept_withholding_discharge`,
   `apply_available_credit`, `deallocate_settlement`, `refund_settlement`,
-  `reverse_posting_group`, `void_document`, `issue_document`,
+  `reverse_posting_group`, `reverse_withholding_discharge`,
+  `reverse_cash_credit_draw`, `reverse_non_cash_credit_application`,
+  `void_document`, `issue_document`,
   `issue_credit_note`, `grant_non_cash_credit`. Commands: `AllocationCommand`,
   `ApplyAvailableCreditCommand`, `DeallocationCommand`, `RefundCommand`,
   `ReversePostingGroupCommand`, `IssueDocument`, `IssueCreditNote`
@@ -122,14 +124,22 @@ chain after `bi_0014_opening_variance_ledger`.
   cursor=None, limit=100)`, a read-only, RLS-scoped page of an account's open
   (`open` or `partially_resolved`), collectible invoices in one currency, each
   with `document_id`, `issued_at`, `due_at`, `collectible_receivable`,
-  `service_ref`, `source_version` and `financial_state`
+  `service_ref`, `source_version`, `financial_state` and `due_at_basis`
+  (the existing `DueDateBasisStatus`: a native invoice's `due_date_basis`, or an
+  imported item's collection and basis, so `unknown_unverified` is distinguishable
+  from a verified date)
   (`OpenReceivableDocumentV1`, `OpenReceivableDocumentPageV1`,
   `OpenReceivableDocumentCursorV1`). Every entry is re-derived through
   `get_document_exposure`, so a corrupt or stale exposure refuses the call.
   Billing applies no policy ordering: pages follow the stable
   `(issued_at, document_id)` keyset, the limit is 1 to 200, and one call scans
   at most 1000 candidates (a page may be short while `next_cursor` is set).
-  The caller (flows) orders by policy. No table, no migration.
+  The caller (flows) orders by policy. No table.
+- G2 (`bi_0017_open_documents_index`): a partial index on `documents`
+  `(tenant_id, billing_account_id, issued_at, id)` and on `platform_documents`
+  `(billing_account_id, issued_at, id)`, both `WHERE document_kind = 'invoice'
+  AND issued_at IS NOT NULL`, serving the read's keyset. An index only: no
+  column, constraint, grant or row change; the downgrade drops only the indexes.
 
 ## 0.1.0a11 — published 2026-11-10
 

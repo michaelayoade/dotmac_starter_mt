@@ -12,6 +12,7 @@ from uuid import UUID
 import dotmac_billing as billing
 import pytest
 from dotmac_billing import document_queries as dq
+from dotmac_billing.contracts import DueDateBasisStatus
 from dotmac_billing.errors import BillingRuleViolation
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.money import Currency, Money
@@ -41,6 +42,9 @@ FLOW_NAMES = (
     "refund_settlement",
     "RefundCommand",
     "reverse_posting_group",
+    "reverse_withholding_discharge",
+    "reverse_cash_credit_draw",
+    "reverse_non_cash_credit_application",
     "ReversePostingGroupCommand",
     "issue_document",
     "IssueDocument",
@@ -76,6 +80,13 @@ def test_exports_are_the_owner_objects_not_wrappers():
     assert billing.accept_settlement is service.accept_settlement
     assert billing.AllocationCommand is commands.AllocationCommand
     assert billing.seal_opening_lane is opening_lane.seal_opening_lane
+    for name in (
+        "reverse_withholding_discharge",
+        "reverse_cash_credit_draw",
+        "reverse_non_cash_credit_application",
+    ):
+        assert getattr(billing, name) is getattr(service, name)
+    assert "apply_non_cash_credit" not in billing.__all__
 
 
 # --- the read -------------------------------------------------------------
@@ -119,7 +130,15 @@ class _Ctx:
         return False
 
 
-def _exposure(document_id, *, state="open", amount="10", due=None, version=3):
+def _exposure(
+    document_id,
+    *,
+    state="open",
+    amount="10",
+    due=None,
+    version=3,
+    basis=DueDateBasisStatus.VERIFIED,
+):
     return type(
         "Exposure",
         (),
@@ -129,6 +148,7 @@ def _exposure(document_id, *, state="open", amount="10", due=None, version=3):
             "due_at": due,
             "service_ref": f"service:{document_id.int}",
             "source_version": version,
+            "due_date_basis": type("Basis", (), {"status": basis})(),
         },
     )()
 
@@ -305,9 +325,78 @@ def test_non_scope_is_refused():
 
 def test_entry_and_cursor_are_frozen():
     entry = dq.OpenReceivableDocumentV1(
-        UUID(int=1), T0, None, Money.of("1", NGN), None, 1, "open"
+        UUID(int=1),
+        T0,
+        None,
+        Money.of("1", NGN),
+        None,
+        1,
+        "open",
+        DueDateBasisStatus.UNKNOWN_UNVERIFIED,
     )
     with pytest.raises(AttributeError):
         entry.source_version = 2
     assert replace(entry, source_version=2).source_version == 2
     assert Decimal("1") == entry.collectible_receivable.amount
+
+
+def test_due_at_basis_is_taken_from_the_native_due_date_basis(monkeypatch):
+    keys = _keys(2)
+    exposures = {
+        keys[0][1]: _exposure(keys[0][1], basis=DueDateBasisStatus.VERIFIED),
+        keys[1][1]: _exposure(
+            keys[1][1], due=None, basis=DueDateBasisStatus.UNKNOWN_UNVERIFIED
+        ),
+    }
+    _install(monkeypatch, exposures)
+    entries, _ = _walk(_Session(keys), limit=10)
+    assert [e.due_at_basis for e in entries] == [
+        DueDateBasisStatus.VERIFIED,
+        DueDateBasisStatus.UNKNOWN_UNVERIFIED,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("collection_status", "basis", "expected"),
+    [
+        ("verified", DueDateBasisStatus.VERIFIED, DueDateBasisStatus.VERIFIED),
+        (
+            "verified",
+            DueDateBasisStatus.UNKNOWN_UNVERIFIED,
+            DueDateBasisStatus.UNKNOWN_UNVERIFIED,
+        ),
+        (
+            "unknown_unverified",
+            DueDateBasisStatus.VERIFIED,
+            DueDateBasisStatus.UNKNOWN_UNVERIFIED,
+        ),
+    ],
+)
+def test_imported_item_due_basis_is_verified_only_if_both_are(
+    monkeypatch, collection_status, basis, expected
+):
+    from dotmac_billing.opening_receivable_contracts import ReceivableExposureV2
+
+    keys = _keys(1)
+    document_id = keys[0][1]
+    exposure = object.__new__(ReceivableExposureV2)
+    for name, value in {
+        "financial_state": "open",
+        "collectible_receivable": Money.of("10", NGN),
+        "source_version": 4,
+        "collection": type(
+            "Collection",
+            (),
+            {
+                "status": collection_status,
+                "due_at": T0,
+                "service_ref": "service:imported",
+                "due_date_basis": type("Basis", (), {"status": basis})(),
+            },
+        )(),
+    }.items():
+        object.__setattr__(exposure, name, value)
+    _install(monkeypatch, {document_id: exposure})
+    (entry,) = _walk(_Session(keys), limit=5)[0]
+    assert entry.due_at_basis is expected
+    assert entry.due_at == T0 and entry.service_ref == "service:imported"

@@ -24,6 +24,7 @@ from dotmac_billing._document_facts import _decode
 from dotmac_billing._receivable_backing import resolve_receivable_backing
 from dotmac_billing.contracts import (
     CollectionTiming,
+    DueDateBasisStatus,
     DueDateBasisV1,
     FinancialState,
     ReceivableExposureV1,
@@ -619,6 +620,10 @@ class OpenReceivableDocumentV1:
     service_ref: str | None
     source_version: int
     financial_state: Literal["open", "partially_resolved"]
+    #: Evidence status of ``due_at``: ``unknown_unverified`` is not a verified
+    #: date. An imported item is verified only if both its collection evidence
+    #: and its due-date basis are.
+    due_at_basis: DueDateBasisStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -726,9 +731,15 @@ def list_open_receivable_documents(
             if isinstance(exposure, ReceivableExposureV2):
                 due_at = exposure.collection.due_at
                 service_ref = exposure.collection.service_ref
+                due_basis = (
+                    exposure.collection.due_date_basis.status
+                    if exposure.collection.status == "verified"
+                    else DueDateBasisStatus.UNKNOWN_UNVERIFIED
+                )
             else:
                 due_at = exposure.due_at
                 service_ref = exposure.service_ref
+                due_basis = exposure.due_date_basis.status
             entries.append(
                 OpenReceivableDocumentV1(
                     document_id,
@@ -740,6 +751,7 @@ def list_open_receivable_documents(
                     cast(
                         Literal["open", "partially_resolved"], exposure.financial_state
                     ),
+                    due_basis,
                 )
             )
             if len(entries) == limit:

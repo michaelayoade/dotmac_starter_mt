@@ -8502,12 +8502,13 @@ UNRELEASED: dict[str, frozenset[str]] = {
         }
     ),
     # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
-    # frozen. `bi_0015` and `bi_0016` are a12's, still editable until a12 is tagged.
+    # frozen. `bi_0015` to `bi_0017` are a12's, still editable until a12 is tagged.
     "dotmac-billing": frozenset(
         {
             # a12 (the a11 number is published): B lane, still unreleased.
             "bi_0015_line_price_version_fk.py",
             "bi_0016_withholding_components.py",
+            "bi_0017_open_documents_index.py",
         }
     ),
     "dotmac-collections": frozenset(),

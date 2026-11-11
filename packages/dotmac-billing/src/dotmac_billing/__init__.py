@@ -385,7 +385,10 @@ from dotmac_billing.service import (
     issue_document,
     issue_rated_invoice,
     refund_settlement,
+    reverse_cash_credit_draw,
+    reverse_non_cash_credit_application,
     reverse_posting_group,
+    reverse_withholding_discharge,
     void_document,
 )
 
@@ -425,7 +428,10 @@ __all__ = [
     "issue_credit_note",
     "issue_document",
     "refund_settlement",
+    "reverse_cash_credit_draw",
+    "reverse_non_cash_credit_application",
     "reverse_posting_group",
+    "reverse_withholding_discharge",
     "void_document",
     "OpeningLaneAssemblyAuthorityV1",
     "OpeningLanePartitionResultV1",
