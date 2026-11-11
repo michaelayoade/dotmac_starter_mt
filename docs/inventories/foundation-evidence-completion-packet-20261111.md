@@ -1,15 +1,14 @@
 # Foundation evidence completion packet — 2026-11-11
 
 Status: prepared source/evidence plan; not an operational authorization or a
-certification. Michael owns the release-captain, architect, CP and approval
-roles. No other person is required. Separate signing purposes and service
-principals remain separate even with one human owner.
+certification. Separate signing purposes and service
+principals remain separate regardless of who holds each role.
 
 ## Deliverable and verified baseline
 
 Release Foundation `0.4.0a2` once through the governed release lane, then deploy
-Sub-thin on the selfcare server (`94.72.107.76`) with fresh backup and the
-accepted explicit first-deploy recovery procedure. `81.0.221.52` remains a
+Sub-thin on the selfcare production host (`prod-app-host`) with fresh backup and the
+accepted explicit first-deploy recovery procedure. The rehearsal host (`rehearsal-host`) remains a
 rehearsal host. Legacy Sub remains the production writer until the cutover.
 No billing work in legacy Sub, telemetry enablement or brand flip is included.
 
@@ -44,6 +43,8 @@ capability and retains no private artifacts. The existing required Docker job
 depends on this qualification. Local execution is forbidden.
 
 A green result proves transport interoperability for this source/tool pair.
+Scope: the qualification patches the final policy object in the test, so
+production policy loading is not exercised.
 It is not production custody, complete behavioral proof, or admitted rehearsal.
 
 ## Evidence contract to complete before the private result can exist
