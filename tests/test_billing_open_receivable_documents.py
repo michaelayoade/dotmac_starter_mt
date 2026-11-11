@@ -251,25 +251,37 @@ def test_index_exists_on_both_planes_and_serves_the_read(scratch):
                 ).scalar_one()
                 assert f"({', '.join(columns)})" in row
                 assert "document_kind" in row and "issued_at IS NOT NULL" in row
-        # The planner may prefer a scan on an empty table; forbid a sequential
-        # scan so the plan shows the index is usable for the read's predicate.
-        with engine.begin() as connection:
-            connection.execute(text("SET LOCAL enable_seqscan = off"))
-            for name, (table, columns) in expected.items():
-                tenant = "tenant_id = :tenant AND " if "tenant_id" in columns else ""
-                plan = "\n".join(
+        # Explain the statement the function really builds, through the driver's
+        # own bind parameters, after forcing generic plans (what psycopg's
+        # server-side prepare produces): the index must still be chosen.
+        from dotmac_billing.document_queries import (
+            OpenReceivableDocumentCursorV1,
+            _open_candidate_statement,
+        )
+        from sqlalchemy.dialects import postgresql
+
+        cursor = OpenReceivableDocumentCursorV1(b.NOW, uuid4())
+        for scope, name in (
+            (TenantScope(uuid4()), "ix_documents_open_by_account"),
+            (PlatformScope(), "ix_platform_documents_open_by_account"),
+        ):
+            for after in (None, cursor):
+                statement = _open_candidate_statement(scope, uuid4(), NGN, after, 10)
+                compiled = statement.compile(dialect=postgresql.dialect())
+                assert "'invoice'" in str(compiled)
+                with engine.begin() as connection:
+                    connection.execute(text("SET LOCAL enable_seqscan = off"))
                     connection.execute(
-                        text(
-                            "EXPLAIN SELECT issued_at, id FROM "
-                            f"mod_billing.{table} WHERE {tenant}"
-                            "billing_account_id = :account "
-                            "AND document_kind = 'invoice' "
-                            "AND issued_at IS NOT NULL AND currency = 'NGN' "
-                            "AND minor_units = 2 ORDER BY issued_at, id LIMIT 10"
-                        ),
-                        {"tenant": uuid4(), "account": uuid4()},
-                    ).scalars()
-                )
-                assert name in plan, plan
+                        text("SET LOCAL plan_cache_mode = force_generic_plan")
+                    )
+                    plan = ""
+                    for _ in range(7):  # past psycopg's prepare threshold
+                        plan = "\n".join(
+                            row[0]
+                            for row in connection.exec_driver_sql(
+                                "EXPLAIN " + str(compiled), compiled.params
+                            )
+                        )
+                    assert name in plan, plan
     finally:
         engine.dispose()

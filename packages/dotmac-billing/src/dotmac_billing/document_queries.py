@@ -17,7 +17,7 @@ from uuid import UUID
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.money import Currency, Money, MoneyError
-from sqlalchemy import literal, select, tuple_
+from sqlalchemy import literal, literal_column, select, tuple_
 from sqlalchemy.orm import Session
 
 from dotmac_billing._document_facts import _decode
@@ -645,6 +645,43 @@ class OpenReceivableDocumentPageV1:
     )
 
 
+def _open_candidate_statement(
+    scope: Scope,
+    account: UUID,
+    currency: Currency,
+    after: OpenReceivableDocumentCursorV1 | None,
+    batch: int,
+) -> Any:
+    """Build the candidate-key select; the test explains exactly this statement.
+
+    ``document_kind`` and ``issued_at`` are SQL literals, not bind parameters: a
+    prepared (generic) plan cannot prove a partial-index predicate from a
+    parameter, so ``bi_0017`` would silently stop being used.
+    """
+    documents = _table(scope, "documents")
+    order = (documents.c.issued_at, documents.c.id)
+    statement = select(*order).where(
+        documents.c.billing_account_id == account,
+        documents.c.document_kind == literal_column("'invoice'"),
+        documents.c.issued_at.is_not(None),
+        documents.c.currency == currency.code,
+        documents.c.minor_units == currency.minor_units,
+    )
+    if after is not None:
+        statement = statement.where(
+            tuple_(*order)
+            > tuple_(
+                *(
+                    literal(value, column.type)
+                    for column, value in zip(
+                        order, (after.issued_at, after.document_id), strict=True
+                    )
+                )
+            )
+        )
+    return _scoped(statement, scope, documents).order_by(*order).limit(batch + 1)
+
+
 def list_open_receivable_documents(
     db: Session,
     *,
@@ -683,37 +720,15 @@ def list_open_receivable_documents(
         raise BillingRuleViolation(
             "invalid_cursor", "the cursor must be a Billing open-document cursor"
         )
-    documents = _table(scope, "documents")
-    order = (documents.c.issued_at, documents.c.id)
     entries: list[OpenReceivableDocumentV1] = []
     scanned = 0
     last: OpenReceivableDocumentCursorV1 | None = cursor
     exhausted = False
     while len(entries) < limit and scanned < MAX_OPEN_DOCUMENT_SCAN:
         batch = min(limit, MAX_OPEN_DOCUMENT_SCAN - scanned)
-        statement = select(*order).where(
-            documents.c.billing_account_id == account,
-            documents.c.document_kind == "invoice",
-            documents.c.issued_at.is_not(None),
-            documents.c.currency == currency.code,
-            documents.c.minor_units == currency.minor_units,
-        )
-        if last is not None:
-            statement = statement.where(
-                tuple_(*order)
-                > tuple_(
-                    *(
-                        literal(value, column.type)
-                        for column, value in zip(
-                            order, (last.issued_at, last.document_id), strict=True
-                        )
-                    )
-                )
-            )
+        statement = _open_candidate_statement(scope, account, currency, last, batch)
         with db.no_autoflush:
-            rows = db.execute(
-                _scoped(statement, scope, documents).order_by(*order).limit(batch + 1)
-            ).all()
+            rows = db.execute(statement).all()
         taken = rows[:batch]
         processed = 0
         for issued_at, document_id in taken:
