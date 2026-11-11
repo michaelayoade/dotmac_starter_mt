@@ -1144,8 +1144,11 @@ def admit_historical_unpaid_invoice(
         raise InvalidAmount("historical invoice amounts do not reconcile")
     if not evidence.exchange_rate.is_finite() or evidence.exchange_rate <= 0:
         raise InvalidAmount("historical exchange rate must be positive and finite")
-    for value in (evidence.source_journal_ref, evidence.destination_journal_ref):
-        _required(value, "historical journal reference", 255)
+    for journal_reference in (
+        evidence.source_journal_ref,
+        evidence.destination_journal_ref,
+    ):
+        _required(journal_reference, "historical journal reference", 255)
     canonical_instant(evidence.original_posted_at)
     if evidence.original_posted_at > admitted_at:
         raise InvalidTransition("historical posting cannot follow admission")
