@@ -18,7 +18,7 @@ supported. Admission rejects pending ORM writes and detects an ended savepoint;
 `Session.commit()` is refused before it can commit the caller's work. The verifier
 runs in a discarded savepoint. Callers must roll back their entire transaction
 on any refusal; a verifier calling `Session.rollback()` can already abort it.
-This is not a sandbox for raw SQL/DBAPI transaction control, advisory locks,
+This is not a sandbox for direct Connection or raw SQL/DBAPI transaction control, advisory locks,
 sequence `nextval`, or effects outside the database.
 This package trusts the evidence the verifier returns. Each assembly
 must supply and review its concrete verifier before enabling a call site.
