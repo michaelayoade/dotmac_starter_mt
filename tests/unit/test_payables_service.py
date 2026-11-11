@@ -644,7 +644,7 @@ def test_historical_admission_refuses_ineligible_or_changed_evidence(
     assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0
 
 
-@pytest.mark.parametrize("write", ["add", "dirty", "delete"])
+@pytest.mark.parametrize("write", ["add", "dirty", "delete", "flush"])
 def test_historical_admission_refuses_when_verifier_writes_to_session(
     db: Session, write: str
 ) -> None:
@@ -655,7 +655,7 @@ def test_historical_admission_refuses_when_verifier_writes_to_session(
 
     class WritingVerifier:
         def verify(self, *, scope, command, destination):
-            if write == "add":
+            if write in {"add", "flush"}:
                 destination.add(
                     models.LiabilityEvent(
                         tenant_id=TENANT,
@@ -670,6 +670,8 @@ def test_historical_admission_refuses_when_verifier_writes_to_session(
                         occurred_at=NOW,
                     )
                 )
+                if write == "flush":
+                    destination.flush()
             elif write == "dirty":
                 invoice.approval_reference = "mutated-by-verifier"
             else:
@@ -686,6 +688,9 @@ def test_historical_admission_refuses_when_verifier_writes_to_session(
             idempotency_expires_at=None,
             admitted_at=NOW,
         )
+    if write == "flush":
+        # The savepoint discarded the flushed row; no expunge is needed.
+        assert not any(isinstance(row, models.LiabilityEvent) for row in db)
     # Drop the verifier's unflushed writes; nothing was admitted or persisted.
     db.expunge_all()
     assert (

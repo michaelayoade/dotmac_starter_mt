@@ -14,7 +14,9 @@ original actors; no new approval or Accounting consequence is produced.
 
 The assembly injects `HistoricalUnpaidInvoiceVerifier`; callers cannot replace
 verification with an import flag. Admission refuses, fail-closed, if the
-verifier leaves any pending write on the session (it must only read). This
+verifier leaves any pending write on the session (it must only read); the
+verifier runs in a discarded savepoint. Callers must roll back the session on
+any refusal. This
 package trusts whatever evidence the verifier returns: the ERP verifier
 implementation does not exist yet and needs its own architect review before any
 ERP call site is enabled. Commands bind source identity, frozen snapshot
