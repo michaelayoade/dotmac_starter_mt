@@ -1101,10 +1101,17 @@ def admit_historical_unpaid_invoice(
         if session.new or session.dirty or session.deleted:
             wrote.append(True)
 
+    def _refuse_commit(_session: Session) -> None:
+        # Refuse before Session.commit() can also commit the caller's outer
+        # transaction. Keep the violation even if the verifier catches it.
+        wrote.append(True)
+        raise InvalidTransition("historical verifier must not write")
+
     evidence = None
     try:
         with db.begin_nested() as savepoint:
             event.listen(db, "after_flush", _saw_flush)
+            event.listen(db, "before_commit", _refuse_commit)
             try:
                 with db.no_autoflush:
                     evidence = verifier.verify(
@@ -1117,6 +1124,7 @@ def admit_historical_unpaid_invoice(
                     ):
                         wrote.append(True)
             finally:
+                event.remove(db, "before_commit", _refuse_commit)
                 event.remove(db, "after_flush", _saw_flush)
             raise _DiscardVerifierSavepoint
     except _DiscardVerifierSavepoint:
