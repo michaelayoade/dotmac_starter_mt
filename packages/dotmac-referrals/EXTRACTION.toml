@@ -4,7 +4,7 @@ classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Tenant referral programmes, invitation/code identity, attribution, qualification and immutable conversion/reward evidence"
-contract = "Create and version referral programmes; issue a stable invitation/code to an opaque referrer; attribute a referred party/prospect without resolving identity from unverified contact data; preserve conversion and reward-request evidence; enforce idempotent capture and terminal rejection/expiry; and emit typed outbox facts. NOT Party/Customer/Lead creation, billing credits, reward payment, campaigns, delivery transport or provider I/O."
+contract = "Create and version referral programmes; issue a stable invitation/code to an opaque referrer; attribute a referred party/prospect without resolving identity from unverified contact data, optionally naming an opaque service-location reference (capture V2; no coordinates or address text); preserve conversion and reward-request evidence; enforce idempotent capture and terminal rejection/expiry; and emit typed outbox facts. NOT Party/Customer/Lead creation, billing credits, reward payment, campaigns, delivery transport or provider I/O."
 source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_erp", "dotmac_starter_mt", "dotmac_integrator", "dotmac_vendor_control_plane", "dotmac_workspace", "dotmac_academy_app"]
 source_revisions = [
   "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",

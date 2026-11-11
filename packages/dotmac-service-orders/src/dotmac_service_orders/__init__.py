@@ -1,10 +1,13 @@
 """Service-delivery order and activation-readiness owner."""
 
 from dotmac_service_orders.contracts import (
+    LOCATION_REQUIRED_ORDER_TYPES,
+    SERVICE_LOCATION_REF_PATTERN,
     ConfirmActivation,
     Conflict,
     DecideReadiness,
     OpenServiceOrder,
+    OpenServiceOrderV2,
     ReadinessCheck,
     ReadinessCheckKind,
     ReadinessCheckResult,
@@ -28,15 +31,19 @@ from dotmac_service_orders.service import (
     decide_readiness,
     latest_readiness,
     open_service_order,
+    open_service_order_v2,
     submit_service_order,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 __all__ = [
+    "LOCATION_REQUIRED_ORDER_TYPES",
+    "SERVICE_LOCATION_REF_PATTERN",
     "Conflict",
     "ConfirmActivation",
     "DecideReadiness",
     "OpenServiceOrder",
+    "OpenServiceOrderV2",
     "ReadinessCheck",
     "ReadinessCheckKind",
     "ReadinessCheckResult",
@@ -56,6 +63,7 @@ __all__ = [
     "latest_readiness",
     "module",
     "open_service_order",
+    "open_service_order_v2",
     "submit_service_order",
     "versions_dir",
 ]

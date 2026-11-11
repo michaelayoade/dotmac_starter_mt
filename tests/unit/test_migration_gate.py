@@ -161,7 +161,8 @@ def test_the_real_repo_composes() -> None:
     # 37 -> 38 (unreleased): `0030_credential_tenant_key` on the kernel lineage.
     # The "deliberately" is the point — this number is not maintenance overhead,
     # it is the reason a migration cannot be added without somebody noticing.
-    assert len(report.revisions) == 38
+    # 38 -> 39 (unreleased): `0031_rate_limit_buckets` on the kernel lineage.
+    assert len(report.revisions) == 39
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

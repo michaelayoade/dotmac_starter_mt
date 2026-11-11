@@ -14,6 +14,7 @@ from dotmac_positioning import (
     GeofenceEvaluationInput,
     ObservationDisposition,
     ObservationInput,
+    ObservationNotFound,
     ObservationPolicy,
     PolygonFence,
     PositionObservationConflict,
@@ -27,9 +28,12 @@ from dotmac_positioning import (
     get_current_position,
     get_trail,
     grant_collection,
+    list_observation_holds,
+    place_observation_hold,
     prune_observations,
     rebuild_current_position,
     record_observations,
+    release_observation_hold,
     revoke_collection,
     unassign_source,
 )
@@ -861,3 +865,158 @@ def test_retention_preserves_observations_selected_by_product_policy(
         point.observation_id
         for point in get_trail(db, scope=SCOPE, tracked_unit_id=unit_id, limit=10)
     } >= {preserved_id}
+
+
+def _three_observations(db: Session, now: datetime) -> tuple[UUID, UUID, UUID, UUID]:
+    """Record an old, a middle and a current observation for one unit."""
+
+    # The grant (three days) must be active for every receipt time below.
+    unit_id = _unit_with_grant(db, granted_at=now - timedelta(days=2, hours=1))
+    ids: list[UUID] = []
+    for age in (timedelta(days=2), timedelta(days=1), timedelta(0)):
+        result = record_observations(
+            db,
+            scope=SCOPE,
+            tracked_unit_id=unit_id,
+            purpose="service_delivery",
+            policy=_policy(),
+            received_at=now - age,
+            observations=(_observation(captured_at=now - age),),
+        )
+        observation_id = result.items[0].observation_id
+        assert observation_id is not None
+        ids.append(observation_id)
+    return unit_id, ids[0], ids[1], ids[2]
+
+
+def test_a_held_observation_survives_prune_and_release_allows_it(
+    db: Session,
+) -> None:
+    now = datetime.now(UTC)
+    unit_id, old_id, middle_id, _current_id = _three_observations(db, now)
+
+    hold = place_observation_hold(
+        db,
+        scope=SCOPE,
+        observation_id=old_id,
+        hold_ref="warrant-0001",
+        placed_at=now,
+    )
+    assert hold.observation_id == old_id
+    assert list_observation_holds(db, scope=SCOPE, observation_id=old_id) == (
+        "warrant-0001",
+    )
+
+    # The held row survives; the unheld expired row is pruned.
+    assert prune_observations(db, scope=SCOPE, received_before=now) == 1
+    surviving = {
+        point.observation_id
+        for point in get_trail(db, scope=SCOPE, tracked_unit_id=unit_id, limit=10)
+    }
+    assert old_id in surviving
+    assert middle_id not in surviving
+
+    # Releasing the hold makes the same row prunable.
+    assert release_observation_hold(
+        db, scope=SCOPE, observation_id=old_id, hold_ref="warrant-0001"
+    )
+    assert list_observation_holds(db, scope=SCOPE, observation_id=old_id) == ()
+    assert prune_observations(db, scope=SCOPE, received_before=now) == 1
+    surviving = {
+        point.observation_id
+        for point in get_trail(db, scope=SCOPE, tracked_unit_id=unit_id, limit=10)
+    }
+    assert old_id not in surviving
+
+
+def test_an_observation_stays_held_until_its_last_holder_releases(
+    db: Session,
+) -> None:
+    now = datetime.now(UTC)
+    _unit_id, old_id, _middle_id, _current_id = _three_observations(db, now)
+    for reference in ("holder-a", "holder-b"):
+        place_observation_hold(
+            db,
+            scope=SCOPE,
+            observation_id=old_id,
+            hold_ref=reference,
+            placed_at=now,
+        )
+
+    assert release_observation_hold(
+        db, scope=SCOPE, observation_id=old_id, hold_ref="holder-a"
+    )
+    assert prune_observations(db, scope=SCOPE, received_before=now) == 1
+    assert list_observation_holds(db, scope=SCOPE, observation_id=old_id) == (
+        "holder-b",
+    )
+    assert release_observation_hold(
+        db, scope=SCOPE, observation_id=old_id, hold_ref="holder-b"
+    )
+    assert prune_observations(db, scope=SCOPE, received_before=now) == 1
+
+
+def test_placing_a_hold_is_idempotent_and_releasing_a_missing_hold_is_false(
+    db: Session,
+) -> None:
+    now = datetime.now(UTC)
+    _unit_id, old_id, _middle_id, _current_id = _three_observations(db, now)
+
+    first = place_observation_hold(
+        db, scope=SCOPE, observation_id=old_id, hold_ref=" ref-1 ", placed_at=now
+    )
+    second = place_observation_hold(
+        db,
+        scope=SCOPE,
+        observation_id=old_id,
+        hold_ref="ref-1",
+        placed_at=now + timedelta(minutes=1),
+    )
+    assert first.id == second.id
+    assert (
+        release_observation_hold(
+            db, scope=SCOPE, observation_id=old_id, hold_ref="never-placed"
+        )
+        is False
+    )
+
+
+def test_holds_refuse_unknown_observations_blank_references_and_other_tenants(
+    db: Session,
+) -> None:
+    now = datetime.now(UTC)
+    _unit_id, old_id, _middle_id, _current_id = _three_observations(db, now)
+
+    with pytest.raises(ObservationNotFound):
+        place_observation_hold(
+            db,
+            scope=SCOPE,
+            observation_id=uuid4(),
+            hold_ref="ref",
+            placed_at=now,
+        )
+    for bad in ("", "   ", "x" * 129):
+        with pytest.raises(PositionObservationRejected):
+            place_observation_hold(
+                db,
+                scope=SCOPE,
+                observation_id=old_id,
+                hold_ref=bad,
+                placed_at=now,
+            )
+
+    other = TenantScope(UUID("22222222-2222-4222-8222-222222222222"))
+    with pytest.raises(ObservationNotFound):
+        place_observation_hold(
+            db,
+            scope=other,
+            observation_id=old_id,
+            hold_ref="ref",
+            placed_at=now,
+        )
+    # A foreign tenant's hold neither exists nor protects this tenant's row.
+    assert (
+        release_observation_hold(db, scope=other, observation_id=old_id, hold_ref="ref")
+        is False
+    )
+    assert list_observation_holds(db, scope=other, observation_id=old_id) == ()

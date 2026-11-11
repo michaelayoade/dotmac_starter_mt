@@ -8,7 +8,7 @@ from dotmac_service_orders.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="service_orders",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="serviceorders",
     migration_prefix="so",

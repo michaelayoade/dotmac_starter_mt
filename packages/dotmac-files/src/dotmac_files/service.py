@@ -36,7 +36,7 @@ from dotmac_files.contracts import (
     StoredObjectRef,
 )
 from dotmac_files.models import PlatformStoredFile, TenantStoredFile
-from dotmac_files.physical import scope_prefix, validate_provider_code
+from dotmac_files.physical import parse_file_ref, scope_prefix, validate_provider_code
 from dotmac_files.providers import ObjectInfo, StorageBoundaryViolation
 
 StoredFileRecord = TenantStoredFile | PlatformStoredFile
@@ -165,6 +165,18 @@ def download_target(db: Session, *, scope: Scope, file_id: UUID) -> StoredObject
     if stored.state != FileState.AVAILABLE:
         raise InvalidFileState(f"file {file_id} is {stored.state}, not available")
     return _object_ref(stored, scope=scope)
+
+
+def verified_read_target(
+    db: Session, *, scope: Scope, file_ref: str | UUID
+) -> StoredObjectRef:
+    """Database phase of a scoped verified read.
+
+    Refuses a non-UUID or path-like reference before any query; another scope's
+    file id is simply not found in this scope. Hand the result to
+    ``physical.read_verified`` after the transaction has ended.
+    """
+    return download_target(db, scope=scope, file_id=parse_file_ref(file_ref))
 
 
 def request_deletion(
@@ -315,4 +327,5 @@ __all__ = [
     "record_presence",
     "request_deletion",
     "stage_file",
+    "verified_read_target",
 ]

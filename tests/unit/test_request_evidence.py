@@ -241,9 +241,10 @@ def test_a_trusted_peer_supplies_the_client_address():
     )
 
 
-def test_the_first_forwarded_hop_wins():
-    """PORTED. `X-Forwarded-For` accumulates left to right, so the original
-    client is first; taking the last would take the nearest proxy."""
+def test_the_first_untrusted_hop_from_the_right_wins():
+    """`X-Forwarded-For` is walked from the RIGHT, skipping trusted proxies; the
+    first untrusted hop is the client. (Ported test, semantics corrected: the
+    leftmost entry is client-controlled because a proxy appends.)"""
     assert (
         TRUSTING.client_address(
             "203.0.113.9",
@@ -1147,3 +1148,103 @@ def test_the_single_seam_that_may_read_the_peer_is_the_only_one():
     from dotmac_kernel import request_evidence
 
     assert peer_address_reads(inspect.getsource(request_evidence._peer_address))
+
+
+# ── X-Forwarded-For is walked from the right (client-IP spoofing) ───────────
+
+PEER = "203.0.113.9"  # inside TRUSTING
+
+
+@pytest.mark.parametrize(
+    "header, expected",
+    [
+        # The client prepends a forged address; the proxy appended the real one.
+        ("9.9.9.9, 198.51.100.20", "198.51.100.20"),
+        ("9.9.9.9, 8.8.8.8, 198.51.100.20", "198.51.100.20"),
+        # Trusted hops to the right of the client are skipped.
+        ("9.9.9.9, 198.51.100.20, 203.0.113.50, 203.0.113.51", "198.51.100.20"),
+        # A forged TRUSTED-looking entry on the left cannot displace the client.
+        ("203.0.113.77, 198.51.100.20", "198.51.100.20"),
+        # Whitespace is tolerated; IPv6 and mapped forms are canonicalised.
+        (", 198.51.100.20", "198.51.100.20"),
+        ("  198.51.100.20  ", "198.51.100.20"),
+        ("2001:DB8:0:0:0:0:0:1", "2001:db8::1"),
+        ("::ffff:198.51.100.20", "198.51.100.20"),
+    ],
+)
+def test_spoofed_leftmost_entries_never_win(header: str, expected: str) -> None:
+    assert TRUSTING.client_address(PEER, {"x-forwarded-for": header}) == expected
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "203.0.113.50",
+        "203.0.113.50, 203.0.113.51",
+        "203.0.113.1,203.0.113.2,203.0.113.3",
+    ],
+)
+def test_an_all_trusted_chain_names_no_client_and_falls_back_to_the_peer(
+    header: str,
+) -> None:
+    assert TRUSTING.client_address(PEER, {"x-forwarded-for": header}) == PEER
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "garbage",
+        "9.9.9.9, not-an-ip",
+        "198.51.100.20, garbage, 203.0.113.50",
+        "198.51.100.20:4433",
+        "[2001:db8::1]:443",
+        "fe80::1%eth0",
+        "198.51.100.20,",
+        "198.51.100.20, , 203.0.113.50",
+        "999.1.1.1",
+        "1.2.3.4/24",
+    ],
+)
+def test_an_unreadable_chain_falls_back_to_the_peer(header: str) -> None:
+    """A garbage entry anywhere the walk reaches refuses the whole chain: the
+    peer is coarse but is never a forged identity."""
+    assert TRUSTING.client_address(PEER, {"x-forwarded-for": header}) == PEER
+
+
+def test_garbage_to_the_left_of_the_first_untrusted_hop_is_never_reached() -> None:
+    assert (
+        TRUSTING.client_address(PEER, {"x-forwarded-for": "garbage, 198.51.100.20"})
+        == "198.51.100.20"
+    )
+
+
+def test_a_garbage_x_real_ip_falls_back_to_the_peer() -> None:
+    assert TRUSTING.client_address(PEER, {"x-real-ip": "garbage"}) == PEER
+    assert TRUSTING.client_address(PEER, {"x-real-ip": "198.51.100.20"}) == (
+        "198.51.100.20"
+    )
+
+
+def test_a_garbage_forwarded_for_does_not_defer_to_x_real_ip() -> None:
+    headers = {"x-forwarded-for": "garbage", "x-real-ip": "198.51.100.20"}
+    assert TRUSTING.client_address(PEER, headers) == PEER
+
+
+def test_an_untrusted_peer_still_ignores_every_forwarded_header() -> None:
+    headers = {"x-forwarded-for": "9.9.9.9, 8.8.8.8", "x-real-ip": "7.7.7.7"}
+    assert TRUSTING.client_address("198.51.100.7", headers) == "198.51.100.7"
+
+
+def test_repeated_forwarded_for_lines_are_one_comma_joined_chain() -> None:
+    from dotmac_kernel.request_evidence import _headers
+
+    scope = {
+        "headers": [
+            (b"x-forwarded-for", b"9.9.9.9"),
+            (b"x-forwarded-for", b"198.51.100.20"),
+            (b"user-agent", b"a"),
+        ]
+    }
+    merged = _headers(scope)
+    assert merged["x-forwarded-for"] == "9.9.9.9, 198.51.100.20"
+    assert TRUSTING.client_address(PEER, merged) == "198.51.100.20"

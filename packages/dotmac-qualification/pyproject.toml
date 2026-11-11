@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-qualification"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Time-bounded service qualification evidence and decisions"
 authors = ["DotMac"]
 readme = "README.md"

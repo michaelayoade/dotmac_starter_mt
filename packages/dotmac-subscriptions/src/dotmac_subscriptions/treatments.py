@@ -764,6 +764,11 @@ def record_non_cash_grant(
             "treatments.occurrence_not_found",
             "The recurring charge occurrence was not found.",
         )
+    if occurrence.state != "emitted":
+        raise SubscriptionStateError(
+            "treatments.occurrence_not_emitted",
+            "A grant is measured against an emitted occurrence only.",
+        )
     if (
         occurrence.contract_line_key != arrangement.contract_line_key
         or occurrence.contract_id != arrangement.contract_id
