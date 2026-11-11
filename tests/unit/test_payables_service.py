@@ -701,6 +701,38 @@ def test_historical_admission_refuses_when_verifier_writes_to_session(
     assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0
 
 
+@pytest.mark.parametrize("end", ["commit", "rollback"])
+def test_historical_admission_refuses_when_verifier_ends_its_savepoint(
+    db: Session, end: str
+) -> None:
+    from dotmac_payables import admit_historical_unpaid_invoice
+
+    _, evidence, command = _historical_case(db)
+    db.flush()
+
+    class EndingVerifier:
+        def verify(self, *, scope, command, destination):
+            getattr(destination, end)()
+            return evidence
+
+    with pytest.raises(InvalidTransition, match="verifier must not write"):
+        admit_historical_unpaid_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=command,
+            verifier=EndingVerifier(),
+            idempotency_key=f"ending-verifier-{end}",
+            idempotency_expires_at=None,
+            admitted_at=NOW,
+        )
+    assert (
+        db.scalar(select(func.count()).select_from(models.HistoricalInvoiceReceipt))
+        == 0
+    )
+    assert db.scalar(select(func.count()).select_from(models.PaymentObligation)) == 0
+    assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0
+
+
 def test_historical_receipt_insert_failure_rolls_back_recognition(
     db: Session, monkeypatch
 ) -> None:
