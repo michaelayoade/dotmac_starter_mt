@@ -255,6 +255,40 @@ class TestTaglineWrites:
         with pytest.raises(IdempotencyConflict):
             self.write(db, plane, ProfileFields(), clear=("tagline",), key=key)
 
+    def test_replay_with_different_clear_fields_is_refused(self, db, plane):
+        from dotmac_kernel.idempotency import IdempotencyConflict
+
+        model = BrandProfile if plane == "tenant" else PlatformBrandProfile
+        ident = self.write(db, plane, ProfileFields(tagline="kept"))
+        key = _cmd()
+        self.write(db, plane, ProfileFields(), clear=("tagline",), key=key)
+        row = db.get(model, ident)
+        assert row.tagline is None
+        version = row.record_version
+        # Same command_id and same fields, but the clear intent was dropped.
+        with pytest.raises(IdempotencyConflict):
+            self.write(db, plane, ProfileFields(), key=key)
+        # Same command_id, clear intent kept, but fields now also set a value
+        # (and a clear-plus-set is refused before the ledger is entered).
+        with pytest.raises(ProfileRefusedError):
+            self.write(
+                db, plane, ProfileFields(tagline="x"), clear=("tagline",), key=key
+            )
+        assert row.tagline is None
+        assert row.record_version == version
+        # The reverse direction: first write without clear, replay adds a clear.
+        key2 = _cmd()
+        self.write(db, plane, ProfileFields(legal_name="Again"), key=key2)
+        with pytest.raises(IdempotencyConflict):
+            self.write(
+                db,
+                plane,
+                ProfileFields(legal_name="Again"),
+                clear=("tagline",),
+                key=key2,
+            )
+        assert row.tagline is None
+
 
 def test_platform_tagline_clear_audits_once_and_rollback_restores(db):
     from dotmac_kernel.models_platform import PlatformAuditEvent
