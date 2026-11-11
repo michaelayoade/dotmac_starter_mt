@@ -1644,7 +1644,7 @@ url = "packages/dotmac-party"
 
 [[package]]
 name = "dotmac-payables"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Tenant supplier-liability and payment-obligation authority"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1653,7 +1653,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a85"
+dotmac-kernel = ">=0.1.0a103"
 sqlalchemy = "^2.0"
 
 [package.source]

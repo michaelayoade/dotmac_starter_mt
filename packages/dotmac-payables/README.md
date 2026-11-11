@@ -4,11 +4,29 @@
 liabilities, due-date payment obligations, credit applications and immutable
 settlement/accounting observations.
 
-Version `0.1.0a2` is declared and unpublished. It allows historical or
-imported supplier invoices and credit notes whose supplier-issued document
-number was never captured to persist that absence as NULL. New documents
-created through the service contracts still require the supplier document
-number, and internal document numbers remain required in all cases.
+Version `0.1.0a3` is an unpublished candidate and is not adopted by this change.
+It adds `admit_historical_unpaid_invoice` for an already migrated
+APPROVED invoice whose trusted assembly verifier establishes a historical
+POSTED, wholly unpaid STANDARD source and exact imported accounting evidence.
+It creates one full-face OPEN obligation, the original recognition event, and
+an immutable permanent receipt. It preserves invoice fields and nullable
+original actors; no new approval or Accounting consequence is produced.
+
+The assembly injects `HistoricalUnpaidInvoiceVerifier`; callers cannot replace
+verification with an import flag. Only a fixed, trusted read-only verifier is
+supported. Admission rejects pending ORM writes and detects an ended savepoint;
+`Session.commit()` is refused before it can commit the caller's work. The verifier
+runs in a discarded savepoint. Callers must roll back their entire transaction
+on any refusal; a verifier calling `Session.rollback()` can already abort it.
+This is not a sandbox for direct Connection or raw SQL/DBAPI transaction control, advisory locks,
+sequence `nextval`, or effects outside the database.
+This package trusts the evidence the verifier returns. Each assembly
+must supply and review its concrete verifier before enabling a call site.
+Commands bind source identity, frozen snapshot
+SHA-256, destination invoice and complete cv1 evidence fingerprint. Permanent
+receipts preserve replay after kernel key retention and later real settlement.
+Changed evidence conflicts. Supplier-issued document numbers may remain NULL
+when historically absent; new document creation still requires them.
 
 It does not own supplier identity, procurement, approval, tax policy,
 inventory, Accounting journals, bank details or payment execution. An assembly

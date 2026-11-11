@@ -11,7 +11,7 @@ from dotmac_payables.models import TABLES
 
 module = ModuleManifest(
     code="payables",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     short_code="payables",
     migration_prefix="pa",

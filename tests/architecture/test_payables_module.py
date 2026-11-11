@@ -81,7 +81,7 @@ def test_service_owns_no_session_or_transaction() -> None:
 
 def test_migration_proves_rls_and_immutable_observations() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
-    for table in module.tables:
+    for table in set(module.tables) - {"historical_invoice_receipts"}:
         qualified = f"mod_payables.{table}"
         assert f"{qualified} ENABLE ROW LEVEL SECURITY" in source
         assert f"{qualified} FORCE ROW LEVEL SECURITY" in source
@@ -120,7 +120,7 @@ def test_payables_lineage_loads_as_one_alembic_head() -> None:
     config.set_main_option("script_location", str(ROOT / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["pa_0002_optional_supplier_doc"]
+    assert scripts.get_heads() == ["pa_0003_historical_invoice"]
     assert scripts.get_bases() == ["pa_0001_payables"]
 
 
@@ -139,3 +139,14 @@ def test_lineage_passes_the_composed_migration_gate() -> None:
         bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
     assert report.ok, report.violations
+
+
+def test_historical_receipt_is_forward_only_and_immutable() -> None:
+    source = (MIGRATION.parent / "pa_0003_historical_invoice.py").read_text()
+    assert 'down_revision = "pa_0002_optional_supplier_doc"' in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "historical_invoice_receipts_immutable" in source
+    assert "GRANT SELECT, INSERT" in source
+    table = models.HistoricalInvoiceReceipt.__table__
+    assert len(table.foreign_key_constraints) == 4
