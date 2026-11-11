@@ -8,9 +8,8 @@ behaviour, so each must be the very object `dotmac_approvals.service` defines.
 
 from __future__ import annotations
 
-import pytest
-
 import dotmac_approvals
+import pytest
 from dotmac_approvals import outbox, service
 
 EXPORTED = (
