@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -18,6 +19,7 @@ from dotmac_kernel.resource_api import (
     digest_pairs,
     drop_stamping_trigger_ddl,
     encode_cursor,
+    settle_bound,
     stamping_trigger_ddl,
     stamping_trigger_installed,
     summarize,
@@ -58,6 +60,8 @@ DECL = ResourceDeclaration(
     stamped_by_trigger=True,
     contact_fields=frozenset({"email"}),
     settle_horizon=timedelta(seconds=60),
+    # SQLite cannot fence open transactions; the unit tests opt in explicitly.
+    unseen_sessions="horizon_only",
 )
 
 
@@ -360,6 +364,7 @@ def test_contact_fields_are_stripped_at_any_depth(session: Session) -> None:
             "list": [[{"email": "y@example.test", "ok": 1}]],
         },
         contact_fields=frozenset({"email"}),
+        unseen_sessions="horizon_only",
     )
     (item,) = changes_page(session, nested, principal=READER, now=NOW).items
     assert "example.test" not in str(item.record)
@@ -487,3 +492,20 @@ def test_trigger_check_is_none_off_postgres(session: Session) -> None:
 
 def test_unseen_sessions_error_exists() -> None:
     assert issubclass(ResourceUnavailableError, Exception)
+
+
+def test_non_postgres_refuses_by_default(session: Session) -> None:
+    strict = replace(DECL, unseen_sessions="refuse")
+    with pytest.raises(ResourceUnavailableError):
+        settle_bound(session, strict, now=NOW)
+    with pytest.raises(ResourceUnavailableError):
+        changes_page(session, strict, principal=READER, now=NOW)
+
+
+def test_non_postgres_horizon_only_is_the_explicit_opt_in(session: Session) -> None:
+    bound = settle_bound(session, DECL, now=NOW)
+    assert bound.fence == "horizon_only_non_postgres"
+    assert bound.horizon == NOW - DECL.settle_horizon
+    assert changes_page(session, DECL, principal=READER, now=NOW).fence == (
+        "horizon_only_non_postgres"
+    )

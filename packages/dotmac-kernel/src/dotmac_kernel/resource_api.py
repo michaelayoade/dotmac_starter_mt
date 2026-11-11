@@ -42,7 +42,10 @@ absolute:
    approval, are: (a) the reader and the writers are the same runtime role;
    (b) a narrow SECURITY DEFINER fence function (client backends only, no query
    text); or (c) ``horizon_only`` declared per resource. Not
-   PostgreSQL (the unit-test SQLite): hold-back only, ``fence`` says so.
+   PostgreSQL (the unit-test SQLite): open transactions cannot be fenced at
+   all, so the same policy applies: ``"refuse"`` raises
+   ``ResourceUnavailableError`` and only an explicit ``"horizon_only"`` gets the
+   hold-back alone, with ``fence`` saying ``horizon_only_non_postgres``.
 3. **Trigger stamping (B3).** ``updated_at`` and ``version`` are stamped by a
    database trigger (``stamping_trigger_ddl``), not by application code. The
    kernel ``TimestampMixin`` is NOT enough: its ``onupdate`` uses the writer's
@@ -403,7 +406,8 @@ class ChangesPage:
     horizon: datetime
     #: How the horizon was fenced: ``pg_stat_activity``,
     #: ``horizon_only_unseen_sessions``
-    #: or ``horizon_only_non_postgres``.
+    #: or ``horizon_only_non_postgres`` (both only when the declaration chose
+    #: ``unseen_sessions="horizon_only"``).
     fence: str
 
     def as_dict(self) -> dict[str, Any]:
@@ -523,7 +527,10 @@ def settle_bound(
     """The instant before which rows are settled, from the DATABASE clock.
 
     ``now`` is a test seam honoured only off PostgreSQL; on PostgreSQL the
-    database clock and open-transaction fence decide.
+    database clock and open-transaction fence decide. Off PostgreSQL no
+    open-transaction fence exists, so the call refuses with
+    ``ResourceUnavailableError`` unless the declaration chose
+    ``unseen_sessions="horizon_only"``; it never passes silently.
     """
     seconds = declaration.settle_horizon.total_seconds()
     if db.get_bind().dialect.name == "postgresql":
@@ -545,6 +552,13 @@ def settle_bound(
             fence = "horizon_only_unseen_sessions"
         return SettleBound(
             horizon=_utc(row.horizon), fence=fence, computed_at=_utc(row.computed_at)
+        )
+    if declaration.unseen_sessions == "refuse":
+        raise ResourceUnavailableError(
+            "open transactions cannot be fenced on a non-PostgreSQL session, so "
+            "completeness cannot be claimed. Declare "
+            "unseen_sessions='horizon_only' on the resource to rely on the "
+            "hold-back alone"
         )
     clock = _utc(
         now if now is not None else db.execute(sa.select(sa.func.now())).scalar_one()
