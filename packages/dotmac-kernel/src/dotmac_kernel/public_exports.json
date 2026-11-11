@@ -1380,6 +1380,41 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.resource_api": {
+      "classification": "supported",
+      "exports": [
+        "CURSOR_VERSION",
+        "ChangeItem",
+        "ChangesPage",
+        "DEFAULT_MAX_SUMMARY_WINDOW",
+        "DEFAULT_PAGE_SIZE",
+        "DEFAULT_SETTLE_HORIZON",
+        "InvalidCursorError",
+        "MAX_PAGE_SIZE",
+        "MIN_SETTLE_HORIZON",
+        "ResourceDeclaration",
+        "ResourceScopes",
+        "ResourceSummary",
+        "ResourceUnavailableError",
+        "SettleBound",
+        "Tombstone",
+        "UnseenSessionsPolicy",
+        "changes_page",
+        "check_session_tenant",
+        "decode_cursor",
+        "digest_pairs",
+        "drop_stamping_trigger_ddl",
+        "encode_cursor",
+        "require_read",
+        "require_read_committed",
+        "settle_bound",
+        "stamping_trigger_ddl",
+        "stamping_trigger_installed",
+        "summarize",
+        "verify_period"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.route_metadata": {
       "classification": "internal",
       "exports": [
@@ -1617,6 +1652,22 @@
         "install_host_application",
         "install_source_applications",
         "validate_source_application"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.source_import": {
+      "classification": "supported",
+      "exports": [
+        "IMPORT_SCOPE_PREFIX",
+        "ImportBlocked",
+        "ImportRefused",
+        "ImportResult",
+        "ImportVerdict",
+        "MAX_RESULT_KEYS",
+        "content_digest",
+        "flat_id_map",
+        "import_record",
+        "import_scope"
       ],
       "status": "declared"
     },
@@ -2140,6 +2191,7 @@
     "dotmac_kernel.public_exports",
     "dotmac_kernel.query",
     "dotmac_kernel.request_evidence",
+    "dotmac_kernel.resource_api",
     "dotmac_kernel.secret_sources",
     "dotmac_kernel.security",
     "dotmac_kernel.semantic_encoding",
@@ -2154,6 +2206,7 @@
     "dotmac_kernel.settings_resolver",
     "dotmac_kernel.settings_shadow",
     "dotmac_kernel.source_applications",
+    "dotmac_kernel.source_import",
     "dotmac_kernel.templating",
     "dotmac_kernel.tenancy",
     "dotmac_kernel.testing",
