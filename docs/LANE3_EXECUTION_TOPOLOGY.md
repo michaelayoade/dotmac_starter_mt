@@ -990,3 +990,17 @@ amendments. Source-policy green alone is not that acceptance. The October6
 scheduling record is evidence input, not a completed structural dossier; no
 full workflow-tree digest/revalidation mechanism is supplied by this change.
 All other programme gates remain unchanged.
+
+
+### Evidence completion packet — 2026-11-11
+
+The [current evidence and custody packet](inventories/foundation-evidence-completion-packet-20261111.md)
+separates landed transport source from the complete private proof still owed.
+A dedicated hosted `lane3-evidence-crypto` job qualifies the actual age adapter
+with disposable synthetic identities; the required Docker job depends on it.
+The source pins the official tool archive checksum before installation. This
+qualifies interoperability only and leaves production policies unenrolled.
+The packet identifies current CP factory/material inputs, approval-standing
+serialization and distinct committed-consumption readback, the missing private
+retention contract, and the concrete custody decisions before enrollment.
+No full offline result, certification or operational approval follows from it.
