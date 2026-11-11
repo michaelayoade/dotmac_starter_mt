@@ -13,7 +13,11 @@ an immutable permanent receipt. It preserves invoice fields and nullable
 original actors; no new approval or Accounting consequence is produced.
 
 The assembly injects `HistoricalUnpaidInvoiceVerifier`; callers cannot replace
-verification with an import flag. Commands bind source identity, frozen snapshot
+verification with an import flag. Admission refuses, fail-closed, if the
+verifier leaves any pending write on the session (it must only read). This
+package trusts whatever evidence the verifier returns: the ERP verifier
+implementation does not exist yet and needs its own architect review before any
+ERP call site is enabled. Commands bind source identity, frozen snapshot
 SHA-256, destination invoice and complete cv1 evidence fingerprint. Permanent
 receipts preserve replay after kernel key retention and later real settlement.
 Changed evidence conflicts. Supplier-issued document numbers may remain NULL
