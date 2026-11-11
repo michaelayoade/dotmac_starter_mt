@@ -1,7 +1,7 @@
 # ADR-0079: Apps publish a resource API, and integrations copy through it
 
-- Status: Proposed (build approved by Michael 2026-11-10: "start 1. The Starter API standard (R0, ADR 0079)"; the R0 ruling is not yet recorded in the register, so this stays Proposed until it is and this record merges)
-- Date: 2026-11-10
+- Status: Accepted (Michael, 2026-11-11; R0 ruling approved, and the kit ships in kernel `0.1.0a109`; build approved 2026-11-10)
+- Date: 2026-11-11
 - Decider: Michael
 - Related: ADR-0024 (applications are independent and compose by synchronizing
   data; amended here), ADR-0014 (idempotency), ADR-0020 (billing destination);
