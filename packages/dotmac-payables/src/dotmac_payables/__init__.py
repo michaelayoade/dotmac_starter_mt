@@ -10,6 +10,9 @@ from dotmac_payables.contracts import (
     CreateCreditNote,
     CreateSupplierInvoice,
     CreditNoteStatus,
+    HistoricalUnpaidInvoiceCommand,
+    HistoricalUnpaidInvoiceEvidence,
+    HistoricalUnpaidInvoiceVerifier,
     InvalidAmount,
     InvalidTransition,
     InvoiceStatus,
@@ -27,6 +30,7 @@ from dotmac_payables.models import (
     CreditApplication,
     CreditNote,
     CreditNoteLine,
+    HistoricalInvoiceReceipt,
     LiabilityEvent,
     PaymentObligation,
     SettlementObservation,
@@ -34,6 +38,7 @@ from dotmac_payables.models import (
     SupplierInvoiceLine,
 )
 from dotmac_payables.service import (
+    admit_historical_unpaid_invoice,
     apply_credit_note,
     approve_credit_note,
     approve_invoice,
@@ -50,9 +55,14 @@ from dotmac_payables.service import (
     void_invoice,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
+    "HistoricalUnpaidInvoiceCommand",
+    "HistoricalUnpaidInvoiceEvidence",
+    "HistoricalUnpaidInvoiceVerifier",
+    "HistoricalInvoiceReceipt",
+    "admit_historical_unpaid_invoice",
     "AccountingConsequence",
     "AccountingEntry",
     "AccountingReceipt",

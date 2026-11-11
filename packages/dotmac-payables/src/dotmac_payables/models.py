@@ -475,7 +475,72 @@ class AccountingReceipt(Base):
     )
 
 
+class HistoricalInvoiceReceipt(Base):
+    """Permanent original-recognition evidence; never a contemporary GL receipt."""
+
+    __tablename__ = "historical_invoice_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_historical_invoice_receipts_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "invoice_id", name="uq_historical_invoice_receipts_invoice"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_owner",
+            "source_invoice_id",
+            name="uq_historical_invoice_receipts_source",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            name="fk_historical_invoice_receipts_invoice",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "obligation_id"],
+            [
+                f"{SCHEMA}.payment_obligations.tenant_id",
+                f"{SCHEMA}.payment_obligations.id",
+            ],
+            name="fk_historical_invoice_receipts_obligation",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "event_id"],
+            [f"{SCHEMA}.liability_events.tenant_id", f"{SCHEMA}.liability_events.id"],
+            name="fk_historical_invoice_receipts_event",
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    obligation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    event_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_invoice_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    facts_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    accounting_evidence_fingerprint: Mapped[str] = mapped_column(
+        String(68), nullable=False
+    )
+    source_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    destination_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    original_posted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    admitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 ALL_MODELS = (
+    HistoricalInvoiceReceipt,
     SupplierInvoice,
     SupplierInvoiceLine,
     CreditNote,
@@ -495,6 +560,7 @@ def metadata_table(name: str) -> sa.Table:
 
 __all__ = [
     "ALL_MODELS",
+    "HistoricalInvoiceReceipt",
     "TABLES",
     "AccountingReceipt",
     "CreditApplication",

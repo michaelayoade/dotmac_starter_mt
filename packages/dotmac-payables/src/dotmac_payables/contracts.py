@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Protocol
 from uuid import UUID
+
+from dotmac_kernel.cache import TenantScope
+from dotmac_kernel.semantic_encoding import ABSENT, digest_of, encode_fields
+from sqlalchemy.orm import Session
 
 
 class PayablesError(ValueError):
@@ -343,4 +348,102 @@ __all__ = [
     "PayableLineInput",
     "PayablesError",
     "SettlementObservationInput",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalUnpaidInvoiceCommand:
+    source_owner: str
+    source_invoice_id: str
+    invoice_id: UUID
+    source_snapshot_sha256: str
+    evidence_fingerprint: str
+
+    def validate(self) -> None:
+        for value, label, maximum in (
+            (self.source_owner, "source owner", 120),
+            (self.source_invoice_id, "source invoice id", 255),
+        ):
+            if _required(value, label, maximum) != value:
+                raise PayablesError(f"{label} must be canonical")
+        if not isinstance(self.invoice_id, UUID):
+            raise PayablesError("invoice id must be UUID")
+        if _fingerprint(self.source_snapshot_sha256) != self.source_snapshot_sha256:
+            raise PayablesError("snapshot digest must be canonical")
+        _historical_digest(self.evidence_fingerprint)
+
+
+def _historical_digest(value: str) -> str:
+    if not value.startswith("cv1:") or _fingerprint(value[4:]) != value[4:]:
+        raise PayablesError("historical evidence requires a canonical cv1 fingerprint")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalUnpaidInvoiceEvidence:
+    tenant_id: UUID
+    source_owner: str
+    source_invoice_id: str
+    source_snapshot_sha256: str
+    invoice_id: UUID
+    source_status: str
+    invoice_type: str
+    paid_amount: Decimal
+    allocation_count: int
+    withholding_tax_amount: Decimal
+    prepayment_amount: Decimal
+    number: str
+    supplier_ref: str
+    supplier_name_snapshot: str
+    supplier_document_number: str | None
+    invoice_date: date
+    received_date: date
+    due_date: date
+    currency_code: str
+    exchange_rate: Decimal
+    subtotal: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
+    liability_account_ref: str
+    procurement_ref: str | None
+    receipt_evidence_fingerprint: str | None
+    submitted_by: str | None
+    approved_by: str | None
+    approval_reference: str | None
+    submitted_at: datetime | None
+    approved_at: datetime | None
+    original_posted_at: datetime
+    source_journal_ref: str
+    destination_journal_ref: str
+    accounting_evidence_fingerprint: str
+    facts_fingerprint: str
+
+    def fingerprint(self) -> str:
+        values: list[tuple[str, object]] = []
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if value is None:
+                value = ABSENT
+            elif isinstance(value, UUID):
+                value = str(value)
+            elif isinstance(value, date) and not isinstance(value, datetime):
+                value = value.isoformat()
+            values.append((field.name, value))
+        return digest_of("payables.historical-unpaid-invoice.v1", encode_fields(values))
+
+
+class HistoricalUnpaidInvoiceVerifier(Protocol):
+    def verify(
+        self,
+        *,
+        scope: TenantScope,
+        command: HistoricalUnpaidInvoiceCommand,
+        destination: Session,
+    ) -> HistoricalUnpaidInvoiceEvidence: ...
+
+
+__all__ += [
+    "HistoricalUnpaidInvoiceCommand",
+    "HistoricalUnpaidInvoiceEvidence",
+    "HistoricalUnpaidInvoiceVerifier",
 ]

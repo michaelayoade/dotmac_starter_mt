@@ -8558,7 +8558,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    "dotmac-payables": frozenset(),
+    "dotmac-payables": frozenset({"pa_0003_historical_invoice.py"}),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until

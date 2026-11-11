@@ -1,5 +1,13 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a3 — unreleased
+
+- Add narrowly verified historical POSTED, wholly unpaid STANDARD invoice
+  admission. Preserve original nullable actors and posting time, record a
+  permanent immutable receipt, and recognize the full original obligation
+  without approving again or producing duplicate imported GL consequences.
+- Require kernel a103 for versioned cv1 semantic evidence fingerprints.
+
 ## 0.1.0a2 — unreleased
 
 - Historical or imported supplier invoices and credit notes whose
