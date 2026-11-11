@@ -50,7 +50,7 @@ from dotmac_payables.service import (
     void_invoice,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AccountingConsequence",

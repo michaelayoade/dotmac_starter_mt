@@ -927,3 +927,22 @@ a file and must be called that.
 Lane 3 establishes none of the three. It is about exposure semantics against a
 real socket, and it is listed here only so the two are not mistaken for one
 gate when publication is finally considered.
+
+
+## 2026-11-10 — late evidence finalization (source; operationally unenrolled)
+
+The current-run evidence carrier is produced inside the runner after Executor
+recording and before v2 receipt assembly. The same qualified probe bytes and
+frozen crossing records are manifest-bound and memory-archived, encrypted by
+the protected fixed age adapter, and exact ciphertext readback is receipt-bound.
+The launcher accepts no prebuilt ciphertext. Artifact paths explicitly exclude
+plaintext probe/exposure/manifest members. This fixes sequencing and transport,
+not exact-rule, foreign-preservation, compensation or Control proof.
+
+The protected public encryption policy ships unenrolled, with no tool pin or
+recipient. Preflight refuses before host contact, and publication's separate
+unenrolled offline-result policy remains mandatory. No keys are created or
+enrolled, no private verifier/result signer exists, and the two behavioral items
+remain BLOCKED. Hosted synthetic tests cover ordering/refusal and transport;
+real enrolled-tool cryptographic round-trip and complete admitted rehearsals
+remain owed. Foundation package bytes/version are unchanged.

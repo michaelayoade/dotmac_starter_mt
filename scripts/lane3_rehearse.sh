@@ -102,6 +102,8 @@ read_topology() {
 }
 
 rehearse() {
+  # Private collector storage is created only for this invocation.
+  umask 077
   require_env LANE3_FACILITY LANE3_CANDIDATE_VERSION LANE3_AUTHORIZATION_RUN \
     LANE3_CONTROLLER_IDENTITY LANE3_HOST_ID GITHUB_SHA GH_TOKEN
 
@@ -147,6 +149,11 @@ rehearse() {
     --descriptor scripts/exposure-rehearsal/product.toml \
     --target "${LANE3_HOST_ID}"
 
+  # Check the public-recipient/tool enrollment before even the collector can
+  # contact a probe host. The runner repeats this in its own live process.
+  step "Refuse unless private evidence encryption is enrolled"
+  .lane3-foundation/bin/python -E -P scripts/lane3_evidence_finalization.py
+
   # The target address, the probe vantage and the observer principal exist
   # ONLY in the OpenBao vantage-topology record (docs/LANE3_EXECUTION_TOPOLOGY.md
   # section 4). Exit 2 means no reader is provisioned (B7), exit 1 a record or
@@ -171,14 +178,20 @@ rehearse() {
     refuse "no target-side observation identity configured. The far-end" \
       "source address is the one check measured from the far end, and a" \
       "vantage cannot certify where it egresses from"
-  ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
-    qualify "${topology_probe_host}" "${topology_target}" > probe-evidence.json
+  lane3_probe_directory="$(mktemp -d "${RUNNER_TEMP:?}/lane3-evidence.XXXXXXXX" 2>/dev/null)" ||
+    refuse "private probe storage unavailable"
+  trap 'rm -f -- "${lane3_probe_directory}/probe-evidence.json"; rmdir -- "${lane3_probe_directory}"' EXIT
+  # noclobber refuses a preexisting name or symlink even in this new directory.
+  (
+    set -o noclobber
+    ./scripts/exposure-rehearsal/collect_probe_evidence.sh \
+      qualify "${topology_probe_host}" "${topology_target}" > "${lane3_probe_directory}/probe-evidence.json"
+  )
 
   # Three revisions, three sources: the runner's own commit is `GITHUB_SHA`;
   # the candidate's source commit and digest come ONLY from the resolved
-  # receipt. The v2 inputs (API run, encrypted evidence bundle, vantage record
-  # reference) are passed through as given; the runner refuses when one is
-  # absent rather than inventing it.
+  # receipt. The API run is passed through; private topology is bound by the
+  # runner. Ciphertext is created only after execution from current-run evidence.
   step "Execute Lane 3 through the controller"
   [ -n "${LANE3_JUMP_KEY:-}" ] || refuse "no inside-vantage jump key configured." \
     "Items 12 and 16 need a probe that genuinely originates inside the" \
@@ -195,9 +208,9 @@ rehearse() {
     --candidate-version "${LANE3_CANDIDATE_VERSION}" \
     --inside-jump-key "${LANE3_JUMP_KEY}" \
     --observer-key "${LANE3_OBSERVER_KEY}" \
-    --probe-evidence probe-evidence.json \
+    --probe-evidence "${lane3_probe_directory}/probe-evidence.json" \
     --api-run "${LANE3_API_RUN:-}" \
-    --evidence-bundle "${LANE3_EVIDENCE_BUNDLE:-}" \
+    --evidence-bundle-out evidence-bundle.age \
     --descriptor scripts/exposure-rehearsal/product.toml \
     --receipt-out receipt.json \
     --status-out docs/inventories/deployment-exposure-rehearsal-status.md \

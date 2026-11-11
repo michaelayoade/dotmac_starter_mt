@@ -164,6 +164,7 @@ from typing import Final
 # then fails at collection time rather than at run time.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import lane3_evidence_finalization as evidence_finalization
 import lane3_inside_vantage as inside_vantage
 import lane3_receipt_v2 as receipt_v2
 import lane3_topology_source as topology_source
@@ -493,9 +494,16 @@ def receipt_v2_refusals(
     """
     try:
         yield
-    except (receipt_v2.AuthorityUnavailable, TopologyRefused) as exc:
+    except (
+        receipt_v2.AuthorityUnavailable,
+        TopologyRefused,
+        evidence_finalization.FinalizationUnavailable,
+    ) as exc:
         raise AuthorizationUnverifiable(Standing.UNANSWERABLE, str(exc)) from exc
-    except receipt_v2.ReceiptRefused as exc:
+    except (
+        receipt_v2.ReceiptRefused,
+        evidence_finalization.FinalizationRefused,
+    ) as exc:
         raise refused_as(str(exc)) from exc
     except AuthorizationUnverifiable as exc:
         # Only the prelease call sites may name a determinate authority refusal
@@ -610,14 +618,49 @@ def _ssh_runner(target: str, identity: str):
     return run
 
 
-def _load_probe_evidence(path: pathlib.Path) -> dict:
+def _capture_probe_evidence(path: pathlib.Path) -> tuple[bytes, dict]:
+    """Read once: qualification and encryption must use the same private bytes."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise EvidenceUnreadable(
-            f"the probe evidence at {path} could not be read ({exc}). The "
-            "external half cannot be assumed"
-        ) from exc
+        with path.open("rb") as stream:
+            payload = stream.read(evidence_finalization.MAX_MEMBER_BYTES + 1)
+        if not payload or len(payload) > evidence_finalization.MAX_MEMBER_BYTES:
+            raise ValueError("probe evidence size")
+        evidence = json.loads(payload)
+        if not isinstance(evidence, dict):
+            raise ValueError("probe evidence object")
+        return payload, evidence
+    except (OSError, ValueError):
+        # Neither a path nor a parser diagnostic belongs in public output.
+        raise EvidenceUnreadable("probe evidence unavailable or invalid") from None
+
+
+def _finalize_run_evidence(
+    args: argparse.Namespace,
+    ctx: TerminalContext,
+    *,
+    probe_evidence: bytes,
+    execution_plan: object,
+    encryption: evidence_finalization.EncryptionContext,
+) -> bytes:
+    """Freeze actual Executor records before encrypting and assembling a receipt.
+
+    The caller retains the live plan/grant/outcome. This transport step does not
+    certify the BLOCKED behavioral rows or create an offline verification result.
+    """
+    records = tuple(ctx.exposure_calls)
+    try:
+        require_exposure_join(records, execution_plan.exposure_reconciliations)
+        calls = serialize_exposure_calls(records)
+    except (ExposureEvidenceRefused, AttributeError):
+        raise receipt_v2.ReceiptRefused(
+            "exposure evidence finalization refused"
+        ) from None
+    return evidence_finalization.finalize_evidence(
+        probe_evidence=probe_evidence,
+        exposure_calls=calls,
+        context=encryption,
+        output=pathlib.Path(args.evidence_bundle_out),
+    )
 
 
 def _qualify(evidence: dict) -> VantageQualification:
@@ -1624,7 +1667,11 @@ def run(
     bindings = prepared.bindings
 
     # ── the external vantage, qualified BEFORE its refusals are believed ────
-    evidence = _load_probe_evidence(pathlib.Path(args.probe_evidence))
+    # Protected public recipient/tool enrollment is checked before any host
+    # contact, lease acquisition or mutation. No private decryption key is used.
+    with receipt_v2_refusals(refused_as=PreconditionUnfit):
+        encryption = evidence_finalization.prepare_encryption()
+    probe_bytes, evidence = _capture_probe_evidence(pathlib.Path(args.probe_evidence))
     _qualify(evidence)
 
     # ── pure invocation preconditions, before read-only host observation ───
@@ -2083,28 +2130,17 @@ def run(
             "build_receipt_v2(chain)",
         )
 
-    # The probe evidence is bound as the ENCRYPTED bundle that is published,
-    # and the vantage by its private record reference, never by an address.
-    # Both are produced outside this file; an absent one refuses at assembly.
+    # Finalize this execution's evidence in the same process that retains its
+    # genuine plan, grant and outcome. Prebuilt ciphertext cannot contain the
+    # records just created by the Executor and is no longer an accepted input.
     with receipt_v2_refusals(refused_as=SpecError):
-        if not args.evidence_bundle:
-            raise receipt_v2.ReceiptRefused(
-                "no --evidence-bundle: a v2 receipt binds the age-encrypted "
-                "evidence bundle as uploaded, and this run was given none"
-            )
-        # When this run carries the private exposure records, the receipt
-        # is refused unless they completely join the authorized plan's
-        # reconciliations. Recording is best-effort, so this is the one
-        # place a missing record stops being a note and becomes a refusal:
-        # a receipt over incomplete exposure evidence would publish a
-        # proof its own bundle cannot support.
-        if getattr(args, "exposure_calls_out", ""):
-            try:
-                require_exposure_join(
-                    ctx.exposure_calls, execution_plan.exposure_reconciliations
-                )
-            except ExposureEvidenceRefused as exc:
-                raise receipt_v2.ReceiptRefused(str(exc)) from exc
+        ciphertext = _finalize_run_evidence(
+            args,
+            ctx,
+            probe_evidence=probe_bytes,
+            execution_plan=execution_plan,
+            encryption=encryption,
+        )
         receipt = receipt_v2.assemble_receipt(
             foundation_revision=args.foundation_revision,
             foundation_artifact_digest=args.foundation_artifact,
@@ -2113,7 +2149,7 @@ def run(
             grant=grant,
             execution_outcome=execution_outcome,
             fixture_digest=str(Digest.of(fixture_bytes)),
-            evidence_bundle=pathlib.Path(args.evidence_bundle).read_bytes(),
+            evidence_bundle=ciphertext,
             controller_identity=str(controller_identity),
             lease_id=lease.authorization_run_id,
             probe_vantage_ref=args.probe_vantage_ref,
@@ -2196,8 +2232,8 @@ def main(
     # `--authorization-document`: the org launcher supplies them (C3) and
     # nothing can today, so a usage error would describe a command line rather
     # than the run. Each is mandatory where it is used: an absent API run
-    # refuses before the descriptor is opened, an absent evidence bundle or
-    # vantage reference refuses at assembly.
+    # refuses before the descriptor is opened; missing encryption enrollment
+    # refuses before host contact. The vantage reference derives from topology.
     parser.add_argument(
         "--topology",
         default=str(
@@ -2213,9 +2249,9 @@ def main(
         help="the launcher's saved GET .../actions/runs/{run_id} response",
     )
     parser.add_argument(
-        "--evidence-bundle",
-        default="",
-        help="the age-encrypted probe evidence bundle, exactly as uploaded",
+        "--evidence-bundle-out",
+        default="evidence-bundle.age",
+        help="new ciphertext output; no prebuilt evidence bundle is accepted",
     )
     # Not a source of the topology: the KV version the script resolved, which
     # the runner's own read must equal. `probe_vantage_ref` is derived from the

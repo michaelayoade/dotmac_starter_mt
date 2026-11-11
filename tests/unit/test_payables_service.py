@@ -22,6 +22,7 @@ from dotmac_payables.contracts import (
     InvalidTransition,
     ObligationSchedule,
     PayableLineInput,
+    PayablesError,
     SettlementObservationInput,
 )
 from dotmac_payables.service import (
@@ -117,6 +118,81 @@ def _approved_invoice(db: Session):
         approved_at=NOW,
     )
     return scope, invoice
+
+
+def test_historical_documents_without_supplier_numbers_persist_as_null(
+    db: Session,
+) -> None:
+    def historical_invoice(number: str) -> models.SupplierInvoice:
+        return models.SupplierInvoice(
+            tenant_id=TENANT,
+            number=number,
+            supplier_ref="party:supplier-1",
+            supplier_name_snapshot="Fibre Vendor Ltd",
+            supplier_document_number=None,
+            invoice_date=date(2026, 8, 1),
+            received_date=date(2026, 8, 2),
+            currency_code="NGN",
+            exchange_rate=Decimal("1"),
+            liability_account_ref="account:2100",
+            subtotal=Decimal("100"),
+            tax_amount=Decimal("0"),
+            total_amount=Decimal("100"),
+            payment_schedule=[{"due_date": "2026-08-31", "amount": "100"}],
+            request_fingerprint="a" * 64,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+
+    first = historical_invoice("PINV-2026-0002")
+    second = historical_invoice("PINV-2026-0003")
+    db.add_all([first, second])
+    db.flush()
+    credit = models.CreditNote(
+        tenant_id=TENANT,
+        original_invoice_id=first.id,
+        number="PCN-2026-0002",
+        supplier_ref="party:supplier-1",
+        supplier_name_snapshot="Fibre Vendor Ltd",
+        supplier_document_number=None,
+        credit_date=date(2026, 8, 5),
+        currency_code="NGN",
+        exchange_rate=Decimal("1"),
+        liability_account_ref="account:2100",
+        subtotal=Decimal("25"),
+        tax_amount=Decimal("0"),
+        total_amount=Decimal("25"),
+        available_amount=Decimal("0"),
+        request_fingerprint="b" * 64,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    db.add(credit)
+    db.flush()
+
+    assert first.supplier_document_number is None
+    assert second.supplier_document_number is None
+    assert credit.supplier_document_number is None
+    assert db.scalar(select(func.count()).select_from(models.SupplierInvoice)) == 2
+    assert db.scalar(select(func.count()).select_from(models.CreditNote)) == 1
+
+
+def test_new_supplier_invoice_still_requires_supplier_document_number(
+    db: Session,
+) -> None:
+    with pytest.raises(PayablesError, match="supplier document number is required"):
+        create_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=replace(
+                _invoice_command(),
+                number="PINV-2026-0004",
+                supplier_document_number="   ",
+            ),
+            idempotency_key="invoice:missing-doc:rejected",
+            idempotency_expires_at=None,
+            recorded_at=NOW,
+        )
 
 
 def test_invoice_approval_recognizes_liability_and_due_obligation(db: Session) -> None:
