@@ -122,7 +122,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-finance": "0.1.0a85",
     "dotmac-inbox": "0.1.0a85",
     "dotmac-party": "0.1.0a85",
-    "dotmac-payables": "0.1.0a85",
     "dotmac-payroll": "0.1.0a85",
     "dotmac-procurement": "0.1.0a85",
     "dotmac-projects": "0.1.0a85",
@@ -192,6 +191,10 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Historical admission consumes semantic_encoding's cv1 digest/frames and
+    # canonical instants, first available in published a103. The namespace was
+    # allocated in a85, which cannot supply those later public APIs.
+    "dotmac-payables": ("0.1.0a103", "0.1.0a85"),
     # Grant-bound Health writers consume the engine-free a98 savepoint API.
     "dotmac-platform-health": ("0.1.0a98", "0.1.0a88"),
     # Opening-window refusal recovery observes Kernel's exact-root rollback
