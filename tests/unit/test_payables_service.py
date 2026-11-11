@@ -548,6 +548,9 @@ def test_historical_replay_preserves_invoice_after_settlement_and_key_expiry(
     from sqlalchemy import delete
 
     invoice, evidence, command = _historical_case(db)
+    # Compare persisted representations on both sides. SQLite drops timezone
+    # metadata on reload, including the ORM-generated updated_at default.
+    db.refresh(invoice)
     before = {c.name: getattr(invoice, c.name) for c in invoice.__table__.columns}
     receipt = _admit(db, evidence, command)
     obligation = db.get(models.PaymentObligation, receipt.obligation_id)
@@ -567,6 +570,7 @@ def test_historical_replay_preserves_invoice_after_settlement_and_key_expiry(
         timespec="microseconds"
     )
     assert receipt.evidence["approved_by"] is None
+    db.refresh(invoice)
     assert {
         c.name: getattr(invoice, c.name) for c in invoice.__table__.columns
     } == before
