@@ -66,7 +66,7 @@ from dotmac_brand_profiles.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="brand_profiles",
-    version="0.1.0a1",
+    version="0.1.0a1+dev",
     core=False,
     short_code="brand",
     migration_prefix="bp",

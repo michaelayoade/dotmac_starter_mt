@@ -110,3 +110,24 @@ is `dotmac_ui.BrandWarning`'s own D8 rule applied to migration.
 **Built and validated, not adopted.** See `EXTRACTION.toml` for what Sub's
 cutover owes, including that the migrated colours are the same *values* rendered
 by a *different generator*, so the cutover renders both and diffs the output.
+
+## Optional tagline (N4 source preparation)
+
+The approved optional `tagline` is display copy with a 255-character maximum.
+It is `DISPLAY` and `LOCKABLE`, not `IDENTITY`; it participates in the same
+per-field precedence, source attribution and lock behavior as other profile
+fields. `None` in `ProfileFields` means no update. The explicit clear signal
+stores SQL `NULL`; resolution treats only an exact empty tagline as absent and
+does not trim whitespace. A stored empty string remains intact, while the
+resolver ignores that empty value; whitespace-only values are preserved. Both
+upsert commands append `clear_fields: tuple[Literal["tagline"], ...] = ()`.
+Unknown/protected clear names, set-and-clear combinations (including `""`),
+and invalid length/type are refused before `execute_once`. Other profile fields
+cannot be cleared through this addition. `command_id` remains the idempotency
+key, and the intent fingerprint includes `clear_fields`; use a new `command_id`
+for each new intent. A historical command whose record has no such fingerprint
+replays its recorded result without executing the new clear behavior. Existing
+lock-list replacement, metadata, and profile API behavior remain intact. The
+assembly owns rendering.
+This source preparation does not change consumer adoption, which remains held
+until a released module is available and a separately authorized flip is ready.

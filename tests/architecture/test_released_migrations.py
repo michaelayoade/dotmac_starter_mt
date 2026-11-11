@@ -8536,7 +8536,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
     "dotmac-banking": frozenset(),
-    "dotmac-brand-profiles": frozenset(),
+    "dotmac-brand-profiles": frozenset({"bp_0002_tagline.py"}),
     "dotmac-campaigns": frozenset(),
     "dotmac-content": frozenset(),
     "dotmac-documents": frozenset(),

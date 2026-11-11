@@ -63,8 +63,7 @@ ALL_PRIVILEGES = (
 
 def _superuser_url() -> str:
     url = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set — the dual-plane canary needs Postgres")
+    assert url, "TEST_DATABASE_URL is required — the dual-plane canary needs Postgres"
     return url
 
 
@@ -164,11 +163,64 @@ def both_planes(migrated_scratch) -> tuple[str, str, str]:
     """Skip loudly rather than pass vacuously if the composition selected one
     plane. A canary that silently tested nothing would be worse than absent."""
     admin_url, _, _ = migrated_scratch
-    if not _plane_installed(admin_url, TENANT_TABLE):
-        pytest.skip("the composition did not select the TENANT plane")
-    if not _plane_installed(admin_url, PLATFORM_TABLES[0]):
-        pytest.skip("the composition did not select the PLATFORM plane")
+    assert _plane_installed(admin_url, TENANT_TABLE)
+    assert _plane_installed(admin_url, PLATFORM_TABLES[0])
     return migrated_scratch
+
+
+def test_platform_tagline_online_roundtrip_and_app_user_denial(both_planes):
+    _, platform_url, tenant_url = both_planes
+    platform = create_engine(platform_url)
+    tenant = create_engine(tenant_url)
+    ident = uuid.uuid4()
+    try:
+        with platform.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_brand.platform_brand_profiles "
+                    "(id, profile_code, display_name, tagline, status, record_version) "
+                    "VALUES (:id, :code, 'Copy', :copy, 'active', 1)"
+                ),
+                {"id": ident, "code": f"copy-{ident.hex}", "copy": "x" * 255},
+            )
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT tagline FROM mod_brand.platform_brand_profiles "
+                        "WHERE id = :id"
+                    ),
+                    {"id": ident},
+                ).scalar_one()
+                == "x" * 255
+            )
+            conn.execute(
+                text(
+                    "UPDATE mod_brand.platform_brand_profiles SET tagline = NULL "
+                    "WHERE id = :id"
+                ),
+                {"id": ident},
+            )
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT tagline FROM mod_brand.platform_brand_profiles "
+                        "WHERE id = :id"
+                    ),
+                    {"id": ident},
+                ).scalar_one()
+                is None
+            )
+        with tenant.begin() as conn, pytest.raises(ProgrammingError):
+            conn.execute(
+                text(
+                    "SELECT tagline FROM mod_brand.platform_brand_profiles "
+                    "WHERE id = :id"
+                ),
+                {"id": ident},
+            )
+    finally:
+        tenant.dispose()
+        platform.dispose()
 
 
 def _seed_two_tenants(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
@@ -216,6 +268,49 @@ def _seed_two_tenants(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 class TestTheTenantPlaneIsIsolatedByRls:
+    def test_tagline_online_write_is_tenant_isolated(self, both_planes) -> None:
+        admin_url, _, app_user_url = both_planes
+        alpha, bravo = _seed_two_tenants(admin_url)
+        engine = create_engine(app_user_url)
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(alpha)},
+                )
+                assert (
+                    conn.execute(
+                        text(
+                            "UPDATE mod_brand.brand_profiles "
+                            "SET tagline = 'Alpha copy' WHERE tenant_id = :t"
+                        ),
+                        {"t": alpha},
+                    ).rowcount
+                    == 1
+                )
+                assert (
+                    conn.execute(
+                        text(
+                            "UPDATE mod_brand.brand_profiles SET tagline = 'leak' "
+                            "WHERE tenant_id = :t"
+                        ),
+                        {"t": bravo},
+                    ).rowcount
+                    == 0
+                )
+                assert conn.execute(
+                    text("SELECT tagline FROM mod_brand.brand_profiles")
+                ).scalars().all() == ["Alpha copy"]
+                conn.execute(
+                    text("SELECT set_config('app.current_tenant', :t, true)"),
+                    {"t": str(bravo)},
+                )
+                assert conn.execute(
+                    text("SELECT tagline FROM mod_brand.brand_profiles")
+                ).scalars().all() == [None]
+        finally:
+            engine.dispose()
+
     def test_rls_is_enabled_and_forced(self, both_planes) -> None:
         """FORCE is the half that is easy to omit and impossible to notice.
         Without it the table OWNER — which migrations run as — bypasses its own

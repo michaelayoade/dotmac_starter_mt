@@ -687,7 +687,7 @@ url = "packages/dotmac-billing"
 
 [[package]]
 name = "dotmac-brand-profiles"
-version = "0.1.0a1"
+version = "0.1.0a1+dev"
 description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0057 § 2)"
 optional = false
 python-versions = ">=3.11,<3.14"

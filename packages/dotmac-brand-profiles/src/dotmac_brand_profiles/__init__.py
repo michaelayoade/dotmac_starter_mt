@@ -108,7 +108,7 @@ from dotmac_brand_profiles.service import (
     upsert_tenant_profile,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a1+dev"
 
 __all__ = [
     "AUDIT_ACTION_PLATFORM",

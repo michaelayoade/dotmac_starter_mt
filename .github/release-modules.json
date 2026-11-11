@@ -572,7 +572,8 @@
           "dotmac_brand_profiles/ports.py",
           "dotmac_brand_profiles/service.py",
           "dotmac_brand_profiles/migrations/__init__.py",
-          "dotmac_brand_profiles/migrations/versions/bp_0001_brand_profiles.py"
+          "dotmac_brand_profiles/migrations/versions/bp_0001_brand_profiles.py",
+          "dotmac_brand_profiles/migrations/versions/bp_0002_tagline.py"
         ],
         "forbidden_prefixes": [
           "app/",

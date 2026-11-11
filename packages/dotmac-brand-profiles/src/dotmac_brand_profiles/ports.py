@@ -115,6 +115,9 @@ class ProfileFields:
     #: signing material lives in the build pipeline's own secret store.
     mobile_build_profile_ref: str | None = None
 
+    #: Customer-visible copy; None leaves the stored override unchanged.
+    tagline: str | None = None
+
     def as_dict(self) -> dict[str, Any]:
         """The set fields only. `None` means "leave alone", never "clear"."""
         return {
