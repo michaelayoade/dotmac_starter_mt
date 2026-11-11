@@ -1356,7 +1356,8 @@
       "classification": "supported",
       "exports": [
         "apply_pagination",
-        "escape_like"
+        "escape_like",
+        "pagination_context"
       ],
       "status": "declared"
     },

@@ -12,6 +12,84 @@ The current kernel version is the `[tool.poetry] version` in this package's
 `pyproject.toml` (pre-release `0.x` alphas; per-release notes in
 `CHANGELOG.md`) — it is deliberately not repeated here, where it would drift.
 
+## List pagination presentation
+
+`dotmac_kernel.query.pagination_context(*, total, limit, offset)` is public and
+pairs with `components/table_macros.html::table_pagination(request, pagination,
+label="items", page_sizes=(10, 25, 50), hidden_fields=())`. Integers must satisfy
+`total >= 0`, `limit >= 1`, `offset >= 0`; violations raise `ValueError`.
+
+The returned dict contains `total`, `limit`, the unchanged requested `offset`,
+`current_page`, `total_pages` (at least 1), `page_items` (integers with `None`
+ellipses), `page_start`, `page_end`, `prev_offset`, `has_prev`, and `has_next`.
+The helper does not run or clamp a query. At an offset outside a nonempty
+collection, or a positive offset into an empty collection, the displayed range
+is 0–0 and `current_page` is `None`: no page link is falsely marked active.
+Navigation stays anchored at the last valid window; Previous returns directly
+to `(total_pages - 1) * limit` for a nonempty stale offset and to zero for
+an empty stale offset; valid pages use `max(offset - limit, 0)`. Empty offset zero retains `current_page == 1`.
+Valid offsets preserve their existing ranges and page windows.
+
+The macro preserves URL query parameters, uses `prev_offset` for Previous,
+and resets offset to zero on its page-size GET form. `hidden_fields` supplies
+filters for that form. Assemblies provide the `table-pagination*`,
+`pagination-*`, and `rows-per-page` styling and Kernel `components.js` delegated
+submission behavior. The older `pagination(page, total_pages, base_url)` macro
+is unchanged. Source, deliberate departures and outstanding consumer retirement
+gates are recorded in [the UI inventory](../../docs/inventories/ui-build-once-20261110.md).
+
+## Render-local product filters
+
+`dotmac_kernel.templating.render(request, name, context=None, *,
+status_code=200, filters=None)` accepts an optional
+`Mapping[str, Callable[..., Any]]`. It snapshots the mapping before rendering.
+Names must be nonempty dot-separated identifiers; values must be callable.
+A non-mapping or noncallable value raises `TypeError`; an invalid name or a
+collision with any canonical filter, including Jinja builtins and Kernel's
+`local_datetime`/`local_date`, raises `ValueError` before template rendering.
+A failed validation does not install any filters.
+
+None/empty mappings follow the existing canonical path. Nonempty mappings apply
+only to that response and its includes/imports/macros through an ephemeral
+same-owner environment overlay, with copied filter/global dictionaries and no
+bytecode cache. The canonical loader, autoescape, context processors, request,
+CSRF, branding/surface enrichment, status and TemplateResponse metadata remain
+in force. Caller filter functions retain their own behavior and state; Kernel
+does not copy callables or make them safe to execute untrusted code.
+
+The private `templates` singleton and `static_asset_url` Python helper remain
+unsupported product imports. Products pass filter callables through `render`
+and product context through its existing `context` argument. This extension
+adds no getter or persistent environment. `compose_templates` remains one
+process-global composition, with the last composition winning; render-local
+filters do not isolate different applications' concurrent loader compositions.
+This extension is unpublished and awaits hosted and installed-artifact
+qualification; [the source inventory](../../docs/inventories/ui-build-once-20261110.md)
+records the Academy caller and related ERP/Sub owners.
+
+## Request-feedback partials
+
+Products using the canonical `render` composition may include
+`components/request_feedback_assets.html` **once in the document head**, and
+`components/toasts.html` **once near the body end**. Kernel `base.html` already
+includes both. The head partial links `/static/css/toasts.css`, loads
+`/static/js/components.js`, then defers the existing CSP
+`/static/js/alpine.min.js`, with Kernel-owned content hashes. Mount Kernel's
+public `static_dir()` at `/static` in the product's declared asset composition.
+The consumer supplies the existing Dotmac UI role-token stylesheet and retains
+its own HTMX and CSRF assets; it need not load Kernel `main.css` or a CSS reset.
+Do not mix another Alpine instance or duplicate a submit-on-change listener.
+
+`components.js` remains the sole toast/feedback behavior owner. `show-toast`
+events, `window.showToast`, and the existing HX-Trigger bridge drive the live
+region; responseError/sendError emit a fixed opaque failure message. Messages
+use x-text, not HTML. The scoped stylesheet owns only `#toast-container` and
+its descendants. Toast status roles, dismissal and transitions are preserved.
+The shared dark store changes no product theme without an explicit binding.
+These extracted partials are unpublished and await hosted/browser and verified
+installed-artifact acceptance; source and consumer gaps are recorded in the
+[UI inventory](../../docs/inventories/ui-build-once-20261110.md).
+
 ## Settings: the minimal core, and everything else
 
 Nine modules carry settings — `settings_resolver`, `settings_models`,
@@ -217,7 +295,7 @@ Two rules travel with it:
 | `dotmac_kernel.database_catalog_comparator` | typed PostgreSQL tables/columns observation, pure module/product comparison, digest-bound verification, and its stable observation/comparator IDs (also top-level) |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
-| `dotmac_kernel.query` | `apply_pagination`, `escape_like` |
+| `dotmac_kernel.query` | `apply_pagination`, `escape_like`, `pagination_context` |
 | `dotmac_kernel.semantic_encoding` | `encode`, `encode_fields`, `encode_ordered`, `encode_unordered`, `digest_of`, `ABSENT`, `CANONICAL_ALGORITHM`, `CanonicalEncodingError`, `canonical_decimal`, `canonical_instant` (the length-prefixed, self-describing encoding every `cv1:` digest is taken over. `encode_ordered` accepts VALUES and therefore frames a `bytes` value with the same `x` tag as `encode`; already-encoded frame composition is kernel-internal. The ENCODING is the contract: a change to produced bytes changes every digest computed from them, so it moves only with a called-out break) |
 | `dotmac_kernel.security` | `hash_password`, `verify_password`, `password_needs_rehash`, `hash_token`, `issue_access_token`, `decode_access_token` |
 | `dotmac_kernel.setting_domains` | `SettingDomainRegistry`, `SettingDomainsNotInstalledError`, `DuplicateSettingDomainError`, `UndeclaredSettingDomainError`, `install_setting_domains`, `active_setting_domains` |

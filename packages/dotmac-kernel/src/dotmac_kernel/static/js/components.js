@@ -157,4 +157,24 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         } catch (e) { /* HX-Trigger wasn't our JSON shape — ignore */ }
     });
+
+    // Rows-per-page selects (`table_pagination` macro) submit their GET
+    // form as soon as the value changes; the hidden submit button in the
+    // macro remains the no-JS path.
+    document.addEventListener('change', function (evt) {
+        if (!(evt.target instanceof Element)) return;
+        if (evt.target.hasAttribute('data-submit-on-change') && evt.target.form) {
+            evt.target.form.submit();
+        }
+    });
+
+    // A failed htmx request otherwise fails silently: no swap happens on
+    // an error status and the user gets no signal at all. Surface it as an
+    // error toast with a fixed message — never the response body, which
+    // can carry a JSON envelope or a full error document.
+    var showRequestFailedToast = function () {
+        window.showToast('Something went wrong. Please try again.', 'error');
+    };
+    document.body.addEventListener('htmx:responseError', showRequestFailedToast);
+    document.body.addEventListener('htmx:sendError', showRequestFailedToast);
 });

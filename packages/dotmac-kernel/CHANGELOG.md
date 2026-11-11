@@ -14,6 +14,14 @@ publication; protected release authorization remains required.
 
 ### Added
 
+- Shared pagination and lifecycle page components, including invitation and
+  password-reset presentation. Product route, token, mail and transaction
+  authority remains with each consumer.
+- Public per-render product filters through isolated template overlays, with
+  canonical filter collision refusal and no shared bytecode-cache writes.
+- Portable request-feedback assets and toast presentation using the existing
+  CSP-compatible Alpine build and fixed generic HTMX failure messages.
+
 - Audit coordinate canary: `write_audit_event` and `write_platform_audit_event`
   refuse, with the typed `AuditDetailsCoordinateError`, any `details` document
   that carries a coordinate-like key (`lat`, `lng`, `lon`, `latitude`,
@@ -53,6 +61,14 @@ publication; protected release authorization remains required.
   the request-evidence log/audit `client_address`, so those now record the
   proxy-observed client, not a client-supplied one. The rate limit additionally
   keys IPv6 clients by their /64.
+
+### Fixed
+
+- Stale pagination offsets now describe the actual empty result and provide a
+  route back to the last valid page without rewriting the requested offset.
+
+Hosted source checks and consumer runtime proofs are required before these
+surfaces can be claimed as qualified or adopted.
 
 ## 0.1.0a108 — Release inventory
 

@@ -264,6 +264,28 @@ def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
     assert "Error-page render failed" in caplog.text
 
 
+def test_html_error_page_renders_body_when_assembly_base_lacks_body_block(tmp_path):
+    """A product `base.html` without a `body` block must not swallow the
+    error body. Assembly templates shadow the kernel's `base.html`
+    (composition order), and a product shell is only contracted to offer
+    `title`/`content`; the kernel error pages must therefore not depend on
+    a `body` block existing in whichever `base.html` wins resolution."""
+    from dotmac_kernel.templating import compose_templates
+
+    (tmp_path / "base.html").write_text(
+        "<html><head><title>{% block title %}Product{% endblock %}</title></head>"
+        "<body>{% block content %}{% endblock %}</body></html>"
+    )
+    compose_templates(assembly_dir=tmp_path)
+    try:
+        resp = TestClient(_make_app()).get("/missing", headers={"Accept": "text/html"})
+    finally:
+        compose_templates()
+    assert resp.status_code == 404
+    assert "Page not found" in resp.text
+    assert "Widget not found" in resp.text
+
+
 # NOTE: `request.state.branding` fallback/override behavior for HTML error
 # pages is exercised directly against `dotmac_kernel.templating.render()` in
 # `tests/unit/test_templating.py` (Task 4 / F4) -- none of this app's
