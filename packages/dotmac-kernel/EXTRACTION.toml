@@ -303,7 +303,12 @@ candidate_consumers = [
   "dotmac_academy_app",
 ]
 inventory_evidence = [
-  "UI PRESENTATION 2026-11-10: docs/inventories/ui-build-once-20261110.md records exact Academy/ERP/Sub source coordinates, all four slice boundaries, existing parity cases, deliberate stale-offset departures, intended first consumer and local-copy retirement gates. This is a retrospective record, not proof of pre-implementation inventory, hosted acceptance, publication or adoption.",
+  # UI PRESENTATION 2026-11-10: exact Academy/ERP/Sub source coordinates,
+  # all four slice boundaries, existing parity cases, deliberate stale-offset
+  # departures, intended first consumer and local-copy retirement gates.
+  # Retrospective record, not proof of pre-implementation inventory, hosted
+  # acceptance, publication or adoption.
+  "docs/inventories/ui-build-once-20261110.md",
   "packages/dotmac-kernel/COMPATIBILITY.md",
   "docs/inventories/kernel-migration-configuration-sources.md",
   "docs/inventories/kernel-conflict-savepoint-composition.md",
