@@ -18,9 +18,9 @@ verifier leaves any pending write on the session (it must only read) or ends
 the savepoint it runs in. The verifier runs in a discarded savepoint, which
 does not contain session-level advisory locks, sequence `nextval` or side
 effects outside the database. Callers must roll back the session on any
-refusal. This package trusts whatever evidence the verifier returns: the ERP
-verifier implementation does not exist yet and needs its own architect review
-before any ERP call site is enabled. Commands bind source identity, frozen snapshot
+refusal. This package trusts the evidence the verifier returns. Each assembly
+must supply and review its concrete verifier before enabling a call site.
+Commands bind source identity, frozen snapshot
 SHA-256, destination invoice and complete cv1 evidence fingerprint. Permanent
 receipts preserve replay after kernel key retention and later real settlement.
 Changed evidence conflicts. Supplier-issued document numbers may remain NULL
