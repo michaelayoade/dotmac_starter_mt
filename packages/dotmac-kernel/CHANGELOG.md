@@ -6,18 +6,63 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased (source marker `0.1.0a108+dev`)
+## 0.1.0a109 — Release inventory
 
-Add `dotmac_kernel.resource_api` and `dotmac_kernel.source_import` (ADR-0079):
-the cursor codec, a changes feed fenced by the database clock and the oldest
-open PostgreSQL transaction, the tombstone envelope, the completeness summary
-with a `since` re-read path and `verify_period`, the exact-scope resource
-declaration (read and import-write never share a key; contact fields stripped at
-any depth; tenant checked), the DB stamping-trigger DDL helper, and the
-idempotent import verdict helper over the existing idempotency ledger
-(advisory-locked per reference, flat id-map results). No table, migration or
-route is added. This does not allocate a version or authorize a release; the `+dev`
-marker is the sanctioned unpublished state.
+This inventories proposed source after the published and tagged `0.1.0a108`
+(source marker `0.1.0a108+dev`). It allocates no version and proves no
+publication; protected release authorization remains required.
+
+### Added
+
+- Audit coordinate canary: `write_audit_event` and `write_platform_audit_event`
+  refuse, with the typed `AuditDetailsCoordinateError`, any `details` document
+  that carries a coordinate-like key (`lat`, `lng`, `lon`, `latitude`,
+  `longitude`, `coordinates`, `geo`, `point`; case-insensitive, exact) at any
+  depth, before anything is added to the session. The error names key paths and
+  never values. Nesting deeper than `AUDIT_DETAILS_MAX_DEPTH` is refused rather
+  than skipped. **Adopter note:** a product that records a position in audit
+  details now fails at the write; record an opaque reference instead. The
+  Starter census found no in-repo producer.
+
+- Per-route anonymous rate limit: `ANONYMOUS_RATE_LIMIT_ROUTES` (route
+  templates, optional method prefix), `_REQUESTS`, `_WINDOW_SECONDS`, `_STORE`.
+  Keyed on the trusted-proxy client address from request evidence (transport peer
+  when none is declared), never on a forwarded header from an untrusted peer.
+  Shared `PostgresRateLimitStore` over new table `rate_limit_buckets` (kernel
+  migration `0031_rate_limit_buckets`, additive). Production refuses the
+  in-memory store at `create_app` and in `validate_settings`; a store failure
+  returns 503, never an unlimited route. **Adopter upgrade:** inert unless routes
+  are declared; apply 0031 before declaring any. See COMPATIBILITY.md.
+  Review hardening: the limiter counts on its own bounded pool
+  (`DatabaseRuntime.bounded_platform_session`), shed by the global limiter first
+  and an in-process blocked-key cache; the stored key is an HMAC under
+  `ANONYMOUS_RATE_LIMIT_KEY_SECRET`; every declared rule must match a route
+  (production refuses to start otherwise, mounts included); production also
+  refuses declared rules when the assembly declares no request evidence.
+
+- Resource API kit and idempotent import (ADR-0079): `dotmac_kernel.resource_api`
+  and `dotmac_kernel.source_import`. The cursor codec, a changes feed fenced by
+  the database clock and the oldest open PostgreSQL transaction, the tombstone
+  envelope, the completeness summary with a `since` re-read path and
+  `verify_period`, the exact-scope resource declaration (read and import-write
+  never share a key; contact fields stripped at any depth; tenant checked), the
+  DB stamping-trigger DDL helper, and the idempotent import verdict helper over
+  the existing idempotency ledger (advisory-locked per reference, flat id-map
+  results). No table, migration or route is added.
+
+### Changed
+
+- **Client address derivation (behaviour change, security fix).**
+  `TrustedProxyPolicy.client_address` no longer takes the LEFTMOST
+  `X-Forwarded-For` entry, which the client controls because a proxy appends
+  (the kernel nginx renderer uses `$proxy_add_x_forwarded_for`). It walks the
+  chain from the right, skips trusted hops, and returns the first untrusted hop
+  after checking that it is a bare IP address. An unreadable entry or an
+  all-trusted chain returns the transport peer. Repeated `X-Forwarded-For` lines
+  are joined in order instead of last-wins. The same value feeds the rate limit,
+  the request-evidence log/audit `client_address`, so those now record the
+  proxy-observed client, not a client-supplied one. The rate limit additionally
+  keys IPv6 clients by their /64.
 
 ## 0.1.0a108 — Release inventory
 

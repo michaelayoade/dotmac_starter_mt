@@ -745,6 +745,13 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # every handoff digest, is owned by that protocol module, and is written to
     # no Foundation store; it is not a host-lease release record.
     "lane3_handoff_protocol.py": 1,
+    # Public offline-verification result and protected signer policy share
+    # one canonical JSON codec, owned by lane3_offline_result. Neither writes
+    # a Foundation grant or persistent store.
+    "lane3_offline_result.py": 1,
+    # Protected public encryption policy for current-run private evidence;
+    # no Foundation store, plan or grant is written by this tooling codec.
+    "lane3_evidence_finalization.py": 1,
     "lane3_runner_capability.py": 1,
     "palette_debt_baseline.py": 1,
     # NativePackageSource.v1 is owned by the published-source drift tooling.

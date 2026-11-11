@@ -4,26 +4,35 @@ from dotmac_files.contracts import (
     FileError,
     FilePolicy,
     FileState,
+    ForeignScopeFile,
+    IntegrityMismatch,
+    InvalidFileRef,
     InvalidFileState,
     PreparedFile,
     PreparedFileConflict,
     ProviderMismatch,
+    ReadLimitExceeded,
+    ReadTypeNotAllowed,
     StaleObjectRef,
     StoredFileNotFound,
     StoredObjectRef,
     UnsafeFile,
+    VerifiedFile,
 )
 from dotmac_files.manifest import module
 from dotmac_files.migrations import versions_dir
 from dotmac_files.models import PlatformStoredFile, TenantStoredFile
 from dotmac_files.physical import (
+    MAX_VERIFIED_READ_BYTES,
     OrphanRecheckResult,
     delete_object,
     delete_orphans,
     list_objects,
     observe_object,
     open_object,
+    parse_file_ref,
     prepare_upload,
+    read_verified,
     recheck_and_delete_orphan,
 )
 from dotmac_files.providers import (
@@ -46,15 +55,20 @@ from dotmac_files.service import (
     record_presence,
     request_deletion,
     stage_file,
+    verified_read_target,
 )
 
-__version__ = "0.1.0a7"
+__version__ = "0.1.0a8"
 
 __all__ = [
     "FileError",
     "FilePolicy",
     "FileState",
+    "ForeignScopeFile",
+    "IntegrityMismatch",
+    "InvalidFileRef",
     "InvalidFileState",
+    "MAX_VERIFIED_READ_BYTES",
     "ObjectInfo",
     "ObjectMissing",
     "OrphanRecheckResult",
@@ -62,6 +76,8 @@ __all__ = [
     "PreparedFile",
     "PreparedFileConflict",
     "ProviderMismatch",
+    "ReadLimitExceeded",
+    "ReadTypeNotAllowed",
     "ReadableObject",
     "StaleObjectRef",
     "StorageBoundaryViolation",
@@ -73,6 +89,7 @@ __all__ = [
     "StoredObjectRef",
     "TenantStoredFile",
     "UnsafeFile",
+    "VerifiedFile",
     "__version__",
     "delete_object",
     "delete_orphans",
@@ -85,11 +102,14 @@ __all__ = [
     "module",
     "observe_object",
     "open_object",
+    "parse_file_ref",
     "prepare_upload",
+    "read_verified",
     "recheck_and_delete_orphan",
     "reconciliation_target",
     "record_presence",
     "request_deletion",
     "stage_file",
+    "verified_read_target",
     "versions_dir",
 ]

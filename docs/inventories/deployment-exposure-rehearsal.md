@@ -50,6 +50,26 @@ being published." A rehearsal that imports
 rehearsal, even if it carries a
 candidate digest in its output, and does not satisfy the lane.
 
+## Independent publication evidence
+
+The public publication oracle requires authenticated offline verification in
+addition to receipt, selected-run and candidate binding. The fixed public
+consumer verifies SSHSIG and every current tuple/profile/policy/time binding.
+The checked-in signer policy remains unenrolled, so otherwise eligible receipts
+remain indeterminate; no production key or profile is introduced.
+
+The private plaintext consumer is an offline helper. It verifies exactly the
+manifest's two allowed members, their lengths and digests, strict exposure-call
+bytes and a concrete V3 plan's reconciliation crossings. It accepts no
+untrusted plan dictionary. These checks alone cannot establish genuine
+Control consumption, outcomes, exact rules, foreign preservation or negative
+compensation, and cannot produce a publication certificate.
+
+Michael selected preparing the offline-custody design. Private evidence never
+becomes a public-runner input. Actual signer/profile enrollment, complete
+offline verification and independent joins remain open. No caller-written PASS supplies that missing
+authority, and no rehearsal item changes status in this source slice.
+
 ## Runner phase ordering and remaining execution blockers
 
 The owner ruling keeps read-only prestate and genuine authorization before the
@@ -907,3 +927,22 @@ a file and must be called that.
 Lane 3 establishes none of the three. It is about exposure semantics against a
 real socket, and it is listed here only so the two are not mistaken for one
 gate when publication is finally considered.
+
+
+## 2026-11-10 — late evidence finalization (source; operationally unenrolled)
+
+The current-run evidence carrier is produced inside the runner after Executor
+recording and before v2 receipt assembly. The same qualified probe bytes and
+frozen crossing records are manifest-bound and memory-archived, encrypted by
+the protected fixed age adapter, and exact ciphertext readback is receipt-bound.
+The launcher accepts no prebuilt ciphertext. Artifact paths explicitly exclude
+plaintext probe/exposure/manifest members. This fixes sequencing and transport,
+not exact-rule, foreign-preservation, compensation or Control proof.
+
+The protected public encryption policy ships unenrolled, with no tool pin or
+recipient. Preflight refuses before host contact, and publication's separate
+unenrolled offline-result policy remains mandatory. No keys are created or
+enrolled, no private verifier/result signer exists, and the two behavioral items
+remain BLOCKED. Hosted synthetic tests cover ordering/refusal and transport;
+real enrolled-tool cryptographic round-trip and complete admitted rehearsals
+remain owed. Foundation package bytes/version are unchanged.

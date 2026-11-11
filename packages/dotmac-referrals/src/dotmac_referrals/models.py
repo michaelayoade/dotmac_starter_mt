@@ -157,6 +157,8 @@ class Referral(Base):
     source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
     source_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
     source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Opaque; NULL for V1 captures and for V2 captures without a known place.
+    service_location_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
     status: Mapped[str] = mapped_column(
         String(24), nullable=False, default="attributed"
     )

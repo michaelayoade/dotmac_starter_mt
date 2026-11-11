@@ -226,6 +226,42 @@ class PositionObservation(Base, TimestampMixin):
     )
 
 
+class ObservationHold(Base, TimestampMixin):
+    """A neutral retention hold: the holder's opaque reference pins one row.
+
+    The reference carries no meaning here. A hold is deleted when released, and
+    the restricting foreign key means that nothing, including a cascade, can
+    remove a held observation while it exists.
+    """
+
+    __tablename__ = "observation_holds"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_observation_holds_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "observation_id",
+            "hold_ref",
+            name="uq_observation_holds_observation_ref",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "observation_id"],
+            [
+                f"{SCHEMA}.position_observations.tenant_id",
+                f"{SCHEMA}.position_observations.id",
+            ],
+            name="fk_observation_holds_observation",
+            ondelete="RESTRICT",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    observation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    hold_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CurrentPosition(Base, TimestampMixin):
     __tablename__ = "current_positions"
     __table_args__ = (
@@ -419,6 +455,7 @@ TENANT_MODELS = (
     SourceAssignment,
     CollectionGrant,
     PositionObservation,
+    ObservationHold,
     CurrentPosition,
     Geofence,
     GeofenceState,
@@ -435,6 +472,7 @@ __all__ = [
     "Geofence",
     "GeofenceFact",
     "GeofenceState",
+    "ObservationHold",
     "PositionObservation",
     "SourceAssignment",
     "SourceIdentity",

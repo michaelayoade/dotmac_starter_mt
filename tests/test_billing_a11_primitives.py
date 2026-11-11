@@ -59,6 +59,9 @@ from dotmac_kernel.planes import ModulePlane
 from tests import test_billing_isolation as b
 from tests import test_billing_public_invoice_authoring as authoring
 from tests import test_billing_tax_dependency_evidence as dep
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 
 CONFIRMED = frozenset({"provider_settled"})
 
@@ -469,7 +472,8 @@ def test_document_withholding_evidence_lists_only_that_document(scratch, plane):
         accept_withholding_discharge(
             session,
             scope=scope,
-            command=b._withholding_command(
+            command=frozen_withholding_command(
+                session,
                 account.id,
                 invoice.id,
                 scope=scope,

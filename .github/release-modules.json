@@ -511,7 +511,10 @@
           "dotmac_billing/migrations/versions/bi_0014_opening_variance_ledger.py",
           "dotmac_billing/opening_variance_contracts.py",
           "dotmac_billing/opening_variance_validation.py",
-          "dotmac_billing/opening_variance.py"
+          "dotmac_billing/opening_variance.py",
+          "dotmac_billing/migrations/versions/bi_0015_line_price_version_fk.py",
+          "dotmac_billing/migrations/versions/bi_0016_withholding_components.py",
+          "dotmac_billing/account_statement.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -895,19 +898,30 @@
         "required": [
           "dotmac_document_rendering/conformance.py",
           "dotmac_document_rendering/conformance_v2.py",
+          "dotmac_document_rendering/conformance_v3.py",
           "dotmac_document_rendering/contracts.py",
           "dotmac_document_rendering/contracts_v2.py",
+          "dotmac_document_rendering/contracts_v3.py",
+          "dotmac_document_rendering/contracts_statement_v1.py",
           "dotmac_document_rendering/manifest.py",
           "dotmac_document_rendering/output_validation_v2.py",
+          "dotmac_document_rendering/output_validation_v3.py",
           "dotmac_document_rendering/projection.py",
           "dotmac_document_rendering/projection_v2.py",
+          "dotmac_document_rendering/projection_v3.py",
+          "dotmac_document_rendering/projection_statement_v1.py",
           "dotmac_document_rendering/py.typed",
+          "dotmac_document_rendering/refusal_kit_v3.py",
           "dotmac_document_rendering/renderers.py",
           "dotmac_document_rendering/renderers_v2.py",
+          "dotmac_document_rendering/renderers_v3.py",
+          "dotmac_document_rendering/renderers_statement_v1.py",
           "dotmac_document_rendering/service.py",
           "dotmac_document_rendering/service_v2.py",
+          "dotmac_document_rendering/service_v3.py",
           "dotmac_document_rendering/templates.py",
-          "dotmac_document_rendering/templates_v2.py"
+          "dotmac_document_rendering/templates_v2.py",
+          "dotmac_document_rendering/templates_statement_v1.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -2472,6 +2486,7 @@
           "dotmac_payables/manifest.py",
           "dotmac_payables/migrations/__init__.py",
           "dotmac_payables/migrations/versions/pa_0001_payables.py",
+          "dotmac_payables/migrations/versions/pa_0002_optional_supplier_doc.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],
@@ -2703,7 +2718,8 @@
           "dotmac_positioning/models.py",
           "dotmac_positioning/service.py",
           "dotmac_positioning/migrations/__init__.py",
-          "dotmac_positioning/migrations/versions/po_0001_positioning.py"
+          "dotmac_positioning/migrations/versions/po_0001_positioning.py",
+          "dotmac_positioning/migrations/versions/po_0002_observation_holds.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -2880,7 +2896,8 @@
           "dotmac_referrals/models.py",
           "dotmac_referrals/service.py",
           "dotmac_referrals/migrations/__init__.py",
-          "dotmac_referrals/migrations/versions/rf_0001_referrals.py"
+          "dotmac_referrals/migrations/versions/rf_0001_referrals.py",
+          "dotmac_referrals/migrations/versions/rf_0002_service_location_ref.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -3084,6 +3101,7 @@
           "dotmac_service_orders/manifest.py",
           "dotmac_service_orders/migrations/__init__.py",
           "dotmac_service_orders/migrations/versions/so_0001_service_delivery_orders.py",
+          "dotmac_service_orders/migrations/versions/so_0002_service_location_ref.py",
           "dotmac_service_orders/models.py",
           "dotmac_service_orders/service.py"
         ],
@@ -3168,6 +3186,9 @@
           "dotmac_subscriptions/migrations/versions/su_0001_subscriptions.py",
           "dotmac_subscriptions/migrations/versions/su_0002_offer_pricing.py",
           "dotmac_subscriptions/migrations/versions/su_0003_billing_treatments.py",
+          "dotmac_subscriptions/migrations/versions/su_0004_catalog_price_line.py",
+          "dotmac_subscriptions/migrations/versions/su_0005_line_coverage_overlap.py",
+          "dotmac_subscriptions/migrations/versions/su_0006_pending_validity.py",
           "dotmac_subscriptions/models.py",
           "dotmac_subscriptions/py.typed",
           "dotmac_subscriptions/service.py",

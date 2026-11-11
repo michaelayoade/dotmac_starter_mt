@@ -122,7 +122,11 @@ def parse_manifest(data: bytes) -> dict[str, tuple[str, int]]:
         name, digest, length = item["name"], item["digest"], item["bytes"]
         if not isinstance(name, str) or name not in BUNDLE_MEMBERS:
             raise EvidenceBundleRefused(f"{where}.name {name!r} is not a bundle member")
-        if not isinstance(digest, str) or len(digest) != 64:
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
             raise EvidenceBundleRefused(f"{where}.digest is not a SHA-256 hex digest")
         if isinstance(length, bool) or not isinstance(length, int) or length < 0:
             raise EvidenceBundleRefused(f"{where}.bytes must be a non-negative integer")
@@ -159,3 +163,31 @@ def require_member(manifest: bytes, name: str, payload: bytes) -> None:
             f"payload does not join evidence bundle member {name!r}: the "
             "manifest binds a different digest or length"
         )
+
+
+def require_plaintext_bundle(manifest: bytes, members: Mapping[str, bytes]) -> None:
+    """Require the complete plaintext set, with both digest and length joins.
+
+    This establishes plaintext consistency only. Acquisition, ciphertext
+    verification before decryption, and publication proof belong to the oracle.
+    Refusals deliberately contain no supplied names or parser payload.
+    """
+    try:
+        if not isinstance(manifest, bytes) or not isinstance(members, Mapping):
+            raise EvidenceBundleRefused("plaintext bundle requires bytes and a mapping")
+        expected = parse_manifest(manifest)
+        if frozenset(members) != BUNDLE_MEMBERS:
+            raise EvidenceBundleRefused(
+                "plaintext bundle member set is incomplete or extended"
+            )
+        for name in BUNDLE_MEMBERS:
+            payload = members[name]
+            digest, length = expected[name]
+            if not isinstance(payload, bytes):
+                raise EvidenceBundleRefused("plaintext bundle member is not bytes")
+            if len(payload) != length or hashlib.sha256(payload).hexdigest() != digest:
+                raise EvidenceBundleRefused(
+                    "plaintext bundle member digest or length differs"
+                )
+    except (ValueError, TypeError, KeyError):
+        raise EvidenceBundleRefused("plaintext bundle consistency refused") from None

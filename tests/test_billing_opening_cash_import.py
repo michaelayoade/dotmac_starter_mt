@@ -65,6 +65,9 @@ from tests import billing_opening_window_fixtures as window_fixture
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as runtime
 from tests import test_billing_withholding_persistence as predecessor
+from tests.billing_frozen_fixtures import (
+    withholding_command as frozen_withholding_command,
+)
 from tests.billing_predecessor_fixtures import predecessor_obligation_columns
 from tests.unit import test_billing_opening_manifest as preflight
 
@@ -1542,6 +1545,8 @@ def test_real_bi6_upgrade_preserves_settlement_claims_ledger_and_v1_v3_history(
             historical.setattr(
                 s, "_opening_document_applied", lambda *a, **k: Decimal(0)
             )
+            # bi6 predates the frozen withholding component table (bi_0016).
+            historical.setattr(s, "_require_frozen_withholding", lambda *a, **k: None)
             with b._session(url, scope) as session:
                 for name in (
                     "opening_import_receipts",
@@ -2518,7 +2523,8 @@ def test_exposure_cutoff_handles_wht_noncash_credit_and_credit_void_between_draw
             s.accept_withholding_discharge(
                 session,
                 scope=scope,
-                command=b._withholding_command(
+                command=frozen_withholding_command(
+                    session,
                     account_id,
                     invoice.id,
                     scope=scope,
@@ -2693,9 +2699,7 @@ def _assert_target_isolation(session, isolation):
     # The harness sets tenant context on connect. Finish that bootstrap
     # transaction, then prove the isolation of the transaction under test.
     session.execute(
-        text(
-            "SET SESSION CHARACTERISTICS AS TRANSACTION " f"ISOLATION LEVEL {isolation}"
-        )
+        text(f"SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL {isolation}")
     )
     session.commit()
     assert (

@@ -53,6 +53,9 @@ _PLATFORM_PRIVATE = {
     "platform_audit_events",
     "platform_idempotency_records",
     "platform_outbox_events",
+    # Shared anonymous-route rate-limit counters (kernel 0031): keyed by an HMAC
+    # of tenant + client + route, written before any tenant session exists.
+    "rate_limit_buckets",
 }
 
 # Bookkeeping, invisible to the app roles entirely.

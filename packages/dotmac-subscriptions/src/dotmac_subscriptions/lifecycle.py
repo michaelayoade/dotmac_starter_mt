@@ -28,6 +28,24 @@ class OccurrenceState(str, Enum):
     due = "due"
     emitted = "emitted"
     cancelled = "cancelled"
+    #: A capped or prepaid renewal whose validity the OWNER of the cap or
+    #: prepayment has not yet evidenced. It blocks its coverage but stages no
+    #: rated output; only an owner-evidence command resolves it.
+    pending_validity = "pending_validity"
+
+
+class OccurrenceValidityHold(str, Enum):
+    """Why an occurrence is held at ``pending_validity``."""
+
+    capped = "capped"
+    prepaid = "prepaid"
+
+
+class OccurrenceValidityOutcome(str, Enum):
+    """What the owner's evidence says about a held occurrence."""
+
+    confirmed = "confirmed"
+    rejected = "rejected"
 
 
 class BillingTreatment(str, Enum):
@@ -85,6 +103,10 @@ _OCCURRENCE_TRANSITIONS = {
     ),
     OccurrenceState.emitted: frozenset(),
     OccurrenceState.cancelled: frozenset(),
+    # The ONLY exit from the hold. emitted -> cancelled stays forbidden.
+    OccurrenceState.pending_validity: frozenset(
+        {OccurrenceState.emitted, OccurrenceState.cancelled}
+    ),
 }
 
 _ARRANGEMENT_TRANSITIONS = {
@@ -138,6 +160,8 @@ __all__ = [
     "BillingTreatment",
     "ContractVersionState",
     "OccurrenceState",
+    "OccurrenceValidityHold",
+    "OccurrenceValidityOutcome",
     "OfferState",
     "require_arrangement_transition",
     "require_contract_transition",

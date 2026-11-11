@@ -17,6 +17,7 @@ from dotmac_referrals.manifest import module
 
 MODULE_ROOT = Path(inspect.getfile(models)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/rf_0001_referrals.py"
+LOCATION_MIGRATION = MODULE_ROOT / "migrations/versions/rf_0002_service_location_ref.py"
 MIGRATION_TEXT = MIGRATION.read_text(encoding="utf-8")
 
 
@@ -87,3 +88,62 @@ def test_owner_has_no_product_provider_or_transaction_boundary() -> None:
     service = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
     assert ".commit(" not in service
     assert ".rollback(" not in service
+
+
+def test_location_is_an_opaque_ref_with_no_coordinate_or_address_column() -> None:
+    columns: set[str] = set()
+    for model in models.ALL_MODELS:
+        columns |= set(model.__table__.columns.keys())
+    assert "service_location_ref" in columns
+    forbidden = {
+        "address",
+        "address_line",
+        "street",
+        "city",
+        "postal_code",
+        "latitude",
+        "longitude",
+        "lat",
+        "lon",
+        "lng",
+        "coordinates",
+        "geom",
+        "pin",
+    }
+    assert not forbidden & columns
+    referral_columns = models.Referral.__table__.columns
+    assert referral_columns["service_location_ref"].nullable is True
+    # Only the attribution row holds it; the reward/conversion path never does.
+    holders = {
+        model.__tablename__
+        for model in models.ALL_MODELS
+        if "service_location_ref" in model.__table__.columns
+    }
+    assert holders == {"referrals"}
+
+
+def test_location_migration_is_a_backward_compatible_child_of_the_root() -> None:
+    source = LOCATION_MIGRATION.read_text(encoding="utf-8")
+    assert 'revision = "rf_0002_service_location_ref"' in source
+    assert 'down_revision = "rf_0001_referrals"' in source
+    assert "branch_labels = None" in source
+    assert "nullable=True" in source
+    assert "op.add_column(" in source
+    assert "op.drop_column(" in source
+
+    from dotmac_kernel.migrations.gate import run_gate
+
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    repo_root = Path(__file__).resolve().parents[2]
+    report = run_gate(
+        [module],
+        [
+            repo_root / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
+            repo_root / "alembic/versions",
+            MIGRATION.parent,
+        ],
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+    )
+    assert report.ok, report.violations
+    assert report.attribution["rf_0002_service_location_ref"]["owner"] == "referrals"

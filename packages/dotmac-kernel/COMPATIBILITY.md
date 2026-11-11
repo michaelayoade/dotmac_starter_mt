@@ -1952,7 +1952,7 @@ after recoverable failures, ruling out a falsely healthy but poisoned root.
 
 ## Resource API kit and idempotent import — source only (ADR-0079)
 
-Two supported modules are added in the unallocated `0.1.0a108+dev` source.
+Two supported modules are added in the unallocated `0.1.0a108+dev` source (listed in the `0.1.0a109` inventory).
 `dotmac_kernel.resource_api` exports `ResourceDeclaration`, `ResourceScopes`,
 `changes_page`, `summarize`, `encode_cursor`/`decode_cursor`, `Tombstone`,
 `ChangeItem`, `ChangesPage`, `ResourceSummary`, `InvalidCursorError`,
@@ -1971,3 +1971,95 @@ sessions refuses unless the declaration chooses `unseen_sessions="horizon_only"`
 `stamping_trigger_ddl`, verify with `stamping_trigger_installed`). `import_record`
 takes an advisory lock per (tenant, scope, reference), stores only a flat id
 map, and accepts an optional `current_version` callback.
+
+## Audit coordinate canary — 2026-11-09, source only
+
+`dotmac_kernel.audit` gains `AUDIT_FORBIDDEN_DETAIL_KEYS`,
+`AUDIT_DETAILS_MAX_DEPTH`, `AuditDetailsCoordinateError` (a `ValueError`) and
+`refuse_coordinate_details`. `write_audit_event` and
+`write_platform_audit_event` (and the private connection writer, which shares
+`_current_audit_event_values`) call it after the action-vocabulary check and
+before anything touches the session, so a refused write leaves no partial state.
+
+**Known gap: the offline history import is NOT covered.** `identity_history.py`
+inserts historical audit `details` directly and does not pass through the
+canary, so a coordinate-like key in imported history is not refused. This change
+does not alter that module. A coordinate-key census of the source data is
+required before any history import runs, pending Michael's ruling on whether the
+import must route through the canary.
+
+The forbidden key list is exactly `lat`, `lng`, `lon`, `latitude`, `longitude`,
+`coordinates`, `geo`, `point`, compared case-insensitively and in full: `latency`
+and `geometry_version` are not refused, and values are never inspected. Mappings,
+lists, tuples and sets are walked; nesting deeper than
+`AUDIT_DETAILS_MAX_DEPTH` (32) is refused because an uninspected subtree is where
+a coordinate would hide. The error carries `key_paths` and never a value.
+
+Adopter note: a product that records a position inside audit details now raises
+at the write. Record the opaque reference of the position (owned by the module
+that holds it) instead. Extending the key list is a contract change. The Starter
+census (every `app/` and `packages/*/src` audit write, by AST) found no producer.
+Source only: no version is allocated and no product adoption is qualified.
+
+
+## Anonymous-route rate limit — 2026-11-09, source only
+
+New settings (all env-driven): `ANONYMOUS_RATE_LIMIT_ROUTES` (comma-separated
+route templates as declared on the router, each optionally `METHOD /template`;
+empty default = feature off), `ANONYMOUS_RATE_LIMIT_REQUESTS` (10),
+`ANONYMOUS_RATE_LIMIT_WINDOW_SECONDS` (60), `ANONYMOUS_RATE_LIMIT_STORE`
+(`postgres` default, or `memory`). Counted per tenant, client address and route,
+in addition to the unchanged global limiter.
+
+**Client address.** The trusted-proxy address from `RequestEvidenceContextV1`
+(`X-Forwarded-For` / `X-Real-IP` honoured only from a peer inside the declared
+`TrustedProxyPolicy`); the transport peer when the assembly declares no
+`request_evidence`. The limit keys an IPv6 client by its /64. With anonymous
+rules declared and no `request_evidence`, `create_app` raises
+`AnonymousRateLimitConfigurationError` in production (every caller would share
+the proxy's bucket) and warns elsewhere.
+The global limiter still keys on the transport peer (unchanged).
+
+**Store.** `PostgresRateLimitStore` counts in `public.rate_limit_buckets`
+(migration `0031_rate_limit_buckets`, platform-catalog posture: no RLS, granted to
+`platform_api`/`app_admin`, revoked from `app_user`; only a SHA-256 of the key is
+stored: an HMAC-SHA256 under `ANONYMOUS_RATE_LIMIT_KEY_SECRET`, which production
+requires (>= 32 bytes, distinct from the JWT, session and CSRF secrets; resolved
+by name through `Settings`, rotating it resets open windows). It counts through
+`DatabaseRuntime.bounded_platform_session`: a dedicated pool (4 connections, no
+overflow, 0.5 s checkout timeout, 500 ms statement timeout) built from the
+platform engine's URL, so `PLATFORM_DATABASE_URL` must be set and TLS must be
+expressed in the DSN. Pool or statement timeouts answer 503. The global limiter
+runs before it, and a key already over budget is refused from an in-process
+cache without a database round trip. Fixed windows: up to 2x the budget across a window boundary.
+
+**Adopter upgrade note.** (1) Upgrading changes nothing until routes are
+declared. (2) Apply migration 0031 to every database before declaring routes;
+until then a declared route answers 503 (fail closed), not unlimited.
+(3) Production refuses `ANONYMOUS_RATE_LIMIT_STORE=memory` when routes are
+declared, raising `AnonymousRateLimitStoreError` from `create_app` and reporting
+it from `validate_settings`; a custom store must declare `shared = True`.
+(4) Declare `request_evidence` with the trusted proxies so the key is the real
+client; production refuses to build the app without it. (4a) Every declared rule
+must equal a route template the application serves (include and mount prefixes
+included); production refuses to start otherwise, other environments warn. (5) The reference deployment declares no routes yet; enabling its login
+routes is a deploy-configuration step. Source only: no version allocated, no
+adoption qualified; PostgreSQL grants and migration are covered by hosted CI.
+
+
+## Client address derivation — 2026-11-09, source only (behaviour change)
+
+`TrustedProxyPolicy.client_address` (and so `RequestEvidence.client_address`)
+changed from "leftmost `X-Forwarded-For` entry" to "first untrusted hop walking
+from the right". A proxy appends to the header, so everything left of its own
+entry is client-supplied; the old rule let any caller choose the address the
+audit trail, structured logs and the anonymous rate limit recorded for them. The
+new rule returns the nearest address a trusted proxy actually observed, requires
+it to be a bare IP address (no port, brackets, zone id or empty entry; IPv4-mapped
+IPv6 is reported as IPv4), and falls back to the transport peer for an
+unreadable chain or one made only of trusted hops. Repeated `X-Forwarded-For`
+lines are now one comma-joined chain. CSRF does not read the client address.
+Adopter note: a product that relied on the leftmost entry to see through a
+multi-proxy chain must list every proxy in its `TrustedProxyPolicy`; an
+unlisted proxy is now the reported client. `X-Real-IP` remains the fallback only
+when no `X-Forwarded-For` is present.

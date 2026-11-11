@@ -464,6 +464,7 @@ def test_occurrence_state_is_exactly_the_subscription_lifecycle() -> None:
         "scheduled",
         "due",
         "emitted",
+        "pending_validity",
         "cancelled",
     }
 

@@ -77,6 +77,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-billing": {
+      "declared": "0.1.0a12",
+      "reason": "UNPUBLISHED SUCCESSOR OF PUBLISHED a11 (the B lane). a11 is published and tagged (cutover-release-1: ST-2, ST-3 and ST-4, with bi_0013_opening_hold_admission and bi_0014_opening_variance_ledger) and its bytes are untouched. a12 adds the unreleased migration bi_0015_line_price_version_fk: a composite foreign key from document_lines to the rated obligation price version (NOT VALID for existing violations) and a document-line guard that refuses a new line without its rated obligation unless it is a credit-note line, plus the read-only document_line_exceptions listing for the manual exceptions review; and bi_0016_withholding_components: expected-withholding components of dotmac-tax determinations frozen at issue (or by the permission-gated, Tax-sealed late-freeze command) as append-only structural rows, each withholding discharge bound to its row by a NOT VALID foreign key and a cumulative-cap guard, a single-freeze admission trigger, plus WithholdingCashRequirementV1. Source preparation only: full hosted CI, a verified a12 publication, install-back, canonical tag and a truthful release record remain due, and nothing here grants production authority. Remove only with the verified a12 publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -91,11 +96,6 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED AND MECHANICALLY HELD BACK. The greenfield NiRA/CoCCA EPP transport has no published tag and release_enabled is false, so it is available only to development composition and both release resolves refuse it. Authenticated OT&E login still requires the Integrator source-IP whitelist; the exact production egress hostname has not been reviewed into the manifest; and dotmac-domains has not yet published the provider-neutral command/result contracts. Remove this row only in the same change that satisfies those gates, enables the reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source conformance is not adoption and must not be used to bypass the hold or edit the declaration down.",
       "state": "never-published"
-    },
-    "dotmac-connector-paystack": {
-      "declared": "0.1.0a3",
-      "reason": "DECLARED BY THE REFUND SLICE (narrowed to refunds, D5 2026-11-04), NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-paystack-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and the DELIVERY capability id payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as SETTLEMENT_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
-      "state": "declared-unpublished"
     },
     "dotmac-connector-remita": {
       "declared": "0.1.0a2",
@@ -122,6 +122,11 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
+    "dotmac-files": {
+      "declared": "0.1.0a8",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a7 remains published and tagged as dotmac-files-v0.1.0a7. 0.1.0a8 adds a same-scope, bounded, verified read: read_verified refuses a foreign-scope target, reads at most limit+1 bytes, and checks the recorded size, sha256 and content-detected media type, with a canonical-UUID-only file reference. The release track publishes and tags it after merge.",
+      "state": "declared-unpublished"
+    },
     "dotmac-inbox-operations": {
       "declared": "0.1.0a5",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
@@ -129,7 +134,22 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a108+dev",
-      "reason": "API INTEGRATION STANDARD KIT AWAITING VERIFIED PUBLICATION. Published a108 remains immutable and consumed. The resource_api and source_import modules (ADR-0079) are source only and add no table or migration. Development markers do not authorize publication; allocation requires separate protected authorization and mechanical version changes. Remove this row only through an oracle-backed release record.",
+      "reason": "REVIEWED DOCUMENT SCRIPT CONTRACT, AUDIT COORDINATE CANARY AND API INTEGRATION STANDARD KIT AWAITING VERIFIED PUBLICATION. Published a107 remains immutable and consumed; a108 is now published and tagged and is likewise immutable; this row tracks the source marker 0.1.0a108+dev, which carries unreleased changes beyond it. The route-bound static script-hash CSP source follows product inventory, and the audit trail now refuses coordinate-like detail keys at any depth. The resource_api and source_import modules (ADR-0079) are source only and add no table or migration. Development markers do not authorize publication; allocation requires separate protected authorization and mechanical version changes. Hosted qualification, build-once publication, independent install-back verification, tag and record bind the released successor; consumer admission is separate. Remove this row only through an oracle-backed release record.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-positioning": {
+      "declared": "0.2.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.2.0a1 is the last published and tagged version (dotmac-positioning-v0.2.0a1) and its released po_0001 bytes are unchanged. 0.2.0a2 adds po_0002_observation_holds: neutral retention holds on observations, honoured by prune_observations, so a product-owned decision can pin evidence under an opaque reference without positioning learning what the reference means. No subject, address or business data enters positioning (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.2.0a2 publication, never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-qualification": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 is the last published and tagged version (dotmac-qualification-v0.1.0a1) and stays unchanged. 0.1.0a2 adds read_decision and verify_warrant, a read-only fail-closed decision read (ELIGIBLE, in force at the verifier's explicit instant, subject equal to the supplied reference) so a product can verify a qualification warrant before promoting a consequence. It exposes no rationale or evidence fact and adds no migration. Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.1.0a2 publication, never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-referrals": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 is the last published and tagged version (dotmac-referrals-v0.1.0a1) and its released rf_0001 bytes are unchanged. 0.1.0a2 adds rf_0002_service_location_ref and referral capture V2, which may carry an opaque service-location ref; V1 is unchanged. The module holds the opaque token only, never coordinates or address text (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.1.0a2 publication, never by editing the declared version down.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {
@@ -141,6 +161,16 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE GITHUB ACTIONS PILOT PROVES THE EXACT SNAPSHOT. The adapter owns GitHub's current exact actions_inbound full-domain set, including its transitive result-storage names, but is deliberately absent from release-adapters.json until VMID 124 proves control, acquisition, result upload and provider-recorded success through the rendered proxy before and after a cold reboot. Metadata drift never auto-admits a domain. Remove this row only with the reviewed adapter-lane enrollment and pilot evidence; do not replace exact names with Azure CIDRs or a cloud-wide wildcard.",
       "state": "never-published"
+    },
+    "dotmac-service-orders": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 is the last published and tagged version (dotmac-service-orders-v0.1.0a1) and its released so_0001 bytes are unchanged. 0.1.0a2 adds so_0002_service_location_ref and the V2 open command that requires an opaque service-location ref for install, reconnect and change orders; V1 is unchanged. The module holds the opaque token only, never address text or coordinates (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.1.0a2 publication, never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a4",
+      "reason": "DECLARED BY THE CATALOG-PRICE AND PERIOD-EXCLUSION SLICE (S1/S2), NOT YET RELEASED. a3 IS published (peeled tag dotmac-subscriptions-v0.1.0a3). a4 adds su_0004 (a catalog_price contract line names and equals its published offer price: nullable price_key, composite FK, INSERT trigger), su_0005 (a coverage-overlap trigger: one contract line is never charged twice for an instant) and su_0006 (a pending_validity occurrence state resolved only by an owner-evidence command). It adds ContractLineInput.price_key, which catalog-priced lines must now supply (breaking). No adopter pins a4. Remove this row in the a4 release-record change; never by editing the declared version down.",
+      "state": "declared-unpublished"
     },
     "dotmac-usage": {
       "declared": "0.1.0a1",
