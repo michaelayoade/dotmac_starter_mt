@@ -705,6 +705,79 @@ def test_historical_admission_refuses_when_verifier_writes_to_session(
     assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0
 
 
+@pytest.mark.parametrize("core_write", [False, True])
+@pytest.mark.parametrize("swallow_refusal", [False, True])
+def test_historical_verifier_cannot_commit_callers_transaction(
+    db: Session, core_write: bool, swallow_refusal: bool
+) -> None:
+    from dotmac_payables import admit_historical_unpaid_invoice
+
+    invoice, evidence, command = _historical_case(db)
+    invoice_id = invoice.id
+    db.flush()
+    caller_transaction = db.get_transaction()
+    assert caller_transaction is not None and caller_transaction.is_active
+    commit_refusals: list[str] = []
+
+    class CommittingVerifier:
+        def verify(self, *, scope, command, destination):
+            if core_write:
+                destination.execute(
+                    models.LiabilityEvent.__table__.insert().values(
+                        tenant_id=TENANT,
+                        event_kind="forged",
+                        document_kind="supplier_invoice",
+                        document_id=invoice_id,
+                        supplier_ref=evidence.supplier_ref,
+                        currency_code="NGN",
+                        amount=Decimal("1.00"),
+                        source_reference="core-write-before-commit",
+                        source_fingerprint="f" * 64,
+                        occurred_at=NOW,
+                    )
+                )
+            try:
+                destination.commit()
+            except InvalidTransition as exc:
+                commit_refusals.append(str(exc))
+                if not swallow_refusal:
+                    raise
+            return evidence
+
+    with pytest.raises(InvalidTransition, match="verifier must not write"):
+        admit_historical_unpaid_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=command,
+            verifier=CommittingVerifier(),
+            idempotency_key="committing-verifier",
+            idempotency_expires_at=None,
+            admitted_at=NOW,
+        )
+    assert commit_refusals == ["historical verifier must not write"]
+    assert db.get_transaction() is caller_transaction
+    assert caller_transaction.is_active
+    assert db.get(models.SupplierInvoice, invoice_id) is not None
+    for model in (
+        models.HistoricalInvoiceReceipt,
+        models.PaymentObligation,
+        models.LiabilityEvent,
+    ):
+        assert db.scalar(select(func.count()).select_from(model)) == 0
+
+    # The caller still owns its original flushed, uncommitted invoice. Its
+    # rollback must remove that row as well as all verifier/admission writes.
+    db.rollback()
+    with Session(db.get_bind()) as fresh:
+        assert fresh.get(models.SupplierInvoice, invoice_id) is None
+        for model in (
+            models.HistoricalInvoiceReceipt,
+            models.PaymentObligation,
+            models.LiabilityEvent,
+        ):
+            assert fresh.scalar(select(func.count()).select_from(model)) == 0
+
+
 @pytest.mark.parametrize("end", ["commit", "rollback"])
 def test_historical_admission_refuses_when_verifier_ends_its_savepoint(
     db: Session, end: str
