@@ -72,11 +72,15 @@ from dotmac_approvals.contracts import (
 from dotmac_approvals.manifest import module
 from dotmac_approvals.migrations import versions_dir
 from dotmac_approvals.outbox import (
+    emit_platform_events,
+    emit_tenant_events,
     withdraw_platform_approval,
     withdraw_tenant_approval,
 )
 from dotmac_approvals.service import (
     ApprovalOutcome,
+    cancel_platform_request,
+    cancel_tenant_request,
     evaluate_platform_approval,
     evaluate_tenant_approval,
     record_platform_decision,
@@ -126,6 +130,10 @@ __all__ = [
     "WithdrawalReferenceConflict",
     "WithdrawalRefused",
     "__version__",
+    "cancel_platform_request",
+    "cancel_tenant_request",
+    "emit_platform_events",
+    "emit_tenant_events",
     "evaluate_platform_approval",
     "evaluate_tenant_approval",
     "module",

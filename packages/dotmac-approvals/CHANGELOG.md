@@ -16,8 +16,11 @@ source adds names to the package root, so it declares the newly allocated
 - Export from `dotmac_approvals` (top-level `__all__`): `request_tenant_approval`,
   `request_platform_approval`, `record_tenant_decision`,
   `record_platform_decision`, `evaluate_tenant_approval`,
-  `evaluate_platform_approval` and their result type `ApprovalOutcome`. The
-  functions and the type already existed in `dotmac_approvals.service` and are
+  `evaluate_platform_approval`, `cancel_tenant_request`,
+  `cancel_platform_request` and their result type `ApprovalOutcome`; and, from
+  `dotmac_approvals.outbox`, `emit_tenant_events` and `emit_platform_events`,
+  which a caller needs to enqueue the `ApprovalOutcome.events` it must deliver. The
+  functions and the type already existed in `dotmac_approvals.service` or `outbox` and are
   unchanged; this package has no separate command dataclasses (the commands take
   keyword arguments).
 - Why: ADR 0024 section 14 lets a composition package call only names in an

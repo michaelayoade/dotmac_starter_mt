@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 import dotmac_approvals
-from dotmac_approvals import service
+from dotmac_approvals import outbox, service
 
 EXPORTED = (
     "ApprovalOutcome",
@@ -21,13 +21,22 @@ EXPORTED = (
     "record_platform_decision",
     "evaluate_tenant_approval",
     "evaluate_platform_approval",
+    "cancel_tenant_request",
+    "cancel_platform_request",
 )
+EMIT = ("emit_tenant_events", "emit_platform_events")
 
 
 @pytest.mark.parametrize("name", EXPORTED)
 def test_name_is_public_and_is_the_service_object(name: str) -> None:
     assert name in dotmac_approvals.__all__
     assert getattr(dotmac_approvals, name) is getattr(service, name)
+
+
+@pytest.mark.parametrize("name", EMIT)
+def test_emit_function_is_public_and_is_the_outbox_object(name: str) -> None:
+    assert name in dotmac_approvals.__all__
+    assert getattr(dotmac_approvals, name) is getattr(outbox, name)
 
 
 def test_every_exported_name_resolves_and_is_unique() -> None:
