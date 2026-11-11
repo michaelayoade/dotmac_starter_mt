@@ -15,3 +15,12 @@ owners report into typed `ReadinessCheck` values; this module decides from them
 and keeps the decision and its evidence append-only.
 
 The tenant-only `so` lineage owns `mod_serviceorders`.
+
+## Service location
+
+Install, reconnect and change orders are opened through
+`open_service_order_v2`, which requires an opaque `service_location_ref`. The
+module holds the token and nothing it resolves to: no address text, no
+coordinates, no qualification evidence. The composing product keeps those, and
+verifies a qualification warrant before it promotes a location. V1
+(`open_service_order`) is unchanged for every other order type.

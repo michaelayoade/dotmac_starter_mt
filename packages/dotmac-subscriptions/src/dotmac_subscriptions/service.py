@@ -41,10 +41,13 @@ from dotmac_subscriptions.commands import (
     EndContractVersionResult,
     GenerateRecurringChargeCommand,
     OccurrenceResult,
+    OccurrenceValidityResult,
     OfferPricingMode,
+    OwnerEvidencePort,
     PublishOfferVersionCommand,
     PublishOfferVersionResult,
     RecordSubscriptionContractVersionCommand,
+    ResolveOccurrenceValidityCommand,
     WithdrawOfferVersionCommand,
 )
 from dotmac_subscriptions.contracts import (
@@ -61,6 +64,12 @@ from dotmac_subscriptions.errors import (
     SubscriptionConflictError,
     SubscriptionDataError,
     SubscriptionStateError,
+)
+from dotmac_subscriptions.lifecycle import (
+    OccurrenceState,
+    OccurrenceValidityHold,
+    OccurrenceValidityOutcome,
+    require_occurrence_transition,
 )
 from dotmac_subscriptions.models import (
     Offer,
@@ -91,6 +100,7 @@ if TYPE_CHECKING:
 _PUBLISH_SCOPE = "subscriptions.publish_offer_version"
 _CONTRACT_SCOPE = "subscriptions.record_contract_version"
 _OCCURRENCE_SCOPE = "subscriptions.generate_recurring_charge"
+_VALIDITY_SCOPE = "subscriptions.resolve_occurrence_validity"
 
 OfferModel = type[Offer] | type[PlatformOffer]
 OfferVersionModel = type[OfferVersion] | type[PlatformOfferVersion]
@@ -366,6 +376,7 @@ def _contract_digest(command: RecordSubscriptionContractVersionCommand) -> str:
                     "offer_version_id": str(line.offer_version_id),
                     "offer_version": line.offer_version,
                     "entitlement_codes": list(line.entitlement_codes),
+                    "price_key": line.price_key,
                 }
                 for line in command.lines
             ],
@@ -778,6 +789,64 @@ def _validate_line(
         )
 
 
+def _require_published_price(
+    session: Session,
+    *,
+    plane: _PlaneModels,
+    scope: Scope,
+    offer_version: OfferVersionRow,
+    line: ContractLineInput,
+) -> None:
+    """Refuse a line whose price is not the published offer-version price.
+
+    A ``catalog_price`` line must name ``(offer_version, price_key)`` and copy
+    that immutable ``OfferVersionPrice`` exactly. A ``contract_price`` line is
+    the only price and must not name a catalogue key. PostgreSQL repeats this
+    rule with a composite foreign key and a trigger, so a writer that bypasses
+    this function is refused by the table.
+    """
+    if offer_version.pricing_mode != OfferPricingMode.catalog_price.value:
+        if line.price_key is not None:
+            raise SubscriptionDataError(
+                "contracts.price_key_not_allowed",
+                "A contract-priced offer version has no catalogue price to name.",
+            )
+        return
+    if not line.price_key:
+        raise SubscriptionDataError(
+            "contracts.catalog_price_key_required",
+            "A catalog-priced line must name the offer version's price_key.",
+        )
+    price = cast(
+        PriceRow | None,
+        session.execute(
+            _scoped(
+                select(plane.price).where(
+                    plane.price.offer_version_id == offer_version.id,
+                    plane.price.price_key == line.price_key,
+                ),
+                scope,
+                plane.price,
+            )
+        ).scalar_one_or_none(),
+    )
+    if price is None:
+        raise SubscriptionDataError(
+            "contracts.catalog_price_not_found",
+            "The named price_key is not on the referenced offer version.",
+        )
+    if (
+        price.charge_model_code != line.charge_model_code
+        or Decimal(price.amount) != line.unit_price.amount
+        or price.currency != line.unit_price.currency
+        or price.scale != line.unit_price.scale
+    ):
+        raise SubscriptionDataError(
+            "contracts.catalog_price_mismatch",
+            "A catalog-priced line must equal the published offer-version price.",
+        )
+
+
 def record_contract_version(
     db: Session,
     command: RecordSubscriptionContractVersionCommand,
@@ -1030,6 +1099,13 @@ def record_contract_version(
                     "contracts.offer_charge_model_mismatch",
                     "Contract line and offer version must use one charge model.",
                 )
+            _require_published_price(
+                session,
+                plane=plane,
+                scope=command.scope,
+                offer_version=offer_version,
+                line=line_input,
+            )
             line_key = line_input.contract_line_key or uuid4()
             line_keys.append(line_key)
             session.add(
@@ -1050,6 +1126,7 @@ def record_contract_version(
                     scale=line_input.unit_price.scale,
                     offer_version_id=line_input.offer_version_id,
                     offer_version=line_input.offer_version,
+                    price_key=line_input.price_key,
                     entitlement_codes=list(line_input.entitlement_codes),
                 )
             )
@@ -1547,6 +1624,10 @@ def generate_recurring_charge(
         )
     registry.require_charge_model(line.charge_model_code)
     registry.require_obligation_source(line.source_code)
+    if command.validity_hold is not None:
+        # Refuse up front: a hold nobody may resolve would block its coverage
+        # forever.
+        registry.require_validity_hold_owner(command.validity_hold.value)
     cadence = _cadence_from(version)
     contract_start = _stored_utc(version.starts_at)
     contract_end = _stored_utc(version.ends_at) if version.ends_at is not None else None
@@ -1653,7 +1734,16 @@ def generate_recurring_charge(
                 request_fingerprint=rating.request_fingerprint,
                 idempotency_key=idempotency_key,
                 generation=command.generation,
-                state="emitted",
+                state=(
+                    OccurrenceState.pending_validity.value
+                    if command.validity_hold is not None
+                    else OccurrenceState.emitted.value
+                ),
+                validity_hold_reason=(
+                    command.validity_hold.value
+                    if command.validity_hold is not None
+                    else None
+                ),
                 emitted_at=command.emitted_at.astimezone(UTC),
                 output_acknowledged_at=None,
                 corrects_occurrence_id=command.corrects_occurrence_id,
@@ -1699,9 +1789,163 @@ def generate_recurring_charge(
             "Occurrence identity conflicts with stored rating inputs.",
         ) from exc
     stored_id = UUID(str(outcome.result["occurrence_id"]))
+    held = command.validity_hold is not None
     if stored_id != occurrence_id:
-        output = _output_for_id(db, scope=command.scope, occurrence_id=stored_id)
-    return OccurrenceResult(stored_id, outcome.replayed, output)
+        stored = _occurrence_row(db, scope=command.scope, occurrence_id=stored_id)
+        if stored.validity_hold_reason != (
+            command.validity_hold.value if command.validity_hold else None
+        ):
+            raise SubscriptionConflictError(
+                "occurrences.validity_hold_conflict",
+                "The stored occurrence was held differently.",
+            )
+        if stored.state == OccurrenceState.cancelled.value:
+            # A replay must not read as "still held": the owner rejected it.
+            raise SubscriptionConflictError(
+                "occurrences.period_rejected",
+                "The stored occurrence for this period was rejected by its owner.",
+            )
+        held = stored.state != OccurrenceState.emitted.value
+        if not held:
+            output = _output_for_id(db, scope=command.scope, occurrence_id=stored_id)
+    return OccurrenceResult(stored_id, outcome.replayed, None if held else output)
+
+
+def _occurrence_row(
+    db: Session, *, scope: Scope, occurrence_id: UUID, lock: bool = False
+) -> OccurrenceRow:
+    plane = _models(scope)
+    statement = _scoped(
+        select(plane.occurrence).where(plane.occurrence.id == occurrence_id),
+        scope,
+        plane.occurrence,
+    )
+    if lock:
+        statement = statement.with_for_update()
+    row = cast(OccurrenceRow | None, db.execute(statement).scalar_one_or_none())
+    if row is None:
+        raise SubscriptionDataError(
+            "occurrences.not_found", "Recurring charge occurrence was not found."
+        )
+    return row
+
+
+def resolve_occurrence_validity(
+    db: Session,
+    command: ResolveOccurrenceValidityCommand,
+    *,
+    registry: SubscriptionVocabularyRegistry,
+    owner_evidence: OwnerEvidencePort,
+) -> OccurrenceValidityResult:
+    """Resolve a ``pending_validity`` occurrence from the OWNER's evidence.
+
+    This is the only way out of the hold. ``confirmed`` moves it to ``emitted``
+    and stages the rated output now (never at the pending insert); ``rejected``
+    cancels it and releases its coverage. Subscriptions records the owner code
+    and the owner's evidence reference and interprets neither.  The resolution
+    instant is the database transaction time (``now()``), the same clock the
+    freeze trigger compares against.
+    """
+    owner_code = command.owner_code.strip()
+    actor_ref = command.actor_ref.strip()
+    key = command.idempotency_key
+    if (
+        not owner_code
+        or len(owner_code) > 120
+        or not actor_ref
+        or len(actor_ref) > 160
+        or not key
+        or len(key) > 200
+    ):
+        raise SubscriptionDataError(
+            "occurrences.owner_evidence_required",
+            "An owner code, an actor reference (at most 160 characters) and an "
+            "idempotency key (at most 200 characters) are required.",
+        )
+    target = (
+        OccurrenceState.emitted
+        if command.outcome is OccurrenceValidityOutcome.confirmed
+        else OccurrenceState.cancelled
+    )
+    fingerprint = _fingerprint(
+        {
+            "occurrence_id": str(command.occurrence_id),
+            "outcome": command.outcome.value,
+            "owner_code": owner_code,
+            "actor_ref": actor_ref,
+            "evidence_ref": str(command.evidence_ref),
+            "command_id": str(command.command_id),
+        }
+    )
+
+    def operation(session: Session) -> dict[str, object]:
+        row = _occurrence_row(
+            session, scope=command.scope, occurrence_id=command.occurrence_id, lock=True
+        )
+        require_occurrence_transition(OccurrenceState(row.state), target)
+        hold = OccurrenceValidityHold(row.validity_hold_reason)
+        if owner_code != registry.require_validity_hold_owner(hold.value):
+            raise SubscriptionDataError(
+                "occurrences.owner_mismatch",
+                "That owner may not resolve this kind of hold.",
+            )
+        verdict = owner_evidence.verify(
+            session,
+            scope=command.scope,
+            owner_code=owner_code,
+            evidence_ref=command.evidence_ref,
+            occurrence_id=command.occurrence_id,
+            hold_reason=hold.value,
+            confirmed=target is OccurrenceState.emitted,
+        )
+        if not verdict.verified:
+            raise SubscriptionDataError(
+                "occurrences.owner_evidence_unverified",
+                "The owner did not verify that evidence.",
+            )
+        held_at = _stored_utc(row.emitted_at)
+        row.state = target.value
+        row.validity_owner_code = owner_code
+        row.validity_evidence_ref = command.evidence_ref
+        row.validity_resolved_at = func.now()
+        row.validity_resolution_command_id = command.command_id
+        row.validity_actor_ref = actor_ref
+        if target is OccurrenceState.emitted:
+            row.emitted_at = func.now()
+        session.flush()
+        session.refresh(row)
+        if row.validity_resolved_at is None or (
+            _stored_utc(row.validity_resolved_at) < held_at
+        ):
+            raise SubscriptionDataError(
+                "occurrences.resolution_before_hold",
+                "Owner evidence cannot pre-date the held occurrence.",
+            )
+        return {"outcome": command.outcome.value}
+
+    try:
+        outcome = _execute_once(
+            db,
+            scope=command.scope,
+            operation_scope=_VALIDITY_SCOPE,
+            key=key,
+            fingerprint=fingerprint,
+            correlation_id=command.correlation_id,
+            operation=operation,
+        )
+    except IntegrityError as exc:
+        raise SubscriptionConflictError(
+            "occurrences.database_conflict",
+            "Owner evidence conflicts with stored state.",
+        ) from exc
+    staged = (
+        _output_for_id(db, scope=command.scope, occurrence_id=command.occurrence_id)
+        if command.outcome is OccurrenceValidityOutcome.confirmed
+        else None
+    )
+    return OccurrenceValidityResult(
+        command.occurrence_id, command.outcome, outcome.replayed, staged
+    )
 
 
 def _output_for_id(
@@ -1806,7 +2050,10 @@ def occurrences_for_contract(
     ids = db.execute(
         _scoped(
             select(plane.occurrence.id)
-            .where(plane.occurrence.contract_id == contract_id)
+            .where(
+                plane.occurrence.contract_id == contract_id,
+                plane.occurrence.state == OccurrenceState.emitted.value,
+            )
             .order_by(
                 plane.occurrence.period_start,
                 plane.occurrence.contract_line_key,
@@ -1859,6 +2106,7 @@ __all__ = [
     "offer_version_snapshot",
     "publish_offer_version",
     "record_contract_version",
+    "resolve_occurrence_validity",
     "unacknowledged_outputs",
     "withdraw_offer_version",
 ]

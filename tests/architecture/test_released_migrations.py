@@ -8490,11 +8490,26 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-inbox-operations": frozenset({"io_0004_availability_transfers.py"}),
     "dotmac-operational-escalations": frozenset(),
     "dotmac-service-changes": frozenset(),
-    "dotmac-subscriptions": frozenset(),
-    # `bi_0013` adds the sealed hold list guards and post-seal hold admission
-    # audit table; `bi_0014` the opening variance ledger (ST-4c). Both are still
-    # editable until billing 0.1.0a11 is tagged.
-    "dotmac-billing": frozenset(),
+    # `su_0006` adds the pending_validity occurrence state.
+    # `su_0004` makes a catalog_price line name and equal its published offer
+    # price; `su_0005` adds the line coverage-overlap trigger and correction uniqueness.
+    # Still editable: no released tag (a3 is the latest) carries either.
+    "dotmac-subscriptions": frozenset(
+        {
+            "su_0004_catalog_price_line.py",
+            "su_0005_line_coverage_overlap.py",
+            "su_0006_pending_validity.py",
+        }
+    ),
+    # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
+    # frozen. `bi_0015` and `bi_0016` are a12's, still editable until a12 is tagged.
+    "dotmac-billing": frozenset(
+        {
+            # a12 (the a11 number is published): B lane, still unreleased.
+            "bi_0015_line_price_version_fk.py",
+            "bi_0016_withholding_components.py",
+        }
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8512,9 +8527,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
-    # Tenant-qualified credential key remains editable until a verified published
-    # tag carries this revision and its digest is recorded above.
-    "dotmac-kernel": frozenset(),
+    # `0031_rate_limit_buckets` (the shared anonymous-route rate-limit counters)
+    # remains editable until a verified published tag carries it and its digest
+    # is recorded above.
+    "dotmac-kernel": frozenset({"20261109_0031_rate_limit_buckets.py"}),
     "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
@@ -8545,15 +8561,21 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-payables": frozenset(),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
-    "dotmac-positioning": frozenset(),
+    # `po_0002` adds neutral observation retention holds; still editable until
+    # `dotmac-positioning` 0.2.0a2 is tagged.
+    "dotmac-positioning": frozenset({"po_0002_observation_holds.py"}),
     "dotmac-procurement": frozenset(),
     "dotmac-projects": frozenset(),
     "dotmac-publishing": frozenset(),
     "dotmac-records": frozenset(),
-    "dotmac-referrals": frozenset(),
+    # `rf_0002` adds the opaque service-location ref; still editable until
+    # `dotmac-referrals` 0.1.0a2 is tagged.
+    "dotmac-referrals": frozenset({"rf_0002_service_location_ref.py"}),
     "dotmac-release-catalog": frozenset(),
     "dotmac-reseller-management": frozenset(),
-    "dotmac-service-orders": frozenset(),
+    # `so_0002` adds the opaque service-location ref; still editable until
+    # `dotmac-service-orders` 0.1.0a2 is tagged.
+    "dotmac-service-orders": frozenset({"so_0002_service_location_ref.py"}),
     "dotmac-sites": frozenset(),
     "dotmac-surveys": frozenset(),
     "dotmac-web-analytics": frozenset(),

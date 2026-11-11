@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_referrals.contracts import (
     CaptureReferral,
+    CaptureReferralV2,
     ContractError,
     CreateProgramme,
     IssueCode,
@@ -156,6 +157,48 @@ def capture_referral(
     command: CaptureReferral,
     recorded_at: datetime,
 ) -> Referral:
+    return _capture(
+        db,
+        scope=scope,
+        command=command,
+        service_location_ref=None,
+        check_location=False,
+        recorded_at=recorded_at,
+    )
+
+
+def capture_referral_v2(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: CaptureReferralV2,
+    recorded_at: datetime,
+) -> Referral:
+    """Capture a referral, optionally naming the opaque place it would serve.
+
+    Behaves as V1 and additionally stores the opaque `service_location_ref`.
+    A replay of the same source event must carry the same location: a different
+    one is a conflict rather than a silent overwrite.
+    """
+    return _capture(
+        db,
+        scope=scope,
+        command=command,
+        service_location_ref=command.service_location_ref,
+        check_location=True,
+        recorded_at=recorded_at,
+    )
+
+
+def _capture(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: CaptureReferral | CaptureReferralV2,
+    service_location_ref: str | None,
+    check_location: bool,
+    recorded_at: datetime,
+) -> Referral:
     _aware("recorded_at", recorded_at)
     existing = db.scalar(
         select(Referral).where(
@@ -169,6 +212,8 @@ def capture_referral(
             raise Conflict(
                 "a source event was replayed with different referral content"
             )
+        if check_location and existing.service_location_ref != service_location_ref:
+            raise Conflict("a source event was replayed with a different location")
         return existing
     invitation = db.scalar(
         select(ReferralCode).where(
@@ -190,6 +235,7 @@ def capture_referral(
         source_owner=command.source_owner,
         source_event_id=command.source_event_id,
         source_fingerprint=command.source_fingerprint,
+        service_location_ref=service_location_ref,
         status="attributed",
         attributed_at=recorded_at,
     )
@@ -281,6 +327,7 @@ __all__ = [
     "REWARD_REQUESTED_EVENT",
     "ReferralError",
     "capture_referral",
+    "capture_referral_v2",
     "create_programme",
     "issue_code",
     "record_conversion",

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-positioning"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
 authors = ["DotMac"]
 readme = "README.md"

@@ -1,5 +1,13 @@
 """Public Billing contracts, queries and owner commands."""
 
+from dotmac_billing.account_statement import (
+    AccountStatementLineV1,
+    AccountStatementV1,
+    GetAccountStatementV1,
+    StatementBalancesV1,
+    compute_account_statement_digest,
+    get_account_statement,
+)
 from dotmac_billing.authority import (
     AuthorityBinding,
     BillingPlane,
@@ -11,6 +19,7 @@ from dotmac_billing.authority import (
 from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
     ApplyNonCashCredit,
+    FreezeIssuedInvoiceWithholding,
     GrantNonCashCredit,
     NumberingProvider,
     ReduceNonCashCreditGrant,
@@ -76,6 +85,7 @@ from dotmac_billing.contracts import (
     StoredInvoiceDocumentFactV1,
     StoredInvoiceDocumentFactV2,
     StoredInvoiceDocumentFactV3,
+    WithholdingCashRequirementV1,
     WithholdingCertificateObservationV1,
     WithholdingDischargeEffectV1,
     WithholdingTaxEvidenceV1,
@@ -348,7 +358,7 @@ from dotmac_billing.queries import (
 )
 from dotmac_billing.service import issue_rated_invoice
 
-__version__ = "0.1.0a11"
+__version__ = "0.1.0a12"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
@@ -376,6 +386,12 @@ __all__ = [
     "get_document_exposure",
     "get_document_withholding_evidence",
     "list_accounting_facts",
+    "AccountStatementLineV1",
+    "AccountStatementV1",
+    "GetAccountStatementV1",
+    "StatementBalancesV1",
+    "compute_account_statement_digest",
+    "get_account_statement",
     "summarize_accounting_fact_window",
     "AccountingFactWindowSummaryV1",
     "SummarizeAccountingFactWindowV1",
@@ -624,10 +640,12 @@ __all__ = [
     "get_non_cash_credit_grant",
     "get_non_cash_credit_effect",
     "AcceptWithholdingDischarge",
+    "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
     "AccountingFactV2",
     "WithholdingTaxEvidenceV1",
     "WithholdingTaxLineV1",
+    "WithholdingCashRequirementV1",
     "WithholdingCertificateObservationV1",
     "WithholdingDischargeEffectV1",
     "get_withholding_discharge",

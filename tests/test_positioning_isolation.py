@@ -398,3 +398,91 @@ def test_concurrent_identical_geofences_replay_one_row(
         ).scalar_one()
     admin_engine.dispose()
     assert count == 1
+
+
+def test_a_held_observation_cannot_be_deleted_until_released(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The restricting foreign key protects a hold from any deleter."""
+
+    admin_url, _ = migrated_scratch
+    tenant_id, unit_id = uuid.uuid4(), uuid.uuid4()
+    identity_id, observation_id = uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(UTC)
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO public.tenants (id, slug, name) "
+                    "VALUES (:id, :slug, :name)"
+                ),
+                {
+                    "id": tenant_id,
+                    "slug": f"position-hold-{tenant_id.hex[:12]}",
+                    "name": "Positioning hold",
+                },
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_pos.tracked_units "
+                    "(id, tenant_id, is_active) VALUES (:id, :tenant, true)"
+                ),
+                {"id": unit_id, "tenant": tenant_id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_pos.source_identities "
+                    "(id, tenant_id, source, source_unit_ref) "
+                    "VALUES (:id, :tenant, 'mobile', 'device-1')"
+                ),
+                {"id": identity_id, "tenant": tenant_id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_pos.position_observations "
+                    "(id, tenant_id, tracked_unit_id, source_identity_id, "
+                    "client_observation_id, payload_fingerprint, source, "
+                    "source_unit_ref, latitude, longitude, accuracy_m, "
+                    "captured_at, received_at) VALUES (:id, :tenant, :unit, "
+                    ":identity, :client, :fingerprint, 'mobile', 'device-1', "
+                    "0, 0, 5, :now, :now)"
+                ),
+                {
+                    "id": observation_id,
+                    "tenant": tenant_id,
+                    "unit": unit_id,
+                    "identity": identity_id,
+                    "client": uuid.uuid4(),
+                    "fingerprint": "0" * 64,
+                    "now": now,
+                },
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_pos.observation_holds "
+                    "(id, tenant_id, observation_id, hold_ref, placed_at) "
+                    "VALUES (:id, :tenant, :observation, 'hold-1', :now)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": tenant_id,
+                    "observation": observation_id,
+                    "now": now,
+                },
+            )
+
+        delete_observation = text(
+            "DELETE FROM mod_pos.position_observations WHERE id = :id"
+        )
+        with pytest.raises(DBAPIError), engine.begin() as conn:
+            conn.execute(delete_observation, {"id": observation_id})
+
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM mod_pos.observation_holds WHERE tenant_id = :t"),
+                {"t": tenant_id},
+            )
+            conn.execute(delete_observation, {"id": observation_id})
+    finally:
+        engine.dispose()

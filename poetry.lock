@@ -667,7 +667,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a11"
+version = "0.1.0a12"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1201,7 +1201,7 @@ url = "packages/dotmac-fiber-plant"
 
 [[package]]
 name = "dotmac-files"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "DotMac dual-plane stored-object lifecycle and validation"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1400,7 +1400,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a108"
+version = "0.1.0a108+dev"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1752,7 +1752,7 @@ url = "packages/dotmac-pon-access"
 
 [[package]]
 name = "dotmac-positioning"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1824,7 +1824,7 @@ url = "packages/dotmac-publishing"
 
 [[package]]
 name = "dotmac-qualification"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Time-bounded service qualification evidence and decisions"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1860,7 +1860,7 @@ url = "packages/dotmac-records"
 
 [[package]]
 name = "dotmac-referrals"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant referral programmes, attribution, conversion and reward-request evidence"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2053,7 +2053,7 @@ url = "packages/dotmac-service-changes"
 
 [[package]]
 name = "dotmac-service-orders"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Service-delivery orders and activation-readiness decisions"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2107,7 +2107,7 @@ url = "packages/dotmac-sites"
 
 [[package]]
 name = "dotmac-subscriptions"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac dual-plane recurring commercial contracts and occurrences"
 optional = false
 python-versions = ">=3.11,<3.14"

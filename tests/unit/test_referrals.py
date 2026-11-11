@@ -12,11 +12,15 @@ from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_kernel.models import Base, Tenant
 from dotmac_referrals import (
     CaptureReferral,
+    CaptureReferralV2,
+    Conflict,
     ContractError,
     CreateProgramme,
     IssueCode,
+    NotFound,
     RecordConversion,
     capture_referral,
+    capture_referral_v2,
     create_programme,
     issue_code,
     record_conversion,
@@ -171,4 +175,131 @@ def test_contract_refuses_ambient_or_unbounded_identity() -> None:
             referrer_ref="party:1",
             code="REF",
             expires_at=datetime(2026, 9, 1),
+        )
+
+
+def _live_code(db: Session, scope: TenantScope) -> None:
+    programme = create_programme(
+        db,
+        scope=scope,
+        command=CreateProgramme(
+            code="friend-2026",
+            name="Friends 2026",
+            qualification_policy_ref="sub:active-after-30-days:v1",
+            reward_policy_ref="billing:credit:v2",
+        ),
+        recorded_at=NOW,
+    )
+    issue_code(
+        db,
+        scope=scope,
+        command=IssueCode(
+            programme_id=programme.id,
+            referrer_ref="party:referrer-1",
+            code="ADA-2026",
+            expires_at=NOW + timedelta(days=30),
+        ),
+        recorded_at=NOW,
+    )
+
+
+def _v2(location: str | None = "loc:site-0001", event: str = "signup-v2"):
+    return CaptureReferralV2(
+        code="ada-2026",
+        referred_subject_ref="prospect:opaque-1",
+        source_owner="sub.signup",
+        source_event_id=event,
+        source_fingerprint="b" * 64,
+        service_location_ref=location,
+    )
+
+
+def test_v2_capture_stores_the_opaque_location_and_is_idempotent(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    _live_code(db, scope)
+
+    first = capture_referral_v2(
+        db, scope=scope, command=_v2(" loc:site-0001 "), recorded_at=NOW
+    )
+    replay = capture_referral_v2(db, scope=scope, command=_v2(), recorded_at=NOW)
+
+    assert first.id == replay.id
+    assert first.service_location_ref == "loc:site-0001"
+    assert first.referred_subject_ref == "prospect:opaque-1"
+    assert first.status == "attributed"
+
+
+def test_v2_capture_location_is_optional_and_a_replay_cannot_change_it(
+    db: Session,
+) -> None:
+    scope = TenantScope(TENANT_A)
+    _live_code(db, scope)
+
+    no_place = capture_referral_v2(
+        db, scope=scope, command=_v2(None, event="no-place"), recorded_at=NOW
+    )
+    assert no_place.service_location_ref is None
+
+    placed = capture_referral_v2(db, scope=scope, command=_v2(), recorded_at=NOW)
+    with pytest.raises(Conflict, match="different location"):
+        capture_referral_v2(
+            db, scope=scope, command=_v2("loc:site-0002"), recorded_at=NOW
+        )
+    with pytest.raises(Conflict, match="different location"):
+        capture_referral_v2(db, scope=scope, command=_v2(None), recorded_at=NOW)
+    assert placed.service_location_ref == "loc:site-0001"
+
+
+def test_v1_capture_is_unchanged_and_carries_no_location(db: Session) -> None:
+    scope = TenantScope(TENANT_A)
+    _live_code(db, scope)
+
+    referral = capture_referral(
+        db,
+        scope=scope,
+        command=CaptureReferral(
+            code="ADA-2026",
+            referred_subject_ref="prospect:opaque-1",
+            source_owner="sub.signup",
+            source_event_id="signup-v1",
+            source_fingerprint="a" * 64,
+        ),
+        recorded_at=NOW,
+    )
+    assert referral.service_location_ref is None
+    assert tuple(CaptureReferral.__slots__) == (
+        "code",
+        "referred_subject_ref",
+        "source_owner",
+        "source_event_id",
+        "source_fingerprint",
+    )
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "   ",
+        "12 Example Street, Town",
+        "9.0765,7.3986",
+        "9.0765 7.3986",
+        "../loc",
+        "-leading",
+        "x" * 161,
+    ],
+)
+def test_v2_contract_refuses_a_location_that_is_not_an_opaque_token(bad: str) -> None:
+    with pytest.raises(ContractError, match="service_location_ref"):
+        _v2(bad)
+
+
+def test_v2_capture_refuses_an_unknown_code_and_other_tenants(db: Session) -> None:
+    _live_code(db, TenantScope(TENANT_A))
+
+    with pytest.raises(NotFound):
+        capture_referral_v2(
+            db, scope=TenantScope(TENANT_B), command=_v2(), recorded_at=NOW
         )

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import hmac
+import io
 import re
 import tempfile
 import zipfile
@@ -18,18 +20,24 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePath
 from typing import IO, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 
 from dotmac_files.contracts import (
     FilePolicy,
     FileState,
+    ForeignScopeFile,
+    IntegrityMismatch,
+    InvalidFileRef,
     InvalidFileState,
     PreparedFile,
     ProviderMismatch,
+    ReadLimitExceeded,
+    ReadTypeNotAllowed,
     StoredObjectRef,
     UnsafeFile,
+    VerifiedFile,
 )
 from dotmac_files.providers import (
     ObjectInfo,
@@ -40,6 +48,12 @@ from dotmac_files.providers import (
 
 _PROVIDER_CODE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 _SPOOL_MEMORY_LIMIT = 1_048_576
+_UUID_TEXT = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_CHECKSUM = re.compile(r"sha256:[0-9a-f]{64}")
+_READ_CHUNK = 65_536
+MAX_VERIFIED_READ_BYTES = 64 * 1024 * 1024
 _MEDIA_BY_EXTENSION = {
     ".pdf": "application/pdf",
     ".csv": "text/csv",
@@ -312,6 +326,102 @@ def open_object(
     return provider.open(target.storage_key)
 
 
+def parse_file_ref(ref: str | UUID) -> UUID:
+    """Accept only a UUID or its canonical hyphenated text; refuse all else.
+
+    No path, URL, URN, braces, bare-hex or other alternate form is interpreted;
+    the refusal never echoes the offending input.
+    """
+    if isinstance(ref, UUID):
+        return ref
+    if not isinstance(ref, str) or _UUID_TEXT.fullmatch(ref) is None:
+        raise InvalidFileRef("file reference must be a canonical UUID")
+    return UUID(ref)
+
+
+def read_verified(
+    provider: StorageProvider,
+    *,
+    scope: Scope,
+    target: StoredObjectRef,
+    limit: int,
+    allowed_media_types: frozenset[str],
+) -> VerifiedFile:
+    """Read one file's bytes, proving they are the row's file, within ``limit``.
+
+    Same-scope only: the target's scope must equal ``scope`` and its key must be
+    exactly the trusted ``<scope prefix><file id>``. At most ``limit + 1`` bytes
+    are ever requested from the provider, so an oversize or unbounded object is
+    refused without being buffered. The bytes must then equal the recorded size
+    and sha256, and their content-detected media type must equal the recorded
+    one and be in ``allowed_media_types``, which is required and may not be empty
+    (there is no allow-all default). Persistence-free: the
+    caller ends its database phase before calling this.
+    """
+    if type(limit) is not int or not 1 <= limit <= MAX_VERIFIED_READ_BYTES:
+        raise ValueError(
+            f"limit must be an integer from 1 to {MAX_VERIFIED_READ_BYTES}"
+        )
+    if (
+        not isinstance(allowed_media_types, frozenset)
+        or not allowed_media_types
+        or not all(isinstance(item, str) for item in allowed_media_types)
+    ):
+        raise ValueError("allowed_media_types must be a non-empty frozenset of text")
+    if not isinstance(target, StoredObjectRef):
+        raise TypeError("target must be a StoredObjectRef")
+    if target.scope != scope or (
+        target.storage_key != f"{scope_prefix(scope)}{target.id}"
+    ):
+        raise ForeignScopeFile("file does not belong to the requested scope")
+    if _CHECKSUM.fullmatch(target.checksum_sha256) is None:
+        raise IntegrityMismatch("recorded checksum is not a sha256 digest")
+    if target.size_bytes > limit:
+        raise ReadLimitExceeded(f"file exceeds the {limit}-byte read limit")
+
+    stream = open_object(provider, target=target)
+    try:
+        parts: list[bytes] = []
+        total = 0
+        while total < limit + 1:
+            requested = min(_READ_CHUNK, limit + 1 - total)
+            chunk = stream.read(requested)
+            if not chunk:
+                break
+            if not isinstance(chunk, bytes):
+                raise IntegrityMismatch("provider returned non-bytes content")
+            if len(chunk) > requested:
+                raise IntegrityMismatch("provider returned more bytes than requested")
+            parts.append(chunk)
+            total += len(chunk)
+    finally:
+        stream.close()
+    if total > limit:
+        raise ReadLimitExceeded(f"file exceeds the {limit}-byte read limit")
+    payload = b"".join(parts)
+    if len(payload) != target.size_bytes:
+        raise IntegrityMismatch("content length differs from the recorded size")
+    checksum = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+    if not hmac.compare_digest(checksum, target.checksum_sha256):
+        raise IntegrityMismatch("content sha256 differs from the recorded checksum")
+    try:
+        detected = _detect_media_type(io.BytesIO(payload))
+    except UnsafeFile as exc:
+        raise IntegrityMismatch("content has no supported signature") from exc
+    if detected != target.detected_media_type:
+        raise IntegrityMismatch("content type differs from the recorded type")
+    if detected not in allowed_media_types:
+        raise ReadTypeNotAllowed(f"media type {detected!r} is not allowed here")
+    return VerifiedFile(
+        id=target.id,
+        scope=scope,
+        media_type=detected,
+        size_bytes=len(payload),
+        checksum_sha256=checksum,
+        content=payload,
+    )
+
+
 def observe_object(provider: StorageProvider, *, target: StoredObjectRef) -> bool:
     """Observe provider presence without holding a database transaction."""
     _require_provider(target, provider)
@@ -439,12 +549,15 @@ def _require_provider(target: StoredObjectRef, provider: StorageProvider) -> Non
 
 
 __all__ = [
+    "MAX_VERIFIED_READ_BYTES",
     "OrphanRecheckResult",
     "delete_object",
     "delete_orphans",
     "list_objects",
     "observe_object",
     "open_object",
+    "parse_file_ref",
     "prepare_upload",
+    "read_verified",
     "recheck_and_delete_orphan",
 ]

@@ -26,7 +26,16 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+    func,
+)
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -109,8 +118,40 @@ class PlatformAuditEvent(Base):
     )
 
 
+class RateLimitBucket(Base):
+    """One fixed-window counter of the shared anonymous-route rate limit.
+
+    A platform catalog table: NO `tenant_id`, NO RLS, GRANTed to
+    `platform_api`/`app_admin` and REVOKEd from `app_user` (migration 0031). The
+    tenant is part of the hashed key, not a column: a bucket is the shared
+    counter that makes N workers behave as one, written before any
+    tenant-scoped session exists. `key_hash` is the HMAC-SHA256 of the limiter key,
+    never the key -- the key contains the client address, and a counter table has
+    no reason to retain it in the clear. Rows are transient (`expires_at`).
+    """
+
+    __tablename__ = "rate_limit_buckets"
+    __table_args__ = (
+        sa.PrimaryKeyConstraint(
+            "key_hash", "window_start", name="pk_rate_limit_buckets"
+        ),
+        sa.CheckConstraint("hit_count >= 1", name="ck_rate_limit_buckets_hit_count"),
+        Index("ix_rate_limit_buckets_expires_at", "expires_at"),
+    )
+
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 __all__ = [
     "PlatformAdmin",
     "PlatformAuditEvent",
     "PlatformSession",
+    "RateLimitBucket",
 ]

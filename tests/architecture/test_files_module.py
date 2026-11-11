@@ -196,6 +196,7 @@ def test_external_provider_actions_are_separate_from_database_recording() -> Non
         "observe_object",
         "open_object",
         "prepare_upload",
+        "read_verified",
         "recheck_and_delete_orphan",
     ):
         assert "db" not in inspect.signature(getattr(physical, name)).parameters
@@ -208,6 +209,7 @@ def test_external_provider_actions_are_separate_from_database_recording() -> Non
         "reconciliation_target",
         "request_deletion",
         "stage_file",
+        "verified_read_target",
     ):
         assert "provider" not in inspect.signature(getattr(service, name)).parameters
 

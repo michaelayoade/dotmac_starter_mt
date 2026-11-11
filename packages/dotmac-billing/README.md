@@ -83,8 +83,36 @@ invoice-grained exposures. An architecture canary derives the emitted set from
 the service and requires an exact match, so a new routing code cannot bypass
 the manifest-owned vocabulary.
 
+Expected withholding is frozen at issue. For each elected component of a
+`dotmac-tax` determination (a positive amount evidenced by a Tax party
+classification, which is how the election is expressed) the issuing transaction
+writes one immutable `document_withholding_components` row. Billing selects no
+rule and calculates no rate; it copies and later verifies Tax's result. A
+withholding discharge is a draw on exactly one such row (composite foreign key on
+the component identity, plus a guard that keeps the net accepted amount within
+the frozen amount), so a discharge on an invoice that was not elected, with
+evidence that differs from what was frozen, or above the frozen amount, is
+refused. `apply_available_credit` may draw at most the outstanding receivable
+less the undischarged frozen withholding. An invoice issued before components were frozen is brought under the same rule by `freeze_issued_invoice_withholding`, a
+governed, idempotent, append-only command that takes the Tax determination as of
+the issue date and binds it to the invoice's own line source. It requires the
+`billing.withholding.freeze` permission, checked through an assembly-wired
+`ActorPermissionReader` that authorizes the actor it is given: the route must use
+`permission_guard("billing.withholding.freeze")`, pass the authenticated party it
+returns as `actor_ref`, and wire the reader over `authorize_party`. It also needs
+an assembly-wired `TaxSealReader` that returns Tax's sealed determination (the
+rows are built from Tax's values). An opening-imported invoice is refused with
+`withholding_freeze_opening_import_unavailable` until a party mapping exists. `WithholdingCashRequirementV1` quotes
+the cash an invoice requires once a Tax-owned withholding amount is deducted; it
+is not a discharge, cash or credit.
+
+`get_account_statement` projects a sealed, read-only account statement over the
+ordered ledger: opening balances, each posting group with its per-lane deltas and
+running balances, closing balances and a digest a consumer can recompute. It
+writes nothing and takes no lock.
+
 The historical first release candidate is `0.1.0a1`; the current unreleased
-development successor is `0.1.0a11` and requires
+development successor is `0.1.0a12` and requires
 `dotmac-kernel>=0.1.0a105` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.

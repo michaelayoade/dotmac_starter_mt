@@ -17,6 +17,10 @@ from dotmac_document_rendering.conformance_v2 import (
     renderer_contract_violations_v2,
     result_contract_violations_v2,
 )
+from dotmac_document_rendering.conformance_v3 import (
+    renderer_contract_violations_v3,
+    result_contract_violations_v3,
+)
 from dotmac_document_rendering.contracts import (
     Block,
     ColumnSpec,
@@ -61,6 +65,12 @@ from dotmac_document_rendering.contracts import (
     TemplateInvalid,
     TemplateNotFound,
 )
+from dotmac_document_rendering.contracts_statement_v1 import (
+    AccountStatementFactV1,
+    AccountStatementProjectionV1,
+    StatementEntryV1,
+    StatementProfileBindingV1,
+)
 from dotmac_document_rendering.contracts_v2 import (
     DiscountV2,
     DocumentLineV2,
@@ -84,7 +94,24 @@ from dotmac_document_rendering.contracts_v2 import (
     SelectedTemplateV2,
     TaxSnapshotV2,
 )
+from dotmac_document_rendering.contracts_v3 import (
+    DATA_ONLY_RESOURCE_POLICY,
+    LOGO_MAX_BYTES,
+    LOGO_MAX_DIMENSION,
+    LOGO_MEDIA_TYPES,
+    DocumentProjectionV3,
+    DocumentRendererV3,
+    EmbeddedLogoAssetV3,
+    InvoiceDocumentFactV3,
+    PdfEngineV3,
+    RenderedDocumentV3,
+    RenderRequestV3,
+)
 from dotmac_document_rendering.manifest import module
+from dotmac_document_rendering.output_validation_v3 import (
+    data_uri_for_logo_v3,
+    html_data_only_violations_v3,
+)
 from dotmac_document_rendering.projection import (
     PROJECTION_CONTRACT_VERSION,
     canonical_fact_payload,
@@ -95,6 +122,14 @@ from dotmac_document_rendering.projection import (
     validate_fact,
     validate_projection_source_fields,
 )
+from dotmac_document_rendering.projection_statement_v1 import (
+    STATEMENT_PROJECTION_CONTRACT_VERSION_V1,
+    canonical_statement_projection_payload_v1,
+    fact_fingerprint_statement_v1,
+    project_statement_v1,
+    statement_projection_digest_v1,
+    validate_statement_fact_v1,
+)
 from dotmac_document_rendering.projection_v2 import (
     PROJECTION_CONTRACT_VERSION_V2,
     canonical_projection_payload_v2,
@@ -104,11 +139,32 @@ from dotmac_document_rendering.projection_v2 import (
     validate_fact_v2,
     validate_payment_link_v2,
 )
+from dotmac_document_rendering.projection_v3 import (
+    PROJECTION_CONTRACT_VERSION_V3,
+    canonical_projection_payload_v3,
+    fact_fingerprint_v3,
+    logo_dimensions_v3,
+    project_invoice_v3,
+    projection_digest_v3,
+    validate_fact_v3,
+    validate_logo_asset_v3,
+    verify_logo_content_v3,
+)
+from dotmac_document_rendering.refusal_kit_v3 import (
+    HOSTILE_LEGAL_NAME,
+    FetchSpy,
+    engine_refusal_violations_v3,
+    renderer_refusal_violations_v3,
+)
 from dotmac_document_rendering.renderers import (
     DeterministicHtmlRenderer,
     InMemoryDocumentRenderer,
     PdfDocumentRenderer,
     html_from_projection,
+)
+from dotmac_document_rendering.renderers_statement_v1 import (
+    html_from_statement_projection_v1,
+    statement_html_v1,
 )
 from dotmac_document_rendering.renderers_v2 import (
     DeterministicHtmlRendererV2,
@@ -116,14 +172,26 @@ from dotmac_document_rendering.renderers_v2 import (
     PdfDocumentRendererV2,
     html_from_projection_v2,
 )
+from dotmac_document_rendering.renderers_v3 import (
+    DeterministicHtmlRendererV3,
+    InMemoryDocumentRendererV3,
+    PdfDocumentRendererV3,
+    html_from_projection_v3,
+)
 from dotmac_document_rendering.service import render_document
 from dotmac_document_rendering.service_v2 import (
     render_document_v2,
 )
+from dotmac_document_rendering.service_v3 import render_document_v3
 from dotmac_document_rendering.templates import (
     DEFAULT_ENGLISH_LABELS,
     TemplateCatalog,
     label_map,
+)
+from dotmac_document_rendering.templates_statement_v1 import (
+    DEFAULT_ENGLISH_LABELS_STATEMENT_V1,
+    SelectedStatementTemplateV1,
+    StatementTemplateCatalogV1,
 )
 from dotmac_document_rendering.templates_v2 import (
     DEFAULT_ENGLISH_LABELS_V2,
@@ -140,6 +208,16 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
         "dotmac_document_rendering.renderers_v2",
         "dotmac_document_rendering.service_v2",
         "dotmac_document_rendering.conformance_v2",
+        "dotmac_document_rendering.contracts_v3",
+        "dotmac_document_rendering.projection_v3",
+        "dotmac_document_rendering.renderers_v3",
+        "dotmac_document_rendering.service_v3",
+        "dotmac_document_rendering.conformance_v3",
+        "dotmac_document_rendering.refusal_kit_v3",
+        "dotmac_document_rendering.contracts_statement_v1",
+        "dotmac_document_rendering.projection_statement_v1",
+        "dotmac_document_rendering.templates_statement_v1",
+        "dotmac_document_rendering.renderers_statement_v1",
         "dotmac_document_rendering.conformance",
         "dotmac_document_rendering.contracts",
         "dotmac_document_rendering.manifest",
@@ -151,7 +229,10 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
 )
 
 INTERNAL_MODULES: Final[frozenset[str]] = frozenset(
-    {"dotmac_document_rendering.output_validation_v2"}
+    {
+        "dotmac_document_rendering.output_validation_v2",
+        "dotmac_document_rendering.output_validation_v3",
+    }
 )
 
 __all__ = [
@@ -192,6 +273,54 @@ __all__ = [
     "render_document_v2",
     "renderer_contract_violations_v2",
     "result_contract_violations_v2",
+    "AccountStatementFactV1",
+    "AccountStatementProjectionV1",
+    "StatementEntryV1",
+    "StatementProfileBindingV1",
+    "STATEMENT_PROJECTION_CONTRACT_VERSION_V1",
+    "canonical_statement_projection_payload_v1",
+    "fact_fingerprint_statement_v1",
+    "project_statement_v1",
+    "statement_projection_digest_v1",
+    "validate_statement_fact_v1",
+    "DEFAULT_ENGLISH_LABELS_STATEMENT_V1",
+    "SelectedStatementTemplateV1",
+    "StatementTemplateCatalogV1",
+    "html_from_statement_projection_v1",
+    "statement_html_v1",
+    "DATA_ONLY_RESOURCE_POLICY",
+    "LOGO_MAX_BYTES",
+    "LOGO_MAX_DIMENSION",
+    "LOGO_MEDIA_TYPES",
+    "DocumentProjectionV3",
+    "DocumentRendererV3",
+    "EmbeddedLogoAssetV3",
+    "InvoiceDocumentFactV3",
+    "PdfEngineV3",
+    "RenderRequestV3",
+    "RenderedDocumentV3",
+    "PROJECTION_CONTRACT_VERSION_V3",
+    "canonical_projection_payload_v3",
+    "fact_fingerprint_v3",
+    "logo_dimensions_v3",
+    "project_invoice_v3",
+    "projection_digest_v3",
+    "validate_fact_v3",
+    "validate_logo_asset_v3",
+    "verify_logo_content_v3",
+    "data_uri_for_logo_v3",
+    "html_data_only_violations_v3",
+    "DeterministicHtmlRendererV3",
+    "InMemoryDocumentRendererV3",
+    "PdfDocumentRendererV3",
+    "html_from_projection_v3",
+    "render_document_v3",
+    "renderer_contract_violations_v3",
+    "result_contract_violations_v3",
+    "HOSTILE_LEGAL_NAME",
+    "FetchSpy",
+    "engine_refusal_violations_v3",
+    "renderer_refusal_violations_v3",
     "DEFAULT_ENGLISH_LABELS",
     "INTERNAL_MODULES",
     "PROJECTION_CONTRACT_VERSION",

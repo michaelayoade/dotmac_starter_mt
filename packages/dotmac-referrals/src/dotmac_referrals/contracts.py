@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -30,6 +31,23 @@ def digest(name: str, value: str) -> str:
 def aware(name: str, value: datetime) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ContractError(f"{name} must be timezone-aware")
+
+
+# A service-location ref is an OPAQUE token owned by the composing product. The
+# closed character set (no whitespace, commas or slashes) means address text and
+# coordinate pairs cannot be written into it; this module holds no address or
+# coordinate field and never resolves the token (ADR-0039).
+SERVICE_LOCATION_REF_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\-]{0,159}")
+
+
+def location_ref(name: str, value: str) -> str:
+    normalized = value.strip()
+    if SERVICE_LOCATION_REF_PATTERN.fullmatch(normalized) is None:
+        raise ContractError(
+            f"{name} must be an opaque token of 1 to 160 letters, digits, "
+            "'.', '_', ':' or '-'"
+        )
+    return normalized
 
 
 def fingerprint(payload: object) -> str:
@@ -105,6 +123,48 @@ class CaptureReferral:
 
 
 @dataclass(frozen=True, slots=True)
+class CaptureReferralV2:
+    """Capture V2: V1 plus the opaque place the referred prospect would be served.
+
+    `service_location_ref` is optional because a prospect may not yet have a
+    place; when present it is an opaque token. No coordinates or address text
+    are accepted or stored. V1 `CaptureReferral` is unchanged.
+    """
+
+    code: str
+    referred_subject_ref: str
+    source_owner: str
+    source_event_id: str
+    source_fingerprint: str
+    service_location_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "code", required("code", self.code, 80).upper())
+        object.__setattr__(
+            self,
+            "referred_subject_ref",
+            required("referred_subject_ref", self.referred_subject_ref),
+        )
+        object.__setattr__(
+            self, "source_owner", required("source_owner", self.source_owner, 120)
+        )
+        object.__setattr__(
+            self, "source_event_id", required("source_event_id", self.source_event_id)
+        )
+        object.__setattr__(
+            self,
+            "source_fingerprint",
+            digest("source_fingerprint", self.source_fingerprint),
+        )
+        if self.service_location_ref is not None:
+            object.__setattr__(
+                self,
+                "service_location_ref",
+                location_ref("service_location_ref", self.service_location_ref),
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class RecordConversion:
     referral_id: UUID
     conversion_ref: str
@@ -122,7 +182,9 @@ class RecordConversion:
 
 
 __all__ = [
+    "SERVICE_LOCATION_REF_PATTERN",
     "CaptureReferral",
+    "CaptureReferralV2",
     "ContractError",
     "CreateProgramme",
     "IssueCode",

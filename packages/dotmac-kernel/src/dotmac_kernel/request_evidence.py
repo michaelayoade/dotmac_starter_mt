@@ -351,6 +351,24 @@ def _first_header_value(value: str | None) -> str | None:
     return value.split(",")[0].strip() or None
 
 
+def _parse_hop(entry: str) -> str | None:
+    """Canonical text of a bare IP address, or `None` for anything else.
+
+    No ports, brackets, zone ids or empty strings: each is attacker-controlled
+    cardinality or an unreadable chain, and none is an address a proxy observed.
+    """
+    value = entry.strip()
+    if not value or "%" in value:
+        return None
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return str(address.ipv4_mapped)
+    return str(address)
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class TrustedProxyPolicy:
     """Whether a forwarded address, scheme, host or request id may be believed.
@@ -408,18 +426,42 @@ class TrustedProxyPolicy:
     ) -> str:
         """The originating client address, believed from headers only via a proxy.
 
-        `X-Forwarded-For` accumulates left to right, so the FIRST hop is the
-        original client; taking the last would take the nearest proxy.
-        `X-Real-IP` is the fallback, not the preference: the former carries the
-        chain, the latter carries one hop's opinion of it.
+        `X-Forwarded-For` accumulates left to right, but a PROXY APPENDS: the
+        kernel's nginx renderer uses `$proxy_add_x_forwarded_for`, which keeps
+        whatever the client sent and adds the peer it saw on the right. The
+        client therefore controls every entry to the LEFT of the first one a
+        trusted proxy wrote, and the leftmost entry is attacker-chosen. So the
+        chain is walked from the RIGHT, skipping hops inside the trusted set; the
+        first UNTRUSTED hop is the nearest address a trusted proxy actually
+        observed, and is the client.
+
+        Fail-closed edges, each returning the transport peer (the trusted proxy,
+        a coarser but never a forged identity):
+
+        * an entry that is not a bare IP address (empty, text, `ip:port`, a zone
+          id) makes the chain unreadable -- it is refused, never guessed past;
+        * a chain made ONLY of trusted hops has no observed client to name.
+
+        `X-Real-IP` is the fallback when no `X-Forwarded-For` is present, and must
+        itself be a bare IP address. The result is the canonical text of the
+        address (an IPv4-mapped IPv6 form is reported as its IPv4 address).
         """
-        if self.trusts(peer_address):
-            forwarded_for = _first_header_value(headers.get("x-forwarded-for"))
-            if forwarded_for:
-                return forwarded_for
-            real_ip = _first_header_value(headers.get("x-real-ip"))
-            if real_ip:
-                return real_ip
+        if not self.trusts(peer_address):
+            return peer_address or "unknown"
+        forwarded_for = headers.get("x-forwarded-for")
+        if forwarded_for is not None and forwarded_for.strip():
+            for entry in reversed(forwarded_for.split(",")):
+                hop = _parse_hop(entry)
+                if hop is None:
+                    return peer_address or "unknown"
+                if not self.trusts(hop):
+                    return hop
+            return peer_address or "unknown"
+        real_ip = _first_header_value(headers.get("x-real-ip"))
+        if real_ip:
+            hop = _parse_hop(real_ip)
+            if hop is not None:
+                return hop
         return peer_address or "unknown"
 
     def scheme(
@@ -476,7 +518,14 @@ def _headers(scope: Scope) -> dict[str, str]:
     """Lower-cased header map, last value wins, decoded latin-1 as ASGI requires."""
     collected: dict[str, str] = {}
     for raw_name, raw_value in scope.get("headers") or ():
-        collected[raw_name.decode("latin-1").lower()] = raw_value.decode("latin-1")
+        name = raw_name.decode("latin-1").lower()
+        value = raw_value.decode("latin-1")
+        if name == "x-forwarded-for" and name in collected:
+            # RFC 9110: repeated field lines are one comma-joined list. Last-wins
+            # would let an earlier, client-sent line hide behind a later one (or
+            # the reverse), so the whole chain is kept, in order.
+            value = f"{collected[name]}, {value}"
+        collected[name] = value
     return collected
 
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0a2 — unreleased
+
+- Add neutral observation retention holds (`po_0002_observation_holds`,
+  additive; released `po_0001` bytes are unchanged). A hold pins one
+  observation against the retention sweep on behalf of an opaque holder
+  reference: `place_observation_hold`, `release_observation_hold` and
+  `list_observation_holds`. A hold carries no subject, address, decision or
+  business meaning; the holder owns what its reference means.
+- `prune_observations` never deletes a held observation, and the restricting
+  foreign key means no cascade or direct delete can either. Releasing the last
+  hold on an observation makes it prunable again. Holds do not extend what may
+  be collected: ingest still requires an active collection grant and the
+  caller's `ObservationPolicy`.
+- Backward compatible: no existing signature, column or constraint changes. A
+  deployment on `0.2.0a1` upgrades by running `po_0002` and can roll the
+  application back without rolling the schema back.
+
 ## 0.2.0a1 — unreleased
 
 - Replace domain computation with a private batched Rust extension behind the existing Python API.
