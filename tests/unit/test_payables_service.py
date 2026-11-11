@@ -556,7 +556,14 @@ def test_historical_replay_preserves_invoice_after_settlement_and_key_expiry(
     )
     event = db.get(models.LiabilityEvent, receipt.event_id)
     assert event.event_kind == "historical_invoice_recognized"
-    assert event.occurred_at == NOW
+    # SQLite reloads DateTime(timezone=True) without its UTC offset. The
+    # comparison is specific to this SQLite fixture; the JSON evidence below
+    # proves that admission preserved the original aware instant.
+    assert event.occurred_at.replace(tzinfo=UTC) == NOW
+    assert receipt.original_posted_at.replace(tzinfo=UTC) == NOW
+    assert receipt.evidence["original_posted_at"] == NOW.isoformat(
+        timespec="microseconds"
+    )
     assert receipt.evidence["approved_by"] is None
     assert {
         c.name: getattr(invoice, c.name) for c in invoice.__table__.columns

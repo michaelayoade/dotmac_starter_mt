@@ -471,6 +471,13 @@ def test_historical_admission_concurrency_rls_fk_and_admin_immutability(
                 idempotency_expires_at=None,
                 admitted_at=now,
             )
+            db.refresh(receipt)
+            event = db.get(LiabilityEvent, receipt.event_id)
+            assert event is not None
+            for instant in (receipt.original_posted_at, event.occurred_at):
+                assert instant.tzinfo is not None
+                assert instant.utcoffset() is not None
+                assert instant.astimezone(UTC) == now
             return receipt.id
 
     # Independent keys contend on the permanent invoice identity.
