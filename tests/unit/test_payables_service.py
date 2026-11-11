@@ -12,10 +12,12 @@ import pytest
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_kernel.models import Tenant
+from dotmac_kernel.semantic_encoding import CanonicalEncodingError
 from dotmac_payables import models
 from dotmac_payables.contracts import (
     AccountingReceiptInput,
     ApplyCredit,
+    Conflict,
     CreateCreditNote,
     CreateSupplierInvoice,
     InvalidAmount,
@@ -604,29 +606,33 @@ def test_historical_replay_preserves_invoice_after_settlement_and_key_expiry(
 
 
 @pytest.mark.parametrize(
-    "change",
+    ("change", "error", "match"),
     [
-        {"source_status": "APPROVED"},
-        {"invoice_type": "CREDIT_NOTE"},
-        {"paid_amount": Decimal("1")},
-        {"allocation_count": 1},
-        {"withholding_tax_amount": Decimal("1")},
-        {"prepayment_amount": Decimal("1")},
-        {"total_amount": Decimal("1075.001")},
-        {"total_amount": Decimal("NaN")},
-        {"supplier_document_number": None},
-        {"due_date": date(2026, 9, 1)},
-        {"approved_by": "invented:actor"},
-        {"subtotal": Decimal("1001")},
+        ({"source_status": "APPROVED"}, InvalidTransition, "POSTED STANDARD"),
+        ({"invoice_type": "CREDIT_NOTE"}, InvalidTransition, "POSTED STANDARD"),
+        ({"paid_amount": Decimal("1")}, InvalidTransition, "wholly unpaid"),
+        ({"allocation_count": 1}, InvalidTransition, "wholly unpaid"),
+        ({"withholding_tax_amount": Decimal("1")}, InvalidTransition, "wholly unpaid"),
+        ({"prepayment_amount": Decimal("1")}, InvalidTransition, "wholly unpaid"),
+        ({"total_amount": Decimal("1075.001")}, InvalidAmount, "two-decimal money"),
+        # NaN is refused by cv1 itself before the owner could persist it.
+        ({"total_amount": Decimal("NaN")}, CanonicalEncodingError, "finite Decimal"),
+        (
+            {"supplier_document_number": None},
+            Conflict,
+            "differs on supplier_document_number",
+        ),
+        ({"due_date": date(2026, 9, 1)}, Conflict, "payment schedule differs"),
+        ({"approved_by": "invented:actor"}, Conflict, "differs on approved_by"),
+        ({"subtotal": Decimal("1001")}, InvalidAmount, "do not reconcile"),
     ],
 )
 def test_historical_admission_refuses_ineligible_or_changed_evidence(
-    db: Session, change
+    db: Session, change, error, match
 ) -> None:
     _, evidence, command = _historical_case(db)
     altered = replace(evidence, **change)
-    # NaN is refused by cv1 itself before the owner could persist it.
-    with pytest.raises(ValueError):
+    with pytest.raises(error, match=match):
         _admit(
             db, altered, replace(command, evidence_fingerprint=altered.fingerprint())
         )
@@ -635,6 +641,59 @@ def test_historical_admission_refuses_ineligible_or_changed_evidence(
         == 0
     )
     assert db.scalar(select(func.count()).select_from(models.PaymentObligation)) == 0
+    assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0
+
+
+@pytest.mark.parametrize("write", ["add", "dirty", "delete"])
+def test_historical_admission_refuses_when_verifier_writes_to_session(
+    db: Session, write: str
+) -> None:
+    from dotmac_payables import admit_historical_unpaid_invoice
+
+    invoice, evidence, command = _historical_case(db)
+    db.flush()
+
+    class WritingVerifier:
+        def verify(self, *, scope, command, destination):
+            if write == "add":
+                destination.add(
+                    models.LiabilityEvent(
+                        tenant_id=TENANT,
+                        event_kind="forged",
+                        document_kind="supplier_invoice",
+                        document_id=invoice.id,
+                        supplier_ref=evidence.supplier_ref,
+                        currency_code="NGN",
+                        amount=Decimal("1.00"),
+                        source_reference="x",
+                        source_fingerprint="f" * 64,
+                        occurred_at=NOW,
+                    )
+                )
+            elif write == "dirty":
+                invoice.approval_reference = "mutated-by-verifier"
+            else:
+                destination.delete(invoice)
+            return evidence
+
+    with pytest.raises(InvalidTransition, match="verifier must not write"):
+        admit_historical_unpaid_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=command,
+            verifier=WritingVerifier(),
+            idempotency_key="writing-verifier",
+            idempotency_expires_at=None,
+            admitted_at=NOW,
+        )
+    # Drop the verifier's unflushed writes; nothing was admitted or persisted.
+    db.expunge_all()
+    assert (
+        db.scalar(select(func.count()).select_from(models.HistoricalInvoiceReceipt))
+        == 0
+    )
+    assert db.scalar(select(func.count()).select_from(models.PaymentObligation)) == 0
+    assert db.scalar(select(func.count()).select_from(models.LiabilityEvent)) == 0
 
 
 def test_historical_receipt_insert_failure_rolls_back_recognition(

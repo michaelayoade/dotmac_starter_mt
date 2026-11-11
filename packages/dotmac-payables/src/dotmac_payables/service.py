@@ -1089,7 +1089,12 @@ def admit_historical_unpaid_invoice(
     # All invoice writers and accounting guards share this lock. Verify the
     # immutable destination facts under it, rather than admitting a stale proof.
     locked = _invoice(db, scope.tenant_id, command.invoice_id, lock=True)
-    evidence = verifier.verify(scope=scope, command=command, destination=db)
+    # The verifier only reads. no_autoflush keeps any pending write visible to
+    # the check below instead of being flushed (and hidden) by a later query.
+    with db.no_autoflush:
+        evidence = verifier.verify(scope=scope, command=command, destination=db)
+        if db.new or db.dirty or db.deleted:
+            raise InvalidTransition("historical verifier must not write")
     if not isinstance(evidence, HistoricalUnpaidInvoiceEvidence):
         raise InvalidTransition("historical verifier returned no typed evidence")
     if (

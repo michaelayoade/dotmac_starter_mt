@@ -8,7 +8,11 @@
   without approving again or producing duplicate imported GL consequences.
 - Require kernel a103 for versioned cv1 semantic evidence fingerprints.
 
-## 0.1.0a2 — unreleased
+## 0.1.0a2 — 2026-11-10
+
+Published, tagged as `dotmac-payables-v0.1.0a2` from exact protected-main
+revision `a9b777d6` by release run `42883090361`.
+
 
 - Historical or imported supplier invoices and credit notes whose
   supplier-issued document number was never captured may persist that absence
