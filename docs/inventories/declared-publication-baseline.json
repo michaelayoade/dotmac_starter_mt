@@ -92,11 +92,6 @@
       "reason": "INTENDED AND MECHANICALLY HELD BACK. The greenfield NiRA/CoCCA EPP transport has no published tag and release_enabled is false, so it is available only to development composition and both release resolves refuse it. Authenticated OT&E login still requires the Integrator source-IP whitelist; the exact production egress hostname has not been reviewed into the manifest; and dotmac-domains has not yet published the provider-neutral command/result contracts. Remove this row only in the same change that satisfies those gates, enables the reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source conformance is not adoption and must not be used to bypass the hold or edit the declaration down.",
       "state": "never-published"
     },
-    "dotmac-connector-paystack": {
-      "declared": "0.1.0a3",
-      "reason": "DECLARED BY THE REFUND SLICE (narrowed to refunds, D5 2026-11-04), NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-paystack-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and the DELIVERY capability id payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as SETTLEMENT_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
-      "state": "declared-unpublished"
-    },
     "dotmac-connector-remita": {
       "declared": "0.1.0a2",
       "reason": "DECLARED BY THE RRR ISSUANCE SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-remita-v0.1.0a1 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.reference.issuance.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 manifest is preserved as POLL_ONLY_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an ERP shadow cutover before that tag exists.",
@@ -130,11 +125,6 @@
     "dotmac-kernel": {
       "declared": "0.1.0a108+dev",
       "reason": "INTENDED DEVELOPMENT SOURCE MARKER, NOT A RELEASE ALLOCATION. Verified 0.1.0a108 remains identified by dotmac-kernel-v0.1.0a108 (peeled commit 0e322f0247129cdbf6480ddffc61383d6690b924); the current UI presentation, render-filter and request-feedback source differs from that released surface. The +dev marker preserves that distinction while the proposed a109 changelog inventory allocates no successor. Hosted source acceptance, protected release authorization and allocation, independent artifact verification and consumer qualification remain separate gates. Replace this row only through the authorized successor allocation and oracle-backed release-record sequence; do not publish or pin +dev, edit the source declaration down, or treat this row as publication or adoption evidence.",
-      "state": "declared-unpublished"
-    },
-    "dotmac-payables": {
-      "declared": "0.1.0a2",
-      "reason": "ALLOCATED FOR THE ERP V2 SUPPLIER-DOCUMENT CUTOVER FIX, NOT YET PUBLISHED. 0.1.0a1 remains published and tagged as dotmac-payables-v0.1.0a1. 0.1.0a2 adds pa_0002_optional_supplier_doc so historical or imported supplier invoices and credit notes whose supplier-issued document number was never captured can persist that absence as NULL, while new service-created documents still require the number. Remove this row only with the verified 0.1.0a2 publication record; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {

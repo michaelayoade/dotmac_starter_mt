@@ -7840,6 +7840,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a2": (
+        "dotmac-payables",
+        "a9b777d6caa5aead4f89a767a9118508958deeb7",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a1": (
         "dotmac-payables",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -8530,7 +8542,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    "dotmac-payables": frozenset({"pa_0002_optional_supplier_doc.py"}),
+    "dotmac-payables": frozenset(),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     "dotmac-positioning": frozenset(),
