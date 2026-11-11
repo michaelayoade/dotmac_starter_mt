@@ -18,12 +18,19 @@ from dotmac_billing.authority import (
 )
 from dotmac_billing.commands import (
     AcceptWithholdingDischarge,
+    AllocationCommand,
+    ApplyAvailableCreditCommand,
     ApplyNonCashCredit,
+    DeallocationCommand,
     FreezeIssuedInvoiceWithholding,
     GrantNonCashCredit,
+    IssueCreditNote,
+    IssueDocument,
     NumberingProvider,
     ReduceNonCashCreditGrant,
+    RefundCommand,
     ReverseNonCashCreditApplication,
+    ReversePostingGroupCommand,
     ReverseWithholdingDischarge,
 )
 from dotmac_billing.contracts import (
@@ -99,10 +106,14 @@ from dotmac_billing.document_queries import (
     AccountingFactWindowSummaryV1,
     DocumentWithholdingEvidenceV1,
     ListAccountingFactsV1,
+    OpenReceivableDocumentCursorV1,
+    OpenReceivableDocumentPageV1,
+    OpenReceivableDocumentV1,
     SummarizeAccountingFactWindowV1,
     get_document_exposure,
     get_document_withholding_evidence,
     list_accounting_facts,
+    list_open_receivable_documents,
     summarize_accounting_fact_window,
 )
 from dotmac_billing.earmark_authority import (
@@ -197,6 +208,13 @@ from dotmac_billing.opening_hold_contracts import (
     opening_hold_content_digest,
     opening_hold_subject_id,
     require_hold_maker_checker,
+)
+from dotmac_billing.opening_lane import (
+    OpeningLaneAssemblyAuthorityV1,
+    OpeningLanePartitionResultV1,
+    admit_held_opening_lane_partition,
+    import_opening_lane_partition,
+    seal_opening_lane,
 )
 from dotmac_billing.opening_qualification import (
     OpeningImportGrantProviderV2,
@@ -356,7 +374,20 @@ from dotmac_billing.queries import (
     get_receivable_position_v2,
     get_withholding_discharge,
 )
-from dotmac_billing.service import issue_rated_invoice
+from dotmac_billing.service import (
+    accept_settlement,
+    accept_withholding_discharge,
+    allocate_settlement,
+    apply_available_credit,
+    deallocate_settlement,
+    grant_non_cash_credit,
+    issue_credit_note,
+    issue_document,
+    issue_rated_invoice,
+    refund_settlement,
+    reverse_posting_group,
+    void_document,
+)
 
 __version__ = "0.1.0a12"
 
@@ -378,6 +409,33 @@ from dotmac_billing.tax_evidence import (
 )
 
 __all__ = [
+    "AllocationCommand",
+    "ApplyAvailableCreditCommand",
+    "DeallocationCommand",
+    "IssueCreditNote",
+    "IssueDocument",
+    "RefundCommand",
+    "ReversePostingGroupCommand",
+    "accept_settlement",
+    "accept_withholding_discharge",
+    "allocate_settlement",
+    "apply_available_credit",
+    "deallocate_settlement",
+    "grant_non_cash_credit",
+    "issue_credit_note",
+    "issue_document",
+    "refund_settlement",
+    "reverse_posting_group",
+    "void_document",
+    "OpeningLaneAssemblyAuthorityV1",
+    "OpeningLanePartitionResultV1",
+    "admit_held_opening_lane_partition",
+    "import_opening_lane_partition",
+    "seal_opening_lane",
+    "OpenReceivableDocumentCursorV1",
+    "OpenReceivableDocumentPageV1",
+    "OpenReceivableDocumentV1",
+    "list_open_receivable_documents",
     "AccountingFactCursorV1",
     "AccountingFactIndexEntryV1",
     "AccountingFactIndexPageV1",

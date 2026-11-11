@@ -37,6 +37,10 @@ from dotmac_billing.queries import get_withholding_discharge
 
 FACT_INDEX_DIGEST_DOMAIN = "billing.accounting.fact.index.v1"
 MAX_FACT_INDEX_PAGE = 1000
+MAX_OPEN_DOCUMENT_PAGE = 200
+#: Candidate invoices examined by one call, so a page of mostly-settled
+#: documents cannot make one call unbounded; the cursor resumes the scan.
+MAX_OPEN_DOCUMENT_SCAN = 1000
 
 
 def _require_scope(scope: Scope) -> None:
@@ -587,6 +591,172 @@ def summarize_accounting_fact_window(
     return AccountingFactWindowSummaryV1(scope, start, end, count, digest.hexdigest())
 
 
+# --------------------------------------------------------------------------
+# Open receivable documents of one account
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class OpenReceivableDocumentCursorV1:
+    """Position in the stable ``(issued_at, document_id)`` key."""
+
+    issued_at: datetime
+    document_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class OpenReceivableDocumentV1:
+    """One open collectible invoice, with the evidence a policy needs to order it.
+
+    Billing states facts only. ``due_at`` is ``None`` when the due date is
+    unknown; the caller decides where such documents sort.
+    """
+
+    document_id: UUID
+    issued_at: datetime
+    due_at: datetime | None
+    collectible_receivable: Money
+    service_ref: str | None
+    source_version: int
+    financial_state: Literal["open", "partially_resolved"]
+
+
+@dataclass(frozen=True, slots=True)
+class OpenReceivableDocumentPageV1:
+    """A page in ``(issued_at, document_id)`` order; this is not a policy order.
+
+    ``next_cursor`` is ``None`` only when the account's candidates are exhausted.
+    A page may be shorter than ``limit`` while ``next_cursor`` is set (the scan
+    is bounded); keep paging until it is ``None``.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    currency: Currency
+    entries: tuple[OpenReceivableDocumentV1, ...]
+    next_cursor: OpenReceivableDocumentCursorV1 | None
+    contract_version: Literal["billing.open.receivable.documents.v1"] = (
+        "billing.open.receivable.documents.v1"
+    )
+
+
+def list_open_receivable_documents(
+    db: Session,
+    *,
+    scope: Scope,
+    account: UUID,
+    currency: Currency,
+    cursor: OpenReceivableDocumentCursorV1 | None = None,
+    limit: int = 100,
+) -> OpenReceivableDocumentPageV1:
+    """Return one keyset page of an account's open, collectible invoices.
+
+    Every candidate is read through ``get_document_exposure``, so each entry is
+    re-derived against Billing's own backing and a corrupt or stale exposure
+    refuses the call rather than being skipped. Only ``open`` and
+    ``partially_resolved`` documents with a positive collectible amount in
+    ``currency`` are returned; resolved and cancelled documents are not. Read-only
+    and lock-free; the caller owns the transaction. Billing applies no policy
+    ordering: the page order is the stable ``(issued_at, document_id)`` key.
+    """
+    _require_scope(scope)
+    if not isinstance(account, UUID):
+        raise BillingRuleViolation(
+            "invalid_account_id", "billing account identity must be a UUID"
+        )
+    if type(currency) is not Currency:
+        raise BillingRuleViolation("invalid_currency", "currency must be a Currency")
+    if (
+        not isinstance(limit, int)
+        or isinstance(limit, bool)
+        or not 1 <= limit <= MAX_OPEN_DOCUMENT_PAGE
+    ):
+        raise BillingRuleViolation(
+            "invalid_limit", "page limit is outside the supported range"
+        )
+    if cursor is not None and not isinstance(cursor, OpenReceivableDocumentCursorV1):
+        raise BillingRuleViolation(
+            "invalid_cursor", "the cursor must be a Billing open-document cursor"
+        )
+    documents = _table(scope, "documents")
+    order = (documents.c.issued_at, documents.c.id)
+    entries: list[OpenReceivableDocumentV1] = []
+    scanned = 0
+    last: OpenReceivableDocumentCursorV1 | None = cursor
+    exhausted = False
+    while len(entries) < limit and scanned < MAX_OPEN_DOCUMENT_SCAN:
+        batch = min(limit, MAX_OPEN_DOCUMENT_SCAN - scanned)
+        statement = select(*order).where(
+            documents.c.billing_account_id == account,
+            documents.c.document_kind == "invoice",
+            documents.c.issued_at.is_not(None),
+            documents.c.currency == currency.code,
+            documents.c.minor_units == currency.minor_units,
+        )
+        if last is not None:
+            statement = statement.where(
+                tuple_(*order)
+                > tuple_(
+                    *(
+                        literal(value, column.type)
+                        for column, value in zip(
+                            order, (last.issued_at, last.document_id), strict=True
+                        )
+                    )
+                )
+            )
+        with db.no_autoflush:
+            rows = db.execute(
+                _scoped(statement, scope, documents).order_by(*order).limit(batch + 1)
+            ).all()
+        taken = rows[:batch]
+        processed = 0
+        for issued_at, document_id in taken:
+            processed += 1
+            scanned += 1
+            last = OpenReceivableDocumentCursorV1(issued_at, document_id)
+            exposure = get_document_exposure(db, scope=scope, document_id=document_id)
+            money = exposure.collectible_receivable
+            if (
+                exposure.financial_state not in ("open", "partially_resolved")
+                or money.currency != currency
+                or money.amount <= 0
+            ):
+                continue
+            if isinstance(exposure, ReceivableExposureV2):
+                due_at = exposure.collection.due_at
+                service_ref = exposure.collection.service_ref
+            else:
+                due_at = exposure.due_at
+                service_ref = exposure.service_ref
+            entries.append(
+                OpenReceivableDocumentV1(
+                    document_id,
+                    issued_at,
+                    due_at,
+                    money,
+                    service_ref,
+                    exposure.source_version,
+                    cast(
+                        Literal["open", "partially_resolved"], exposure.financial_state
+                    ),
+                )
+            )
+            if len(entries) == limit:
+                break
+        more = len(rows) > batch or processed < len(taken)
+        if not more:
+            exhausted = True
+            break
+    return OpenReceivableDocumentPageV1(
+        scope,
+        account,
+        currency,
+        tuple(entries),
+        None if exhausted or last is None else last,
+    )
+
+
 __all__ = [
     "AccountingFactCursorV1",
     "AccountingFactIndexEntryV1",
@@ -594,10 +764,14 @@ __all__ = [
     "DocumentWithholdingEvidenceV1",
     "AccountingFactWindowSummaryV1",
     "ListAccountingFactsV1",
+    "OpenReceivableDocumentCursorV1",
+    "OpenReceivableDocumentPageV1",
+    "OpenReceivableDocumentV1",
     "SummarizeAccountingFactWindowV1",
     "exposure_state_fingerprint",
     "get_document_exposure",
     "get_document_withholding_evidence",
     "list_accounting_facts",
+    "list_open_receivable_documents",
     "summarize_accounting_fact_window",
 ]
