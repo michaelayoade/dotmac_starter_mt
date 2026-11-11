@@ -268,6 +268,8 @@ def test_every_composed_template_is_a_page_a_fragment_or_a_declared_non_page() -
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/request_feedback_assets.html",
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/sidebar.html",
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/table_macros.html",
+        # Body-only feedback container; never a standalone response.
+        "packages/dotmac-kernel/src/dotmac_kernel/templates/components/toasts.html",
         "packages/dotmac-kernel/src/dotmac_kernel/templates/components/topbar.html",
         "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/dashboard_grid.html",
         "packages/dotmac-ui/src/dotmac_ui/templates/dotmac_ui/components/dashboard_line_chart.html",
