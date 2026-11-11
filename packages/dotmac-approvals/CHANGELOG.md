@@ -3,7 +3,27 @@
 All notable changes to the `dotmac-approvals` distribution. This package follows
 [Semantic Versioning](https://semver.org). The `.github/release-modules.json`
 entry landed once the live Postgres migration and catalog gate passed;
-`0.1.0a1` through `0.1.0a8` have since been published.
+`0.1.0a1` through `0.1.0a8` have since been published; `0.1.0a9` is the
+unreleased dev marker.
+
+## 0.1.0a9 — unreleased (dev)
+
+**Export-only; no behaviour change.** `0.1.0a8` is published and tagged; this
+source adds names to the package root, so it declares the newly allocated
+`0.1.0a9`. Publication happens through a separate `workflow_dispatch` of
+`release-module.yml`.
+
+- Export from `dotmac_approvals` (top-level `__all__`): `request_tenant_approval`,
+  `request_platform_approval`, `record_tenant_decision`,
+  `record_platform_decision`, `evaluate_tenant_approval`,
+  `evaluate_platform_approval` and their result type `ApprovalOutcome`. The
+  functions and the type already existed in `dotmac_approvals.service` and are
+  unchanged; this package has no separate command dataclasses (the commands take
+  keyword arguments).
+- Why: ADR 0024 section 14 lets a composition package call only names in an
+  owner's top-level `__all__`. Without these exports the money-flows package
+  cannot call approval request, decision or evaluate (money-flows plan section 4,
+  gap G3). Declaring them is a public-API commitment.
 
 ## 0.1.0a8 — 2026-09-26 — published (tag `dotmac-approvals-v0.1.0a8`)
 

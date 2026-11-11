@@ -75,8 +75,17 @@ from dotmac_approvals.outbox import (
     withdraw_platform_approval,
     withdraw_tenant_approval,
 )
+from dotmac_approvals.service import (
+    ApprovalOutcome,
+    evaluate_platform_approval,
+    evaluate_tenant_approval,
+    record_platform_decision,
+    record_tenant_decision,
+    request_platform_approval,
+    request_tenant_approval,
+)
 
-__version__ = "0.1.0a8"
+__version__ = "0.1.0a9"
 
 __all__ = [
     "ActionRefusal",
@@ -86,6 +95,7 @@ __all__ = [
     "ApprovalHoldRefusal",
     "ApprovalLevel",
     "ApprovalNotHeld",
+    "ApprovalOutcome",
     "ApprovalState",
     "ApproverKind",
     "ContentChanged",
@@ -116,7 +126,13 @@ __all__ = [
     "WithdrawalReferenceConflict",
     "WithdrawalRefused",
     "__version__",
+    "evaluate_platform_approval",
+    "evaluate_tenant_approval",
     "module",
+    "record_platform_decision",
+    "record_tenant_decision",
+    "request_platform_approval",
+    "request_tenant_approval",
     "versions_dir",
     "withdraw_platform_approval",
     "withdraw_tenant_approval",
