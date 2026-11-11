@@ -13,7 +13,6 @@
 Published, tagged as `dotmac-payables-v0.1.0a2` from exact protected-main
 revision `a9b777d6` by release run `42883090361`.
 
-
 - Historical or imported supplier invoices and credit notes whose
   supplier-issued document number was never captured may persist that absence
   as NULL. New documents created through the service contracts still require

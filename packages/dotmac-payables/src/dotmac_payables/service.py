@@ -16,7 +16,7 @@ from uuid import UUID
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.semantic_encoding import canonical_instant
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1067,6 +1067,10 @@ def _evidence_json(evidence: HistoricalUnpaidInvoiceEvidence) -> dict[str, objec
     return result
 
 
+class _DiscardVerifierSavepoint(Exception):
+    """Private sentinel: always leave the verifier savepoint by rolling it back."""
+
+
 def admit_historical_unpaid_invoice(
     db: Session,
     *,
@@ -1089,12 +1093,31 @@ def admit_historical_unpaid_invoice(
     # All invoice writers and accounting guards share this lock. Verify the
     # immutable destination facts under it, rather than admitting a stale proof.
     locked = _invoice(db, scope.tenant_id, command.invoice_id, lock=True)
-    # The verifier only reads. no_autoflush keeps any pending write visible to
-    # the check below instead of being flushed (and hidden) by a later query.
-    with db.no_autoflush:
-        evidence = verifier.verify(scope=scope, command=command, destination=db)
-        if db.new or db.dirty or db.deleted:
-            raise InvalidTransition("historical verifier must not write")
+    # The verifier only reads. It runs in a savepoint that is always discarded,
+    # so flushed and Core writes are contained, and any ORM write is refused.
+    wrote: list[bool] = []
+
+    def _saw_flush(session: Session, _context: object) -> None:
+        if session.new or session.dirty or session.deleted:
+            wrote.append(True)
+
+    try:
+        with db.begin_nested():
+            event.listen(db, "after_flush", _saw_flush)
+            try:
+                with db.no_autoflush:
+                    evidence = verifier.verify(
+                        scope=scope, command=command, destination=db
+                    )
+                    if db.new or db.dirty or db.deleted:
+                        wrote.append(True)
+            finally:
+                event.remove(db, "after_flush", _saw_flush)
+            raise _DiscardVerifierSavepoint
+    except _DiscardVerifierSavepoint:
+        pass
+    if wrote:
+        raise InvalidTransition("historical verifier must not write")
     if not isinstance(evidence, HistoricalUnpaidInvoiceEvidence):
         raise InvalidTransition("historical verifier returned no typed evidence")
     if (
