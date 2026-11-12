@@ -175,13 +175,29 @@ def _deployment_admission_provider(bindings: ExecutionBindings | None):
     stays the default, never an accident of omission. Discovery already
     happened on the execute path that calls this; `validate` and dry
     runs never reach it, and nothing here reads request material.
-    Recovery execution does NOT use this helper: it keeps its literal
-    refusing provider until it has a grant/consumption contract.
+    Isolated restore rehearsal uses its own scoped helper. Neither provider
+    substitutes for the other, and neither authorizes production recovery.
     """
     from .host_source_admission import RefusingHostSourceAdmissionProvider
 
     if bindings is not None and bindings.deployment_admission_provider is not None:
         return bindings.deployment_admission_provider
+    return RefusingHostSourceAdmissionProvider()
+
+
+def _restore_rehearsal_admission_provider(bindings: ExecutionBindings | None):
+    """Select only the installed assembly's isolated restore admission.
+
+    Missing remains refusal. Deployment admission is never a fallback, and
+    this helper supplies neither a session nor production recovery authority.
+    """
+    from .host_source_admission import RefusingHostSourceAdmissionProvider
+
+    if (
+        bindings is not None
+        and bindings.restore_rehearsal_admission_provider is not None
+    ):
+        return bindings.restore_rehearsal_admission_provider
     return RefusingHostSourceAdmissionProvider()
 
 
@@ -836,7 +852,7 @@ def _execute_restore_rehearsal(
     That premise stops exactly where the act does. Recovering a FAILED
     PRODUCTION SYSTEM mutates something that already exists and needs the whole
     chain — an authorization binding, the replay coordinate, a settleable signed
-    result. That is `0.4.0a1`'s subject and it is not this command's.
+    result. That separate production-recovery subject is not this command's.
 
     `recover` is deliberately absent from `authorization.OPERATIONS`, and it is
     NOT scheduled to return merely because that capability lands: the vocabulary
@@ -844,7 +860,6 @@ def _execute_restore_rehearsal(
     constant rather than restated here.
     """
     from .execution_bindings import ENTRY_POINT_GROUP
-    from .host_source_admission import RefusingHostSourceAdmissionProvider
     from .recovery import load_manifest
     from .recovery_execution import (
         SESSION_ABSENT,
@@ -891,10 +906,9 @@ def _execute_restore_rehearsal(
         session.effects,
         source_evidence=session.source_evidence,
         product_image=session.product_image,
-        # This CLI wires no real host-source admission (see the matching
-        # comment in `cmd_deploy`); the refusing provider preserves today's
-        # unconditional refusal as a visible decision.
-        admission_provider=RefusingHostSourceAdmissionProvider(),
+        # This isolated path reads only its own installation-fixed provider.
+        # Unwired assemblies still refuse before target creation or effects.
+        admission_provider=_restore_rehearsal_admission_provider(bindings),
     ).run(session.bundle)
 
     print()

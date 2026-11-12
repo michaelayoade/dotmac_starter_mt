@@ -133,10 +133,15 @@ class ExecutionBindings:
     #: selected from request material. None means the CLI keeps the
     #: refusing provider — the unconditional refusal stands exactly as
     #: before this field existed. Recovery execution deliberately never
-    #: reads this field: `RecoveryExecutor` has no grant/consumption
-    #: contract yet, so its CLI site keeps the literal refusing provider
-    #: until that contract exists.
+    #: reads this field: isolated restore rehearsal has its own provider below.
+    #: Production recovery remains unavailable and has a separate authority
+    #: contract; deployment admission is never a recovery authorization.
     deployment_admission_provider: HostSourceAdmissionProvider | None = None
+    #: Host-source admission only for the isolated `restore-rehearsal` CLI.
+    #: Fixed at assembly installation/discovery, never a request selector.
+    #: This does not authorize production recovery or supply a RecoverySession.
+    #: None retains the literal refusing provider; deployment never reads it.
+    restore_rehearsal_admission_provider: HostSourceAdmissionProvider | None = None
 
     def __post_init__(self) -> None:
         name = str(self.provider).strip()
@@ -206,6 +211,15 @@ class ExecutionBindings:
                 "`admit_host_source()` method); got "
                 f"{type(self.deployment_admission_provider).__name__}"
             )
+        if self.restore_rehearsal_admission_provider is not None and not isinstance(
+            self.restore_rehearsal_admission_provider, HostSourceAdmissionProvider
+        ):
+            raise SpecError(
+                "ExecutionBindings.restore_rehearsal_admission_provider does not "
+                "implement HostSourceAdmissionProvider (an "
+                "`admit_host_source()` method); got "
+                f"{type(self.restore_rehearsal_admission_provider).__name__}"
+            )
         for field in ("evidence_verifier", "recovery_verifier"):
             value = getattr(self, field)
             if value is not None and not isinstance(value, SignatureVerifier):
@@ -224,6 +238,7 @@ class ExecutionBindings:
             and self.evidence_verifier is None
             and self.recovery_verifier is None
             and self.deployment_admission_provider is None
+            and self.restore_rehearsal_admission_provider is None
         ):
             raise SpecError(
                 "ExecutionBindings carries no injectable at all. An empty "
