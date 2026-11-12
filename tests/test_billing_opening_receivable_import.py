@@ -13,7 +13,7 @@ from threading import Barrier, Thread
 from uuid import uuid4
 
 import pytest
-from dotmac_billing import models
+from dotmac_billing import list_open_receivable_documents, models
 from dotmac_billing import opening_queries as cash_queries
 from dotmac_billing import opening_receivable_queries as q
 from dotmac_billing import service as s
@@ -27,6 +27,7 @@ from dotmac_billing.commands import (
     ReverseNonCashCreditApplication,
     ReverseWithholdingDischarge,
 )
+from dotmac_billing.contracts import DueDateBasisStatus
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
 from dotmac_billing.opening_commands import ReverseOpeningAccountImportV1
 from dotmac_billing.opening_receivable_validation import (
@@ -351,6 +352,56 @@ def test_complete_partition_recognizes_residual_without_issuing_history(scratch,
             assert exposure.collection.subject_ref is exposure.collection.due_at is None
             assert exposure.collection.service_ref is None
             assert exposure.financial_state == "open"
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_open_documents_read_returns_imported_items_and_native_invoice(scratch, plane):
+    from types import SimpleNamespace
+
+    from tests import test_billing_open_receivable_documents as native
+
+    scope, url = noncash._scope_url(scratch, plane)
+    with cash._session(scratch, url, scope) as db:
+        account = cash._new_account(db, scope)
+        _, receipt = _import(db, scope, account)
+        bases = _bases(db, scope, receipt)
+        invoice = native._invoice(db, scope, SimpleNamespace(id=account))
+        db.commit()
+        entries, cursor = [], None
+        while True:
+            page = list_open_receivable_documents(
+                db,
+                scope=scope,
+                account=account,
+                currency=b._money("1").currency,
+                cursor=cursor,
+                limit=1,
+            )
+            entries.extend(page.entries)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+        by_id = {entry.document_id: entry for entry in entries}
+        assert len(entries) == len(by_id) == len(bases) + 1
+        assert [(e.issued_at, e.document_id) for e in entries] == sorted(
+            (e.issued_at, e.document_id) for e in entries
+        )
+        for basis in bases:
+            entry = by_id[basis.document_id]
+            exposure = q.get_opening_receivable_exposure(
+                db, scope=scope, basis_id=basis.basis_id
+            )
+            assert entry.collectible_receivable == basis.initial_receivable
+            assert entry.financial_state == "open"
+            assert entry.due_at is exposure.collection.due_at is None
+            assert entry.service_ref is exposure.collection.service_ref is None
+            assert entry.source_version == exposure.source_version
+            assert entry.due_at_basis is DueDateBasisStatus.UNKNOWN_UNVERIFIED
+        native_entry = by_id[invoice.id]
+        assert native_entry.collectible_receivable == b._money("120.00")
+        assert native_entry.due_at == invoice.due_at and invoice.due_at is not None
+        assert native_entry.service_ref == "service:example"
+        assert native_entry.due_at_basis is DueDateBasisStatus.VERIFIED
 
 
 @pytest.mark.parametrize("plane", ["tenant", "platform"])

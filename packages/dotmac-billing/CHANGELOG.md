@@ -4,8 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## 0.1.0a12 — UNRELEASED
 
-The a11 number was never published; a12 carries everything listed under a11
-below plus the B lane. Migrations here (`bi_0015` and later) are unreleased and
+a11 was published on 2026-11-10 (tag `dotmac-billing-v0.1.0a11`); a12 adds the
+B lane and the entries below. Migrations here (`bi_0015` and later) are unreleased and
 chain after `bi_0014_opening_variance_ledger`.
 
 - B1 (`bi_0015_line_price_version_fk`): a composite foreign key
@@ -103,8 +103,45 @@ chain after `bi_0014_opening_variance_ledger`.
   (`compute_account_statement_digest`, recomputable by a consumer; the dataclass
   verifies it on construction). Anchored to the ledger watermark read, bounded to
   5000 lines (`statement_too_large`). No DDL, no write, no event.
+- G1 (money-flows, export-only; no behaviour change): the existing owner
+  commands and their command types become part of the declared top-level
+  `__all__`, so a composing app can call them under ADR 0024 §14. Functions:
+  `accept_settlement`, `allocate_settlement`, `accept_withholding_discharge`,
+  `apply_available_credit`, `deallocate_settlement`, `refund_settlement`,
+  `reverse_posting_group`, `reverse_withholding_discharge`,
+  `reverse_cash_credit_draw`, `reverse_non_cash_credit_application`,
+  `void_document`, `issue_document`,
+  `issue_credit_note`, `grant_non_cash_credit`. Commands: `AllocationCommand`,
+  `ApplyAvailableCreditCommand`, `DeallocationCommand`, `RefundCommand`,
+  `ReversePostingGroupCommand`, `IssueDocument`, `IssueCreditNote`
+  (`AcceptWithholdingDischarge` and `GrantNonCashCredit` were already
+  exported). Opening lane entry points: `import_opening_lane_partition`,
+  `admit_held_opening_lane_partition`, `seal_opening_lane`,
+  `OpeningLaneAssemblyAuthorityV1`, `OpeningLanePartitionResultV1`.
+  `void_document` has no command type. This is a declared-public-API
+  commitment, not a control relaxation.
+- G2: add `list_open_receivable_documents(db, *, scope, account, currency,
+  cursor=None, limit=100)`, a read-only, RLS-scoped page of an account's open
+  (`open` or `partially_resolved`), collectible invoices in one currency, each
+  with `document_id`, `issued_at`, `due_at`, `collectible_receivable`,
+  `service_ref`, `source_version`, `financial_state` and `due_at_basis`
+  (the existing `DueDateBasisStatus`: a native invoice's `due_date_basis`, or an
+  imported item's collection and basis, so `unknown_unverified` is distinguishable
+  from a verified date)
+  (`OpenReceivableDocumentV1`, `OpenReceivableDocumentPageV1`,
+  `OpenReceivableDocumentCursorV1`). Every entry is re-derived through
+  `get_document_exposure`, so a corrupt or stale exposure refuses the call.
+  Billing applies no policy ordering: pages follow the stable
+  `(issued_at, document_id)` keyset, the limit is 1 to 200, and one call scans
+  at most 1000 candidates (a page may be short while `next_cursor` is set).
+  The caller (flows) orders by policy. No table.
+- G2 (`bi_0017_open_documents_index`): a partial index on `documents`
+  `(tenant_id, billing_account_id, issued_at, id)` and on `platform_documents`
+  `(billing_account_id, issued_at, id)`, both `WHERE document_kind = 'invoice'
+  AND issued_at IS NOT NULL`, serving the read's keyset. An index only: no
+  column, constraint, grant or row change; the downgrade drops only the indexes.
 
-## 0.1.0a11 — UNRELEASED (rolled into a12)
+## 0.1.0a11 — published 2026-11-10
 
 - Breaking for adapters: `NumberingProvider.allocate` now also receives a
   required `document_reference`, the stable identity of the document being

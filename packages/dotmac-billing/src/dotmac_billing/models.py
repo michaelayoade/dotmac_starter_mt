@@ -289,6 +289,16 @@ class BillingDocument(Base, _TenantRow, _DocumentColumns):
             "document_number",
             name="uq_documents_tenant_number",
         ),
+        Index(
+            "ix_documents_open_by_account",
+            "tenant_id",
+            "billing_account_id",
+            "issued_at",
+            "id",
+            postgresql_where=text(
+                "document_kind = 'invoice' AND issued_at IS NOT NULL"
+            ),
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -333,6 +343,15 @@ class PlatformBillingDocument(Base, _DocumentColumns):
         ),
         UniqueConstraint(
             "series_code", "document_number", name="uq_platform_documents_number"
+        ),
+        Index(
+            "ix_platform_documents_open_by_account",
+            "billing_account_id",
+            "issued_at",
+            "id",
+            postgresql_where=text(
+                "document_kind = 'invoice' AND issued_at IS NOT NULL"
+            ),
         ),
         schema_table_args(SCHEMA),
     )
