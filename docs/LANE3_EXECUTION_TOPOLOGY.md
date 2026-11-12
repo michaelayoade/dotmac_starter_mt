@@ -460,7 +460,13 @@ still belong in the concrete operational packet. No key creation, enrollment,
 provisioning, release or deployment was authorized by the design selection.
 
 The bounded plaintext consumer is offline-only: it verifies the closed
-manifest/member set and exposure-crossing completeness. The public publication
+manifest/member set and exposure-crossing completeness. It also binds a
+caller-held concrete descriptor to the trusted V3 product/digest and derived
+reconciliations, then checks every recorded replacement's exact ordered rule
+arguments against Foundation's descriptor-derived rules. Failed replacements
+are checked too, and unbound exposure-side compose calls refuse. These checks
+do not establish applied host rules, foreign preservation or compensation.
+The public publication
 oracle instead requires an authenticated offline verification result. Its
 public consumer is implemented with an unenrolled policy, so it remains
 indeterminate. Complete independent
@@ -1004,3 +1010,13 @@ The packet identifies current CP factory/material inputs, approval-standing
 serialization and distinct committed-consumption readback, the missing private
 retention contract, and the concrete custody decisions before enrollment.
 No full offline result, certification or operational approval follows from it.
+
+
+### Source worksheet — 2026-11-12
+
+The [source certification worksheet](inventories/foundation-gate2-source-worksheet-20261112.md)
+records the existing deployment authority, approved CP composition and isolated
+recovery scope separately from unavailable runtime evidence. It is prepared for
+Michael's certification, not certification by the agent. Positive installed
+admission remains an exact-candidate Gate 3 exercise; no new spent-version build,
+fabricated archive metadata or source-shadowing shortcut is permitted.
