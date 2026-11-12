@@ -7939,6 +7939,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a3": (
+        "dotmac-payables",
+        "ec7af09897c8123067344b57216ff643fafb09d1",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a2": (
         "dotmac-payables",
         "a9b777d6caa5aead4f89a767a9118508958deeb7",
@@ -8658,7 +8673,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    "dotmac-payables": frozenset({"pa_0003_historical_invoice.py"}),
+    "dotmac-payables": frozenset(),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
