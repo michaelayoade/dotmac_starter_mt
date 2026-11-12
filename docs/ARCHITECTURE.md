@@ -715,7 +715,15 @@ unreachable until its authorization and settlement bindings exist.
 **Publication evidence has separate private and public consumers.** Starter
 tooling owns `scripts/lane3_evidence_bundle.py` and
 `scripts/lane3_bundle_verification.py` for offline manifest/member integrity
-and exposure-crossing consistency. Offline decryption and verification stay
+and exposure-crossing consistency. The offline exposure consumer additionally
+requires a concrete trusted descriptor matching the V3 product/digest and
+canonical reconciliation set. Every recorded rule replacement, including failed
+writes, must contain exactly the ordered rules derived by Foundation's owner
+for that family/chain. Compose crossings are refused here because deployment
+effects own compose; this proof has no authority for an exposure-side command.
+These are recorded argument checks, not proof of the applied host state,
+foreign preservation, compensation or Control/outcome truth.
+Offline decryption and verification stay
 outside runners; only the execution boundary produces private evidence.
 `scripts/lane3_offline_result.py` owns the closed public claim and protected
 policy grammars; `scripts/lane3_offline_signature.py` authenticates the original
