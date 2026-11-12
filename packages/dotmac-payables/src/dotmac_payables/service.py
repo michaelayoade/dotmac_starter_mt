@@ -7,16 +7,18 @@ settlement only as an immutable observation from the payment owner.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import fields
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
-from sqlalchemy import func, select
+from dotmac_kernel.semantic_encoding import canonical_instant
+from sqlalchemy import event, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, scoped_session
 
 from dotmac_payables.contracts import (
     AccountingConsequence,
@@ -28,6 +30,9 @@ from dotmac_payables.contracts import (
     CreateCreditNote,
     CreateSupplierInvoice,
     CreditNoteStatus,
+    HistoricalUnpaidInvoiceCommand,
+    HistoricalUnpaidInvoiceEvidence,
+    HistoricalUnpaidInvoiceVerifier,
     InvalidAmount,
     InvalidTransition,
     InvoiceStatus,
@@ -40,6 +45,7 @@ from dotmac_payables.models import (
     CreditApplication,
     CreditNote,
     CreditNoteLine,
+    HistoricalInvoiceReceipt,
     LiabilityEvent,
     PaymentObligation,
     SettlementObservation,
@@ -88,7 +94,7 @@ def _invoice(
         SupplierInvoice.tenant_id == tenant_id, SupplierInvoice.id == invoice_id
     )
     if lock:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     row = db.scalar(stmt)
     if row is None:
         raise NotFound("supplier invoice was not found")
@@ -818,7 +824,23 @@ def _consequence(
 def build_invoice_accounting_consequence(
     db: Session, *, tenant_id: UUID, invoice_id: UUID
 ) -> AccountingConsequence:
-    invoice = _invoice(db, tenant_id, invoice_id)
+    invoice = _invoice(db, tenant_id, invoice_id, lock=True)
+    if _historical_receipt(db, tenant_id, invoice_id) is not None:
+        raise InvalidTransition(
+            "historical invoice already has imported accounting evidence"
+        )
+    recognized = db.scalar(
+        select(LiabilityEvent.id)
+        .where(
+            LiabilityEvent.tenant_id == tenant_id,
+            LiabilityEvent.document_kind == "supplier_invoice",
+            LiabilityEvent.document_id == invoice_id,
+            LiabilityEvent.event_kind == "invoice_recognized",
+        )
+        .limit(1)
+    )
+    if recognized is None:
+        raise InvalidTransition("invoice has no owner recognition event")
     if invoice.status != InvoiceStatus.APPROVED:
         raise InvalidTransition(
             "only an approved invoice has an accounting consequence"
@@ -1011,6 +1033,338 @@ def record_accounting_receipt(
     return receipt
 
 
+def _historical_receipt(
+    db: Session, tenant_id: UUID, invoice_id: UUID
+) -> HistoricalInvoiceReceipt | None:
+    return db.scalar(
+        select(HistoricalInvoiceReceipt).where(
+            HistoricalInvoiceReceipt.tenant_id == tenant_id,
+            HistoricalInvoiceReceipt.invoice_id == invoice_id,
+        )
+    )
+
+
+def _historical_money(value: Decimal) -> None:
+    if (
+        not isinstance(value, Decimal)
+        or not value.is_finite()
+        or value != value.quantize(Decimal("0.01"))
+    ):
+        raise InvalidAmount("historical money must be exact finite two-decimal money")
+
+
+def _evidence_json(evidence: HistoricalUnpaidInvoiceEvidence) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for field in fields(evidence):
+        value = getattr(evidence, field.name)
+        if isinstance(value, datetime):
+            value = canonical_instant(value)
+        elif isinstance(value, date):
+            value = value.isoformat()
+        elif isinstance(value, Decimal | UUID):
+            value = str(value)
+        result[field.name] = value
+    return result
+
+
+class _DiscardVerifierSavepoint(Exception):
+    """Private sentinel: always leave the verifier savepoint by rolling it back."""
+
+
+def admit_historical_unpaid_invoice(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: HistoricalUnpaidInvoiceCommand,
+    verifier: HistoricalUnpaidInvoiceVerifier,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    admitted_at: datetime,
+) -> HistoricalInvoiceReceipt:
+    """Recognize original liability once without approving or posting again.
+
+    The verifier is a trusted assembly dependency. Its immutable source/header/GL
+    checks precede replay; mutable owner eligibility is checked only on admission.
+    """
+    command.validate()
+    if verifier is None or not callable(getattr(verifier, "verify", None)):
+        raise InvalidTransition("historical admission requires a trusted verifier")
+    canonical_instant(admitted_at)
+    if not isinstance(db, Session) or isinstance(db, scoped_session):
+        raise InvalidTransition("historical admission requires a plain Session")
+    # All invoice writers and accounting guards share this lock. Verify the
+    # immutable destination facts under it, rather than admitting a stale proof.
+    locked = _invoice(db, scope.tenant_id, command.invoice_id, lock=True)
+    # The verifier only reads. It runs in a savepoint that is always discarded,
+    # so flushed and Core writes are contained, and any ORM write is refused.
+    wrote: list[bool] = []
+
+    def _saw_flush(session: Session, _context: object) -> None:
+        if session.new or session.dirty or session.deleted:
+            wrote.append(True)
+
+    def _refuse_commit(_session: Session) -> None:
+        # Refuse before Session.commit() can also commit the caller's outer
+        # transaction. Keep the violation even if the verifier catches it.
+        wrote.append(True)
+        raise InvalidTransition("historical verifier must not write")
+
+    evidence = None
+    try:
+        with db.begin_nested() as savepoint:
+            registered: list[tuple[str, Callable[..., object]]] = []
+            try:
+                event.listen(db, "after_flush", _saw_flush)
+                registered.append(("after_flush", _saw_flush))
+                event.listen(db, "before_commit", _refuse_commit)
+                registered.append(("before_commit", _refuse_commit))
+                with db.no_autoflush:
+                    evidence = verifier.verify(
+                        scope=scope, command=command, destination=db
+                    )
+                    if db.new or db.dirty or db.deleted:
+                        wrote.append(True)
+                    if not savepoint.is_active or (
+                        db.get_nested_transaction() is not savepoint
+                    ):
+                        wrote.append(True)
+            finally:
+                for name, fn in reversed(registered):
+                    event.remove(db, name, fn)
+            raise _DiscardVerifierSavepoint
+    except _DiscardVerifierSavepoint:
+        pass
+    if wrote:
+        raise InvalidTransition("historical verifier must not write")
+    if not isinstance(evidence, HistoricalUnpaidInvoiceEvidence):
+        raise InvalidTransition("historical verifier returned no typed evidence")
+    if (
+        evidence.tenant_id,
+        evidence.invoice_id,
+        evidence.source_owner,
+        evidence.source_invoice_id,
+        evidence.source_snapshot_sha256,
+    ) != (
+        scope.tenant_id,
+        command.invoice_id,
+        command.source_owner,
+        command.source_invoice_id,
+        command.source_snapshot_sha256,
+    ):
+        raise Conflict("historical evidence identity differs from command")
+    fingerprint = evidence.fingerprint()
+    if fingerprint != command.evidence_fingerprint:
+        raise Conflict("historical evidence fingerprint differs from command")
+    from dotmac_payables.contracts import _historical_digest
+
+    _historical_digest(evidence.accounting_evidence_fingerprint)
+    _historical_digest(evidence.facts_fingerprint)
+    for value in (
+        evidence.subtotal,
+        evidence.tax_amount,
+        evidence.total_amount,
+        evidence.paid_amount,
+        evidence.withholding_tax_amount,
+        evidence.prepayment_amount,
+    ):
+        _historical_money(value)
+    if evidence.source_status != "POSTED" or evidence.invoice_type != "STANDARD":
+        raise InvalidTransition("historical admission requires POSTED STANDARD source")
+    if (
+        evidence.paid_amount != 0
+        or type(evidence.allocation_count) is not int
+        or evidence.allocation_count != 0
+        or evidence.withholding_tax_amount != 0
+        or evidence.prepayment_amount != 0
+    ):
+        raise InvalidTransition(
+            "historical invoice must be wholly unpaid without allocations, "
+            "WHT or prepayment"
+        )
+    if (
+        evidence.total_amount <= 0
+        or evidence.subtotal < 0
+        or evidence.tax_amount < 0
+        or evidence.total_amount != evidence.subtotal + evidence.tax_amount
+    ):
+        raise InvalidAmount("historical invoice amounts do not reconcile")
+    if not evidence.exchange_rate.is_finite() or evidence.exchange_rate <= 0:
+        raise InvalidAmount("historical exchange rate must be positive and finite")
+    for journal_reference in (
+        evidence.source_journal_ref,
+        evidence.destination_journal_ref,
+    ):
+        _required(journal_reference, "historical journal reference", 255)
+    canonical_instant(evidence.original_posted_at)
+    if evidence.original_posted_at > admitted_at:
+        raise InvalidTransition("historical posting cannot follow admission")
+
+    def operation(session: Session) -> Mapping[str, object]:
+        invoice = _invoice(session, scope.tenant_id, command.invoice_id, lock=True)
+        existing = _historical_receipt(session, scope.tenant_id, invoice.id)
+        if existing is not None:
+            if existing.evidence_fingerprint != fingerprint:
+                raise Conflict("invoice has different permanent historical evidence")
+            return {"receipt_id": str(existing.id)}
+        source_existing = session.scalar(
+            select(HistoricalInvoiceReceipt).where(
+                HistoricalInvoiceReceipt.tenant_id == scope.tenant_id,
+                HistoricalInvoiceReceipt.source_owner == command.source_owner,
+                HistoricalInvoiceReceipt.source_invoice_id == command.source_invoice_id,
+            )
+        )
+        if source_existing is not None:
+            raise Conflict("source invoice already admitted to another invoice")
+        if invoice.status != InvoiceStatus.APPROVED:
+            raise InvalidTransition("historical destination must already be APPROVED")
+        for name in (
+            "number",
+            "supplier_ref",
+            "supplier_name_snapshot",
+            "supplier_document_number",
+            "invoice_date",
+            "received_date",
+            "currency_code",
+            "exchange_rate",
+            "liability_account_ref",
+            "subtotal",
+            "tax_amount",
+            "total_amount",
+            "procurement_ref",
+            "receipt_evidence_fingerprint",
+            "submitted_by",
+            "submitted_at",
+            "approved_by",
+            "approved_at",
+            "approval_reference",
+        ):
+            actual, expected = getattr(invoice, name), getattr(evidence, name)
+            if isinstance(actual, datetime) and isinstance(expected, datetime):
+                equal = canonical_instant(actual) == canonical_instant(expected)
+            else:
+                equal = actual == expected
+            if not equal:
+                raise Conflict(f"historical destination differs on {name}")
+        if len(invoice.payment_schedule) != 1:
+            raise InvalidTransition(
+                "historical invoice requires one full-face obligation"
+            )
+        schedule = invoice.payment_schedule[0]
+        amount = Decimal(schedule["amount"])
+        _historical_money(amount)
+        if (
+            amount != evidence.total_amount
+            or date.fromisoformat(schedule["due_date"]) != evidence.due_date
+        ):
+            raise Conflict("historical payment schedule differs from evidence")
+        for model, predicate in (
+            (PaymentObligation, PaymentObligation.invoice_id == invoice.id),
+            (
+                LiabilityEvent,
+                (LiabilityEvent.document_kind == "supplier_invoice")
+                & (LiabilityEvent.document_id == invoice.id),
+            ),
+            (
+                AccountingReceipt,
+                (AccountingReceipt.document_kind == "supplier_invoice")
+                & (AccountingReceipt.document_id == invoice.id),
+            ),
+        ):
+            if (
+                session.scalar(
+                    select(model.id)
+                    .where(model.tenant_id == scope.tenant_id, predicate)
+                    .limit(1)
+                )
+                is not None
+            ):
+                raise Conflict(
+                    "historical invoice already has owner recognition "
+                    "or accounting evidence"
+                )
+        obligation = PaymentObligation(
+            tenant_id=scope.tenant_id,
+            invoice_id=invoice.id,
+            sequence=1,
+            due_date=evidence.due_date,
+            currency_code=evidence.currency_code,
+            original_amount=evidence.total_amount,
+            outstanding_amount=evidence.total_amount,
+            status=ObligationStatus.OPEN,
+            created_at=admitted_at,
+            updated_at=admitted_at,
+        )
+        session.add(obligation)
+        session.flush()
+        event = LiabilityEvent(
+            tenant_id=scope.tenant_id,
+            obligation_id=obligation.id,
+            event_kind="historical_invoice_recognized",
+            document_kind="supplier_invoice",
+            document_id=invoice.id,
+            supplier_ref=evidence.supplier_ref,
+            currency_code=evidence.currency_code,
+            amount=evidence.total_amount,
+            source_reference=command.source_invoice_id,
+            source_fingerprint=fingerprint[4:],
+            occurred_at=evidence.original_posted_at,
+        )
+        session.add(event)
+        session.flush()
+        receipt = HistoricalInvoiceReceipt(
+            tenant_id=scope.tenant_id,
+            invoice_id=invoice.id,
+            obligation_id=obligation.id,
+            event_id=event.id,
+            source_owner=command.source_owner,
+            source_invoice_id=command.source_invoice_id,
+            source_snapshot_sha256=command.source_snapshot_sha256,
+            evidence_fingerprint=fingerprint,
+            facts_fingerprint=evidence.facts_fingerprint,
+            accounting_evidence_fingerprint=evidence.accounting_evidence_fingerprint,
+            source_journal_ref=evidence.source_journal_ref,
+            destination_journal_ref=evidence.destination_journal_ref,
+            evidence=_evidence_json(evidence),
+            original_posted_at=evidence.original_posted_at,
+            admitted_at=admitted_at,
+        )
+        session.add(receipt)
+        session.flush()
+        return {"receipt_id": str(receipt.id)}
+
+    # Check permanent evidence even when the short-lived kernel key still exists.
+    existing = _historical_receipt(db, scope.tenant_id, locked.id)
+    if existing is not None and existing.evidence_fingerprint != fingerprint:
+        raise Conflict("invoice has different permanent historical evidence")
+    try:
+        outcome = execute_once(
+            db,
+            tenant_id=scope.tenant_id,
+            scope="payables.admit_historical_unpaid_invoice",
+            key=idempotency_key,
+            # The kernel ledger stores 64 hex characters; retain the complete
+            # versioned identity as one fixed field in its established adapter.
+            fingerprint=fingerprint_of(
+                {"historical_evidence_fingerprint": fingerprint}
+            ),
+            operation=operation,
+            expires_at=idempotency_expires_at,
+        )
+    except IntegrityError as exc:
+        # execute_once has already restored its savepoint and tenant context.
+        # A different invoice may race for this permanent source identity.
+        raise Conflict("historical source identity or evidence already exists") from exc
+    receipt = db.scalar(
+        select(HistoricalInvoiceReceipt).where(
+            HistoricalInvoiceReceipt.tenant_id == scope.tenant_id,
+            HistoricalInvoiceReceipt.id == UUID(str(outcome.result["receipt_id"])),
+        )
+    )
+    if receipt is None:
+        raise NotFound("historical invoice receipt was not found")
+    return receipt
+
+
 def supplier_liability_balance(
     db: Session, *, tenant_id: UUID, supplier_ref: str, currency_code: str
 ) -> Decimal:
@@ -1025,6 +1379,7 @@ def supplier_liability_balance(
 
 
 __all__ = [
+    "admit_historical_unpaid_invoice",
     "apply_credit_note",
     "approve_credit_note",
     "approve_invoice",

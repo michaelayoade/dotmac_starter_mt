@@ -2477,7 +2477,7 @@
       "package_dir": "packages/dotmac-payables",
       "import_name": "dotmac_payables",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a85",
+      "kernel_floor": "0.1.0a103",
       "db_schema": "mod_payables",
       "tag_prefix": "dotmac-payables-v",
       "wheel_contents": {
@@ -2488,6 +2488,7 @@
           "dotmac_payables/migrations/__init__.py",
           "dotmac_payables/migrations/versions/pa_0001_payables.py",
           "dotmac_payables/migrations/versions/pa_0002_optional_supplier_doc.py",
+          "dotmac_payables/migrations/versions/pa_0003_historical_invoice.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],
