@@ -946,3 +946,21 @@ enrolled, no private verifier/result signer exists, and the two behavioral items
 remain BLOCKED. Hosted synthetic tests cover ordering/refusal and transport;
 real enrolled-tool cryptographic round-trip and complete admitted rehearsals
 remain owed. Foundation package bytes/version are unchanged.
+
+
+## 2026-11-12 — trusted descriptor and recorded rule-argument binding
+
+The offline plaintext consumer now requires the actual trusted descriptor
+alongside the concrete V3 plan. It joins descriptor digest/product and the
+canonical reconciliation set, derives the expected ordered rules through
+Foundation's owner, and refuses any successful or failed replacement with
+unreviewed family/chain/rule arguments. Exposure-side compose calls also refuse:
+the public Executor's deployment effects own compose, and the private rule
+consumer has no independently bound command authority.
+
+This closes recorded argument consistency only. Applied host state, nonempty
+foreign preservation, genuine verification failure/compensation, Control and
+outcome joins and the complete private result producer remain owed. The carrier
+schema/member set and Foundation package bytes/version are unchanged. The
+[source worksheet](foundation-gate2-source-worksheet-20261112.md) records phase
+boundaries and isolated recovery scope without certifying them for Michael.
