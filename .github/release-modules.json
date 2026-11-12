@@ -514,6 +514,7 @@
           "dotmac_billing/opening_variance.py",
           "dotmac_billing/migrations/versions/bi_0015_line_price_version_fk.py",
           "dotmac_billing/migrations/versions/bi_0016_withholding_components.py",
+          "dotmac_billing/migrations/versions/bi_0017_open_documents_index.py",
           "dotmac_billing/account_statement.py"
         ],
         "forbidden_prefixes": [
