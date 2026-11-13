@@ -116,12 +116,31 @@ No generic recovery feature, new signing identity, waiver or extra version is
 introduced by documenting these boundaries. Legacy Sub remains production.
 
 
-## Proposed recorded-rule source closure in this change
+## Landed recorded-rule source closure — PR1048
 
-The accompanying offline consumer change binds the caller-held descriptor to
+PR1048 merged as `12a772ad1214544f385ed42310dcaba9a49cd0c9`, with all
+35 hosted checks green. Its offline consumer binds the caller-held descriptor to
 the V3 product/digest and canonical reconciliations, and checks every recorded
 replacement's exact owner-derived ordered rule arguments, including failed
 writes. It refuses exposure-side compose calls. This closes an argument
-consistency gap in the proposed source; hosted qualification is still required.
+consistency gap in the landed source. It proves recorded arguments only.
 It does not change the assessments of Control/outcome joins, applied host state,
 foreign preservation, compensation, custody or installed admission above.
+
+
+## Pre-freeze installed restore-rehearsal correction
+
+The earlier snapshot found the public in-process isolated recovery API already
+sufficient, but the installed CLI still unconditionally selected the refusing
+provider. That is a narrower source wiring gap than a missing recovery executor.
+This change adds `restore_rehearsal_admission_provider` to `ExecutionBindings`
+and selects it only for the installed restore-rehearsal site; deployment uses
+only its own field. Both defaults refuse. Constructor-seam guards retain
+request/alias/dynamic-keyword refusals and reject cross-use of either helper.
+
+This modifies Foundation package bytes and must land before the next freeze.
+It creates no new version identity, production recovery authority or positive
+admission result. Refusing-provider CLI tests establish selection and stopping
+before effects; genuine CP isolated-session composition, admission and real
+ten-step candidate proof remain owed. Do not reuse deployment authorization
+as production recovery, or interpret this field as an installed runtime change.

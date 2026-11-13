@@ -335,7 +335,7 @@ class RecoveryExecutor:
         # `RefusingHostSourceAdmissionProvider()` itself — which calls exactly
         # `require_host_source(receipt=None)` and always refuses — so a caller
         # explicitly supplying the refusing provider observes no behavior
-        # change. The shipped CLI does exactly that. `_do_fresh_target`
+        # change. An unwired CLI does exactly that. `_do_fresh_target`
         # (below) is this class's first effect — creating a cluster — and the
         # provider is consulted before it, never after.
         self._admission_provider: HostSourceAdmissionProvider = admission_provider

@@ -5,8 +5,9 @@ with no argument at all. `admission_provider` is now a REQUIRED
 constructor parameter with no default (see `_unsafe_cli_calls` below); the
 shipped CLI passes it EXPLICITLY at every call site — the literal
 `RefusingHostSourceAdmissionProvider()`, or at `Executor` sites only the
-exact `_deployment_admission_provider(bindings)` selection over the
-discovered, installation-fixed bindings — and the refusing provider calls
+exact `_deployment_admission_provider(bindings)` selection, or at
+`RecoveryExecutor` only `_restore_rehearsal_admission_provider(bindings)`,
+over discovered, installation-fixed bindings — and the refusing provider calls
 EXACTLY `require_host_source(receipt=None)`, never anything a caller could
 reach. See the amendment below for why this is now a two-link claim.
 
@@ -190,8 +191,8 @@ def _is_safe_refusing_provider_call(node: ast.expr) -> bool:
 #: DISCOVERED bindings (fixed at assembly installation, never a request
 #: value). The helper returns the bindings' declared deployment provider
 #: or the refusing provider; this guard proves no other expression can
-#: reach the keyword, and `RecoveryExecutor` — which has no grant or
-#: consumption contract yet — keeps the literal refusing provider.
+#: reach the keyword. Isolated restore has its separate scoped selection;
+#: neither helper is valid at the other executor's constructor.
 def _is_safe_deployment_admission_selection(node: ast.Call, value: ast.expr) -> bool:
     return (
         isinstance(node.func, ast.Name)
@@ -199,6 +200,20 @@ def _is_safe_deployment_admission_selection(node: ast.Call, value: ast.expr) -> 
         and isinstance(value, ast.Call)
         and isinstance(value.func, ast.Name)
         and value.func.id == "_deployment_admission_provider"
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Name)
+        and value.args[0].id == "bindings"
+        and not value.keywords
+    )
+
+
+def _is_safe_restore_admission_selection(node: ast.Call, value: ast.expr) -> bool:
+    return (
+        isinstance(node.func, ast.Name)
+        and node.func.id == "RecoveryExecutor"
+        and isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "_restore_rehearsal_admission_provider"
         and len(value.args) == 1
         and isinstance(value.args[0], ast.Name)
         and value.args[0].id == "bindings"
@@ -217,6 +232,7 @@ def _unsafe_cli_calls(tree: ast.Module) -> list[tuple[str | None, int]]:
             keyword.arg == "admission_provider"
             and not _is_safe_refusing_provider_call(keyword.value)
             and not _is_safe_deployment_admission_selection(node, keyword.value)
+            and not _is_safe_restore_admission_selection(node, keyword.value)
         )
     ]
 
@@ -256,7 +272,10 @@ def _unsafe_provider_name_bindings(tree: ast.Module) -> list[tuple[str, int]]:
                     unsafe.append(("wildcard import", node.lineno))
                     continue
                 effective = alias.asname or alias.name
-                if effective == "_deployment_admission_provider":
+                if effective in {
+                    "_deployment_admission_provider",
+                    "_restore_rehearsal_admission_provider",
+                }:
                     # The selection helper must be the CLI-local def; an
                     # imported object under its name would read as the
                     # guarded selection while admitting anything.
@@ -277,7 +296,11 @@ def _unsafe_provider_name_bindings(tree: ast.Module) -> list[tuple[str, int]]:
                     unsafe.append((detail, node.lineno))
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if (alias.asname or alias.name) == _PROVIDER_NAME:
+                if (alias.asname or alias.name) in {
+                    _PROVIDER_NAME,
+                    "_deployment_admission_provider",
+                    "_restore_rehearsal_admission_provider",
+                }:
                     unsafe.append((f"import {alias.name} as ...", node.lineno))
     return unsafe
 
@@ -294,8 +317,9 @@ def _assert_cli_executor_calls_are_refusal_only(tree: ast.Module) -> None:
         "the shipped CLI contains an admission-provider call that is "
         "neither the safe, literal `RefusingHostSourceAdmissionProvider()` "
         "nor, at an `Executor` site only, the exact "
-        "`_deployment_admission_provider(bindings)` selection over the "
-        f"discovered bindings, or a dynamic-keyword call: {unsafe}"
+        "`_deployment_admission_provider(bindings)` selection or the scoped "
+        "restore helper at `RecoveryExecutor` over discovered bindings, "
+        f"or a dynamic-keyword call: {unsafe}"
     )
     unsafe_bindings = _unsafe_provider_name_bindings(tree)
     assert unsafe_bindings == [], (
@@ -829,8 +853,8 @@ Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionPro
 
 def test_cli_executor_guard_refuses_helper_at_recovery_site() -> None:
     """Sensitivity: the deployment selection helper is Executor-only.
-    Recovery has no grant/consumption contract yet, so its site keeps the
-    literal refusing provider; the helper shape there must still refuse."""
+    Isolated restore must select its own binding, never deployment admission;
+    the deployment helper shape there must still refuse."""
     source = """
 Executor(spec, effects, grant,
          admission_provider=_deployment_admission_provider(bindings))
@@ -856,3 +880,64 @@ Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionPro
     tree = ast.parse(source, filename="<plant: helper over request value>")
     with pytest.raises(AssertionError, match="shipped CLI contains"):
         _assert_cli_executor_calls_are_refusal_only(tree)
+
+
+def test_cli_guard_admits_both_scoped_helpers_and_literal_refusal() -> None:
+    source = """
+Executor(spec, effects, grant,
+         admission_provider=_deployment_admission_provider(bindings))
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=_restore_rehearsal_admission_provider(bindings))
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    _assert_cli_executor_calls_are_refusal_only(ast.parse(source))
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        "Executor(spec, effects, grant, "
+        "admission_provider=_restore_rehearsal_admission_provider(bindings))",
+        "RecoveryExecutor(spec, manifest, effects, "
+        "admission_provider=_restore_rehearsal_admission_provider(args.bindings))",
+        "RecoveryExecutor(spec, manifest, effects, "
+        "admission_provider=_restore_rehearsal_admission_provider(bindings=bindings))",
+        "RecoveryExecutor(spec, manifest, effects, **kwargs)",
+    ],
+)
+def test_cli_guard_refuses_restore_crossover_request_and_dynamic_keywords(
+    plant: str,
+) -> None:
+    expected = ast.parse("""
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=RefusingHostSourceAdmissionProvider())
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+""")
+    replacement = ast.parse(plant).body[0]
+    index = 0 if plant.startswith("Executor(") else 1
+    ast.increment_lineno(replacement, expected.body[index].lineno - replacement.lineno)
+    expected.body[index] = replacement
+    with pytest.raises(AssertionError, match="shipped CLI contains"):
+        _assert_cli_executor_calls_are_refusal_only(expected)
+
+
+@pytest.mark.parametrize(
+    "import_statement",
+    [
+        "from .wired import RealProvider as _restore_rehearsal_admission_provider",
+        "import wired as _restore_rehearsal_admission_provider",
+    ],
+)
+def test_cli_guard_refuses_imported_restore_helper_alias(import_statement: str) -> None:
+    source = (
+        import_statement
+        + """
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+RecoveryExecutor(spec, manifest, effects,
+                 admission_provider=_restore_rehearsal_admission_provider(bindings))
+Executor(spec, effects, grant, admission_provider=RefusingHostSourceAdmissionProvider())
+"""
+    )
+    with pytest.raises(AssertionError, match="binds the name"):
+        _assert_cli_executor_calls_are_refusal_only(ast.parse(source))
