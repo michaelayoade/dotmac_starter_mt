@@ -712,6 +712,22 @@ assembly does not compose it into boot or deploy. No Foundation `HostSource`
 provider is composed here, and failed-production recovery is deliberately
 unreachable until its authorization and settlement bindings exist.
 
+**Isolated restore admission has its own installed binding.**
+`ExecutionBindings.restore_rehearsal_admission_provider` reaches only the
+`RecoveryExecutor` built by `restore-rehearsal`; deployment sites continue to
+read only `deployment_admission_provider`. Each missing provider falls back
+to the literal refusing provider. Discovery remains fixed at assembly
+installation, and no request value selects either provider.
+
+The assembly's `build_recovery_session` factory supplies the typed source
+catalogue, bundle and effects. Installed plugins/factories are trusted code;
+factory construction is not a sandbox. Actual target creation and restore
+mutations remain inside `RecoveryExecutor.run`, after fresh admission, and
+its effects protocol names only a newly created isolated `RestoreTarget`.
+This source seam adds no production `recover` operation, deployment grant or
+Control consumption. A genuine isolated session/driver and the one-candidate
+installed proof remain outstanding; adding a field is not CP runtime adoption.
+
 **Publication evidence has separate private and public consumers.** Starter
 tooling owns `scripts/lane3_evidence_bundle.py` and
 `scripts/lane3_bundle_verification.py` for offline manifest/member integrity

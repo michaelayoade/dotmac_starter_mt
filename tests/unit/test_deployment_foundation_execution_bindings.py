@@ -350,3 +350,108 @@ def test_cli_selection_refuses_without_a_declared_provider() -> None:
         _deployment_admission_provider(_bindings()),
         RefusingHostSourceAdmissionProvider,
     )
+
+
+# Isolated restore has a distinct, installation-fixed admission binding.
+
+
+def test_restore_provider_is_an_injectable_and_rejects_invalid_shape() -> None:
+    provider = _AdmissionProvider()
+    bound = ExecutionBindings(
+        provider="restore-host", restore_rehearsal_admission_provider=provider
+    )
+    assert bound.restore_rehearsal_admission_provider is provider
+    with pytest.raises(SpecError, match="restore_rehearsal_admission_provider"):
+        _bindings(restore_rehearsal_admission_provider=object())
+
+
+@pytest.mark.parametrize("falsey", [False, True])
+def test_restore_selection_is_exact_and_does_not_invoke_admission(falsey: bool) -> None:
+    from dotmac_deployment_foundation.cli import _restore_rehearsal_admission_provider
+
+    class Provider(_AdmissionProvider):
+        def __bool__(self) -> bool:
+            return not falsey
+
+    provider = Provider()
+    assert (
+        _restore_rehearsal_admission_provider(
+            _bindings(restore_rehearsal_admission_provider=provider)
+        )
+        is provider
+    )
+
+
+def test_admission_fields_have_no_cross_fallback() -> None:
+    from dotmac_deployment_foundation.cli import (
+        _deployment_admission_provider,
+        _restore_rehearsal_admission_provider,
+    )
+    from dotmac_deployment_foundation.host_source_admission import (
+        RefusingHostSourceAdmissionProvider,
+    )
+
+    deployment, restore = _AdmissionProvider(), _AdmissionProvider()
+    both = _bindings(
+        deployment_admission_provider=deployment,
+        restore_rehearsal_admission_provider=restore,
+    )
+    assert _deployment_admission_provider(both) is deployment
+    assert _restore_rehearsal_admission_provider(both) is restore
+    assert isinstance(
+        _deployment_admission_provider(
+            _bindings(restore_rehearsal_admission_provider=restore)
+        ),
+        RefusingHostSourceAdmissionProvider,
+    )
+    for bound in (
+        None,
+        _bindings(),
+        _bindings(deployment_admission_provider=deployment),
+    ):
+        assert isinstance(
+            _restore_rehearsal_admission_provider(bound),
+            RefusingHostSourceAdmissionProvider,
+        )
+
+
+def test_real_restore_cli_honors_refusing_assembly_before_any_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dotmac_deployment_foundation import cli, execution_bindings
+
+    from tests.unit.test_deployment_foundation_recovery_bundle import _manifest, _spec
+    from tests.unit.test_deployment_foundation_recovery_execution import (
+        RecordingRecoveryEffects,
+        _session,
+    )
+
+    events = []
+    effects = RecordingRecoveryEffects()
+    spec, manifest = _spec(), _manifest()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(manifest.to_json(), encoding="utf-8")
+
+    class RefusingAssembly:
+        def admit_host_source(self):
+            events.append("admission")
+            raise PreconditionFailed("assembly-isolated-refusal")
+
+    def factory(actual_spec, actual_manifest):
+        assert actual_spec is spec and actual_manifest == manifest
+        events.append("session")
+        return _session(effects=effects)
+
+    bound = ExecutionBindings(
+        provider="restore-host",
+        build_recovery_session=factory,
+        deployment_admission_provider=_AdmissionProvider(),
+        restore_rehearsal_admission_provider=RefusingAssembly(),
+    )
+    monkeypatch.setattr(execution_bindings, "discover_bindings", lambda: bound)
+    with pytest.raises(PreconditionFailed, match="assembly-isolated-refusal"):
+        cli._execute_restore_rehearsal(
+            argparse.Namespace(manifest=str(manifest_path)), spec
+        )
+    assert events == ["session", "admission"]
+    assert effects.calls == effects.created == effects.destroyed == []
