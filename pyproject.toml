@@ -149,6 +149,9 @@ dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = tru
 dotmac-delivery-resend = { path = "packages/dotmac-delivery-resend", develop = true }
 dotmac-billing = { path = "packages/dotmac-billing", develop = true }
 dotmac-collections = { path = "packages/dotmac-collections", develop = true }
+# Tenant-plane money-flow composition (instance state only). Built and proven
+# here; no assembly composes it, so this reference app installs nothing.
+dotmac-money-flows = { path = "packages/dotmac-money-flows", develop = true }
 # Reusable recurring-commercial owner. Built and proven here; real adopters
 # compose an explicit plane while this reference assembly installs neither.
 dotmac-subscriptions = { path = "packages/dotmac-subscriptions", develop = true }
@@ -355,6 +358,7 @@ module = [
     "dotmac_durable_timers.*",
     "dotmac_billing.*",
     "dotmac_collections.*",
+    "dotmac_money_flows.*",
     "dotmac_subscriptions.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -543,6 +547,7 @@ root_packages = [
     "dotmac_fulfillment",
     "dotmac_learning",
     "dotmac_learning_bank_rules",
+    "dotmac_money_flows",
 ]
 
 [[tool.importlinter.contracts]]
@@ -718,6 +723,7 @@ source_modules = [
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
     "dotmac_learning",
+    "dotmac_money_flows",
 ]
 forbidden_modules = ["app"]
 
@@ -873,6 +879,106 @@ source_modules = ["dotmac_auth_oidc"]
 forbidden_modules = ["dotmac_kernel", "app"]
 
 [[tool.importlinter.contracts]]
+# ST-1 composition rule: a composition package sits ABOVE the owners it
+# composes, and nothing imports it except an assembly. `dotmac_money_flows` is
+# deliberately outside the independence list (it imports the named owners'
+# top-level public surface), so the other direction is pinned here: no module
+# and no connector may import it. The assembly rule above already keeps it from
+# importing `app`.
+name = "Modules and connectors must not import money flows"
+type = "forbidden"
+source_modules = [
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+    "dotmac_licensing",
+    "dotmac_deployment_control",
+    "dotmac_platform_health",
+    "dotmac_support_access",
+    "dotmac_brand_profiles",
+    "dotmac_application_directory",
+    "dotmac_files",
+    "dotmac_imports",
+    "dotmac_integration",
+    "dotmac_media_observations",
+    "dotmac_approvals",
+    "dotmac_numbering",
+    "dotmac_people",
+    "dotmac_customers",
+    "dotmac_service_catalog",
+    "dotmac_qualification",
+    "dotmac_services",
+    "dotmac_usage",
+    "dotmac_usage_rating",
+    "dotmac_service_access_policy",
+    "dotmac_inbox_operations",
+    "dotmac_workforce",
+    "dotmac_fx_policy",
+    "dotmac_service_orders",
+    "dotmac_payments",
+    "dotmac_service_changes",
+    "dotmac_operational_escalations",
+    "dotmac_response_obligations",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
+    "dotmac_positioning",
+    "dotmac_durable_timers",
+    "dotmac_billing",
+    "dotmac_collections",
+    "dotmac_subscriptions",
+    "dotmac_auth_oidc",
+    "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
+    "dotmac_referrals",
+    "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
+    "dotmac_remote_access",
+    "dotmac_compliance_reporting",
+    "dotmac_ai_operations",
+    "dotmac_web_analytics",
+    "dotmac_sales",
+    "dotmac_document_rendering",
+    "dotmac_device_cli",
+    "dotmac_config_layers",
+    "dotmac_forms",
+    "dotmac_workflow_runtime",
+    "dotmac_fulfillment",
+    "dotmac_learning",
+    "dotmac_connector_whatsapp",
+    "dotmac_connector_paystack",
+    "dotmac_connector_nira",
+]
+forbidden_modules = ["dotmac_money_flows"]
+
+[[tool.importlinter.contracts]]
 name = "Connector plugins depend only on the integration SPI"
 type = "forbidden"
 # The contract is named for connector PLUGINS, so its source list is the
@@ -969,6 +1075,7 @@ forbidden_modules = [
     "dotmac_auth_oidc",
     "dotmac_learning",
     "dotmac_learning_bank_rules",
+    "dotmac_money_flows",
 ]
 
 [[tool.importlinter.contracts]]
