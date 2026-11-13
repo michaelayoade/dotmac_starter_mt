@@ -77,11 +77,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-approvals": {
-      "declared": "0.1.0a9",
-      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a8 is the last published and tagged version (dotmac-approvals-v0.1.0a8, recorded in docs/inventories/module-release-verifications.json) and its bytes are untouched. 0.1.0a9 is an export-only change for the money-flows plan (PR A2, gap G3): the existing request, decision and evaluate commands of both planes and ApprovalOutcome join the top-level __all__, so a composition package can call them under ADR 0024 section 14. No behaviour, migration or privilege changes. It awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
-      "state": "declared-unpublished"
-    },
     "dotmac-brand-profiles": {
       "declared": "0.1.0a1+dev",
       "reason": "SOURCE PREPARATION ONLY; UNPUBLISHED AND UNALLOCATED. The previously released 0.1.0a1 remains immutable. This local PEP 440 development marker prevents source preparation from allocating a bare successor identity while the approved tagline addition is completed. Remove this row only after a separately authorized successor allocation and verified publication record; this entry grants no release, adoption, deployment, or flip authority.",

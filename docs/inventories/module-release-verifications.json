@@ -1127,6 +1127,28 @@
           "sha256": "8aca6521db2cbca7424191a4ee89a862d66172d45c759e1f0c3c2215ac315c5f"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-approvals",
+      "version": "0.1.0a9",
+      "tag": "dotmac-approvals-v0.1.0a9",
+      "tag_object": "132d09d4d0afcb99c3f629a219791f9c523b1bfd",
+      "peeled_commit": "8d13c456713a17f5ef3f9c33b4ae4946819988c8",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_approvals-0.1.0a9-py3-none-any.whl": "eb6fe38f63731cf6d326a806dd63ee2867c47840ea4249ffbd4e1cae8dc7cee5"
+      },
+      "verification_run_id": "43300319445",
+      "source_run_id": "43300319445",
+      "release_authority_digest": "sha256:87beda9b734a1f24c41e09baa530aebb9b6e6bf1268388333f894e950ac5c5b6",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a109-py3-none-any.whl",
+          "sha256": "8aca6521db2cbca7424191a4ee89a862d66172d45c759e1f0c3c2215ac315c5f"
+        }
+      ]
     }
   ]
 }
