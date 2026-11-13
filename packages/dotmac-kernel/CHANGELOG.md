@@ -6,6 +6,15 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased (source marker 0.1.0a109+dev)
+
+### Added
+
+- Reserve `money_flows` / `mod_mflows` / `mf` / branch `money_flows` for the
+  tenant-plane money-flows composition package before its release. This
+  reservation installs no module, moves no data and transfers no writer
+  authority; the published a109 release remains unchanged.
+
 ## 0.1.0a109 — Release inventory
 
 This inventories proposed source after the published and tagged `0.1.0a108`
