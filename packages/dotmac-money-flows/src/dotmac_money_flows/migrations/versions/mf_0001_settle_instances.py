@@ -145,7 +145,7 @@ def downgrade() -> None:
     )
     evidence = (
         op.get_bind()
-        .execute(sa.text(f"SELECT 1 FROM {_SCHEMA}.{_TABLE} LIMIT 1"))  # noqa: S608
+        .execute(sa.text("SELECT 1 FROM mod_mflows.settle_instances LIMIT 1"))
         .first()
     )
     if evidence is not None:
