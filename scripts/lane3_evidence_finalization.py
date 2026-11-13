@@ -184,7 +184,7 @@ def prepare_encryption() -> EncryptionContext:
     return context
 
 
-def _json_depth_within_bound(raw: bytes) -> bool:
+def _json_depth_within_bound(text: str) -> bool:
     """Iterative nesting count, ignoring brackets inside strings.
 
     Refusing deep members cannot depend on the interpreter's recursion
@@ -194,21 +194,21 @@ def _json_depth_within_bound(raw: bytes) -> bool:
     depth = 0
     in_string = False
     escaped = False
-    for byte in raw:
+    for character in text:
         if in_string:
             if escaped:
                 escaped = False
-            elif byte == 0x5C:  # backslash
+            elif character == "\\":
                 escaped = True
-            elif byte == 0x22:  # double quote
+            elif character == '"':
                 in_string = False
-        elif byte == 0x22:
+        elif character == '"':
             in_string = True
-        elif byte in (0x7B, 0x5B):  # { or [
+        elif character in "{[":
             depth += 1
             if depth > _MAX_JSON_DEPTH:
                 return False
-        elif byte in (0x7D, 0x5D):  # } or ]
+        elif character in "}]":
             depth -= 1
     return True
 
@@ -222,9 +222,10 @@ def _archive(probe_evidence: bytes, exposure_calls: bytes) -> bytes:
         for raw in members.values():
             if type(raw) is not bytes or not 0 < len(raw) <= MAX_MEMBER_BYTES:
                 raise ValueError
-            if not _json_depth_within_bound(raw):
+            text = raw.decode("utf-8")
+            if not _json_depth_within_bound(text):
                 raise ValueError
-            if type(json.loads(raw)) is not dict:
+            if type(json.loads(text)) is not dict:
                 raise ValueError
         manifest = build_manifest(members)
         require_plaintext_bundle(manifest, members)

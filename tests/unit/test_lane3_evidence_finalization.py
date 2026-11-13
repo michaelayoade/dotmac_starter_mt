@@ -250,6 +250,43 @@ def test_archive_intake_refuses_invalid_json_and_manifest_joins(contents, capsys
     assert capsys.readouterr() == ("", "")
 
 
+def _nested_member(array_depth):
+    value = 0
+    for _ in range(array_depth):
+        value = [value]
+    return json.dumps({"x": '\\"[]{}', "y": value}).encode("utf-8")
+
+
+def test_archive_json_depth_boundary_and_string_escapes():
+    accepted = _nested_member(63)  # Root object plus 63 arrays = depth 64.
+    raw = final._archive(accepted, b"{}")
+    assert (
+        final.read_plaintext_evidence_archive(raw)[1]["probe-evidence.json"] == accepted
+    )
+    too_deep = _nested_member(64)
+    with pytest.raises(final.FinalizationRefused, match="^encryption-members-invalid$"):
+        final._archive(too_deep, b"{}")
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(
+            _intake_archive(contents={"probe-evidence.json": too_deep})
+        )
+
+
+@pytest.mark.parametrize(
+    "encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-32", "utf-32-le", "utf-32-be"]
+)
+@pytest.mark.parametrize("array_depth", [0, 64])
+def test_archive_refuses_non_utf8_json_with_escaped_quote(encoding, array_depth):
+    # json.loads(bytes) accepts these encodings; a byte escape scanner must not
+    # be paired with that broader parser. Both shallow and deep forms refuse.
+    payload = _nested_member(array_depth).decode("utf-8").encode(encoding)
+    with pytest.raises(final.FinalizationRefused, match="^encryption-members-invalid$"):
+        final._archive(payload, b"{}")
+    raw = _intake_archive(contents={"probe-evidence.json": payload})
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(raw)
+
+
 def test_archive_intake_refuses_digest_mismatch():
     raw = _intake_archive()
     changed = raw.replace(b'{"probe":true}', b'{"probe":null}', 1)
