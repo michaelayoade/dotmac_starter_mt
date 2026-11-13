@@ -767,6 +767,18 @@ ciphertext readback is passed into the existing receipt constructor while the
 live plan, grant and outcome remain in the same process. No prebuilt ciphertext
 is accepted. The artifact carrier lists ciphertext explicitly, never raw members.
 
+The same finalization owner exposes `read_plaintext_evidence_archive` for
+bounded plaintext intake. Member JSON is strictly UTF-8; one decoded text
+is used for the iterative depth-64 limit and JSON parsing, so encoding
+autodetection cannot bypass the limit. It reads exactly three regular USTAR headers in the
+producer order, validates member limits and manifest joins, and requires exact
+reconstruction by the producer before returning bytes. It never extracts files
+or processes PAX/GNU extension streams. Its fixed refusal message excludes
+private header and parser text. The hosted real-age round-trip consumer uses
+this reader alongside independent archive checks. Archive consistency alone
+authenticates no producer and supplies no private behavioral proof; acquisition,
+decryption, custody and the full offline orchestrator remain separate.
+
 The encryption policy ships **unenrolled**, with no recipient or tool pin;
 its preflight stops before host contact. No private key, signing, decryption or
 full-proof result producer is introduced. A valid age header is a transport
