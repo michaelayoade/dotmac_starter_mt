@@ -214,6 +214,64 @@ def _archive(probe_evidence: bytes, exposure_calls: bytes) -> bytes:
         raise FinalizationRefused("encryption-members-invalid") from None
 
 
+def read_plaintext_evidence_archive(payload: bytes) -> tuple[bytes, dict[str, bytes]]:
+    """Read only the bounded canonical archive without extraction or extensions.
+
+    This establishes transport consistency only, never authenticity or proof
+    acceptance. Ciphertext acquisition/authentication and decryption belong to
+    the caller; no policy, key, executable or filesystem is consulted here.
+    """
+    try:
+        if type(payload) is not bytes or not 0 < len(payload) <= MAX_ARCHIVE_BYTES:
+            raise ValueError
+        contents: dict[str, bytes] = {}
+        offset = 0
+        for name in ("manifest.json", "probe-evidence.json", "exposure-calls.json"):
+            # Parse exactly one raw header, never TarFile's PAX/GNU processing.
+            header_end = offset + tarfile.BLOCKSIZE
+            if header_end > len(payload):
+                raise ValueError
+            info = tarfile.TarInfo.frombuf(
+                payload[offset:header_end], "utf-8", "strict"
+            )
+            limit = 4096 if name == "manifest.json" else MAX_MEMBER_BYTES
+            if (
+                info.name != name
+                or info.type != tarfile.REGTYPE
+                or not 0 < info.size <= limit
+                or info.mode != 0o600
+                or info.uid != 0
+                or info.gid != 0
+                or info.mtime != 0
+                or info.uname != ""
+                or info.gname != ""
+                or info.linkname != ""
+                or info.pax_headers
+            ):
+                raise ValueError
+            end = header_end + info.size
+            offset = (
+                header_end
+                + ((info.size + tarfile.BLOCKSIZE - 1) // tarfile.BLOCKSIZE)
+                * tarfile.BLOCKSIZE
+            )
+            if offset > len(payload):
+                raise ValueError
+            contents[name] = payload[header_end:end]
+        manifest = contents.pop("manifest.json")
+        require_plaintext_bundle(manifest, contents)
+        # Reject every alternate header encoding, padding, trailer or format,
+        # including an extra member hidden after the fixed three-header read.
+        if (
+            _archive(contents["probe-evidence.json"], contents["exposure-calls.json"])
+            != payload
+        ):
+            raise ValueError
+        return manifest, contents
+    except (ValueError, TypeError, RecursionError, OverflowError, tarfile.HeaderError):
+        raise FinalizationRefused("archive-input-invalid") from None
+
+
 def _same_output(directory: int, name: str, descriptor: int) -> bool:
     opened = os.fstat(descriptor)
     named = os.stat(name, dir_fd=directory, follow_symlinks=False)

@@ -5,6 +5,7 @@ The fake age process checks transport and cleanup, never cryptographic proof.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import json
@@ -12,6 +13,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,6 +122,186 @@ def test_archive_exact_joined_deterministic_members():
     manifest = payloads.pop("manifest.json")
     bundle.require_plaintext_bundle(manifest, payloads)
     assert payloads == {"probe-evidence.json": probe, "exposure-calls.json": calls}
+
+
+def _intake_archive(
+    *, names=None, overrides=None, contents=None, format=tarfile.USTAR_FORMAT
+):
+    """Independent tar writer for malformed-input fixtures, never extraction."""
+    members = {
+        "probe-evidence.json": b'{"probe":true}',
+        "exposure-calls.json": b'{"calls":[]}',
+    }
+    payloads = {"manifest.json": bundle.build_manifest(members), **members}
+    payloads.update(contents or {})
+    if contents and "manifest.json" not in contents:
+        payloads["manifest.json"] = bundle.build_manifest(
+            {name: payloads[name] for name in members}
+        )
+    storage = io.BytesIO()
+    with tarfile.open(fileobj=storage, mode="w", format=format) as archive:
+        for name in names or payloads:
+            raw = payloads.get(name, b"{}")
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(raw), 0o600
+            for key, value in (overrides or {}).items():
+                setattr(info, key, value)
+            archive.addfile(info, io.BytesIO(raw))
+    return storage.getvalue()
+
+
+def test_archive_intake_exact_payloads_and_recomputed_manifest():
+    for probe in (b'{"probe":true}', b'{"probe":"changed"}'):
+        calls = b'{"calls":[]}'
+        manifest, members = final.read_plaintext_evidence_archive(
+            final._archive(probe, calls)
+        )
+        assert members == {"probe-evidence.json": probe, "exposure-calls.json": calls}
+        assert manifest == bundle.build_manifest(members)
+    independently_written = _intake_archive()
+    manifest, members = final.read_plaintext_evidence_archive(independently_written)
+    assert manifest == bundle.build_manifest(members)
+    # This is consistency, not authenticity: a freshly joined changed bundle is valid.
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ["manifest.json", "probe-evidence.json", "probe-evidence.json"],
+        ["manifest.json", "probe-evidence.json", "exposure-calls.json", "extra"],
+        ["probe-evidence.json", "manifest.json", "exposure-calls.json"],
+        ["manifest.json", "/probe-evidence.json", "exposure-calls.json"],
+        ["manifest.json", "../probe-evidence.json", "exposure-calls.json"],
+    ],
+)
+def test_archive_intake_refuses_wrong_names_order_or_count(names):
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(_intake_archive(names=names))
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"type": tarfile.SYMTYPE, "linkname": "private-marker"},
+        {"type": tarfile.LNKTYPE, "linkname": "private-marker"},
+        {"type": tarfile.GNUTYPE_SPARSE},
+        {"type": tarfile.XHDTYPE},
+        {"type": tarfile.XGLTYPE},
+        {"type": tarfile.GNUTYPE_LONGNAME},
+        {"mode": 0o644},
+        {"uid": 1},
+        {"gid": 1},
+        {"mtime": 1},
+        {"uname": "private-marker"},
+        {"gname": "private-marker"},
+        {"linkname": "private-marker"},
+    ],
+)
+def test_archive_intake_refuses_extension_link_and_metadata(overrides):
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(_intake_archive(overrides=overrides))
+
+
+@pytest.mark.parametrize("format", [tarfile.PAX_FORMAT, tarfile.GNU_FORMAT])
+def test_archive_intake_refuses_extended_formats(format):
+    raw = _intake_archive(
+        format=format, overrides={"pax_headers": {"comment": "private-marker"}}
+    )
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(raw)
+
+
+def test_archive_intake_refuses_checksum_truncation_padding_and_trailers():
+    raw = _intake_archive()
+    bad_checksum = bytes([raw[0] ^ 1]) + raw[1:]
+    for altered in (
+        bad_checksum,
+        raw[:511],
+        raw[:700],
+        raw[:3072],
+        raw[:-512],
+        raw + b"private-marker",
+        raw + bytes(512),
+        raw[:-1] + b"x",
+        bytes(512) + raw[512:],
+        gzip.compress(raw),
+        raw[:1000] + b"x" + raw[1001:],
+    ):
+        with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+            final.read_plaintext_evidence_archive(altered)
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        {"manifest.json": b'{"private-marker":true}'},
+        {"probe-evidence.json": b"[]"},
+        {"probe-evidence.json": b"{"},
+        {"probe-evidence.json": b'{"deep":' * 1100 + b"0" + b"}" * 1100},
+    ],
+)
+def test_archive_intake_refuses_invalid_json_and_manifest_joins(contents, capsys):
+    raw = _intake_archive(contents=contents)
+    with pytest.raises(final.FinalizationRefused) as error:
+        final.read_plaintext_evidence_archive(raw)
+    assert str(error.value) == "archive-input-invalid"
+    assert "private-marker" not in "".join(traceback.format_exception(error.value))
+    assert capsys.readouterr() == ("", "")
+
+
+def test_archive_intake_refuses_digest_mismatch():
+    raw = _intake_archive()
+    changed = raw.replace(b'{"probe":true}', b'{"probe":null}', 1)
+    assert changed != raw
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(changed)
+
+
+@pytest.mark.parametrize("declared_size", [16 * 1024 * 1024 + 1, 40 * 1024 * 1024])
+def test_archive_intake_refuses_oversized_declared_member(declared_size):
+    raw = _intake_archive()
+    info = tarfile.TarInfo("probe-evidence.json")
+    info.size, info.mode = declared_size, 0o600
+    # Find the second header independently, without parsing untrusted data.
+    manifest_size = len(
+        bundle.build_manifest(
+            {
+                "probe-evidence.json": b'{"probe":true}',
+                "exposure-calls.json": b'{"calls":[]}',
+            }
+        )
+    )
+    second_header = 512 + ((manifest_size + 511) // 512) * 512
+    changed = (
+        raw[:second_header]
+        + info.tobuf(format=tarfile.USTAR_FORMAT)
+        + raw[second_header + 512 :]
+    )
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(changed)
+
+
+def test_archive_intake_bounds_and_type_before_header_parse(monkeypatch):
+    raw = _intake_archive()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("header parsed before input bound")
+
+    monkeypatch.setattr(final.tarfile.TarInfo, "frombuf", forbidden)
+    monkeypatch.setattr(final, "MAX_ARCHIVE_BYTES", len(raw) - 1)
+    for bad in (raw, b"", bytearray(raw), True):
+        with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+            final.read_plaintext_evidence_archive(bad)
+
+
+def test_archive_intake_member_bounds_before_payload_join(monkeypatch):
+    raw = _intake_archive()
+    monkeypatch.setattr(final, "MAX_MEMBER_BYTES", 3)
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(raw)
+    large_manifest = _intake_archive(contents={"manifest.json": b" " * 4097})
+    with pytest.raises(final.FinalizationRefused, match="^archive-input-invalid$"):
+        final.read_plaintext_evidence_archive(large_manifest)
 
 
 @pytest.mark.parametrize("bad", [b"", b"private-marker", b"[]", b"{", True])
