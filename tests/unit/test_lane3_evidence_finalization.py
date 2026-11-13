@@ -151,7 +151,8 @@ def _intake_archive(
 
 
 def test_archive_intake_exact_payloads_and_recomputed_manifest():
-    for probe in (b'{"probe":true}', b'{"probe":"changed"}'):
+    bracketed = b'{"probe":"' + b"{" * 200 + b'\\"[' + b"}" * 200 + b'"}'
+    for probe in (b'{"probe":true}', b'{"probe":"changed"}', bracketed):
         calls = b'{"calls":[]}'
         manifest, members = final.read_plaintext_evidence_archive(
             final._archive(probe, calls)

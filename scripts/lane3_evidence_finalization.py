@@ -32,6 +32,7 @@ _AGE_HEADER = b"age-encryption.org/v1\n"
 _SCHEMA = "lane3.evidence-encryption-policy.v1"
 MAX_POLICY_BYTES = 4096
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
+_MAX_JSON_DEPTH = 64
 MAX_ARCHIVE_BYTES = 40 * 1024 * 1024
 MAX_CIPHERTEXT_BYTES = MAX_ARCHIVE_BYTES + 1024 * 1024
 _MAX_TOOL_BYTES = 64 * 1024 * 1024
@@ -183,6 +184,35 @@ def prepare_encryption() -> EncryptionContext:
     return context
 
 
+def _json_depth_within_bound(raw: bytes) -> bool:
+    """Iterative nesting count, ignoring brackets inside strings.
+
+    Refusing deep members cannot depend on the interpreter's recursion
+    behaviour: some runtimes parse nesting far past the limit this
+    transport accepts, so the bound is measured before ``json.loads``.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # double quote
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x7B, 0x5B):  # { or [
+            depth += 1
+            if depth > _MAX_JSON_DEPTH:
+                return False
+        elif byte in (0x7D, 0x5D):  # } or ]
+            depth -= 1
+    return True
+
+
 def _archive(probe_evidence: bytes, exposure_calls: bytes) -> bytes:
     members = {
         "probe-evidence.json": probe_evidence,
@@ -191,6 +221,8 @@ def _archive(probe_evidence: bytes, exposure_calls: bytes) -> bytes:
     try:
         for raw in members.values():
             if type(raw) is not bytes or not 0 < len(raw) <= MAX_MEMBER_BYTES:
+                raise ValueError
+            if not _json_depth_within_bound(raw):
                 raise ValueError
             if type(json.loads(raw)) is not dict:
                 raise ValueError
