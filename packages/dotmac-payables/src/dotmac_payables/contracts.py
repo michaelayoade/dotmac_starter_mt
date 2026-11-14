@@ -70,6 +70,14 @@ def _required(value: str, label: str, maximum: int) -> str:
     return normalized
 
 
+_MONEY_QUANTUM = Decimal("0.000001")
+
+
+def _exact_money(value: Decimal, label: str) -> None:
+    if value != value.quantize(_MONEY_QUANTUM):
+        raise InvalidAmount(f"{label} must have at most 6 decimal places")
+
+
 def _currency(value: str) -> str:
     currency = _required(value, "currency code", 3).upper()
     if len(currency) != 3:
@@ -466,6 +474,7 @@ class SupplierPaymentAllocationInput:
     def payload(self) -> dict[str, str]:
         if self.amount <= 0:
             raise InvalidAmount("payment allocation amount must be positive")
+        _exact_money(self.amount, "payment allocation amount")
         return {"obligation_id": str(self.obligation_id), "amount": str(self.amount)}
 
 
@@ -481,6 +490,7 @@ class SupplierPaymentWithholdingInput:
     def payload(self) -> dict[str, object]:
         if self.amount <= 0:
             raise InvalidAmount("withholding amount must be positive")
+        _exact_money(self.amount, "withholding amount")
         return {
             "account_ref": _required(
                 self.account_ref, "withholding account reference", 255

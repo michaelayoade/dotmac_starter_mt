@@ -1451,6 +1451,19 @@ def _reserved_by_active_payments(
     return _money(Decimal(db.scalar(stmt) or 0))
 
 
+def _liability_in_ledger(db: Session, tenant_id: UUID, invoice_id: UUID) -> bool:
+    receipt = db.scalar(
+        select(AccountingReceipt.id).where(
+            AccountingReceipt.tenant_id == tenant_id,
+            AccountingReceipt.document_kind == "supplier_invoice",
+            AccountingReceipt.document_id == invoice_id,
+        )
+    )
+    if receipt is not None:
+        return True
+    return _historical_receipt(db, tenant_id, invoice_id) is not None
+
+
 def _check_allocation_payable(
     db: Session,
     *,
@@ -1459,6 +1472,7 @@ def _check_allocation_payable(
     amount: Decimal,
     supplier_ref: str,
     currency_code: str,
+    exchange_rate: Decimal,
     payment_id: UUID | None,
 ) -> None:
     """Refuse an allocation that is not payable now. Locks the obligation row."""
@@ -1470,6 +1484,20 @@ def _check_allocation_payable(
         raise InvalidTransition("obligation belongs to a different supplier")
     if obligation.currency_code != currency_code:
         raise InvalidAmount("payment currency does not match the obligation")
+    if invoice.exchange_rate != exchange_rate:
+        # fx_difference_unsupported: realised FX is not modelled, so a payment
+        # at a rate other than the invoice's would drift the control account.
+        raise InvalidAmount(
+            "payment exchange rate differs from the invoice rate "
+            "(fx_difference_unsupported)"
+        )
+    if not _liability_in_ledger(db, tenant_id, invoice.id):
+        # liability_not_in_ledger: paying it would debit a control account that
+        # was never credited.
+        raise InvalidTransition(
+            "supplier invoice has no accounting or historical receipt "
+            "(liability_not_in_ledger)"
+        )
     if obligation.status not in (
         ObligationStatus.OPEN,
         ObligationStatus.PARTIALLY_SETTLED,
@@ -1541,6 +1569,7 @@ def create_supplier_payment(
                 amount=amount,
                 supplier_ref=supplier_ref,
                 currency_code=currency,
+                exchange_rate=command.exchange_rate,
                 payment_id=None,
             )
         payment = SupplierPayment(
@@ -1618,6 +1647,7 @@ def _recheck_allocations(db: Session, payment: SupplierPayment) -> None:
             amount=allocation.amount,
             supplier_ref=payment.supplier_ref,
             currency_code=payment.currency_code,
+            exchange_rate=payment.exchange_rate,
             payment_id=payment.id,
         )
 
@@ -1722,7 +1752,11 @@ def record_supplier_payment(
         )
         if duplicate is not None:
             raise Conflict("bank reference was already recorded against a payment")
-        for allocation in _payment_allocations(session, tenant_id, payment.id):
+        _recheck_allocations(session, payment)
+        for allocation in sorted(
+            _payment_allocations(session, tenant_id, payment.id),
+            key=lambda row: str(row.obligation_id),
+        ):
             fingerprint = fingerprint_of(
                 {
                     "payment_id": str(payment.id),

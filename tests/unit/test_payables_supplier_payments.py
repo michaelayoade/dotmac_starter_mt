@@ -84,6 +84,8 @@ def _obligation(
     currency: str = "NGN",
     tenant: uuid.UUID = TENANT,
     liability: str = LIABILITY,
+    rate: str = "1",
+    receipt: bool = True,
 ) -> models.PaymentObligation:
     """An approved invoice with one open obligation of ``amount`` (tax-free)."""
     _counter["n"] += 1
@@ -100,7 +102,7 @@ def _obligation(
             invoice_date=date(2026, 8, 1),
             received_date=date(2026, 8, 2),
             currency_code=currency,
-            exchange_rate=Decimal("1"),
+            exchange_rate=Decimal(rate),
             liability_account_ref=liability,
             lines=(
                 PayableLineInput(
@@ -129,6 +131,19 @@ def _obligation(
         idempotency_expires_at=None,
         approved_at=NOW,
     )
+    if receipt:
+        db.add(
+            models.AccountingReceipt(
+                tenant_id=tenant,
+                document_kind="supplier_invoice",
+                document_id=invoice.id,
+                consequence_fingerprint="e" * 64,
+                accounting_reference=f"journal:{n}",
+                accounting_evidence_fingerprint="f" * 64,
+                recorded_at=NOW,
+            )
+        )
+        db.flush()
     return db.scalars(
         select(models.PaymentObligation).where(
             models.PaymentObligation.tenant_id == tenant,
@@ -143,6 +158,7 @@ def _command(
     number: str = "SPAY-0001",
     supplier: str = SUPPLIER,
     currency: str = "NGN",
+    rate: str = "1",
     wht: tuple[SupplierPaymentWithholdingInput, ...] = (),
     prepared_by: str = "user:preparer",
 ) -> CreateSupplierPayment:
@@ -151,7 +167,7 @@ def _command(
         supplier_ref=supplier,
         supplier_name_snapshot="Fibre Vendor Ltd",
         currency_code=currency,
-        exchange_rate=Decimal("1"),
+        exchange_rate=Decimal(rate),
         value_date=date(2026, 9, 2),
         cash_account_ref=CASH,
         payer_instrument_ref="instrument:bank-main",
@@ -519,7 +535,7 @@ def test_record_refuses_if_obligation_was_settled_elsewhere_and_rolls_back(
     second.outstanding_amount = Decimal("100")
     second.status = ObligationStatus.PARTIALLY_SETTLED
     db.flush()
-    with pytest.raises(InvalidAmount, match="exceeds the obligation outstanding"):
+    with pytest.raises(InvalidAmount, match="exceeds the obligation balance"):
         _record(db, payment)
     db.refresh(payment)
     db.refresh(first)
@@ -691,3 +707,85 @@ def test_other_tenant_cannot_see_or_drive_a_payment(db: Session) -> None:
             idempotency_expires_at=None,
             prepared_at=NOW,
         )
+
+
+# --- review hardening (S1-1, S1-2, S1-5) --------------------------------------
+
+
+def test_invoice_without_any_ledger_receipt_cannot_be_paid(db: Session) -> None:
+    ob = _obligation(db, receipt=False)
+    with pytest.raises(InvalidTransition, match="liability_not_in_ledger"):
+        _create(db, _command([(ob, "10")]))
+
+
+def test_historical_receipt_also_satisfies_the_ledger_guard(db: Session) -> None:
+    ob = _obligation(db, receipt=False)
+    event = db.scalars(select(models.LiabilityEvent)).first()
+    db.add(
+        models.HistoricalInvoiceReceipt(
+            tenant_id=TENANT,
+            invoice_id=ob.invoice_id,
+            obligation_id=ob.id,
+            event_id=event.id,
+            source_owner="legacy",
+            source_invoice_id="L-1",
+            source_snapshot_sha256="a" * 64,
+            evidence_fingerprint="cv1:" + "a" * 64,
+            facts_fingerprint="cv1:" + "b" * 64,
+            accounting_evidence_fingerprint="cv1:" + "c" * 64,
+            source_journal_ref="j1",
+            destination_journal_ref="j2",
+            evidence={},
+            original_posted_at=NOW,
+            admitted_at=NOW,
+        )
+    )
+    db.flush()
+    assert _create(db, _command([(ob, "10")])).status == SupplierPaymentStatus.DRAFT
+
+
+def test_ledger_guard_is_rechecked_at_approval_and_recording(db: Session) -> None:
+    ob = _obligation(db)
+    payment = _create(db, _command([(ob, "10")]))
+    db.execute(
+        models.AccountingReceipt.__table__.delete().where(
+            models.AccountingReceipt.document_id == ob.invoice_id
+        )
+    )
+    with pytest.raises(InvalidTransition, match="liability_not_in_ledger"):
+        _approve(db, payment)
+
+
+def test_fx_rate_mismatch_is_refused(db: Session) -> None:
+    ob = _obligation(db, rate="1")
+    with pytest.raises(InvalidAmount, match="fx_difference_unsupported"):
+        _create(db, _command([(ob, "10")], rate="1.5"))
+    foreign = _obligation(db, currency="USD", rate="1500")
+    with pytest.raises(InvalidAmount, match="fx_difference_unsupported"):
+        _create(
+            db,
+            _command([(foreign, "10")], currency="USD", rate="1499"),
+            key="pay:c:2",
+        )
+    ok = _create(
+        db,
+        _command([(foreign, "10")], currency="USD", rate="1500.0000"),
+        key="pay:c:3",
+    )
+    assert ok.status == SupplierPaymentStatus.DRAFT
+
+
+def test_amounts_beyond_six_decimals_are_refused_not_rounded(db: Session) -> None:
+    ob = _obligation(db)
+    with pytest.raises(InvalidAmount, match="6 decimal"):
+        _create(db, _command([(ob, "10.0000004")]))
+    with pytest.raises(InvalidAmount, match="6 decimal"):
+        _create(
+            db,
+            _command(
+                [(ob, "10")],
+                wht=(SupplierPaymentWithholdingInput(WHT, Decimal("0.1234567")),),
+            ),
+            key="pay:c:2",
+        )
+    assert _create(db, _command([(ob, "10.000001")]), key="pay:c:3")

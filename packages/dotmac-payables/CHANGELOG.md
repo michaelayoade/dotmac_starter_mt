@@ -15,6 +15,12 @@ the release lane after review. No assembly adopts this candidate by this change.
   committed to DRAFT/APPROVED payments can never exceed the outstanding balance.
   Recording settles each allocation through `record_settlement` in the caller's
   transaction (all or nothing) and refuses a reused bank reference.
+- Create, approve and record refuse an allocation whose invoice has neither an
+  accounting receipt nor a historical receipt (`liability_not_in_ledger`: paying
+  it would debit a control account that was never credited), and whose invoice
+  exchange rate differs from the payment's (`fx_difference_unsupported`: realised
+  FX is not modelled in this release). Amounts with more than six decimal places
+  are refused rather than rounded. Record locks obligations in obligation-id order.
 - Optional withholding-tax lines reduce the cash credited, not the liability
   discharged.
 - `build_payment_accounting_consequence` exposes the balanced, provider-neutral

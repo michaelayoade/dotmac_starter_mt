@@ -248,6 +248,12 @@ def upgrade() -> None:
           IF (to_jsonb(NEW)-lifecycle) <> (to_jsonb(OLD)-lifecycle) THEN
             RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='supplier payment facts are immutable';
           END IF;
+          IF OLD.approved_by IS NOT NULL AND (
+               NEW.approved_by IS DISTINCT FROM OLD.approved_by
+            OR NEW.approved_at IS DISTINCT FROM OLD.approved_at
+            OR NEW.approval_reference IS DISTINCT FROM OLD.approval_reference) THEN
+            RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='supplier payment approval evidence is immutable';
+          END IF;
           IF NOT ((OLD.status='DRAFT' AND NEW.status IN ('APPROVED','CANCELLED'))
                OR (OLD.status='APPROVED' AND NEW.status IN ('RECORDED','CANCELLED'))) THEN
             RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='invalid supplier payment transition';
@@ -273,7 +279,7 @@ def upgrade() -> None:
             RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='supplier payment lines are append-only';
           END IF;
           SELECT status INTO parent_status FROM mod_payables.supplier_payments
-          WHERE id=NEW.payment_id AND tenant_id=NEW.tenant_id;
+          WHERE id=NEW.payment_id AND tenant_id=NEW.tenant_id FOR SHARE;
           IF parent_status IS DISTINCT FROM 'DRAFT' THEN
             RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='lines can only be added to a draft supplier payment';
           END IF;
