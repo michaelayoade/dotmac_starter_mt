@@ -154,6 +154,14 @@ class AgeRoundtrip(unittest.TestCase):
         )
         decrypted = self.decrypt(ciphertext, self.key)
         self.assertTrue(decrypted.returncode == 0, "real age decryption refused")
+        checked_manifest, checked_payloads = final.read_plaintext_evidence_archive(
+            decrypted.stdout
+        )
+        self.assertTrue(
+            checked_payloads
+            == {"probe-evidence.json": PROBE, "exposure-calls.json": CALLS},
+            "bounded archive intake payload mismatch",
+        )
         self.assertTrue(decrypted.stdout[257:263] == b"ustar\0", "expected USTAR")
         with tarfile.open(fileobj=io.BytesIO(decrypted.stdout), mode="r:") as archive:
             members = archive.getmembers()
@@ -177,6 +185,10 @@ class AgeRoundtrip(unittest.TestCase):
                 member.name: archive.extractfile(member).read() for member in members
             }
         manifest = payloads.pop("manifest.json")
+        self.assertTrue(
+            (checked_manifest, checked_payloads) == (manifest, payloads),
+            "bounded intake and independent archive inspection mismatch",
+        )
         self.assertTrue(
             payloads == {"probe-evidence.json": PROBE, "exposure-calls.json": CALLS},
             "decrypted synthetic payload mismatch",
