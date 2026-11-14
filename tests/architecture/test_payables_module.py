@@ -12,6 +12,14 @@ from dotmac_payables.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/pa_0001_payables.py"
+FOURTH_MIGRATION = ROOT / "migrations/versions/pa_0004_supplier_payments.py"
+# Tables created by a later revision carry their own RLS/immutability tests.
+_LATER_MIGRATION_TABLES = {
+    "historical_invoice_receipts",
+    "supplier_payments",
+    "supplier_payment_allocations",
+    "supplier_payment_withholdings",
+}
 SECOND_MIGRATION = ROOT / "migrations/versions/pa_0002_optional_supplier_doc.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -81,7 +89,7 @@ def test_service_owns_no_session_or_transaction() -> None:
 
 def test_migration_proves_rls_and_immutable_observations() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
-    for table in set(module.tables) - {"historical_invoice_receipts"}:
+    for table in set(module.tables) - _LATER_MIGRATION_TABLES:
         qualified = f"mod_payables.{table}"
         assert f"{qualified} ENABLE ROW LEVEL SECURITY" in source
         assert f"{qualified} FORCE ROW LEVEL SECURITY" in source
@@ -120,7 +128,7 @@ def test_payables_lineage_loads_as_one_alembic_head() -> None:
     config.set_main_option("script_location", str(ROOT / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["pa_0003_historical_invoice"]
+    assert scripts.get_heads() == ["pa_0004_supplier_payments"]
     assert scripts.get_bases() == ["pa_0001_payables"]
 
 
@@ -150,3 +158,56 @@ def test_historical_receipt_is_forward_only_and_immutable() -> None:
     assert "GRANT SELECT, INSERT" in source
     table = models.HistoricalInvoiceReceipt.__table__
     assert len(table.foreign_key_constraints) == 4
+
+
+def test_supplier_payment_migration_is_additive_forward_only_and_tenant_safe() -> None:
+    source = FOURTH_MIGRATION.read_text(encoding="utf-8")
+    assert 'down_revision = "pa_0003_historical_invoice"' in source
+    for table in (
+        "supplier_payments",
+        "supplier_payment_allocations",
+        "supplier_payment_withholdings",
+    ):
+        assert f"{table}_tenant_isolation" in source or "_tenant_isolation" in source
+        assert table in module.tables
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "protect_supplier_payment()" in source
+    assert "supplier_payments_lifecycle" in source
+    assert "_append_only" in source
+    # Additive only: never alters or drops a released table or column.
+    assert "op.add_column" not in source
+    assert "op.alter_column" not in source
+    assert "op.drop_column" not in source
+    assert "ALTER TABLE mod_payables.supplier_invoices" not in source
+    # Same downgrade policy as pa_0003: refuse once evidence exists.
+    assert "supplier payments require forward correction" in source
+    fks = {
+        models.SupplierPayment: 1,
+        models.SupplierPaymentAllocation: 3,
+        models.SupplierPaymentWithholding: 2,
+    }
+    for model, count in fks.items():
+        assert len(model.__table__.foreign_key_constraints) == count, model
+
+
+def test_released_migration_check_text_matches_the_model() -> None:
+    from importlib import import_module
+
+    migration = import_module(
+        "dotmac_payables.migrations.versions.pa_0004_supplier_payments"
+    )
+    assert (
+        migration.SUPPLIER_PAYMENT_EVIDENCE_CHECK
+        == models.SUPPLIER_PAYMENT_EVIDENCE_CHECK
+    )
+    assert migration.SUPPLIER_PAYMENT_SOD_CHECK == models.SUPPLIER_PAYMENT_SOD_CHECK
+
+
+def test_supplier_payment_commands_never_post_to_accounting_or_move_money() -> None:
+    from dotmac_payables import contracts
+
+    assert contracts.SupplierPaymentStatus.RECORDED.value == "RECORDED"
+    source = Path(inspect.getfile(service)).read_text(encoding="utf-8")
+    for forbidden in ("transfer(", "dotmac_accounting", "post_journal"):
+        assert forbidden not in source

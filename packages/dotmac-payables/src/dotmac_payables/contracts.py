@@ -54,6 +54,13 @@ class ObligationStatus(enum.StrEnum):
     SETTLED = "SETTLED"
 
 
+class SupplierPaymentStatus(enum.StrEnum):
+    DRAFT = "DRAFT"
+    APPROVED = "APPROVED"
+    RECORDED = "RECORDED"
+    CANCELLED = "CANCELLED"
+
+
 def _required(value: str, label: str, maximum: int) -> str:
     normalized = value.strip()
     if not normalized:
@@ -446,4 +453,109 @@ __all__ += [
     "HistoricalUnpaidInvoiceCommand",
     "HistoricalUnpaidInvoiceEvidence",
     "HistoricalUnpaidInvoiceVerifier",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierPaymentAllocationInput:
+    """One slice of a supplier payment applied to one open obligation."""
+
+    obligation_id: UUID
+    amount: Decimal
+
+    def payload(self) -> dict[str, str]:
+        if self.amount <= 0:
+            raise InvalidAmount("payment allocation amount must be positive")
+        return {"obligation_id": str(self.obligation_id), "amount": str(self.amount)}
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierPaymentWithholdingInput:
+    """Optional withholding tax deducted from the cash paid to the supplier."""
+
+    account_ref: str
+    amount: Decimal
+    description: str | None = None
+    certificate_ref: str | None = None
+
+    def payload(self) -> dict[str, object]:
+        if self.amount <= 0:
+            raise InvalidAmount("withholding amount must be positive")
+        return {
+            "account_ref": _required(
+                self.account_ref, "withholding account reference", 255
+            ),
+            "amount": str(self.amount),
+            "description": _required(self.description, "withholding description", 255)
+            if self.description is not None
+            else None,
+            "certificate_ref": _required(
+                self.certificate_ref, "withholding certificate reference", 255
+            )
+            if self.certificate_ref is not None
+            else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CreateSupplierPayment:
+    """Proposal to pay one supplier from one cash account against open obligations.
+
+    The payment is a statement of intent until it is RECORDED, and RECORDED is an
+    assertion by a human that money left through an external channel. Nothing here
+    moves money or calls a provider.
+    """
+
+    number: str
+    supplier_ref: str
+    supplier_name_snapshot: str
+    currency_code: str
+    exchange_rate: Decimal
+    value_date: date
+    cash_account_ref: str
+    payer_instrument_ref: str
+    allocations: tuple[SupplierPaymentAllocationInput, ...]
+    prepared_by: str
+    withholdings: tuple[SupplierPaymentWithholdingInput, ...] = ()
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        if not self.allocations:
+            raise InvalidAmount("supplier payment requires at least one allocation")
+        if self.exchange_rate <= 0:
+            raise InvalidAmount("exchange rate must be greater than zero")
+        allocation_payloads = [item.payload() for item in self.allocations]
+        withholding_payloads = [item.payload() for item in self.withholdings]
+        obligation_ids = [item.obligation_id for item in self.allocations]
+        if len(obligation_ids) != len(set(obligation_ids)):
+            raise InvalidAmount("an obligation may be allocated once per payment")
+        gross = sum((item.amount for item in self.allocations), Decimal("0"))
+        withheld = sum((item.amount for item in self.withholdings), Decimal("0"))
+        if withheld >= gross:
+            raise InvalidAmount("withholding must be less than the gross payment")
+        return {
+            "number": _required(self.number, "payment number", 50).upper(),
+            "supplier_ref": _required(self.supplier_ref, "supplier reference", 255),
+            "supplier_name_snapshot": _required(
+                self.supplier_name_snapshot, "supplier name snapshot", 255
+            ),
+            "currency_code": _currency(self.currency_code),
+            "exchange_rate": str(self.exchange_rate),
+            "value_date": self.value_date.isoformat(),
+            "cash_account_ref": _required(
+                self.cash_account_ref, "cash account reference", 255
+            ),
+            "payer_instrument_ref": _required(
+                self.payer_instrument_ref, "payer instrument reference", 255
+            ),
+            "prepared_by": _required(self.prepared_by, "prepared by", 255),
+            "allocations": allocation_payloads,
+            "withholdings": withholding_payloads,
+        }
+
+
+__all__ += [
+    "CreateSupplierPayment",
+    "SupplierPaymentAllocationInput",
+    "SupplierPaymentStatus",
+    "SupplierPaymentWithholdingInput",
 ]
