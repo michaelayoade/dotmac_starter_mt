@@ -1074,6 +1074,7 @@
         "MIGRATION_OWNER_LEDGER_DIGEST",
         "MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN",
         "MODULE_SCHEMA_PREFIX",
+        "MONEY_FLOWS_MIGRATION_OWNER",
         "MigrationOwner",
         "NamespaceAllocationError",
         "NamespaceError",
