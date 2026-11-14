@@ -1662,7 +1662,7 @@ url = "packages/dotmac-party"
 
 [[package]]
 name = "dotmac-payables"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Tenant supplier-liability and payment-obligation authority"
 optional = false
 python-versions = ">=3.11,<3.14"
