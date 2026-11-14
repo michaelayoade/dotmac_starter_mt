@@ -36,6 +36,8 @@ from tests.unit.test_payroll_service import (
     _tenant,
 )
 
+VALUE_DATE = date(2026, 9, 1)
+
 
 @pytest.fixture
 def db() -> Session:
@@ -102,8 +104,8 @@ def test_run_fact_is_balanced_idempotent_and_uses_configured_refs(db: Session) -
     run = _finalized(db, tenant.id)
     fact = build_run_accounting_consequence(db, tenant_id=tenant.id, run_id=run.id)
     # 10% allowance on 1000 base: gross 1100, deduction 100, net 1000.
-    debits = {x.account_ref: x.amount for x in fact.lines if x.side == "debit"}
-    credits = {x.account_ref: x.amount for x in fact.lines if x.side == "credit"}
+    debits = {x.account_ref: x.debit for x in fact.entries if x.debit}
+    credits = {x.account_ref: x.credit for x in fact.entries if x.credit}
     assert debits == {
         "ledger:salary-expense": Decimal("1000.00"),
         "ledger:allowance-expense": Decimal("100.00"),
@@ -112,12 +114,19 @@ def test_run_fact_is_balanced_idempotent_and_uses_configured_refs(db: Session) -
         "ledger:deduction-payable": Decimal("100.00"),
         "ledger:employee-payable": Decimal("1000.00"),
     }
-    assert fact.total_debit == fact.total_credit == Decimal("1100.00")
-    assert fact.effective_date == date(2026, 7, 31)
+    assert sum(debits.values()) == sum(credits.values()) == Decimal("1100.00")
+    assert fact.posting_date == date(2026, 7, 31)
+    assert fact.description == run.run_ref
+    assert fact.source.owner == "payroll"
+    assert fact.source.document_kind == "payroll_run"
+    assert fact.source.document_id == str(run.id)
+    assert fact.source.version == "1"
+    assert fact.source.fingerprint == fact.fingerprint
+    assert not hasattr(fact, "exchange_rate")
     again = build_run_accounting_consequence(db, tenant_id=tenant.id, run_id=run.id)
     assert again == fact
-    assert fact.idempotency_key == f"payroll.run.finalized:{tenant.id}:{run.id}"
-    assert len(fact.content_sha256) == 64
+    assert fact.idempotency_key == f"payroll:payroll_run:{tenant.id}:{run.id}"
+    assert len(fact.fingerprint) == 64
 
 
 def test_run_fact_refuses_unfinalized_wrong_tenant_and_missing_run(db: Session) -> None:
@@ -183,13 +192,27 @@ def test_settlement_fact_covers_net_pay_and_statutory_remittance(db: Session) ->
         recorded_at=NOW,
     )
     fact = build_liability_settlement_consequence(
-        db, tenant_id=tenant.id, settlement_id=s1.id, bank_account_ref="ledger:bank"
+        db,
+        tenant_id=tenant.id,
+        settlement_id=s1.id,
+        bank_account_ref="ledger:bank",
+        posting_date=VALUE_DATE,
     )
-    assert [(x.side, x.account_ref, x.amount) for x in fact.lines] == [
-        ("debit", "ledger:employee-payable", Decimal("400.00")),
-        ("credit", "ledger:bank", Decimal("400.00")),
+    assert [(x.account_ref, x.debit, x.credit) for x in fact.entries] == [
+        ("ledger:employee-payable", Decimal("400.00"), Decimal("0")),
+        ("ledger:bank", Decimal("0"), Decimal("400.00")),
     ]
-    assert fact.effective_date == NOW.date()
+    assert fact.posting_date == VALUE_DATE != NOW.date()
+    assert fact.source.document_kind == "payroll_liability_settlement"
+    assert fact.description == "pay:1"
+    moved = build_liability_settlement_consequence(
+        db,
+        tenant_id=tenant.id,
+        settlement_id=s1.id,
+        bank_account_ref="ledger:bank",
+        posting_date=date(2026, 9, 2),
+    )
+    assert moved.fingerprint != fact.fingerprint
     paye = next(v for k, v in liabilities.items() if k.startswith("component:"))
     s2 = record_liability_settlement(
         db,
@@ -202,12 +225,20 @@ def test_settlement_fact_covers_net_pay_and_statutory_remittance(db: Session) ->
         recorded_at=NOW,
     )
     f2 = build_liability_settlement_consequence(
-        db, tenant_id=tenant.id, settlement_id=s2.id, bank_account_ref="ledger:bank"
+        db,
+        tenant_id=tenant.id,
+        settlement_id=s2.id,
+        bank_account_ref="ledger:bank",
+        posting_date=VALUE_DATE,
     )
-    assert f2.lines[0].account_ref == "ledger:deduction-payable"
+    assert f2.entries[0].account_ref == "ledger:deduction-payable"
     assert f2.idempotency_key != fact.idempotency_key
     assert fact == build_liability_settlement_consequence(
-        db, tenant_id=tenant.id, settlement_id=s1.id, bank_account_ref="ledger:bank"
+        db,
+        tenant_id=tenant.id,
+        settlement_id=s1.id,
+        bank_account_ref="ledger:bank",
+        posting_date=VALUE_DATE,
     )
 
 
@@ -232,7 +263,11 @@ def test_settlement_fact_refusals(db: Session) -> None:
     )
     with pytest.raises(PayrollRuleViolation, match="bank account reference"):
         build_liability_settlement_consequence(
-            db, tenant_id=tenant.id, settlement_id=s.id, bank_account_ref=" "
+            db,
+            tenant_id=tenant.id,
+            settlement_id=s.id,
+            bank_account_ref=" ",
+            posting_date=VALUE_DATE,
         )
     with pytest.raises(PayrollRuleViolation, match="must differ"):
         build_liability_settlement_consequence(
@@ -240,11 +275,16 @@ def test_settlement_fact_refusals(db: Session) -> None:
             tenant_id=tenant.id,
             settlement_id=s.id,
             bank_account_ref="ledger:employee-payable",
+            posting_date=VALUE_DATE,
         )
     other = _tenant(db)
     with pytest.raises(PayrollNotFound):
         build_liability_settlement_consequence(
-            db, tenant_id=other.id, settlement_id=s.id, bank_account_ref="ledger:bank"
+            db,
+            tenant_id=other.id,
+            settlement_id=s.id,
+            bank_account_ref="ledger:bank",
+            posting_date=VALUE_DATE,
         )
     with pytest.raises(PayrollNotFound):
         build_liability_settlement_consequence(
@@ -252,4 +292,30 @@ def test_settlement_fact_refusals(db: Session) -> None:
             tenant_id=tenant.id,
             settlement_id=uuid4(),
             bank_account_ref="ledger:bank",
+            posting_date=VALUE_DATE,
         )
+
+
+def test_component_liability_drift_is_refused(db: Session) -> None:
+    tenant = _tenant(db)
+    run = _finalized(db, tenant.id)
+    component = db.scalars(
+        select(PayrollLiability).where(
+            PayrollLiability.run_id == run.id,
+            PayrollLiability.liability_key != "employee-net-pay",
+        )
+    ).one()
+    original = component.liability_account_ref
+    component.liability_account_ref = "ledger:other-payable"
+    db.flush()
+    with pytest.raises(PayrollRuleViolation, match="component liabilities drift"):
+        build_run_accounting_consequence(db, tenant_id=tenant.id, run_id=run.id)
+    component.liability_account_ref = original
+    component.amount = Decimal("99.00")
+    db.flush()
+    with pytest.raises(PayrollRuleViolation, match="component liabilities drift"):
+        build_run_accounting_consequence(db, tenant_id=tenant.id, run_id=run.id)
+    db.delete(component)
+    db.flush()
+    with pytest.raises(PayrollRuleViolation, match="component liabilities drift"):
+        build_run_accounting_consequence(db, tenant_id=tenant.id, run_id=run.id)

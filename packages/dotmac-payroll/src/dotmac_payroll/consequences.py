@@ -28,34 +28,54 @@ from dotmac_payroll.models import (
 )
 from dotmac_payroll.service import PayrollNotFound, PayrollRuleViolation
 
-RUN_FINALIZED_SOURCE = "payroll.run.finalized"
-SETTLEMENT_SOURCE = "payroll.liability.settled"
+CONSEQUENCE_OWNER = "payroll"
+RUN_DOCUMENT_KIND = "payroll_run"
+SETTLEMENT_DOCUMENT_KIND = "payroll_liability_settlement"
+CONSEQUENCE_SOURCE_VERSION = "1"
 _DEBIT = "debit"
 _CREDIT = "credit"
 
 
 @dataclass(frozen=True, slots=True)
-class PayrollGlLine:
+class PayrollConsequenceSource:
+    """Source identity; field names mirror payables ``ConsequenceSource``."""
+
+    owner: str
+    document_kind: str
+    document_id: str
+    version: str
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class PayrollAccountingEntry:
+    """One GL entry; field names mirror payables ``AccountingEntry``."""
+
     account_ref: str
-    side: str
-    amount: Decimal
+    debit: Decimal = Decimal("0")
+    credit: Decimal = Decimal("0")
+    description: str | None = None
+    dimension_refs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class PayrollAccountingConsequence:
-    """One balanced, idempotent GL consequence fact."""
+    """One balanced, idempotent GL consequence fact.
 
-    tenant_id: UUID
-    source_type: str
-    source_ref: str
-    idempotency_key: str
-    effective_date: date
+    Mirrors payables ``AccountingConsequence`` (source, posting_date,
+    description, currency_code, entries, fingerprint) without
+    ``exchange_rate``: payroll stores none, so adopters must refuse a
+    non-functional currency. ``minor_units`` and ``idempotency_key`` are extras.
+    """
+
+    source: PayrollConsequenceSource
+    posting_date: date
+    description: str
     currency_code: str
     minor_units: int
-    lines: tuple[PayrollGlLine, ...]
-    total_debit: Decimal
-    total_credit: Decimal
-    content_sha256: str
+    entries: tuple[PayrollAccountingEntry, ...]
+    fingerprint: str
+    idempotency_key: str
 
 
 def _clean_ref(value: str | None, label: str) -> str:
@@ -68,9 +88,10 @@ def _clean_ref(value: str | None, label: str) -> str:
 def _seal(
     *,
     tenant_id: UUID,
-    source_type: str,
-    source_ref: str,
-    effective_date: date,
+    document_kind: str,
+    document_id: str,
+    description: str,
+    posting_date: date,
     currency_code: str,
     minor_units: int,
     raw: list[tuple[str, str, Decimal]],
@@ -90,39 +111,50 @@ def _seal(
     ordered = sorted(
         merged.items(), key=lambda item: (item[0][1] != _DEBIT, item[0][0])
     )
-    lines = tuple(
-        PayrollGlLine(account_ref, side, amount.quantize(quantum))
+    entries = tuple(
+        PayrollAccountingEntry(
+            account_ref,
+            debit=amount.quantize(quantum) if side == _DEBIT else Decimal(0),
+            credit=amount.quantize(quantum) if side == _CREDIT else Decimal(0),
+        )
         for (account_ref, side), amount in ordered
     )
-    if not lines:
+    if not entries:
         raise PayrollRuleViolation("payroll consequence has no non-zero lines")
-    debit = sum((x.amount for x in lines if x.side == _DEBIT), Decimal(0))
-    credit = sum((x.amount for x in lines if x.side == _CREDIT), Decimal(0))
+    debit = sum((x.debit for x in entries), Decimal(0))
+    credit = sum((x.credit for x in entries), Decimal(0))
     if debit != credit:
         raise PayrollRuleViolation("payroll consequence does not balance")
     canonical = "|".join(
         [
             str(tenant_id),
-            source_type,
-            source_ref,
-            effective_date.isoformat(),
+            CONSEQUENCE_OWNER,
+            document_kind,
+            document_id,
+            CONSEQUENCE_SOURCE_VERSION,
+            description,
+            posting_date.isoformat(),
             currency_code,
             str(minor_units),
-            *(f"{x.side}:{x.account_ref}:{x.amount}" for x in lines),
+            *(f"{x.account_ref}:{x.debit}:{x.credit}" for x in entries),
         ]
     )
+    fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return PayrollAccountingConsequence(
-        tenant_id=tenant_id,
-        source_type=source_type,
-        source_ref=source_ref,
-        idempotency_key=f"{source_type}:{tenant_id}:{source_ref}",
-        effective_date=effective_date,
+        source=PayrollConsequenceSource(
+            CONSEQUENCE_OWNER,
+            document_kind,
+            document_id,
+            CONSEQUENCE_SOURCE_VERSION,
+            fingerprint,
+        ),
+        posting_date=posting_date,
+        description=description,
         currency_code=currency_code,
         minor_units=minor_units,
-        lines=lines,
-        total_debit=debit,
-        total_credit=credit,
-        content_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        entries=entries,
+        fingerprint=fingerprint,
+        idempotency_key=f"{CONSEQUENCE_OWNER}:{document_kind}:{tenant_id}:{document_id}",
     )
 
 
@@ -140,6 +172,10 @@ def build_run_accounting_consequence(
     configured payroll payable, e.g. ref 2040) for total net pay. Refuses a run
     that is not finalized, has no calculations, lacks a configured account, or
     whose persisted liabilities/calculation snapshots drift from its lines.
+    Component liability rows must match the deduction/employer lines per
+    calculation, so later settlements clear exactly what the fact credited.
+    The builder calls ``db.flush()`` on the caller's session and takes no row
+    lock: a finalized run is terminal and immutable.
     """
     db.flush()
     run = db.scalar(
@@ -204,6 +240,27 @@ def build_run_accounting_consequence(
                 raw.append((payable, _CREDIT, line.amount))
             else:
                 raise PayrollRuleViolation("unknown payroll component kind")
+        component_liabilities = db.scalars(
+            select(PayrollLiability).where(
+                PayrollLiability.tenant_id == tenant_id,
+                PayrollLiability.run_id == run.id,
+                PayrollLiability.calculation_id == calculation.id,
+                PayrollLiability.liability_key != "employee-net-pay",
+            )
+        ).all()
+        expected = sorted(
+            (str(x.component_id), x.liability_account_ref or "", x.amount)
+            for x in lines
+            if x.component_kind in ("deduction", "employer_liability") and x.amount > 0
+        )
+        actual = sorted(
+            (str(x.component_id), x.liability_account_ref, x.amount)
+            for x in component_liabilities
+        )
+        if expected != actual:
+            raise PayrollRuleViolation(
+                "component liabilities drift from the calculation lines"
+            )
         net_liabilities = db.scalars(
             select(PayrollLiability).where(
                 PayrollLiability.tenant_id == tenant_id,
@@ -227,9 +284,10 @@ def build_run_accounting_consequence(
             )
     return _seal(
         tenant_id=tenant_id,
-        source_type=RUN_FINALIZED_SOURCE,
-        source_ref=str(run.id),
-        effective_date=run.period_end,
+        document_kind=RUN_DOCUMENT_KIND,
+        document_id=str(run.id),
+        description=run.run_ref,
+        posting_date=run.period_end,
         currency_code=run.currency_code,
         minor_units=run.minor_units,
         raw=raw,
@@ -242,13 +300,17 @@ def build_liability_settlement_consequence(
     tenant_id: UUID,
     settlement_id: UUID,
     bank_account_ref: str,
+    posting_date: date,
 ) -> PayrollAccountingConsequence:
     """Fact for a recorded settlement: Dr liability account / Cr bank GL.
 
     Covers employee net pay (the payable account, e.g. 2040) and statutory
     remittances (PAYE, pension) alike; settlements are records of money a human
     already moved, never an instruction to move it. The bank GL ref is supplied
-    by the caller because payroll stores no bank account.
+    by the caller because payroll stores no bank account. ``posting_date`` is
+    the bank value date, supplied by the caller (who validates it against the
+    open period) and covered by the fingerprint. Calls ``db.flush()`` on the
+    caller's session; takes no lock.
     """
     db.flush()
     bank = _clean_ref(bank_account_ref, "bank account reference")
@@ -276,9 +338,10 @@ def build_liability_settlement_consequence(
         raise PayrollRuleViolation("settlement amount must be positive")
     return _seal(
         tenant_id=tenant_id,
-        source_type=SETTLEMENT_SOURCE,
-        source_ref=str(settlement.id),
-        effective_date=settlement.recorded_at.date(),
+        document_kind=SETTLEMENT_DOCUMENT_KIND,
+        document_id=str(settlement.id),
+        description=settlement.settlement_ref,
+        posting_date=posting_date,
         currency_code=liability.currency_code,
         minor_units=liability.minor_units,
         raw=[
@@ -289,10 +352,13 @@ def build_liability_settlement_consequence(
 
 
 __all__ = [
-    "RUN_FINALIZED_SOURCE",
-    "SETTLEMENT_SOURCE",
+    "CONSEQUENCE_OWNER",
+    "RUN_DOCUMENT_KIND",
+    "SETTLEMENT_DOCUMENT_KIND",
+    "CONSEQUENCE_SOURCE_VERSION",
     "PayrollAccountingConsequence",
-    "PayrollGlLine",
+    "PayrollAccountingEntry",
+    "PayrollConsequenceSource",
     "build_liability_settlement_consequence",
     "build_run_accounting_consequence",
 ]

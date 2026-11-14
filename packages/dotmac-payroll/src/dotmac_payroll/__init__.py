@@ -1,8 +1,13 @@
 """Public contract for dotmac-payroll."""
 
 from dotmac_payroll.consequences import (
+    CONSEQUENCE_OWNER,
+    CONSEQUENCE_SOURCE_VERSION,
+    RUN_DOCUMENT_KIND,
+    SETTLEMENT_DOCUMENT_KIND,
     PayrollAccountingConsequence,
-    PayrollGlLine,
+    PayrollAccountingEntry,
+    PayrollConsequenceSource,
     build_liability_settlement_consequence,
     build_run_accounting_consequence,
 )
@@ -46,7 +51,12 @@ __all__ = [
     "PayRuleInput",
     "PayrollAccountingConsequence",
     "PayrollAmountSnapshot",
-    "PayrollGlLine",
+    "PayrollAccountingEntry",
+    "PayrollConsequenceSource",
+    "CONSEQUENCE_OWNER",
+    "RUN_DOCUMENT_KIND",
+    "SETTLEMENT_DOCUMENT_KIND",
+    "CONSEQUENCE_SOURCE_VERSION",
     "build_liability_settlement_consequence",
     "build_run_accounting_consequence",
     "PayrollRunTotals",

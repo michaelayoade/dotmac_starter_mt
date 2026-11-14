@@ -228,3 +228,119 @@ def test_online_role_cannot_read_or_write_across_tenants(
                 text(case.seed_sql),
                 {"id": uuid.uuid4(), "tenant": tenant_a, **case.seed_values},
             )
+
+
+def test_payroll_consequence_facts_round_trip_on_postgres(
+    migrated_module: tuple[ModuleCase, str, str],
+) -> None:
+    """Two employees, a deduction and a settlement through real MONEY columns."""
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.money import Currency, Money
+    from dotmac_payroll import (
+        EmployeeComponentInput,
+        approve_payroll_run,
+        assign_employee_pay_structure,
+        build_liability_settlement_consequence,
+        build_run_accounting_consequence,
+        calculate_employee_payroll,
+        create_payroll_run,
+        finalize_payroll_run,
+        record_liability_settlement,
+    )
+    from dotmac_payroll.models import PayrollLiability
+    from sqlalchemy import select
+
+    from tests.unit.test_payroll_service import _configured_payroll
+
+    case, admin_url, app_url = migrated_module
+    if case.manifest.code != "payroll":
+        pytest.skip("payroll-only proof")
+    tenant_a, _ = _seed_tenants(admin_url)
+    ngn = Currency("NGN", 2)
+    now = datetime(2026, 8, 19, 12, tzinfo=UTC)
+    with _tenant_session(app_url, tenant_a) as session:
+        base, _, deduction, _, revision, _ = _configured_payroll(session, tenant_a)
+        assign_employee_pay_structure(
+            session,
+            tenant_id=tenant_a,
+            employee_ref="employee:opaque-2",
+            revision_id=revision.id,
+            effective_from=date(2026, 1, 1),
+            effective_to=None,
+            source_ref="people-assignment:2",
+            source_version="1",
+        )
+        run = create_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_ref="PG-RUN",
+            period_start=date(2026, 7, 1),
+            period_end=date(2026, 7, 31),
+            currency=ngn,
+            created_by_id=uuid.uuid4(),
+            created_at=now,
+        )
+        for employee, gross, tax in (
+            ("employee:opaque-1", "1000.10", "100.05"),
+            ("employee:opaque-2", "2000.20", "300.15"),
+        ):
+            calculate_employee_payroll(
+                session,
+                tenant_id=tenant_a,
+                run_id=run.id,
+                employee_ref=employee,
+                proration_factor=Decimal("1"),
+                inputs=(
+                    EmployeeComponentInput(base.id, Money.of(gross, ngn), "comp"),
+                    EmployeeComponentInput(deduction.id, Money.of(tax, ngn), "tax"),
+                ),
+                calculated_at=now,
+            )
+        approve_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            approved_by_id=uuid.uuid4(),
+            approved_at=now,
+        )
+        finalize_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            finalized_by_id=uuid.uuid4(),
+            finalized_at=now,
+        )
+        fact = build_run_accounting_consequence(
+            session, tenant_id=tenant_a, run_id=run.id
+        )
+        assert sum(x.debit for x in fact.entries) == sum(x.credit for x in fact.entries)
+        assert sum(x.credit for x in fact.entries) > 0
+        net = session.scalars(
+            select(PayrollLiability).where(
+                PayrollLiability.run_id == run.id,
+                PayrollLiability.liability_key == "employee-net-pay",
+            )
+        ).first()
+        settlement = record_liability_settlement(
+            session,
+            tenant_id=tenant_a,
+            liability_id=net.id,
+            amount=Money.of("10.01", ngn),
+            settlement_ref="pg-pay:1",
+            evidence_ref="bank:1",
+            recorded_by_id=uuid.uuid4(),
+            recorded_at=now,
+        )
+        settled = build_liability_settlement_consequence(
+            session,
+            tenant_id=tenant_a,
+            settlement_id=settlement.id,
+            bank_account_ref="ledger:bank",
+            posting_date=date(2026, 9, 1),
+        )
+        assert [(x.debit, x.credit) for x in settled.entries] == [
+            (Decimal("10.01"), Decimal("0.00")),
+            (Decimal("0.00"), Decimal("10.01")),
+        ]
