@@ -744,8 +744,16 @@ outside runners; only the execution boundary produces private evidence.
 `scripts/lane3_offline_result.py` owns the closed public claim and protected
 policy grammars; `scripts/lane3_offline_signature.py` authenticates the original
 claim bytes through fixed, pinned OpenSSH verification and all current bindings.
-`require_rehearsal.py` requires that consumer after its existing selected-run,
-candidate and receipt checks. Public workflow inputs carry only bounded result
+`require_rehearsal.py` acquires the selected run's exact three-member receipt
+artifact with bounded download and ZIP reads. It joins the encrypted member's
+SHA-256 to the parsed receipt before authenticated offline-result verification.
+The existing release evidence upload retains that ciphertext, source status
+and a canonical source-artifact record containing observed API expiry and
+artifact coordinates plus measured ZIP/member sizes and hashes. The observed
+source expiry is not a promise about the new upload's lifetime. No plaintext
+evidence or decryption key enters this path.
+`require_rehearsal.py` requires the authenticated public consumer after its
+selected-run, candidate, receipt and ciphertext checks. Public workflow inputs carry only bounded result
 and signature bytes; they select no trust root, executable or verification time.
 
 The checked-in policy is **unenrolled**, with no key, tool or verifier profile

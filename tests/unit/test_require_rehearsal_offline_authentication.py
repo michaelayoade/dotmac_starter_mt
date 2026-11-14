@@ -19,7 +19,6 @@ from dotmac_deployment_foundation.rehearsal import ExecutionRunBindingV1
 from tests.unit.test_deployment_foundation_rehearsal_receipt_v2 import (
     REVISION,
     Subject,
-    _build,
     subject,  # noqa: F401 - shared pytest fixture
 )
 from tests.unit.test_lane3_offline_signature import (
@@ -32,6 +31,7 @@ from tests.unit.test_require_rehearsal_organization_oracle import (
     RUN,
     RUN_ID,
     TOPOLOGY,
+    _build,
     _main,
     _network,
 )
@@ -195,6 +195,9 @@ def test_release_transport_is_environment_only_and_retains_only_public_files():
     )
     assert set(retained["with"]["path"].splitlines()) == {
         ".rehearsal/receipt.json",
+        ".rehearsal/evidence-bundle.age",
+        ".rehearsal/source-status.md",
+        ".rehearsal/source-artifact.json",
         ".rehearsal/offline-result.json",
         ".rehearsal/offline-result.sshsig",
     }

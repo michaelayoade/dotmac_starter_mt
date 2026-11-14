@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
+import io
 import json
 import pathlib
 import sys
+import zipfile
 from typing import Any
 
 import pytest
@@ -25,8 +28,10 @@ from tests.unit.lane3_evidence_support import REFERENCE, write_topology
 from tests.unit.test_deployment_foundation_rehearsal_receipt_v2 import (
     REVISION,
     Subject,
-    _build,
     subject,  # noqa: F401 - pytest fixture, used by name
+)
+from tests.unit.test_deployment_foundation_rehearsal_receipt_v2 import (
+    _build as _build_receipt,
 )
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -39,6 +44,28 @@ REPO_ID = 1397614141
 GROUP_ID = 4
 ENV_ID = 23103080999
 RUN_ID = 4242
+CIPHERTEXT = b"age-encryption.org/v1\nsynthetic-ciphertext"
+
+
+def _build(held_subject, **overrides):
+    return _build_receipt(
+        held_subject,
+        evidence_bundle_digest="sha256:" + hashlib.sha256(CIPHERTEXT).hexdigest(),
+        **overrides,
+    )
+
+
+def _archive(receipt, ciphertext=CIPHERTEXT):
+    storage = io.BytesIO()
+    with zipfile.ZipFile(storage, "w") as archive:
+        archive.writestr("receipt.json", receipt)
+        archive.writestr("evidence-bundle.age", ciphertext)
+        archive.writestr(
+            "docs/inventories/deployment-exposure-rehearsal-status.md",
+            b"synthetic status\n",
+        )
+    return storage.getvalue()
+
 
 TOPOLOGY: dict[str, Any] = {
     "schema": "Lane3ExecutionTopology.v1",
@@ -84,7 +111,16 @@ def _network(
         return {
             "workflow_runs": [run],
             "jobs": [{"id": 1, "runner_group_id": GROUP_ID}],
-            "artifacts": [{"id": 9, "expired": False}],
+            "artifacts": [
+                {
+                    "id": 9,
+                    "name": "lane3-rehearsal-receipt",
+                    "expired": False,
+                    "size_in_bytes": len(_archive(receipt)),
+                    "expires_at": "2099-01-01T00:00:00Z",
+                    "workflow_run": {"id": run["id"]},
+                }
+            ],
         }[key]
 
     def fake_fetch(url: str, token: str) -> Any:
@@ -100,7 +136,9 @@ def _network(
 
     monkeypatch.setattr(require_rehearsal, "_list", fake_list)
     monkeypatch.setattr(require_rehearsal, "_fetch", fake_fetch)
-    monkeypatch.setattr(require_rehearsal, "_receipt_bytes", lambda *a, **k: receipt)
+    monkeypatch.setattr(
+        require_rehearsal, "_download", lambda *a, **k: _archive(receipt)
+    )
     return calls
 
 
