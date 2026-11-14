@@ -1357,6 +1357,16 @@ LEARNING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("learning"),
 )
 
+# The tenant-plane composition of money flows over published owners. Reserving
+# the physical identity transfers no data or writer authority; the package holds
+# instance state only and never money facts.
+MONEY_FLOWS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="money_flows",
+    prefix="mf",
+    branch_label="money_flows",
+    db_schema=module_schema("mflows"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1442,6 +1452,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     OPERATIONAL_ESCALATIONS_MIGRATION_OWNER,
     RESPONSE_OBLIGATIONS_MIGRATION_OWNER,
     LEARNING_MIGRATION_OWNER,
+    MONEY_FLOWS_MIGRATION_OWNER,
 )
 
 
@@ -1584,7 +1595,7 @@ def migration_owner_ledger_digest(
 #: advertise a plain SHA-256 over some unstated serialization and invite a
 #: consumer to recompute the wrong thing.
 MIGRATION_OWNER_LEDGER_DIGEST: Final[str] = (
-    "cv1:e5f874b1a0ee526067a5dc3f1273d8bbe4ff51f133cb5b8ee282bf3c6e11fc67"
+    "cv1:4bdbdbc6b69841de17532951e679bfd7fc8d61e81a43c30b82692e695c82adcc"
 )
 
 
@@ -1988,6 +1999,7 @@ __all__ = [
     "OPERATIONAL_ESCALATIONS_MIGRATION_OWNER",
     "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
     "LEARNING_MIGRATION_OWNER",
+    "MONEY_FLOWS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
