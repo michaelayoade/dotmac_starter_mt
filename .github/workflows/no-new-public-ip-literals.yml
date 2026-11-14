@@ -34,4 +34,4 @@ jobs:
       - name: Refuse new public IP address literals
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python scripts/check_new_ip_literals.py --base "$BASE_SHA"
+        run: python -I scripts/check_new_ip_literals.py --base "$BASE_SHA"

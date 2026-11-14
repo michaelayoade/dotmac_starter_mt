@@ -38,7 +38,7 @@ MARKER = re.compile(r"ip-literal-ok:\s*\S")
 
 _V4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?:/(\d{1,3}))?(?!\w|\.\d)")
 _V6 = re.compile(
-    r"(?<![\w:])([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?:/(\d{1,3}))?(?![\w:])"
+    r"(?<![\w:])([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,8})(?:/(\d{1,3}))?(?![\w:])"
 )
 
 _DOCUMENTATION = tuple(
@@ -88,6 +88,7 @@ _BINARY_SUFFIXES = frozenset(
         ".whl",
         ".pyc",
         ".jar",
+        ".svg",
         ".mp4",
         ".mov",
         ".sqlite",
@@ -108,7 +109,11 @@ class Finding:
 def is_skipped_path(path: str) -> bool:
     pure = PurePosixPath(path)
     name = pure.name.lower()
-    return name in _LOCKFILE_NAMES or pure.suffix.lower() in _BINARY_SUFFIXES
+    return (
+        name in _LOCKFILE_NAMES
+        or pure.suffix.lower() == ".lock"
+        or pure.suffix.lower() in _BINARY_SUFFIXES
+    )
 
 
 def _is_flagged(
@@ -117,9 +122,22 @@ def _is_flagged(
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
         address = mapped
+    if address.is_multicast or address.is_reserved:
+        # Reserved covers ::/8, which is where Python slices such as a[1::2]
+        # parse as IPv6 addresses.
+        return False
     if any(address in net for net in _DOCUMENTATION if net.version == address.version):
         return False
     return bool(address.is_global)
+
+
+def _normalise_v4(text: str) -> str | None:
+    """Strip leading zeros per octet so a zero-padded form is judged as the
+    address it spells; None when an octet is out of range."""
+    octets = [int(part) for part in text.split(".")]
+    if any(octet > 255 for octet in octets):
+        return None
+    return ".".join(str(octet) for octet in octets)
 
 
 def _mask(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
@@ -129,26 +147,39 @@ def _mask(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
 
 
 def public_addresses(line: str) -> list[str]:
-    """Masked form of every public address or network on one line of text."""
+    """Masked form of every public address or network on one line of text.
+
+    The plain address is judged, and so is the network a valid prefix implies,
+    so `<public>/1` (an unspecified network) and a URL path such as `/123/` cannot hide
+    a public host.
+    """
     if MARKER.search(line):
         return []
     masked: list[str] = []
-    for pattern in (_V4, _V6):
+    for version, pattern in ((4, _V4), (6, _V6)):
         for match in pattern.finditer(line):
             text, prefix = match.group(1), match.group(2)
+            if version == 4:
+                normal = _normalise_v4(text)
+                if normal is None:
+                    continue
+                text = normal
             try:
                 address = ipaddress.ip_address(text)
             except ValueError:
                 continue
+            candidates = [address]
             if prefix is not None:
                 try:
                     network = ipaddress.ip_network(f"{text}/{prefix}", strict=False)
                 except ValueError:
                     pass
                 else:
-                    address = network.network_address
-            if _is_flagged(address):
-                masked.append(_mask(address))
+                    candidates.append(network.network_address)
+            for candidate in candidates:
+                if _is_flagged(candidate):
+                    masked.append(_mask(address))
+                    break
     return masked
 
 
@@ -158,23 +189,23 @@ def scan_diff(diff_text: str) -> list[Finding]:
     findings: list[Finding] = []
     path: str | None = None
     skip = True
+    in_hunk = False
     new_line = 0
     for raw in diff_text.splitlines():
         if raw.startswith("diff --git "):
-            path, skip, new_line = None, True, 0
-        elif raw.startswith("+++ "):
+            path, skip, in_hunk, new_line = None, True, False, 0
+        elif not in_hunk and raw.startswith("+++ "):
             target = raw[4:]
             if target == "/dev/null":
                 path, skip = None, True
             else:
                 path = target[2:] if target.startswith("b/") else target
                 skip = is_skipped_path(path)
-        elif raw.startswith("--- "):
-            continue
         elif raw.startswith("@@"):
             hunk = _HUNK.match(raw)
             new_line = int(hunk.group(1)) if hunk else 0
-        elif raw.startswith("+"):
+            in_hunk = True
+        elif in_hunk and raw.startswith("+"):
             if path is not None and not skip:
                 for masked in public_addresses(raw[1:]):
                     findings.append(Finding(path, new_line, masked))
@@ -182,28 +213,37 @@ def scan_diff(diff_text: str) -> list[Finding]:
     return findings
 
 
-def _git_diff(base: str) -> str:
-    result = subprocess.run(
-        [
-            "git",
-            "-c",
-            "core.quotePath=false",
-            "diff",
-            "--unified=0",
-            "--no-color",
-            "--no-ext-diff",
-            f"{base}...HEAD",
-        ],
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-c", "core.quotePath=false", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
     )
+
+
+def _git_diff(base: str) -> str:
+    verify = _git(
+        "rev-parse", "--verify", "--quiet", "--end-of-options", f"{base}^{{commit}}"
+    )
+    if verify.returncode != 0:
+        raise RuntimeError("base does not resolve to a commit (is it fetched?)")
+    result = _git(
+        "diff",
+        "--unified=0",
+        "--no-color",
+        "--no-ext-diff",
+        "--text",
+        "--find-renames",
+        "--end-of-options",
+        f"{base}...HEAD",
+    )
     if result.returncode != 0:
         raise RuntimeError(
-            "git diff failed (is the base fetched? shallow checkouts have no "
-            f"merge base): {result.stderr.strip()[:300]}"
+            "git diff failed (shallow checkouts have no merge base): "
+            f"{result.stderr.strip()[:300]}"
         )
     return result.stdout
 
@@ -216,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
         help="read a unified diff from this file instead of running git (testing)",
     )
     args = parser.parse_args(argv)
+    if not args.base.strip():
+        print("check_new_ip_literals: --base must not be empty", file=sys.stderr)
+        return 2
     try:
         if args.diff_file:
             with open(args.diff_file, encoding="utf-8", errors="replace") as handle:
