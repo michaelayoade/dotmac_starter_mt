@@ -2568,6 +2568,7 @@
       "wheel_contents": {
         "required": [
           "dotmac_payroll/py.typed",
+          "dotmac_payroll/consequences.py",
           "dotmac_payroll/contracts.py",
           "dotmac_payroll/manifest.py",
           "dotmac_payroll/migrations/__init__.py",

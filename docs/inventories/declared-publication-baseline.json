@@ -137,6 +137,11 @@
       "reason": "Unpublished source successor to verified 0.1.0a109. It reserves money_flows / mod_mflows / mf / branch money_flows for the money-flows composition package; the reservation installs no module and transfers no data or writer authority. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
       "state": "declared-unpublished"
     },
+    "dotmac-payroll": {
+      "declared": "0.1.0a3",
+      "reason": "Unpublished source successor to verified 0.1.0a2 (ERP v2 cutover S2). It adds read-only GL consequence facts for finalized payroll runs and settlements; no migration, GL write or payment call. Publication was authorized by Michael under W9 (Knowledge register v1279) and goes through the release lane after review. This row records source awaiting release and is not publication or adoption evidence. Remove only with the independently verified release record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-positioning": {
       "declared": "0.2.0a2",
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.2.0a1 is the last published and tagged version (dotmac-positioning-v0.2.0a1) and its released po_0001 bytes are unchanged. 0.2.0a2 adds po_0002_observation_holds: neutral retention holds on observations, honoured by prune_observations, so a product-owned decision can pin evidence under an opaque reference without positioning learning what the reference means. No subject, address or business data enters positioning (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.2.0a2 publication, never by editing the declared version down.",

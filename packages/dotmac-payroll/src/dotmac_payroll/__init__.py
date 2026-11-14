@@ -1,5 +1,16 @@
 """Public contract for dotmac-payroll."""
 
+from dotmac_payroll.consequences import (
+    CONSEQUENCE_OWNER,
+    CONSEQUENCE_SOURCE_VERSION,
+    RUN_DOCUMENT_KIND,
+    SETTLEMENT_DOCUMENT_KIND,
+    PayrollAccountingConsequence,
+    PayrollAccountingEntry,
+    PayrollConsequenceSource,
+    build_liability_settlement_consequence,
+    build_run_accounting_consequence,
+)
 from dotmac_payroll.contracts import (
     EmployeeComponentInput,
     PayComponentInput,
@@ -32,13 +43,22 @@ from dotmac_payroll.totals import (
     validate_payment_total,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "EmployeeComponentInput",
     "PayComponentInput",
     "PayRuleInput",
+    "PayrollAccountingConsequence",
     "PayrollAmountSnapshot",
+    "PayrollAccountingEntry",
+    "PayrollConsequenceSource",
+    "CONSEQUENCE_OWNER",
+    "RUN_DOCUMENT_KIND",
+    "SETTLEMENT_DOCUMENT_KIND",
+    "CONSEQUENCE_SOURCE_VERSION",
+    "build_liability_settlement_consequence",
+    "build_run_accounting_consequence",
     "PayrollRunTotals",
     "PayrollTotalsViolation",
     "aggregate_payroll_run_totals",

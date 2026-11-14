@@ -1,5 +1,26 @@
 # Changelog — dotmac-payroll
 
+## 0.1.0a3 — declared successor
+
+- Add read-only GL consequence facts: `build_run_accounting_consequence`
+  (finalized run: Dr earning and employer-liability expense; Cr deduction and
+  employer liability accounts; Cr the revision net-payable account, e.g. the
+  tenant-configured payroll payable) and `build_liability_settlement_consequence`
+  (recorded settlement or statutory remittance: Dr liability account / Cr
+  caller-supplied bank GL ref).
+- Facts mirror the payables `AccountingConsequence` shape (source, posting_date,
+  description, currency_code, entries, fingerprint; no exchange rate, so
+  adopters refuse a non-functional currency). Settlement facts take an explicit
+  bank-value `posting_date` covered by the fingerprint; run facts use the
+  period end.
+- Facts are frozen, balanced, tenant-scoped, deterministic and carry an
+  idempotency key and content sha256. Refusals: run not finalized, no
+  calculations, missing account refs, line/snapshot/liability drift (including component liabilities), bank ref
+  equal to the liability account, wrong tenant.
+- No migration, no GL write, no payment or provider call, no change to
+  existing transitions or separation of duties. The adopting adapter posts.
+- Publication and ERP adoption remain separate gates; `0.1.0a2` is unchanged.
+
 ## 0.1.0a2 — declared successor
 
 - Extract independent gross/deduction/net sums and net-only payment-total parity
