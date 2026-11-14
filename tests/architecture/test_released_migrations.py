@@ -8712,7 +8712,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # remains editable until a verified published tag carries it and its digest
     # is recorded above.
     "dotmac-kernel": frozenset(),
-    "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
+    "dotmac-accounting": frozenset(
+        {"ac_0002_posted_content.py", "ac_0003_draft_void.py"}
+    ),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),

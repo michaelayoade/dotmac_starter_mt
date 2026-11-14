@@ -102,6 +102,22 @@ def _post(db: Session, tenant: uuid.UUID, journal: uuid.UUID) -> None:
     )
 
 
+def _record_void(conn: Connection, journal_param: str = "draft") -> None:
+    """Append the governed void event the guard requires, then void the draft."""
+    conn.execute(
+        text(
+            "INSERT INTO mod_accounting.period_events (id,tenant_id,period_id,"
+            "event_kind,from_status,to_status,actor_ref,approval_reference,"
+            "evidence,occurred_at) SELECT gen_random_uuid(),tenant_id,"
+            "fiscal_period_id,'JOURNAL_VOID','DRAFT','VOID','user:requester',"
+            "'approval:void',jsonb_build_object('journal_id',id::text,"
+            "'reason','test','approved_by','user:approver'),now() "
+            "FROM mod_accounting.journal_entries WHERE id=:journal"
+        ),
+        {"journal": journal_param},
+    )
+
+
 def _seed(admin_url: str, *, posted: bool = True) -> Evidence:
     engine = create_engine(admin_url)
     tenant = uuid.uuid4()
@@ -528,6 +544,7 @@ def test_dimension_ancestry_is_resolved_after_concurrent_line_reparent(
             ),
             vars(evidence),
         )
+        _record_void(holder, str(evidence.draft))
         holder.execute(
             text(
                 "UPDATE mod_accounting.journal_entries SET status='VOID' WHERE "
@@ -808,10 +825,11 @@ def test_downgrade_refuses_nonposted_frozen_or_appended_evidence(
     engine = create_engine(admin_url)
     if evidence_kind == "void":
         with engine.begin() as conn:
+            _record_void(conn, str(evidence.draft))
             conn.execute(
                 text(
                     "UPDATE mod_accounting.journal_entries SET status='VOID' WHERE "
-                    "id=:journal"
+                    "id=:draft"
                 ),
                 vars(evidence),
             )
@@ -828,7 +846,8 @@ def test_downgrade_refuses_nonposted_frozen_or_appended_evidence(
                 posted_by="user:test",
                 posted_at=NOW,
             )
-    with pytest.raises(RuntimeError, match="cannot downgrade ac_0002"):
+    expected = "ac_0003" if evidence_kind == "void" else "ac_0002"
+    with pytest.raises(RuntimeError, match=f"cannot downgrade {expected}"):
         command.downgrade(config, BASELINE)
     engine.dispose()
 

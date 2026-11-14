@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
+from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.models import Tenant
@@ -43,6 +44,7 @@ from dotmac_accounting.contracts import (
     PeriodCloseEvidence,
     PeriodStatus,
     ReverseJournal,
+    VoidDraftJournal,
 )
 from dotmac_accounting.models import (
     Account,
@@ -97,8 +99,8 @@ def _tenant_lock(db: Session, tenant_id: UUID) -> None:
 
 
 def _flush_unique(db: Session, row: object, *, label: str) -> None:
-    from dotmac_kernel.db import conflict_savepoint
-
+    # Private kernel helper, as the idempotency module uses: ``dotmac_kernel.db``
+    # builds the reference runtime engine on import and fails in a composed app.
     try:
         with conflict_savepoint(db):
             db.add(row)
@@ -1076,6 +1078,74 @@ def reverse_journal(
     return _journal(db, tenant_id, UUID(str(outcome.result["journal_id"])))
 
 
+JOURNAL_VOID_EVENT = "JOURNAL_VOID"
+
+
+def void_draft_journal(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: VoidDraftJournal,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    voided_at: datetime,
+) -> JournalEntry:
+    """Retire a never-posted DRAFT journal with reason, actors and audit.
+
+    Appends one immutable ``period_events`` row (the journal's period) in the
+    same transaction as the status change; the database refuses DRAFT->VOID
+    without that row. POSTED, REVERSED and already VOID journals are refused.
+    """
+    tenant_id = scope.tenant_id
+    payload = command.fingerprint_payload()
+    request_fingerprint = fingerprint_of(payload)
+
+    def operation(session: Session) -> Mapping[str, object]:
+        journal = _journal(session, tenant_id, command.journal_id, lock=True)
+        if journal.status != JournalStatus.DRAFT:
+            raise InvalidTransition(
+                "only a never-posted draft journal can be voided; "
+                "a posted journal is corrected by reversal"
+            )
+        if journal.posted_at is not None or journal.posted_by is not None:
+            raise InvalidTransition("a journal with posting evidence cannot be voided")
+        period = _period(session, tenant_id, journal.fiscal_period_id, lock=True)
+        session.add(
+            PeriodEvent(
+                tenant_id=tenant_id,
+                period_id=period.id,
+                event_kind=JOURNAL_VOID_EVENT,
+                from_status=JournalStatus.DRAFT.value,
+                to_status=JournalStatus.VOID.value,
+                actor_ref=str(payload["voided_by"]),
+                approval_reference=str(payload["approval_reference"]),
+                evidence={
+                    "journal_id": str(journal.id),
+                    "journal_number": journal.number,
+                    "reason": payload["reason"],
+                    "approved_by": payload["approved_by"],
+                },
+                occurred_at=voided_at,
+            )
+        )
+        session.flush()
+        journal.status = JournalStatus.VOID
+        journal.updated_at = voided_at
+        session.flush()
+        return {"journal_id": str(journal.id)}
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope="accounting.void_draft_journal",
+        key=idempotency_key,
+        operation=operation,
+        fingerprint=request_fingerprint,
+        expires_at=idempotency_expires_at,
+    )
+    return _journal(db, tenant_id, UUID(str(outcome.result["journal_id"])))
+
+
 __all__ = [
     "create_account",
     "create_account_category",
@@ -1090,4 +1160,5 @@ __all__ = [
     "reopen_period",
     "reverse_journal",
     "soft_close_period",
+    "void_draft_journal",
 ]
