@@ -95,20 +95,62 @@ IS_PRODUCT = re.compile(r"\bis_[a-z0-9]+\b")
 # --- Forbidden and allowlisted owner calls ----------------------------------
 FORBIDDEN_DECISION = re.compile(r"^record_[a-z_]*_decision$")
 ALWAYS_FORBIDDEN = frozenset({"seal_opening_lane", "issue_document", "IssueDocument"})
-# Owner commands only specific flows may touch. Keys are the names; values are
-# the flows modules (paths relative to the package source root) permitted to
-# reference them. Nothing exists yet, so the sets are empty. PR E adds the F3
-# module(s) to the first three and the F5 module to ``reverse_posting_group``.
+# DEFAULT-DENY for the owners that carry money and approval authority. Any name
+# imported from one of these owners that is not listed here is refused, so a new
+# owner command (``reverse_*``, ``refund_*`` ...) is unreachable until a reviewer
+# adds it deliberately. Values are the flows modules (paths relative to the
+# package source root) permitted to use the name; ``"*"`` means any flows module.
+DEFAULT_DENY_OWNERS = frozenset(
+    {"dotmac_billing", "dotmac_approvals", "dotmac_payments"}
+)
+ANY_MODULE = frozenset({"*"})
+# The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
+# narrow this to modules; PR E adds the F3/F5 modules to the restricted names.
+OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
+    "get_confirmed_cash_v1": ANY_MODULE,
+    "GetConfirmedCashV1": ANY_MODULE,
+    "get_payment_intent_v1": ANY_MODULE,
+    "GetPaymentIntentV1": ANY_MODULE,
+    "get_document_exposure": ANY_MODULE,
+    "list_open_receivable_documents": ANY_MODULE,
+    "OpenReceivableDocumentV1": ANY_MODULE,
+    "accept_settlement": ANY_MODULE,
+    "AcceptSettlementV1": ANY_MODULE,
+    "allocate_settlement": ANY_MODULE,
+    "AllocationCommand": ANY_MODULE,
+    "accept_withholding_discharge": ANY_MODULE,
+}
+# Owner commands only specific flows may touch. Nothing exists yet, so each set
+# is empty. PR E adds the F3 module(s) to the first group and the F5 module to
+# the reversal group. Reversals are only ever of settlement-acceptance groups;
+# the module allowlist is the static enforcement, the group-kind check belongs to
+# the F5 behaviour tests.
 F3_ONLY_CALLERS: frozenset[str] = frozenset()
 F5_REVERSAL_CALLERS: frozenset[str] = frozenset()
 RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "void_document": F3_ONLY_CALLERS,
     "grant_non_cash_credit": F3_ONLY_CALLERS,
     "issue_credit_note": F3_ONLY_CALLERS,
-    # Only on settlement-acceptance groups; the module allowlist is the static
-    # enforcement, the group-kind check belongs to the F5 behaviour tests.
     "reverse_posting_group": F5_REVERSAL_CALLERS,
+    "reverse_cash_credit_draw": F5_REVERSAL_CALLERS,
+    "reverse_non_cash_credit_application": F5_REVERSAL_CALLERS,
+    "reverse_withholding_discharge": F5_REVERSAL_CALLERS,
 }
+FORBIDDEN_BUILTINS = frozenset({"__import__", "eval", "exec", "globals", "vars"})
+# Standard-library modules the package may import. ``importlib`` and ``sys`` are
+# deliberately absent: they are how a guard is walked around.
+STDLIB_ALLOWED = frozenset(
+    {
+        "__future__",
+        "typing",
+        "dataclasses",
+        "enum",
+        "uuid",
+        "collections",
+        "datetime",
+        "pathlib",
+    }
+)
 
 
 def _source_files(directory: Path = MODULE_ROOT) -> list[Path]:
@@ -151,15 +193,18 @@ def import_violations(source: str) -> list[str]:
             if node.module is None:
                 continue
             root, _, rest = node.module.partition(".")
-            problems.extend(
-                _module_problems(root, rest, [alias.name for alias in node.names])
-            )
+            names = [alias.name for alias in node.names]
+            if "*" in names:
+                problems.append(f"from {node.module} import *: name what you import")
+            problems.extend(_module_problems(root, rest, names))
     return problems
 
 
 def _module_problems(root: str, rest: str, names: list[str] | None) -> list[str]:
-    if root == "__future__" or root in sys.stdlib_module_names:
-        return []
+    if root in sys.stdlib_module_names or root == "__future__":
+        if root in STDLIB_ALLOWED:
+            return []
+        return [f"imports stdlib module {root}: not on the allowed list"]
     if root == SELF or root in THIRD_PARTY_ROOTS:
         return []
     if root == KERNEL:
@@ -312,31 +357,122 @@ def literal_violations(source: str) -> list[str]:
     return problems
 
 
-# --- Rule 4: no transaction control, no wall clock --------------------------
-_CONTROL_CALLS = frozenset({"commit", "rollback", "begin_nested"})
-_CLOCK_CALLS = frozenset({"utcnow", "today", "utcfromtimestamp"})
+# --- Rule 4: no transaction control, no wall clock, no dynamic escape -------
+_CONTROL_ATTRS = frozenset({"commit", "rollback", "begin_nested", "connect"})
+_SESSION_FACTORIES = frozenset(
+    {"Session", "sessionmaker", "scoped_session", "create_engine"}
+)
+_TRANSACTION_WORDS = re.compile(r"\b(COMMIT|ROLLBACK|SAVEPOINT|BEGIN)\b", re.IGNORECASE)
+_CLOCKS = frozenset(
+    {
+        "datetime.now",
+        "datetime.utcnow",
+        "datetime.today",
+        "datetime.datetime.now",
+        "datetime.datetime.utcnow",
+        "datetime.datetime.today",
+        "datetime.date.today",
+        "time.time",
+        "time.time_ns",
+        "time.monotonic",
+        "time.monotonic_ns",
+        "time.perf_counter",
+        "time.perf_counter_ns",
+    }
+)
 
 
-def transaction_and_clock_violations(source: str) -> list[str]:
+def _aliases(tree: ast.AST) -> dict[str, str]:
+    """Map every locally bound import name to its fully qualified dotted name."""
+    mapping: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                mapping[alias.asname or alias.name.split(".")[0]] = (
+                    alias.name if alias.asname else alias.name.split(".")[0]
+                )
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                mapping[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return mapping
+
+
+def _dotted(node: ast.expr, aliases: Mapping[str, str]) -> str | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(aliases.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                found.add(id(body[0].value))
+    return found
+
+
+def transaction_and_clock_violations(
+    source: str, *, in_migration: bool = False
+) -> list[str]:
+    """Transaction control, wall-clock and dynamic-escape rule.
+
+    ``in_migration`` exempts the string-literal scan only: a migration's SQL
+    legitimately contains plpgsql ``BEGIN``. Attribute and clock checks still run.
+    """
+    tree = ast.parse(source)
+    aliases = _aliases(tree)
+    docstrings = _docstring_nodes(tree)
     problems: list[str] = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-            continue
-        attr = node.func.attr
-        if attr in _CONTROL_CALLS:
-            problems.append(f".{attr}( is transaction control; the caller owns it")
-        elif attr in _CLOCK_CALLS:
-            problems.append(f".{attr}( reads the clock; instants are inputs")
-        elif attr == "now":
-            base = node.func.value
-            base_name = (
-                base.attr
-                if isinstance(base, ast.Attribute)
-                else getattr(base, "id", "")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            if node.attr in _CONTROL_ATTRS:
+                problems.append(
+                    f".{node.attr} is transaction control; the caller owns it"
+                )
+            if node.attr in {"utcnow", "today"}:
+                problems.append(f".{node.attr} reads the clock; instants are inputs")
+        if isinstance(node, ast.Attribute | ast.Name):
+            dotted = _dotted(node, aliases)
+            if dotted in _CLOCKS:
+                problems.append(f"{dotted} reads the clock; instants are inputs")
+        if isinstance(node, ast.Call):
+            target = _dotted(node.func, aliases)
+            if target and target.rsplit(".", 1)[-1] in _SESSION_FACTORIES:
+                problems.append(f"{target}( opens its own session or engine")
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in {"getattr", "setattr"}:
+                name_arg = node.args[1] if len(node.args) > 1 else None
+                if not (
+                    isinstance(name_arg, ast.Constant)
+                    and isinstance(name_arg.value, str)
+                ):
+                    problems.append(f"{func.id} with a non-literal attribute name")
+        if isinstance(node, ast.Name) and node.id in FORBIDDEN_BUILTINS:
+            problems.append(f"builtin {node.id} is a way around the guards")
+        if (
+            not in_migration
+            and isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and _TRANSACTION_WORDS.search(node.value)
+        ):
+            problems.append(
+                f"string literal mentions transaction control: {node.value!r}"
             )
-            # ``func.now()`` is the database clock and is the sanctioned source.
-            if base_name in {"datetime", "date"}:
-                problems.append("datetime.now( reads the clock; instants are inputs")
     return problems
 
 
@@ -355,8 +491,32 @@ def referenced_names(source: str) -> set[str]:
     return names
 
 
+def _owner_imports(source: str) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and not node.level
+            and node.module in DEFAULT_DENY_OWNERS
+        ):
+            names.update(alias.name for alias in node.names)
+    return names
+
+
+def _permitted(callers: frozenset[str] | None, relative_path: str) -> bool:
+    return callers is not None and ("*" in callers or relative_path in callers)
+
+
 def forbidden_call_violations(source: str, relative_path: str) -> list[str]:
     problems: list[str] = []
+    for name in sorted(_owner_imports(source)):
+        if name == "*" or not _permitted(
+            {**OWNER_NAME_ALLOWLIST, **RESTRICTED_CALLERS}.get(name), relative_path
+        ):
+            problems.append(
+                f"{name}: not on the owner-call allowlist for {relative_path} "
+                "(default deny)"
+            )
     for name in sorted(referenced_names(source)):
         if FORBIDDEN_DECISION.match(name):
             problems.append(
@@ -365,8 +525,8 @@ def forbidden_call_violations(source: str, relative_path: str) -> list[str]:
             )
         elif name in ALWAYS_FORBIDDEN:
             problems.append(f"{name}: not callable from flows")
-        elif (
-            name in RESTRICTED_CALLERS and relative_path not in RESTRICTED_CALLERS[name]
+        elif name in RESTRICTED_CALLERS and not _permitted(
+            RESTRICTED_CALLERS[name], relative_path
         ):
             problems.append(f"{name}: not permitted in {relative_path}")
     return problems
@@ -469,7 +629,10 @@ def test_real_package_has_no_product_or_provider_literals() -> None:
 
 def test_real_package_never_controls_transactions_or_reads_a_clock() -> None:
     for path in _source_files():
-        assert transaction_and_clock_violations(path.read_text("utf-8")) == [], path
+        found = transaction_and_clock_violations(
+            path.read_text("utf-8"), in_migration="migrations" in path.parts
+        )
+        assert found == [], path
 
 
 def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None:
@@ -480,6 +643,31 @@ def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None
     for callers in RESTRICTED_CALLERS.values():
         for relative in callers:
             assert (MODULE_ROOT / relative).is_file(), relative
+
+
+def test_the_owner_allowlist_names_only_real_public_owner_exports() -> None:
+    public = {owner: _owner_all(owner) or frozenset() for owner in DEFAULT_DENY_OWNERS}
+    everything = frozenset().union(*public.values())
+    for name in (*OWNER_NAME_ALLOWLIST, *RESTRICTED_CALLERS):
+        assert name in everything, f"{name} is in no allowed owner's __all__"
+    # Every reversal and credit command the owner exports is explicitly decided.
+    for name in public["dotmac_billing"]:
+        if name.startswith("reverse_"):
+            assert name in RESTRICTED_CALLERS, f"{name} has no allowlist decision"
+
+
+def test_the_money_flows_contract_forbids_every_other_root_package() -> None:
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))["tool"]
+    linter = config["importlinter"]
+    contract = next(
+        c
+        for c in linter["contracts"]
+        if c["name"] == "Modules and connectors must not import money flows"
+    )
+    expected = set(linter["root_packages"]) - {"app", "dotmac_money_flows"}
+    assert set(contract["source_modules"]) == expected
+    assert len(contract["source_modules"]) == len(set(contract["source_modules"]))
+    assert contract["forbidden_modules"] == ["dotmac_money_flows"]
 
 
 # ============================ planted violations ============================
@@ -620,18 +808,85 @@ def test_the_literal_scan_does_not_flag_ordinary_words() -> None:
         "db.commit()",
         "session.rollback()",
         "db.begin_nested()",
+        "hook = db.commit",  # a reference, not a call
+        "fns = [session.rollback]",
         "datetime.now()",
         "datetime.datetime.now(tz)",
         "datetime.utcnow()",
         "date.today()",
+        "import datetime as dt\ndt.datetime.now()",
+        "from datetime import datetime as D\nD.now()",
+        "from datetime import datetime as D\nclock = D.utcnow",
+        "from datetime import date as d\nd.today()",
+        "import time\ntime.time()",
+        "import time as t\nt.monotonic()",
+        "from time import perf_counter as pc\npc()",
+        "from time import time as now_fn\nnow_fn()",
+        "import time\ntime.monotonic_ns()",
+        "db.execute(text('COMMIT'))",
+        "db.execute('rollback')",
+        "q = 'SAVEPOINT s1'",
+        "q = 'BEGIN'",
+        "engine.connect()",
+        "Session(engine)",
+        "from sqlalchemy.orm import sessionmaker\nsessionmaker(bind=e)",
+        "from sqlalchemy.orm import Session as S\nS(e)",
+        "create_engine(url)",
     ],
 )
 def test_planted_transaction_control_and_clock_reads_are_refused(source: str) -> None:
     assert transaction_and_clock_violations(source), source
 
 
-def test_the_database_clock_is_not_a_clock_read() -> None:
+@pytest.mark.parametrize(
+    "source",
+    [
+        "__import__('os')",
+        "eval('1')",
+        "exec('x = 1')",
+        "globals()['x']",
+        "vars(obj)",
+        "getattr(db, name)",
+        "setattr(db, 'a' + 'b', 1)",
+        "getattr(db, attr)()",
+    ],
+)
+def test_planted_dynamic_escapes_are_refused(source: str) -> None:
+    assert transaction_and_clock_violations(source), source
+
+
+def test_a_literal_attribute_name_is_not_a_dynamic_escape() -> None:
+    assert transaction_and_clock_violations("getattr(obj, 'name')") == []
+
+
+def test_the_database_clock_and_migration_sql_are_not_violations() -> None:
     assert transaction_and_clock_violations("x = sa.func.now()\ny = func.now()") == []
+    sql = "op.execute('CREATE FUNCTION f() AS $$ BEGIN RETURN NEW; END; $$')"
+    assert transaction_and_clock_violations(sql, in_migration=True) == []
+    # ...but the exemption is for the string scan only.
+    assert transaction_and_clock_violations(sql + "\ndb.commit()", in_migration=True)
+    assert transaction_and_clock_violations(sql, in_migration=False)
+    docstring = '"""BEGIN here, then COMMIT."""\nx = 1'
+    assert transaction_and_clock_violations(docstring) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import importlib",
+        "from importlib import import_module",
+        "import sys",
+        "import os",
+        "import subprocess",
+        "import ast",
+        "from pickle import loads",
+        "from dotmac_billing import *",
+        "from dotmac_collections import *",
+        "from sqlalchemy import *",
+    ],
+)
+def test_planted_unlisted_stdlib_and_wildcard_imports_are_refused(source: str) -> None:
+    assert import_violations(source), source
 
 
 @pytest.mark.parametrize(
@@ -650,19 +905,35 @@ def test_planted_always_forbidden_calls_are_refused(source: str) -> None:
     assert forbidden_call_violations(source, "settle.py"), source
 
 
+@pytest.mark.parametrize("name", sorted(RESTRICTED_CALLERS))
+def test_restricted_commands_are_refused_outside_their_allowlist(name: str) -> None:
+    assert forbidden_call_violations(f"billing.{name}(db)", "settle.py"), name
+    assert forbidden_call_violations(f"billing.{name}(db)", "adjust.py"), name
+    imported = f"from dotmac_billing import {name}\n{name}(db)"
+    assert forbidden_call_violations(imported, "adjust.py"), name
+
+
 @pytest.mark.parametrize(
-    "name",
+    "source",
     [
-        "void_document",
-        "grant_non_cash_credit",
-        "issue_credit_note",
-        "reverse_posting_group",
+        "from dotmac_billing import refund_settlement",
+        "from dotmac_billing import deallocate_settlement",
+        "from dotmac_billing import a_command_added_next_year",
+        "from dotmac_payments import record_confirmation",
+        "from dotmac_approvals import request_tenant_approval",
+        "from dotmac_billing import *",
     ],
 )
-def test_restricted_commands_are_refused_outside_their_allowlist(name: str) -> None:
-    source = f"billing.{name}(db)"
-    assert forbidden_call_violations(source, "settle.py"), name
-    assert forbidden_call_violations(source, "adjust.py"), name
+def test_an_unlisted_owner_name_is_denied_by_default(source: str) -> None:
+    assert forbidden_call_violations(source, "settle.py"), source
+
+
+def test_the_listed_owner_calls_are_accepted() -> None:
+    source = (
+        "from dotmac_billing import accept_settlement, AllocationCommand\n"
+        "from dotmac_payments import get_confirmed_cash_v1\n"
+    )
+    assert forbidden_call_violations(source, "settle.py") == []
 
 
 def test_a_restricted_command_is_accepted_only_in_an_allowlisted_module(
@@ -670,10 +941,12 @@ def test_a_restricted_command_is_accepted_only_in_an_allowlisted_module(
 ) -> None:
     allowed = {**RESTRICTED_CALLERS, "void_document": frozenset({"adjust.py"})}
     monkeypatch.setitem(globals(), "RESTRICTED_CALLERS", allowed)
-    assert forbidden_call_violations("billing.void_document(db)", "adjust.py") == []
-    assert forbidden_call_violations("billing.void_document(db)", "settle.py")
+    source = "from dotmac_billing import void_document\nvoid_document(db)"
+    assert forbidden_call_violations(source, "adjust.py") == []
+    assert forbidden_call_violations(source, "settle.py")
     # An allowlist for one command never opens another.
-    assert forbidden_call_violations("billing.issue_credit_note(db)", "adjust.py")
+    other = "from dotmac_billing import issue_credit_note"
+    assert forbidden_call_violations(other, "adjust.py")
 
 
 def test_ordinary_decision_words_are_not_flagged() -> None:

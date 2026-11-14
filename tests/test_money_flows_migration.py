@@ -21,9 +21,9 @@ TABLE = "mod_mflows.settle_instances"
 _INSERT = text(
     "INSERT INTO mod_mflows.settle_instances "
     "(id, tenant_id, state, reason_code, policy_version, definition_version, "
-    "confirmation_id, intent_id, settlement_id, resolution_ref) "
+    "confirmation_id, intent_id, settlement_id, resolution_ref, version) "
     "VALUES (:id, :tenant, :state, :reason, 'p1', 'd1', :confirmation, :intent, "
-    ":settlement, :resolution)"
+    ":settlement, :resolution, :version)"
 )
 
 
@@ -100,6 +100,7 @@ def _insert(connection, tenant, state, **overrides) -> uuid.UUID:
         "intent": uuid.uuid4(),
         "settlement": None,
         "resolution": None,
+        "version": 0,
     }
     values.update(overrides)
     connection.execute(_INSERT, values)
@@ -193,23 +194,51 @@ def test_app_user_cannot_delete(migrated) -> None:
         app.dispose()
 
 
-@pytest.mark.parametrize(
-    "state, overrides",
-    [
-        ("settled", {"settlement": uuid.UUID(int=1)}),
-        ("refused", {"reason": "account_held"}),
-        ("unapplied", {"reason": "document_closed", "settlement": uuid.UUID(int=2)}),
-        ("resolved", {"resolution": "f3-instance"}),
-    ],
-)
-def test_each_valid_state_shape_is_accepted(migrated, state, overrides) -> None:
+SETTLEMENT = uuid.UUID(int=1)
+OTHER_SETTLEMENT = uuid.UUID(int=2)
+
+# Inserted shapes: (state, overrides).
+_INSERT_STATES = {
+    "settled": {"settlement": SETTLEMENT},
+    "refused": {"reason": "account_held"},
+    "unapplied": {"reason": "document_closed", "settlement": SETTLEMENT},
+}
+
+
+def _update(app, tenant, row, assignments, **params):
+    with app.begin() as connection:
+        _as_tenant(connection, tenant)
+        connection.execute(
+            text(f"UPDATE {TABLE} SET {assignments} WHERE id = :id"),  # noqa: S608
+            {"id": row, **params},
+        )
+
+
+def _row(app, tenant, row):
+    with app.begin() as connection:
+        _as_tenant(connection, tenant)
+        return (
+            connection.execute(
+                text(
+                    "SELECT state, reason_code, settlement_id, resolution_ref, version "  # noqa: S608
+                    f"FROM {TABLE} WHERE id = :id"
+                ),
+                {"id": row},
+            )
+            .one()
+            ._mapping
+        )
+
+
+@pytest.mark.parametrize("state", sorted(_INSERT_STATES))
+def test_each_insertable_state_shape_is_accepted(migrated, state) -> None:
     admin_url, app_url = migrated
     tenant = _tenant(admin_url)
     app = create_engine(app_url)
     try:
         with app.begin() as connection:
             _as_tenant(connection, tenant)
-            _insert(connection, tenant, state, **overrides)
+            _insert(connection, tenant, state, **_INSERT_STATES[state])
     finally:
         app.dispose()
 
@@ -219,24 +248,181 @@ def test_each_valid_state_shape_is_accepted(migrated, state, overrides) -> None:
     [
         ("pending", {}),  # unknown state
         ("settled", {}),  # settled needs a settlement
-        ("settled", {"settlement": uuid.UUID(int=1), "reason": "x"}),
+        ("settled", {"settlement": SETTLEMENT, "reason": "x"}),
         ("refused", {}),  # refused needs a reason
-        ("refused", {"reason": "x", "settlement": uuid.UUID(int=1)}),
+        ("refused", {"reason": "x", "settlement": SETTLEMENT}),  # no cash accepted
         ("unapplied", {"reason": "x"}),  # unapplied needs a settlement
-        ("unapplied", {"settlement": uuid.UUID(int=1)}),  # and a reason
-        ("resolved", {}),  # resolved needs a resolution
-        (
-            "refused",
-            {"reason": "x", "resolution": "ref"},
-        ),  # resolution only if resolved
+        ("unapplied", {"settlement": SETTLEMENT}),  # and a reason
+        ("refused", {"reason": "x", "resolution": "ref"}),  # ref only if resolved
     ],
 )
-def test_check_constraints_refuse_invalid_shapes(migrated, state, overrides) -> None:
+def test_check_constraints_refuse_invalid_insert_shapes(
+    migrated, state, overrides
+) -> None:
     admin_url, app_url = migrated
     tenant = _tenant(admin_url)
     app = create_engine(app_url)
     try:
         with pytest.raises(IntegrityError), app.begin() as connection:
+            _as_tenant(connection, tenant)
+            _insert(connection, tenant, state, **overrides)
+    finally:
+        app.dispose()
+
+
+@pytest.mark.parametrize(
+    "source, assignments, expected",
+    [
+        (
+            "refused",
+            "reason_code = 'still_held', version = version + 1",
+            ("refused", "still_held", None),
+        ),
+        (
+            "refused",
+            "state = 'settled', reason_code = NULL, settlement_id = :s, "
+            "version = version + 1",
+            ("settled", None, SETTLEMENT),
+        ),
+        (
+            "refused",
+            "state = 'unapplied', reason_code = 'document_closed', "
+            "settlement_id = :s, version = version + 1",
+            ("unapplied", "document_closed", SETTLEMENT),
+        ),
+        (
+            "unapplied",
+            "state = 'resolved', resolution_ref = 'f3-instance', version = version + 1",
+            ("resolved", "document_closed", SETTLEMENT),
+        ),
+    ],
+)
+def test_every_allowed_transition_edge_succeeds_and_keeps_the_settlement(
+    migrated, source, assignments, expected
+) -> None:
+    admin_url, app_url = migrated
+    tenant = _tenant(admin_url)
+    app = create_engine(app_url)
+    try:
+        with app.begin() as connection:
+            _as_tenant(connection, tenant)
+            row = _insert(connection, tenant, source, **_INSERT_STATES[source])
+        _update(app, tenant, row, assignments, s=SETTLEMENT)
+        after = _row(app, tenant, row)
+        assert (
+            after["state"],
+            after["reason_code"],
+            after["settlement_id"],
+        ) == expected
+        assert after["version"] == 1
+        # The record that cash was accepted is never lost on resolution.
+        if expected[0] == "resolved":
+            assert after["resolution_ref"] == "f3-instance"
+    finally:
+        app.dispose()
+
+
+@pytest.mark.parametrize(
+    "source, assignments, message",
+    [
+        # unapplied may only go to resolved
+        ("unapplied", "state = 'refused', version = version + 1", "not allowed"),
+        (
+            "unapplied",
+            "state = 'settled', reason_code = NULL, version = version + 1",
+            "not allowed",
+        ),
+        ("unapplied", "reason_code = 'again', version = version + 1", "not allowed"),
+        # refused cannot jump to resolved
+        (
+            "refused",
+            "state = 'resolved', resolution_ref = 'r', version = version + 1",
+            "not allowed",
+        ),
+        # version must advance by exactly one
+        ("refused", "reason_code = 'again', version = version + 2", "version must"),
+        ("refused", "reason_code = 'again'", "version must"),
+        ("refused", "reason_code = 'again', version = version - 1", "version must"),
+        (
+            "unapplied",
+            "state = 'resolved', resolution_ref = 'r', version = version",
+            "version must",
+        ),
+        # an accepted settlement is never changed or erased
+        (
+            "unapplied",
+            "settlement_id = :other, version = version + 1",
+            "never changed",
+        ),
+        (
+            "unapplied",
+            "state = 'resolved', resolution_ref = 'r', settlement_id = NULL, "
+            "version = version + 1",
+            "never changed",
+        ),
+    ],
+)
+def test_refused_transition_edges(migrated, source, assignments, message) -> None:
+    admin_url, app_url = migrated
+    tenant = _tenant(admin_url)
+    app = create_engine(app_url)
+    try:
+        with app.begin() as connection:
+            _as_tenant(connection, tenant)
+            row = _insert(connection, tenant, source, **_INSERT_STATES[source])
+        with pytest.raises(DBAPIError, match=message):
+            _update(app, tenant, row, assignments, other=OTHER_SETTLEMENT)
+        assert _row(app, tenant, row)["version"] == 0
+    finally:
+        app.dispose()
+
+
+def test_the_resolution_edge_still_obeys_the_check_constraints(migrated) -> None:
+    admin_url, app_url = migrated
+    tenant = _tenant(admin_url)
+    app = create_engine(app_url)
+    try:
+        with app.begin() as connection:
+            _as_tenant(connection, tenant)
+            row = _insert(
+                connection, tenant, "unapplied", **_INSERT_STATES["unapplied"]
+            )
+        # resolved needs its resolution reference
+        with pytest.raises(IntegrityError):
+            _update(app, tenant, row, "state = 'resolved', version = version + 1")
+        # resolved keeps its reason code
+        with pytest.raises(IntegrityError):
+            _update(
+                app,
+                tenant,
+                row,
+                "state = 'resolved', resolution_ref = 'r', reason_code = NULL, "
+                "version = version + 1",
+            )
+    finally:
+        app.dispose()
+
+
+@pytest.mark.parametrize(
+    "state, overrides, message",
+    [
+        (
+            "resolved",
+            {"reason": "x", "settlement": SETTLEMENT, "resolution": "r"},
+            "may only",
+        ),
+        ("settled", {"settlement": SETTLEMENT, "version": 1}, "version 0"),
+        ("refused", {"reason": "x", "version": 3}, "version 0"),
+    ],
+)
+def test_insert_is_restricted_to_attention_or_settled_at_version_zero(
+    migrated, state, overrides, message
+) -> None:
+    admin_url, app_url = migrated
+    tenant = _tenant(admin_url)
+    app = create_engine(app_url)
+    try:
+        with pytest.raises(DBAPIError, match=message), app.begin() as connection:
             _as_tenant(connection, tenant)
             _insert(connection, tenant, state, **overrides)
     finally:
@@ -275,10 +461,17 @@ def test_trigger_refuses_identity_changes_and_terminal_exits(migrated) -> None:
         with app.begin() as connection:
             _as_tenant(connection, tenant)
             refused = _insert(connection, tenant, "refused", reason="held")
-            settled = _insert(
-                connection, tenant, "settled", settlement=uuid.UUID(int=7)
+            settled = _insert(connection, tenant, "settled", settlement=SETTLEMENT)
+            unapplied = _insert(
+                connection, tenant, "unapplied", **_INSERT_STATES["unapplied"]
             )
-            resolved = _insert(connection, tenant, "resolved", resolution="f3")
+        _update(
+            app,
+            tenant,
+            unapplied,
+            "state = 'resolved', resolution_ref = 'f3', version = version + 1",
+        )
+        resolved = unapplied
 
         for column, value in (
             ("confirmation_id", uuid.uuid4()),
@@ -287,61 +480,56 @@ def test_trigger_refuses_identity_changes_and_terminal_exits(migrated) -> None:
             ("id", uuid.uuid4()),
             ("created_at", "2001-01-01T00:00:00+00"),
         ):
-            with (
-                pytest.raises(DBAPIError, match="identity is immutable"),
-                app.begin() as connection,
-            ):
-                _as_tenant(connection, tenant)
-                connection.execute(
-                    text(
-                        f"UPDATE {TABLE} SET {column} = :v WHERE id = :id"  # noqa: S608
-                    ),
-                    {"v": value, "id": refused},
-                )
+            with pytest.raises(DBAPIError, match="identity is immutable"):
+                _update(app, tenant, refused, f"{column} = :v", v=value)
 
-        # Terminal rows refuse every update, even one that changes nothing.
+        # Terminal rows refuse every update: nothing leaves settled or resolved.
         for row in (settled, resolved):
-            for assignment in ("state = 'refused'", "version = version + 1"):
-                with (
-                    pytest.raises(DBAPIError, match="terminal state"),
-                    app.begin() as connection,
-                ):
-                    _as_tenant(connection, tenant)
-                    connection.execute(
-                        text(f"UPDATE {TABLE} SET {assignment} WHERE id = :id"),  # noqa: S608
-                        {"id": row},
-                    )
+            for assignment in (
+                "state = 'refused', version = version + 1",
+                "state = 'unapplied', version = version + 1",
+                "state = 'resolved', version = version + 1",
+                "state = 'settled', version = version + 1",
+                "version = version + 1",
+                "actor_ref = 'x'",
+            ):
+                with pytest.raises(DBAPIError, match="terminal state"):
+                    _update(app, tenant, row, assignment)
 
         # A non-terminal row may move, and the database clock stamps updated_at.
+        before = _row(app, tenant, refused)
         with app.begin() as connection:
             _as_tenant(connection, tenant)
-            before = connection.scalar(
+            stamp_before = connection.scalar(
                 text(f"SELECT updated_at FROM {TABLE} WHERE id = :id"),  # noqa: S608
                 {"id": refused},
             )
-            connection.execute(
-                text(
-                    f"UPDATE {TABLE} SET state = 'settled', reason_code = NULL, "  # noqa: S608
-                    "settlement_id = :s, version = version + 1 WHERE id = :id"
-                ),
-                {"s": uuid.uuid4(), "id": refused},
-            )
-            state, version, after = connection.execute(
-                text(f"SELECT state, version, updated_at FROM {TABLE} WHERE id = :id"),  # noqa: S608
-                {"id": refused},
-            ).one()
-            assert (state, version) == ("settled", 1)
-            assert after >= before
-        # ...and is then terminal.
-        with (
-            pytest.raises(DBAPIError, match="terminal state"),
-            app.begin() as connection,
-        ):
+        _update(
+            app,
+            tenant,
+            refused,
+            "state = 'settled', reason_code = NULL, settlement_id = :s, "
+            "version = version + 1",
+            s=uuid.uuid4(),
+        )
+        after = _row(app, tenant, refused)
+        assert (before["state"], after["state"], after["version"]) == (
+            "refused",
+            "settled",
+            1,
+        )
+        with app.begin() as connection:
             _as_tenant(connection, tenant)
-            connection.execute(
-                text(f"UPDATE {TABLE} SET actor_ref = 'x' WHERE id = :id"),  # noqa: S608
-                {"id": refused},
+            assert (
+                connection.scalar(
+                    text(f"SELECT updated_at FROM {TABLE} WHERE id = :id"),  # noqa: S608
+                    {"id": refused},
+                )
+                >= stamp_before
             )
+        # ...and is then terminal.
+        with pytest.raises(DBAPIError, match="terminal state"):
+            _update(app, tenant, refused, "actor_ref = 'x'")
     finally:
         app.dispose()
 

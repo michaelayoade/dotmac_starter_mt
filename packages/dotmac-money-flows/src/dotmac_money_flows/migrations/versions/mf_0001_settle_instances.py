@@ -5,8 +5,10 @@ Revises: (lineage root)
 
 Instance state only: no amount, currency or balance column and no foreign key
 to another owner. Rows are never deleted (the runtime role holds no DELETE) and
-a trigger refuses identity-column changes and any change to a row that has
-reached a terminal state.
+a trigger holds the transition graph (insert only as settled, refused or
+unapplied at version 0; refused to refused, settled or unapplied; unapplied to
+resolved; settled and resolved terminal; version advances by exactly one) and
+refuses identity-column changes and any change to an accepted settlement_id.
 """
 
 from __future__ import annotations
@@ -77,12 +79,12 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(f"state IN ({states})", name="ck_settle_instances_state"),
         sa.CheckConstraint(
-            "(reason_code IS NOT NULL) = (state IN ('refused', 'unapplied'))",
-            name="ck_settle_instances_reason_iff_attention",
+            "(reason_code IS NOT NULL) = (state IN ('refused', 'unapplied', 'resolved'))",
+            name="ck_settle_instances_reason_unless_settled",
         ),
         sa.CheckConstraint(
-            "(settlement_id IS NOT NULL) = (state IN ('settled', 'unapplied'))",
-            name="ck_settle_instances_settlement_iff_accepted",
+            "(state = 'refused' AND settlement_id IS NULL) OR (state IN ('settled', 'unapplied') AND settlement_id IS NOT NULL) OR state = 'resolved'",
+            name="ck_settle_instances_settlement_kept",
         ),
         sa.CheckConstraint(
             "(resolution_ref IS NOT NULL) = (state = 'resolved')",
@@ -110,9 +112,21 @@ def upgrade() -> None:
 
     op.execute(
         f"""
-        CREATE FUNCTION {_SCHEMA}.guard_settle_instance_update()
+        CREATE FUNCTION {_SCHEMA}.guard_settle_instance()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
+            IF TG_OP = 'INSERT' THEN
+                IF NEW.state NOT IN ('settled', 'refused', 'unapplied') THEN
+                    RAISE EXCEPTION
+                        'settle instance may only be inserted as settled, refused or unapplied'
+                        USING ERRCODE = 'restrict_violation';
+                END IF;
+                IF NEW.version <> 0 THEN
+                    RAISE EXCEPTION 'settle instance must be inserted at version 0'
+                        USING ERRCODE = 'restrict_violation';
+                END IF;
+                RETURN NEW;
+            END IF;
             IF NEW.id IS DISTINCT FROM OLD.id
                OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
                OR NEW.confirmation_id IS DISTINCT FROM OLD.confirmation_id
@@ -125,6 +139,23 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'settle instance in terminal state % is immutable',
                     OLD.state USING ERRCODE = 'restrict_violation';
             END IF;
+            IF OLD.settlement_id IS NOT NULL
+               AND NEW.settlement_id IS DISTINCT FROM OLD.settlement_id THEN
+                RAISE EXCEPTION 'settle instance settlement_id is never changed once set'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            IF NOT (
+                (OLD.state = 'refused'
+                    AND NEW.state IN ('refused', 'settled', 'unapplied'))
+                OR (OLD.state = 'unapplied' AND NEW.state = 'resolved')
+            ) THEN
+                RAISE EXCEPTION 'settle instance transition % to % is not allowed',
+                    OLD.state, NEW.state USING ERRCODE = 'restrict_violation';
+            END IF;
+            IF NEW.version <> OLD.version + 1 THEN
+                RAISE EXCEPTION 'settle instance version must advance by exactly one'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
             NEW.updated_at := pg_catalog.now();
             RETURN NEW;
         END;
@@ -133,8 +164,8 @@ def upgrade() -> None:
     )
     op.execute(
         f"CREATE TRIGGER settle_instances_guard "
-        f"BEFORE UPDATE ON {_SCHEMA}.{_TABLE} "
-        f"FOR EACH ROW EXECUTE FUNCTION {_SCHEMA}.guard_settle_instance_update()"
+        f"BEFORE INSERT OR UPDATE ON {_SCHEMA}.{_TABLE} "
+        f"FOR EACH ROW EXECUTE FUNCTION {_SCHEMA}.guard_settle_instance()"
     )
 
 
@@ -151,6 +182,6 @@ def downgrade() -> None:
     if evidence is not None:
         raise RuntimeError("cannot downgrade money flows while instance rows exist")
     op.execute(f"DROP TRIGGER settle_instances_guard ON {_SCHEMA}.{_TABLE};")
-    op.execute(f"DROP FUNCTION {_SCHEMA}.guard_settle_instance_update();")
+    op.execute(f"DROP FUNCTION {_SCHEMA}.guard_settle_instance();")
     op.drop_table(_TABLE, schema=_SCHEMA)
     op.execute(f"DROP SCHEMA IF EXISTS {_SCHEMA};")

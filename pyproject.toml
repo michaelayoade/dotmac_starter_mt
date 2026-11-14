@@ -883,11 +883,16 @@ forbidden_modules = ["dotmac_kernel", "app"]
 # composes, and nothing imports it except an assembly. `dotmac_money_flows` is
 # deliberately outside the independence list (it imports the named owners'
 # top-level public surface), so the other direction is pinned here: no module
-# and no connector may import it. The assembly rule above already keeps it from
-# importing `app`.
+# and no connector may import it: the list is every root package except the
+# assembly (which is the one place allowed to compose it) and flows itself, kept
+# equal to `root_packages` by tests/architecture/test_money_flows_module.py. The
+# assembly rule above already keeps flows from importing `app`.
 name = "Modules and connectors must not import money flows"
 type = "forbidden"
 source_modules = [
+    "dotmac_deployment_foundation",
+    "dotmac_kernel",
+    "dotmac_ui",
     "dotmac_template_studio",
     "dotmac_ticketing",
     "dotmac_release_catalog",
@@ -901,8 +906,6 @@ source_modules = [
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
-    "dotmac_integration",
-    "dotmac_media_observations",
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
@@ -937,7 +940,13 @@ source_modules = [
     "dotmac_billing",
     "dotmac_collections",
     "dotmac_subscriptions",
+    "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_auth_oidc",
+    "dotmac_connector_whatsapp",
+    "dotmac_connector_meta_social",
+    "dotmac_connector_paystack",
+    "dotmac_connector_nira",
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
@@ -972,9 +981,7 @@ source_modules = [
     "dotmac_workflow_runtime",
     "dotmac_fulfillment",
     "dotmac_learning",
-    "dotmac_connector_whatsapp",
-    "dotmac_connector_paystack",
-    "dotmac_connector_nira",
+    "dotmac_learning_bank_rules",
 ]
 forbidden_modules = ["dotmac_money_flows"]
 

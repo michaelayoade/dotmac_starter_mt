@@ -63,12 +63,15 @@ class SettleInstance(Base):
             f"state IN ({_states(SETTLE_STATES)})", name="ck_settle_instances_state"
         ),
         CheckConstraint(
-            "(reason_code IS NOT NULL) = (state IN ('refused', 'unapplied'))",
-            name="ck_settle_instances_reason_iff_attention",
+            "(reason_code IS NOT NULL) = "
+            "(state IN ('refused', 'unapplied', 'resolved'))",
+            name="ck_settle_instances_reason_unless_settled",
         ),
         CheckConstraint(
-            "(settlement_id IS NOT NULL) = (state IN ('settled', 'unapplied'))",
-            name="ck_settle_instances_settlement_iff_accepted",
+            "(state = 'refused' AND settlement_id IS NULL) "
+            "OR (state IN ('settled', 'unapplied') AND settlement_id IS NOT NULL) "
+            "OR state = 'resolved'",
+            name="ck_settle_instances_settlement_kept",
         ),
         CheckConstraint(
             "(resolution_ref IS NOT NULL) = (state = 'resolved')",
