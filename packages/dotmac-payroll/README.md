@@ -36,3 +36,13 @@ run-total fields, migrations, shadow runs or new authority are introduced.
 
 ERP adoption must pin a published successor and supply persisted scalar facts
 after flush. This declaration is not publication or ERP adoption evidence.
+
+The declared `0.1.0a3` successor adds read-only GL consequence facts
+(`dotmac_payroll.consequences`). `build_run_accounting_consequence` turns a
+finalized run into one balanced fact (Dr earning and employer-liability
+expense; Cr deduction/employer liability accounts; Cr the configured net
+payable account). `build_liability_settlement_consequence` turns a recorded
+settlement or statutory remittance into Dr liability account / Cr a bank GL ref
+supplied by the caller. Each fact has an idempotency key and content sha256 for
+the posting adapter. Payroll writes no journals, moves no money and calls no
+provider; there is no migration. This declaration is not publication evidence.
