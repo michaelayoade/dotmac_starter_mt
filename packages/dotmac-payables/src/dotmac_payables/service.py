@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import fields
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -29,6 +29,7 @@ from dotmac_payables.contracts import (
     ConsequenceSource,
     CreateCreditNote,
     CreateSupplierInvoice,
+    CreateSupplierPayment,
     CreditNoteStatus,
     HistoricalUnpaidInvoiceCommand,
     HistoricalUnpaidInvoiceEvidence,
@@ -39,6 +40,7 @@ from dotmac_payables.contracts import (
     NotFound,
     ObligationStatus,
     SettlementObservationInput,
+    SupplierPaymentStatus,
 )
 from dotmac_payables.models import (
     AccountingReceipt,
@@ -51,6 +53,9 @@ from dotmac_payables.models import (
     SettlementObservation,
     SupplierInvoice,
     SupplierInvoiceLine,
+    SupplierPayment,
+    SupplierPaymentAllocation,
+    SupplierPaymentWithholding,
 )
 
 MONEY_QUANTUM = Decimal("0.000001")
@@ -965,6 +970,10 @@ def record_accounting_receipt(
         consequence = build_credit_accounting_consequence(
             db, tenant_id=tenant_id, credit_note_id=command.document_id
         )
+    elif kind == "supplier_payment":
+        consequence = build_payment_accounting_consequence(
+            db, tenant_id=tenant_id, payment_id=command.document_id
+        )
     else:
         raise InvalidTransition("unknown accounting receipt document kind")
     claimed = _fingerprint(command.consequence_fingerprint, "consequence fingerprint")
@@ -1365,6 +1374,557 @@ def admit_historical_unpaid_invoice(
     return receipt
 
 
+PAYMENT_SETTLEMENT_OWNER = "payables.supplier_payment"
+_ACTIVE_PAYMENT_STATES = (SupplierPaymentStatus.DRAFT, SupplierPaymentStatus.APPROVED)
+
+
+def _same_actor(left: str | None, right: str | None) -> bool:
+    return (
+        left is not None
+        and right is not None
+        and left.strip().casefold() == right.strip().casefold()
+    )
+
+
+def _payment(
+    db: Session, tenant_id: UUID, payment_id: UUID, *, lock: bool = False
+) -> SupplierPayment:
+    stmt = select(SupplierPayment).where(
+        SupplierPayment.tenant_id == tenant_id, SupplierPayment.id == payment_id
+    )
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    row = db.scalar(stmt)
+    if row is None:
+        raise NotFound("supplier payment was not found")
+    return row
+
+
+def _payment_allocations(
+    db: Session, tenant_id: UUID, payment_id: UUID
+) -> list[SupplierPaymentAllocation]:
+    return list(
+        db.scalars(
+            select(SupplierPaymentAllocation)
+            .where(
+                SupplierPaymentAllocation.tenant_id == tenant_id,
+                SupplierPaymentAllocation.payment_id == payment_id,
+            )
+            .order_by(SupplierPaymentAllocation.line_number)
+        )
+    )
+
+
+def _payment_withholdings(
+    db: Session, tenant_id: UUID, payment_id: UUID
+) -> list[SupplierPaymentWithholding]:
+    return list(
+        db.scalars(
+            select(SupplierPaymentWithholding)
+            .where(
+                SupplierPaymentWithholding.tenant_id == tenant_id,
+                SupplierPaymentWithholding.payment_id == payment_id,
+            )
+            .order_by(SupplierPaymentWithholding.line_number)
+        )
+    )
+
+
+def _reserved_by_active_payments(
+    db: Session, tenant_id: UUID, obligation_id: UUID, *, excluding: UUID | None
+) -> Decimal:
+    stmt = (
+        select(func.sum(SupplierPaymentAllocation.amount))
+        .join(
+            SupplierPayment,
+            (SupplierPayment.tenant_id == SupplierPaymentAllocation.tenant_id)
+            & (SupplierPayment.id == SupplierPaymentAllocation.payment_id),
+        )
+        .where(
+            SupplierPaymentAllocation.tenant_id == tenant_id,
+            SupplierPaymentAllocation.obligation_id == obligation_id,
+            SupplierPayment.status.in_(_ACTIVE_PAYMENT_STATES),
+        )
+    )
+    if excluding is not None:
+        stmt = stmt.where(SupplierPayment.id != excluding)
+    return _money(Decimal(db.scalar(stmt) or 0))
+
+
+def _liability_in_ledger(db: Session, tenant_id: UUID, invoice_id: UUID) -> bool:
+    receipt = db.scalar(
+        select(AccountingReceipt.id).where(
+            AccountingReceipt.tenant_id == tenant_id,
+            AccountingReceipt.document_kind == "supplier_invoice",
+            AccountingReceipt.document_id == invoice_id,
+        )
+    )
+    if receipt is not None:
+        return True
+    return _historical_receipt(db, tenant_id, invoice_id) is not None
+
+
+def _check_allocation_payable(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    obligation_id: UUID,
+    amount: Decimal,
+    supplier_ref: str,
+    currency_code: str,
+    exchange_rate: Decimal,
+    payment_id: UUID | None,
+) -> None:
+    """Refuse an allocation that is not payable now. Locks the obligation row."""
+    obligation = _obligation(db, tenant_id, obligation_id, lock=True)
+    invoice = _invoice(db, tenant_id, obligation.invoice_id)
+    if invoice.status != InvoiceStatus.APPROVED:
+        raise InvalidTransition("only an approved supplier invoice can be paid")
+    if invoice.supplier_ref != supplier_ref:
+        raise InvalidTransition("obligation belongs to a different supplier")
+    if obligation.currency_code != currency_code:
+        raise InvalidAmount("payment currency does not match the obligation")
+    if invoice.exchange_rate != exchange_rate:
+        # fx_difference_unsupported: realised FX is not modelled, so a payment
+        # at a rate other than the invoice's would drift the control account.
+        raise InvalidAmount(
+            "payment exchange rate differs from the invoice rate "
+            "(fx_difference_unsupported)"
+        )
+    if not _liability_in_ledger(db, tenant_id, invoice.id):
+        # liability_not_in_ledger: paying it would debit a control account that
+        # was never credited.
+        raise InvalidTransition(
+            "supplier invoice has no accounting or historical receipt "
+            "(liability_not_in_ledger)"
+        )
+    if obligation.status not in (
+        ObligationStatus.OPEN,
+        ObligationStatus.PARTIALLY_SETTLED,
+    ):
+        raise InvalidTransition("only an open payment obligation can be paid")
+    reserved = _reserved_by_active_payments(
+        db, tenant_id, obligation_id, excluding=payment_id
+    )
+    if reserved + amount > obligation.outstanding_amount:
+        raise InvalidAmount(
+            "allocation exceeds the obligation balance not already committed "
+            "to other supplier payments"
+        )
+
+
+def create_supplier_payment(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: CreateSupplierPayment,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    prepared_at: datetime,
+) -> SupplierPayment:
+    """Prepare a DRAFT supplier payment against open obligations (no money moves)."""
+    tenant_id = scope.tenant_id
+    payload = command.fingerprint_payload()
+    request_fingerprint = fingerprint_of(payload)
+    preparer = str(payload["prepared_by"])
+    currency = str(payload["currency_code"])
+    supplier_ref = str(payload["supplier_ref"])
+    allocations = tuple(
+        (item.obligation_id, _money(item.amount)) for item in command.allocations
+    )
+    withholdings = tuple(
+        (
+            str(item.payload()["account_ref"]),
+            _money(item.amount),
+            item.description.strip() if item.description else None,
+            item.certificate_ref.strip() if item.certificate_ref else None,
+        )
+        for item in command.withholdings
+    )
+    gross = _money(sum((amount for _, amount in allocations), Decimal("0")))
+    withheld = _money(sum((row[1] for row in withholdings), Decimal("0")))
+    if any(amount <= 0 for _, amount in allocations) or any(
+        row[1] <= 0 for row in withholdings
+    ):
+        raise InvalidAmount("rounded payment amounts must remain positive")
+    if withheld >= gross:
+        raise InvalidAmount("withholding must be less than the gross payment")
+
+    def operation(session: Session) -> Mapping[str, object]:
+        existing = session.scalar(
+            select(SupplierPayment).where(
+                SupplierPayment.tenant_id == tenant_id,
+                SupplierPayment.number == str(payload["number"]),
+            )
+        )
+        if existing is not None:
+            if existing.request_fingerprint != request_fingerprint:
+                raise Conflict("supplier payment number names a different payment")
+            return {"payment_id": str(existing.id)}
+        for obligation_id, amount in sorted(allocations, key=lambda row: str(row[0])):
+            _check_allocation_payable(
+                session,
+                tenant_id=tenant_id,
+                obligation_id=obligation_id,
+                amount=amount,
+                supplier_ref=supplier_ref,
+                currency_code=currency,
+                exchange_rate=command.exchange_rate,
+                payment_id=None,
+            )
+        payment = SupplierPayment(
+            tenant_id=tenant_id,
+            number=str(payload["number"]),
+            supplier_ref=supplier_ref,
+            supplier_name_snapshot=str(payload["supplier_name_snapshot"]),
+            currency_code=currency,
+            exchange_rate=command.exchange_rate,
+            value_date=command.value_date,
+            cash_account_ref=str(payload["cash_account_ref"]),
+            payer_instrument_ref=str(payload["payer_instrument_ref"]),
+            gross_amount=gross,
+            wht_amount=withheld,
+            net_amount=_money(gross - withheld),
+            request_fingerprint=request_fingerprint,
+            status=SupplierPaymentStatus.DRAFT,
+            prepared_by=preparer,
+            prepared_at=prepared_at,
+            created_at=prepared_at,
+            updated_at=prepared_at,
+        )
+        session.add(payment)
+        session.flush()
+        for number, (obligation_id, amount) in enumerate(allocations, start=1):
+            session.add(
+                SupplierPaymentAllocation(
+                    tenant_id=tenant_id,
+                    payment_id=payment.id,
+                    line_number=number,
+                    obligation_id=obligation_id,
+                    amount=amount,
+                    created_at=prepared_at,
+                )
+            )
+        for number, (account_ref, amount, description, certificate) in enumerate(
+            withholdings, start=1
+        ):
+            session.add(
+                SupplierPaymentWithholding(
+                    tenant_id=tenant_id,
+                    payment_id=payment.id,
+                    line_number=number,
+                    account_ref=account_ref,
+                    amount=amount,
+                    description=description,
+                    certificate_ref=certificate,
+                    created_at=prepared_at,
+                )
+            )
+        session.flush()
+        return {"payment_id": str(payment.id)}
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope="payables.create_supplier_payment",
+        key=idempotency_key,
+        operation=operation,
+        fingerprint=request_fingerprint,
+        expires_at=idempotency_expires_at,
+    )
+    return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
+
+
+def _recheck_allocations(db: Session, payment: SupplierPayment) -> None:
+    for allocation in sorted(
+        _payment_allocations(db, payment.tenant_id, payment.id),
+        key=lambda row: str(row.obligation_id),
+    ):
+        _check_allocation_payable(
+            db,
+            tenant_id=payment.tenant_id,
+            obligation_id=allocation.obligation_id,
+            amount=allocation.amount,
+            supplier_ref=payment.supplier_ref,
+            currency_code=payment.currency_code,
+            exchange_rate=payment.exchange_rate,
+            payment_id=payment.id,
+        )
+
+
+def approve_supplier_payment(
+    db: Session,
+    *,
+    scope: TenantScope,
+    payment_id: UUID,
+    approval_reference: str,
+    approved_by: str,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    approved_at: datetime,
+) -> SupplierPayment:
+    """DRAFT -> APPROVED. The approver must differ from the preparer."""
+    tenant_id = scope.tenant_id
+    approval = _required(approval_reference, "approval reference", 255)
+    actor = _required(approved_by, "approved by", 255)
+    payload = {
+        "payment_id": str(payment_id),
+        "approval_reference": approval,
+        "approved_by": actor,
+        "approved_at": approved_at.isoformat(),
+    }
+    event_fingerprint = fingerprint_of(payload)
+
+    def operation(session: Session) -> Mapping[str, object]:
+        payment = _payment(session, tenant_id, payment_id, lock=True)
+        if payment.status != SupplierPaymentStatus.DRAFT:
+            raise InvalidTransition("only a draft supplier payment can be approved")
+        if _same_actor(actor, payment.prepared_by):
+            raise InvalidTransition(
+                "a supplier payment cannot be approved by its preparer"
+            )
+        _recheck_allocations(session, payment)
+        payment.status = SupplierPaymentStatus.APPROVED
+        payment.approval_reference = approval
+        payment.approved_by = actor
+        payment.approved_at = approved_at
+        payment.updated_at = approved_at
+        session.flush()
+        return {"payment_id": str(payment.id)}
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope="payables.approve_supplier_payment",
+        key=idempotency_key,
+        operation=operation,
+        fingerprint=event_fingerprint,
+        expires_at=idempotency_expires_at,
+    )
+    return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
+
+
+def record_supplier_payment(
+    db: Session,
+    *,
+    scope: TenantScope,
+    payment_id: UUID,
+    bank_reference: str,
+    recorded_by: str,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    recorded_at: datetime,
+) -> SupplierPayment:
+    """APPROVED -> RECORDED, settling every allocation in the caller's transaction.
+
+    Recording is an assertion by a human, backed by ``bank_reference``, that the
+    money left through an external channel. The recorder must differ from both the
+    preparer and the approver. Nothing here calls a bank or provider.
+    """
+    tenant_id = scope.tenant_id
+    reference = _required(bank_reference, "bank reference", 255)
+    actor = _required(recorded_by, "recorded by", 255)
+    payload = {
+        "payment_id": str(payment_id),
+        "bank_reference": reference,
+        "recorded_by": actor,
+        "recorded_at": recorded_at.isoformat(),
+    }
+    event_fingerprint = fingerprint_of(payload)
+
+    def operation(session: Session) -> Mapping[str, object]:
+        payment = _payment(session, tenant_id, payment_id, lock=True)
+        if payment.status != SupplierPaymentStatus.APPROVED:
+            raise InvalidTransition("only an approved supplier payment can be recorded")
+        if _same_actor(actor, payment.prepared_by) or _same_actor(
+            actor, payment.approved_by
+        ):
+            raise InvalidTransition(
+                "a supplier payment must be recorded by someone other than "
+                "its preparer and approver"
+            )
+        duplicate = session.scalar(
+            select(SupplierPayment.id).where(
+                SupplierPayment.tenant_id == tenant_id,
+                SupplierPayment.payer_instrument_ref == payment.payer_instrument_ref,
+                SupplierPayment.bank_reference == reference,
+            )
+        )
+        if duplicate is not None:
+            raise Conflict("bank reference was already recorded against a payment")
+        _recheck_allocations(session, payment)
+        for allocation in sorted(
+            _payment_allocations(session, tenant_id, payment.id),
+            key=lambda row: str(row.obligation_id),
+        ):
+            fingerprint = fingerprint_of(
+                {
+                    "payment_id": str(payment.id),
+                    "line_number": allocation.line_number,
+                    "obligation_id": str(allocation.obligation_id),
+                    "amount": str(allocation.amount),
+                    "bank_reference": reference,
+                }
+            )
+            record_settlement(
+                session,
+                scope=scope,
+                command=SettlementObservationInput(
+                    obligation_id=allocation.obligation_id,
+                    source_owner=PAYMENT_SETTLEMENT_OWNER,
+                    source_reference=f"{payment.id}:{allocation.line_number}",
+                    source_version="1",
+                    source_fingerprint=fingerprint,
+                    amount=allocation.amount,
+                    occurred_at=datetime.combine(
+                        payment.value_date, datetime.min.time(), UTC
+                    ),
+                    currency_code=payment.currency_code,
+                ),
+                idempotency_key=f"supplier_payment:{payment.id}:settle:{allocation.line_number}",
+                idempotency_expires_at=None,
+                recorded_at=recorded_at,
+            )
+        payment.status = SupplierPaymentStatus.RECORDED
+        payment.bank_reference = reference
+        payment.recorded_by = actor
+        payment.recorded_at = recorded_at
+        payment.updated_at = recorded_at
+        session.flush()
+        return {"payment_id": str(payment.id)}
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope="payables.record_supplier_payment",
+        key=idempotency_key,
+        operation=operation,
+        fingerprint=event_fingerprint,
+        expires_at=idempotency_expires_at,
+    )
+    return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
+
+
+def cancel_supplier_payment(
+    db: Session,
+    *,
+    scope: TenantScope,
+    payment_id: UUID,
+    reason: str,
+    cancelled_by: str,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    cancelled_at: datetime,
+) -> SupplierPayment:
+    """DRAFT or APPROVED -> CANCELLED, releasing its obligation reservation.
+
+    A RECORDED payment is never cancelled; correcting one is a forward reversal
+    owned by a later release.
+    """
+    tenant_id = scope.tenant_id
+    why = _required(reason, "cancel reason", 2000)
+    actor = _required(cancelled_by, "cancelled by", 255)
+    payload = {
+        "payment_id": str(payment_id),
+        "reason": why,
+        "cancelled_by": actor,
+        "cancelled_at": cancelled_at.isoformat(),
+    }
+    event_fingerprint = fingerprint_of(payload)
+
+    def operation(session: Session) -> Mapping[str, object]:
+        payment = _payment(session, tenant_id, payment_id, lock=True)
+        if payment.status not in _ACTIVE_PAYMENT_STATES:
+            raise InvalidTransition(
+                "only a draft or approved supplier payment can be cancelled"
+            )
+        payment.status = SupplierPaymentStatus.CANCELLED
+        payment.cancelled_by = actor
+        payment.cancelled_at = cancelled_at
+        payment.cancel_reason = why
+        payment.updated_at = cancelled_at
+        session.flush()
+        return {"payment_id": str(payment.id)}
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope="payables.cancel_supplier_payment",
+        key=idempotency_key,
+        operation=operation,
+        fingerprint=event_fingerprint,
+        expires_at=idempotency_expires_at,
+    )
+    return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
+
+
+def build_payment_accounting_consequence(
+    db: Session, *, tenant_id: UUID, payment_id: UUID
+) -> AccountingConsequence:
+    """Provider-neutral GL consequence of a RECORDED payment, for the ERP adapter.
+
+    Dr supplier liability (gross, per invoice liability account), Cr cash account
+    (net), Cr each withholding-tax payable account. Payables posts nothing itself.
+    """
+    payment = _payment(db, tenant_id, payment_id)
+    if payment.status != SupplierPaymentStatus.RECORDED:
+        raise InvalidTransition(
+            "only a recorded supplier payment has an accounting consequence"
+        )
+    by_account: dict[str, Decimal] = {}
+    for allocation in _payment_allocations(db, tenant_id, payment.id):
+        obligation = _obligation(db, tenant_id, allocation.obligation_id)
+        invoice = _invoice(db, tenant_id, obligation.invoice_id)
+        account = invoice.liability_account_ref
+        by_account[account] = _money(
+            by_account.get(account, Decimal("0")) + allocation.amount
+        )
+    entries: list[AccountingEntry] = [
+        AccountingEntry(
+            account_ref=account,
+            debit=amount,
+            description=f"Supplier payment {payment.number}",
+        )
+        for account, amount in by_account.items()
+    ]
+    entries.append(
+        AccountingEntry(
+            account_ref=payment.cash_account_ref,
+            credit=payment.net_amount,
+            description=(
+                f"Supplier payment {payment.number} ref {payment.bank_reference}"
+            ),
+        )
+    )
+    for withholding in _payment_withholdings(db, tenant_id, payment.id):
+        entries.append(
+            AccountingEntry(
+                account_ref=withholding.account_ref,
+                credit=withholding.amount,
+                description=withholding.description
+                or f"Withholding tax: payment {payment.number}",
+            )
+        )
+    debits = sum((entry.debit for entry in entries), Decimal("0"))
+    credits = sum((entry.credit for entry in entries), Decimal("0"))
+    if debits != credits or debits != payment.gross_amount:
+        raise InvalidAmount("persisted supplier payment does not balance")
+    return _consequence(
+        source=ConsequenceSource(
+            owner="payables",
+            document_kind="supplier_payment",
+            document_id=str(payment.id),
+            version="1",
+            fingerprint=payment.request_fingerprint,
+        ),
+        posting_date=payment.value_date,
+        description=f"Supplier payment {payment.number}",
+        currency_code=payment.currency_code,
+        exchange_rate=payment.exchange_rate,
+        entries=tuple(entries),
+    )
+
+
 def supplier_liability_balance(
     db: Session, *, tenant_id: UUID, supplier_ref: str, currency_code: str
 ) -> Decimal:
@@ -1383,12 +1943,17 @@ __all__ = [
     "apply_credit_note",
     "approve_credit_note",
     "approve_invoice",
+    "approve_supplier_payment",
     "build_credit_accounting_consequence",
     "build_invoice_accounting_consequence",
+    "build_payment_accounting_consequence",
+    "cancel_supplier_payment",
     "create_credit_note",
     "create_invoice",
+    "create_supplier_payment",
     "record_accounting_receipt",
     "record_settlement",
+    "record_supplier_payment",
     "submit_credit_note",
     "submit_invoice",
     "supplier_liability_balance",
