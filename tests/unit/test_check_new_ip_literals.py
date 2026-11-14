@@ -12,7 +12,7 @@ from scripts.check_new_ip_literals import main, public_addresses, scan_diff
 
 # A globally routable value, assembled at runtime rather than written down.
 GLOBAL_V4 = ".".join(["8", "8", "4", "4"])
-GLOBAL_V6 = "2606:4700:4700::" + "1001"
+GLOBAL_V6 = ":".join(["2606", "4700", "4700", "", "1001"])
 
 
 def _diff(path: str, *lines: str, start: int = 1) -> str:
