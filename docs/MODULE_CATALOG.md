@@ -98,6 +98,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-learning`](../packages/dotmac-learning/README.md) | optional module | [`audit-complete`](../packages/dotmac-learning/EXTRACTION.toml) | [tenant · `mod_learning`](../packages/dotmac-learning/src/dotmac_learning/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a106` | — | `dotmac_academy_app` |
 | [`dotmac-licensing`](../packages/dotmac-licensing/README.md) | optional module | [`adopted`](../packages/dotmac-licensing/EXTRACTION.toml) | [platform · `mod_licensing`](../packages/dotmac-licensing/src/dotmac_licensing/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a100` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-media-observations`](../packages/dotmac-media-observations/README.md) | optional module | [`audit-complete`](../packages/dotmac-media-observations/EXTRACTION.toml) | [tenant · `mod_mediaobs`](../packages/dotmac-media-observations/src/dotmac_media_observations/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.2.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-money-flows`](../packages/dotmac-money-flows/README.md) | optional module | [`audit-complete`](../packages/dotmac-money-flows/EXTRACTION.toml) | [tenant · `mod_mflows`](../packages/dotmac-money-flows/src/dotmac_money_flows/manifest.py) | `tenant` | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a109` | — | `dotmac_sub_thin` |
 | [`dotmac-network-access`](../packages/dotmac-network-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-access/EXTRACTION.toml) | [tenant · `mod_netaccess`](../packages/dotmac-network-access/src/dotmac_network_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
 | [`dotmac-network-assurance`](../packages/dotmac-network-assurance/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-assurance/EXTRACTION.toml) | [tenant · `mod_netassure`](../packages/dotmac-network-assurance/src/dotmac_network_assurance/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
 | [`dotmac-network-control`](../packages/dotmac-network-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-control/EXTRACTION.toml) | [tenant · `mod_netctrl`](../packages/dotmac-network-control/src/dotmac_network_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
@@ -584,6 +585,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-media-observations/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-money-flows`](../packages/dotmac-money-flows/README.md)
+
+- **Owner:** Instance state of cross-owner money flows on the tenant plane: one governed state, the policy and definition version it was decided under, an optional deadline instant, a reason code and opaque references to the owners' records. No money facts, no balances, no timers, leases, retries or scanners, and no transaction control
+- **Contract:** Compose published owners (Billing, Payments, Approvals, Durable Timers, Fulfillment, Imports; Collections and SAP by contract only) through their top-level public surface inside the caller's transaction. Each flow persists exactly one instance table of common columns plus declared opaque references, refuses identity changes and exits from terminal states at the database boundary, and never stores an amount, currency or balance: the owners remain the only source of money facts. This skeleton ships the manifest, the instance-table allowlist, the migration lineage with the Settle instance table and the event-type constants; no flow behaviour yet.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-money-flows/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub_thin`.
 
 ### [`dotmac-network-access`](../packages/dotmac-network-access/README.md)
 
