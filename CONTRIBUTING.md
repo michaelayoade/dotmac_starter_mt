@@ -62,6 +62,16 @@ All relevant Git-hosted CI gates must be green before merge.
   `validate_settings`'s prod-fatal list. Never hardcode ports, hosts,
   image names, or paths.
 
+## IP addresses in a public repository
+
+This repository is public, so the `No new public IP literals` check
+(`scripts/check_new_ip_literals.py`) fails a pull request that ADDS a globally
+routable IPv4 or IPv6 address or network. Use role names in code and docs,
+documentation ranges (RFC 5737 / RFC 3849) in tests and examples, and real
+addresses only at deploy time. Private, loopback, link-local and CGNAT ranges
+pass. A deliberate exception takes an inline marker with a reason:
+`ip-literal-ok: <reason>`. Existing content is not rewritten.
+
 ## Pull requests
 
 - Small and reviewable — one coherent slice per PR, not a grab-bag.
