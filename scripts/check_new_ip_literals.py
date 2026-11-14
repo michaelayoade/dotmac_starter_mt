@@ -123,8 +123,8 @@ def _is_flagged(
     if mapped is not None:
         address = mapped
     if address.is_multicast or address.is_reserved:
-        # Reserved covers ::/8, which is where Python slices such as a[1::2]
-        # parse as IPv6 addresses.
+        # Reserved covers the first IPv6 /8 block, which is where Python
+        # extended slices with a numeric start parse as IPv6 addresses.
         return False
     if any(address in net for net in _DOCUMENTATION if net.version == address.version):
         return False
