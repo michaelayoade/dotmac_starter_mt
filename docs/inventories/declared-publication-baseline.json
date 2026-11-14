@@ -132,6 +132,11 @@
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
       "state": "declared-unpublished"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a109+dev",
+      "reason": "Unpublished source successor to verified 0.1.0a109. It reserves money_flows / mod_mflows / mf / branch money_flows for the money-flows composition package; the reservation installs no module and transfers no data or writer authority. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-money-flows": {
       "declared": "0.1.0a1",
       "reason": "Unpublished tenant-plane money-flows skeleton (manifest and mf_0001 settle_instances lineage; no flow behaviour). It awaits the kernel migration-namespace allocation, the owners' public exports and the protected release lifecycle. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",

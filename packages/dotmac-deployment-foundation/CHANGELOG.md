@@ -2,6 +2,21 @@
 
 ## Unreleased — successor not allocated
 
+### Added: scoped restore-rehearsal admission binding
+
+`ExecutionBindings.restore_rehearsal_admission_provider` supplies the trusted
+assembly's admission provider only to the installed `restore-rehearsal`
+executor. Missing binding retains `RefusingHostSourceAdmissionProvider`.
+Deployment and restore-rehearsal providers never substitute for each other.
+The factory still supplies a typed `RecoverySession`; its effects can mutate
+only a fresh isolated `RestoreTarget` after admission. This introduces no
+production recovery operation, deployment grant or Control consumption route.
+
+This is an unpublished source correction that must land before the next
+candidate freeze. It allocates no version and proves no positive installed
+admission; genuine isolated-session composition and exact-candidate rehearsal
+remain required.
+
 ### Added: `deployment_admission_provider` execution binding
 
 `ExecutionBindings` gains an optional `deployment_admission_provider`
@@ -10,14 +25,16 @@ discovery like every other binding — never request-selected). The CLI's
 `deploy`/`rollback` executor constructions select exactly that provider
 when declared and keep `RefusingHostSourceAdmissionProvider` otherwise,
 so the unconditional refusal stands wherever no assembly is wired.
-Recovery execution deliberately does not read the field: it keeps its
-literal refusing provider until it has a grant/consumption contract.
+Restore rehearsal deliberately does not read the deployment field: it uses
+its separate scoped binding, retaining refusal when that binding is absent.
+Production recovery remains unavailable and requires its own authority contract.
 The constructor-seam architecture guard is narrowed to admit exactly
 this one selection shape at `Executor` sites only, with planted-bypass
 sensitivity tests for the recovery site and request-value shapes. This
 makes the deployment ADMIT representable from the installed CLI for the
-first time; it admits nothing by itself — no distribution declares the
-provider yet, and `Executor.rollback` still refuses
+first time; it admits nothing by itself. CP has a source binding factory, but
+actual runtime adoption and genuine installed admission remain separate, and
+`Executor.rollback` still refuses
 `execution_plan.rollback_target_unbound` by design.
 
 ### Changed (breaking for re-render): the collector config is mounted as a directory
