@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-money-flows"
+version = "0.1.0a1"
+description = "Tenant-plane composition of money flows over published owners: instance state only"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_money_flows", from = "src" }]
+include = [
+    { path = "src/dotmac_money_flows/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_money_flows/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a109"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

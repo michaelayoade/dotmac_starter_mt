@@ -1,0 +1,53 @@
+schema_version = 1
+package = "dotmac-money-flows"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Instance state of cross-owner money flows on the tenant plane: one governed state, the policy and definition version it was decided under, an optional deadline instant, a reason code and opaque references to the owners' records. No money facts, no balances, no timers, leases, retries or scanners, and no transaction control"
+contract = "Compose published owners (Billing, Payments, Approvals, Durable Timers, Fulfillment, Imports; Collections and SAP by contract only) through their top-level public surface inside the caller's transaction. Each flow persists exactly one instance table of common columns plus declared opaque references, refuses identity changes and exits from terminal states at the database boundary, and never stores an amount, currency or balance: the owners remain the only source of money facts. This skeleton ships the manifest, the instance-table allowlist, the migration lineage with the Settle instance table and the event-type constants; no flow behaviour yet."
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_erp",
+]
+source_revisions = [
+  "dotmac_sub:9e545a357adb1185e550edc4d04190e4da2d0893",
+  "dotmac_erp:b912fd4ef474915d62758e3083742e42924ac3e3",
+]
+source_paths = [
+  "dotmac_sub:app/services/billing/starter_settlement.py",
+  "dotmac_sub:app/services/billing/starter_manual_settlement.py",
+  "dotmac_sub:app/services/billing/starter_reseller_settlement.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/integration/test_starter_settlement_pg.py",
+  "dotmac_sub:tests/integration/test_starter_manual_settlement_pg.py",
+  "dotmac_sub:tests/integration/test_starter_reseller_settlement_pg.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_sub_thin"]
+composition_boundary = "Only an assembly imports this package; the Starter reference app does not compose it. The Sub thin-client deployment is the named consumer (read as the deployment boundary of the flows ruling); legacy dotmac_sub never installs it. A flow calls owners only through their top-level public names and never commits, rolls back or reads a clock."
+inventory_evidence = [
+  "docs/inventories/money-flows-sources.md",
+]
+first_cutover = "Sub thin client composes the Settle flow in the confirmation transaction after the owners' exports are published and the flow behaviour lands; no authority moves in this skeleton."
+shadow_and_drift = "Not applicable to the skeleton, which holds no behaviour. Adoption is proven by backtest and real-record preview on Starter rails, not by side-by-side running."
+local_copy_retirement = "Retire the three Sub settlement back-half modules after the flow is adopted and verified; nothing is retired by this skeleton."
+next_action = "Land the Settle flow behaviour, then publish the package after the owners' exports are released."
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "9e545a357adb1185e550edc4d04190e4da2d0893"
+evidence_paths = [
+  "app/services/billing/starter_settlement.py",
+  "app/services/billing/starter_manual_settlement.py",
+  "app/services/billing/starter_reseller_settlement.py",
+]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "b912fd4ef474915d62758e3083742e42924ac3e3"
+evidence_paths = ["app/services/finance/ar/customer_payment.py"]
