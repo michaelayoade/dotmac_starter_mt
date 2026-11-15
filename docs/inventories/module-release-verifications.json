@@ -1193,6 +1193,28 @@
           "sha256": "bdb27ee15cb23ace2a8efd5fdc88ffeaa0ef0b12ccc936e4304868e770f8a9f7"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-accounting",
+      "version": "0.1.0a2",
+      "tag": "dotmac-accounting-v0.1.0a2",
+      "tag_object": "4c611e3122a6b5e574276b3dc08e550868d0ae72",
+      "peeled_commit": "adf15837767e3a013d662c0af85ff299c24ef9a9",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_accounting-0.1.0a2-py3-none-any.whl": "adb95227531f9cfffc20a848210b8ff78f8a1a2d358730ca487916d75c617d81"
+      },
+      "verification_run_id": "43731461910",
+      "source_run_id": "43731461910",
+      "release_authority_digest": "sha256:c6eb77226186da4b19044afee39a4809b9aba3a4218d2b56bf6004495eb54d1a",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a109+dev-py3-none-any.whl",
+          "sha256": "bdb27ee15cb23ace2a8efd5fdc88ffeaa0ef0b12ccc936e4304868e770f8a9f7"
+        }
+      ]
     }
   ]
 }
