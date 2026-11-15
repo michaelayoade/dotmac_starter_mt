@@ -462,7 +462,7 @@ def _assignment_for_period(
         )
     except PayrollNotFound:
         pass
-    ends = db.scalars(
+    candidate_ends = db.scalars(
         select(EmployeePayAssignment.effective_to).where(
             EmployeePayAssignment.tenant_id == tenant_id,
             EmployeePayAssignment.employee_ref == employee_ref,
@@ -472,6 +472,7 @@ def _assignment_for_period(
             EmployeePayAssignment.effective_to >= run.period_start,
         )
     ).all()
+    ends = [end for end in candidate_ends if end is not None]
     if not ends:
         raise PayrollNotFound("employee has no active pay assignment")
     as_of = min(run.period_end, max(ends))
