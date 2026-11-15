@@ -8011,6 +8011,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a4": (
+        "dotmac-payables",
+        "fdf6cb3cc5cf850135492c0869ed9badb76c84a5",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+            "pa_0004_supplier_payments.py": (
+                "1228dca6a16fda7c3ab458d4144e0f3d74838029355213c3fb61c174a8af772b"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a3": (
         "dotmac-payables",
         "ec7af09897c8123067344b57216ff643fafb09d1",
