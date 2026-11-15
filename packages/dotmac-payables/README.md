@@ -4,8 +4,15 @@
 liabilities, due-date payment obligations, credit applications and immutable
 settlement/accounting observations.
 
-Version `0.1.0a4` is an unpublished candidate and is not adopted by this change.
-It adds a governed supplier-payment lifecycle (DRAFT, APPROVED, RECORDED or
+Version `0.1.0a5` is an unpublished candidate and is not adopted by this change.
+It adds a governed reversal of RECORDED supplier payments (REVERSED, terminal; the
+reverser is not the recorder or approver; obligations reopen; a GL reversal
+consequence is exposed), verifier-bound admission of partially settled historical
+invoices with immutable legacy settlements and an exactly proved residual (no GL
+entry), and `recognize_approved_invoice` for imported APPROVED invoices that never
+reached the owner ledger.
+
+Version `0.1.0a4` added a governed supplier-payment lifecycle (DRAFT, APPROVED, RECORDED or
 CANCELLED) with preparer, approver and recorder kept distinct, settlement of open
 obligations in the caller's transaction, and a provider-neutral accounting
 consequence (Dr supplier liability, Cr cash, optional Cr withholding tax) that an
