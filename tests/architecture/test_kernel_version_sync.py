@@ -114,7 +114,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-ai-operations": "0.1.0a88",
     "dotmac-compliance-reporting": "0.1.0a88",
     "dotmac-remote-access": "0.1.0a88",
-    "dotmac-accounting": "0.1.0a85",
     "dotmac-analytics": "0.1.0a85",
     "dotmac-banking": "0.1.0a85",
     "dotmac-documents": "0.1.0a85",
@@ -191,6 +190,9 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Composed-safe creators use a98's engine-free public savepoint API
+    # (dotmac_kernel.transactions); the namespace was allocated in a85.
+    "dotmac-accounting": ("0.1.0a98", "0.1.0a85"),
     # Historical admission consumes semantic_encoding's cv1 digest/frames and
     # canonical instants, first available in published a103. The namespace was
     # allocated in a85, which cannot supply those later public APIs.

@@ -515,7 +515,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a85"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1680,7 +1680,7 @@ url = "packages/dotmac-payments"
 
 [[package]]
 name = "dotmac-payroll"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Composable data-driven payroll-calculation and employee-liability owner"
 optional = false
 python-versions = ">=3.12,<3.14"

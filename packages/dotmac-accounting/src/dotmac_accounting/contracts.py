@@ -282,6 +282,36 @@ class ReverseJournal:
 
 
 @dataclass(frozen=True, slots=True)
+class VoidDraftJournal:
+    """Governed retirement of a journal that was never posted.
+
+    ``voided_by`` requests, ``approved_by`` decides; they must differ. A posted
+    journal can never be voided: it is corrected only by ``ReverseJournal``.
+    """
+
+    journal_id: UUID
+    reason: str
+    voided_by: str
+    approved_by: str
+    approval_reference: str
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        voided_by = _required(self.voided_by, "voided by", maximum=255)
+        approved_by = _required(self.approved_by, "approved by", maximum=255)
+        if voided_by.casefold() == approved_by.casefold():
+            raise InvalidTransition("void requester and approver must differ")
+        return {
+            "journal_id": str(self.journal_id),
+            "reason": _required(self.reason, "void reason", maximum=2000),
+            "voided_by": voided_by,
+            "approved_by": approved_by,
+            "approval_reference": _required(
+                self.approval_reference, "approval reference", maximum=255
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CloseCheck:
     code: str
     passed: bool
@@ -343,4 +373,5 @@ __all__ = [
     "PeriodStatus",
     "ReverseJournal",
     "SourceIdentity",
+    "VoidDraftJournal",
 ]
