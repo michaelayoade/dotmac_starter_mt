@@ -1481,6 +1481,24 @@ type = "directory"
 url = "packages/dotmac-media-observations"
 
 [[package]]
+name = "dotmac-money-flows"
+version = "0.1.0a1"
+description = "Tenant-plane composition of money flows over published owners: instance state only"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a109"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-money-flows"
+
+[[package]]
 name = "dotmac-network-access"
 version = "0.1.0a1"
 description = "Tenant provider-neutral access projection, authentication/accounting fact and session owner"
@@ -4523,4 +4541,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "b2f716e0e9761c094b816ac5972a03ac492b06cdd9ee617db76e047bf3d8b6eb"
+content-hash = "c5fe28a3e11a9740f7e846ab5c3bbc10ed3bdec5635bf536cbcd1511653849dd"
