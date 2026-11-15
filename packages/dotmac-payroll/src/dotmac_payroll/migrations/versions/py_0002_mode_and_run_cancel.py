@@ -1,6 +1,6 @@
 """Deduction settlement mode and payroll-run cancellation evidence (additive).
 
-Revision ID: py_0002_settlement_mode_run_cancel
+Revision ID: py_0002_mode_and_run_cancel
 Revises: py_0001_payroll
 
 Adds ``settlement_mode`` ('external' default | 'internal_recovery') to rules,
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "py_0002_settlement_mode_run_cancel"
+revision = "py_0002_mode_and_run_cancel"
 down_revision = "py_0001_payroll"
 branch_labels = None
 depends_on = None

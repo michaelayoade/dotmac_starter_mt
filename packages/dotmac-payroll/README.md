@@ -71,5 +71,5 @@ example a staff loan); no outstanding external payable is created,
 `record_liability_settlement` refuses it, and the run consequence still credits
 the asset ref. Cancelling a draft or approved run stores actor, instant and a
 mandatory reason; a finalized run cannot be cancelled. The additive migration
-is `py_0002_settlement_mode_run_cancel`. This declaration is not publication
+is `py_0002_mode_and_run_cancel`. This declaration is not publication
 evidence.

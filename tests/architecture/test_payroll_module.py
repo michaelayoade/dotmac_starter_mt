@@ -145,3 +145,21 @@ def test_payroll_migration_forces_rls_and_protects_calculation_evidence() -> Non
             f"CREATE POLICY {table}_tenant_isolation ON {module.db_schema}.{table}"
         ) in compact
         assert f'"{table}"' in source
+
+
+def test_payroll_a4_migration_revision_fits_alembic_version_column() -> None:
+    migration = SOURCE / "migrations/versions/py_0002_mode_and_run_cancel.py"
+    source = migration.read_text(encoding="utf-8")
+    assert 'revision = "py_0002_mode_and_run_cancel"' in source
+    assert 'down_revision = "py_0001_payroll"' in source
+    # Alembic declares alembic_version.version_num as String(32).
+    assert len("py_0002_mode_and_run_cancel") <= 32
+    for name in (
+        "ck_payroll_runs_cancel_present",
+        "ck_payroll_runs_cancel_absent",
+        "ck_pay_structure_rules_settlement_mode",
+        "ck_payroll_calculation_lines_settlement_mode",
+        "ck_payroll_liabilities_settlement_mode",
+    ):
+        assert name in source
+        assert len(name) <= 63

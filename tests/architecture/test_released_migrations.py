@@ -8807,7 +8807,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-payables": frozenset(),
     # `py_0002` adds deduction settlement_mode and run-cancel evidence; still
     # editable until `dotmac-payroll` 0.1.0a4 is tagged.
-    "dotmac-payroll": frozenset({"py_0002_settlement_mode_run_cancel.py"}),
+    "dotmac-payroll": frozenset({"py_0002_mode_and_run_cancel.py"}),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
     # `dotmac-positioning` 0.2.0a2 is tagged.

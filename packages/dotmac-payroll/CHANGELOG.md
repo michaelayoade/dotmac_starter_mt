@@ -19,7 +19,7 @@
   uses min(period_end, assignment end date) of the assignment that ends inside
   the period; revision effectiveness is checked at that date. Stayers are
   unchanged.
-- Migration `py_0002_settlement_mode_run_cancel` is additive (defaulted columns
+- Migration `py_0002_mode_and_run_cancel` is additive (defaulted columns
   and CHECKs; existing rows backfill to `external`). Downgrade refuses once a
   cancelled run or an internal-recovery row exists.
 - No change to existing transitions, separation of duties, amounts or the
