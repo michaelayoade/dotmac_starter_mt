@@ -138,8 +138,8 @@
       "state": "declared-unpublished"
     },
     "dotmac-payables": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a3 is published and its migration bytes remain unchanged. 0.1.0a4 adds the governed supplier-payment lifecycle (DRAFT, APPROVED, RECORDED or CANCELLED with separation of duties), settlement of open obligations and the provider-neutral payment accounting consequence, through the additive pa_0004 migration. Publication is authorized by Michael (register v1279) but happens only through the release lane after review; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
+      "declared": "0.1.0a5",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a4 is published and tagged and its migration bytes remain unchanged. 0.1.0a5 adds the governed reversal of a RECORDED supplier payment, verifier-bound admission of partially settled historical invoices with immutable legacy settlements, and recognition of imported APPROVED invoices that never reached the owner ledger, through the additive pa_0005 migration. Publication is authorized by Michael (W9; register v1302 rulings) but happens only through the release lane after review; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
