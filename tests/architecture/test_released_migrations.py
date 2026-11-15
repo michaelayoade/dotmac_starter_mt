@@ -8026,6 +8026,27 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a5": (
+        "dotmac-payables",
+        "6ed9ab5cd1067916229c8993dafbccd5ccc0e682",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+            "pa_0004_supplier_payments.py": (
+                "1228dca6a16fda7c3ab458d4144e0f3d74838029355213c3fb61c174a8af772b"
+            ),
+            "pa_0005_reversal_settled_history.py": (
+                "1cf9e92760e2a8406f5e7bceb2dd81bd774a03795bde7abc537989f7031ab4cf"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a4": (
         "dotmac-payables",
         "fdf6cb3cc5cf850135492c0869ed9badb76c84a5",
@@ -8783,7 +8804,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-party": frozenset(),
     # `pa_0005` adds payment reversal, settled historical admission and invoice
     # recognition; still editable until `dotmac-payables` 0.1.0a5 is tagged.
-    "dotmac-payables": frozenset({"pa_0005_reversal_settled_history.py"}),
+    "dotmac-payables": frozenset(),
     # `py_0002` adds deduction settlement_mode and run-cancel evidence; still
     # editable until `dotmac-payroll` 0.1.0a4 is tagged.
     "dotmac-payroll": frozenset({"py_0002_settlement_mode_run_cancel.py"}),
