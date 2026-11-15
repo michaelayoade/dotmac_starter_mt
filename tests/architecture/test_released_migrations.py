@@ -8739,9 +8739,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    # `pa_0004` adds the supplier-payment lifecycle tables; still editable until
-    # `dotmac-payables` 0.1.0a4 is tagged.
-    "dotmac-payables": frozenset({"pa_0004_supplier_payments.py"}),
+    # `pa_0005` adds payment reversal, settled historical admission and invoice
+    # recognition; still editable until `dotmac-payables` 0.1.0a5 is tagged.
+    "dotmac-payables": frozenset({"pa_0005_reversal_settled_history.py"}),
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until

@@ -10,7 +10,12 @@ from typing import Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import TenantScope
-from dotmac_kernel.semantic_encoding import ABSENT, digest_of, encode_fields
+from dotmac_kernel.semantic_encoding import (
+    ABSENT,
+    digest_of,
+    encode_fields,
+    encode_ordered,
+)
 from sqlalchemy.orm import Session
 
 
@@ -59,6 +64,7 @@ class SupplierPaymentStatus(enum.StrEnum):
     APPROVED = "APPROVED"
     RECORDED = "RECORDED"
     CANCELLED = "CANCELLED"
+    REVERSED = "REVERSED"
 
 
 def _required(value: str, label: str, maximum: int) -> str:
@@ -568,4 +574,173 @@ __all__ += [
     "SupplierPaymentAllocationInput",
     "SupplierPaymentStatus",
     "SupplierPaymentWithholdingInput",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RecognizeApprovedInvoice:
+    """Recognize an imported APPROVED invoice that never reached the owner ledger.
+
+    The assembly binds ``evidence_reference`` to its own reviewed list (for
+    example a census digest) and enforces who may act; this package records the
+    reference, actor and approval reference permanently and refuses anything but
+    an APPROVED invoice with no recognition, obligation or accounting evidence.
+    """
+
+    invoice_id: UUID
+    evidence_reference: str
+    recognized_by: str
+    approval_reference: str
+
+    def validate(self) -> None:
+        if not isinstance(self.invoice_id, UUID):
+            raise PayablesError("invoice id must be UUID")
+        _required(self.evidence_reference, "evidence reference", 255)
+        _required(self.recognized_by, "recognized by", 255)
+        _required(self.approval_reference, "approval reference", 255)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalSettlement:
+    """One legacy settlement of a historical invoice, proven by the verifier."""
+
+    source_settlement_id: str
+    payment_ref: str
+    settled_on: date
+    applied_amount: Decimal
+    withholding_amount: Decimal
+    currency_code: str
+    exchange_rate: Decimal
+    source_row_fingerprint: str
+
+    def validate(self) -> None:
+        _required(self.source_settlement_id, "source settlement id", 255)
+        _required(self.payment_ref, "legacy payment reference", 255)
+        _currency(self.currency_code)
+        if not isinstance(self.settled_on, date) or isinstance(
+            self.settled_on, datetime
+        ):
+            raise PayablesError("settlement date must be a date")
+        _historical_digest(self.source_row_fingerprint)
+        if not self.exchange_rate.is_finite() or self.exchange_rate <= 0:
+            raise InvalidAmount("settlement exchange rate must be positive")
+        for value in (self.applied_amount, self.withholding_amount):
+            if (
+                not isinstance(value, Decimal)
+                or not value.is_finite()
+                or value != value.quantize(Decimal("0.01"))
+            ):
+                raise InvalidAmount("settlement money must be exact two-decimal")
+        if self.applied_amount <= 0:
+            raise InvalidAmount("settlement amount must be positive")
+        if self.withholding_amount < 0 or self.withholding_amount > self.applied_amount:
+            raise InvalidAmount("settlement withholding must lie within the amount")
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalSettledInvoiceCommand:
+    source_owner: str
+    source_invoice_id: str
+    invoice_id: UUID
+    source_snapshot_sha256: str
+    evidence_fingerprint: str
+
+    def validate(self) -> None:
+        HistoricalUnpaidInvoiceCommand(
+            self.source_owner,
+            self.source_invoice_id,
+            self.invoice_id,
+            self.source_snapshot_sha256,
+            self.evidence_fingerprint,
+        ).validate()
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalSettledInvoiceEvidence:
+    """Verifier proof for a POSTED STANDARD invoice with legacy settlements.
+
+    ``settled_amount`` is the legacy total settled, counting withholding tax as
+    settled; ``residual_amount`` must equal the face less every settlement.
+    """
+
+    tenant_id: UUID
+    source_owner: str
+    source_invoice_id: str
+    source_snapshot_sha256: str
+    invoice_id: UUID
+    source_status: str
+    invoice_type: str
+    settlements: tuple[HistoricalSettlement, ...]
+    settled_amount: Decimal
+    residual_amount: Decimal
+    withholding_tax_amount: Decimal
+    prepayment_amount: Decimal
+    number: str
+    supplier_ref: str
+    supplier_name_snapshot: str
+    supplier_document_number: str | None
+    invoice_date: date
+    received_date: date
+    due_date: date
+    currency_code: str
+    exchange_rate: Decimal
+    subtotal: Decimal
+    tax_amount: Decimal
+    total_amount: Decimal
+    liability_account_ref: str
+    procurement_ref: str | None
+    receipt_evidence_fingerprint: str | None
+    submitted_by: str | None
+    approved_by: str | None
+    approval_reference: str | None
+    submitted_at: datetime | None
+    approved_at: datetime | None
+    original_posted_at: datetime
+    source_journal_ref: str
+    destination_journal_ref: str
+    accounting_evidence_fingerprint: str
+    facts_fingerprint: str
+
+    def fingerprint(self) -> str:
+        def scalar(value: object) -> object:
+            if value is None:
+                return ABSENT
+            if isinstance(value, UUID):
+                return str(value)
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value.isoformat()
+            return value
+
+        values: list[tuple[str, object]] = []
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if field.name == "settlements":
+                value = encode_ordered(
+                    encode_fields(
+                        [(f.name, scalar(getattr(item, f.name))) for f in fields(item)]
+                    )
+                    for item in value
+                )
+            values.append((field.name, scalar(value)))
+        return digest_of(
+            "payables.historical-settled-invoice.v1", encode_fields(values)
+        )
+
+
+class HistoricalSettledInvoiceVerifier(Protocol):
+    def verify(
+        self,
+        *,
+        scope: TenantScope,
+        command: HistoricalSettledInvoiceCommand,
+        destination: Session,
+    ) -> HistoricalSettledInvoiceEvidence: ...
+
+
+__all__ += [
+    "HistoricalSettledInvoiceCommand",
+    "HistoricalSettledInvoiceEvidence",
+    "HistoricalSettledInvoiceVerifier",
+    "HistoricalSettlement",
+    "RecognizeApprovedInvoice",
 ]
