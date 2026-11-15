@@ -1353,17 +1353,56 @@ def _imported_approved_invoice(
     return invoice_id
 
 
-def _recognize_in(db, tenant, invoice_id, *, key, evidence="census:1#1"):
+class _RecognitionVerifier:
+    def __init__(self, evidence):
+        self.evidence = evidence
+
+    def verify(self, *, scope, command, destination):
+        return self.evidence
+
+
+def _recognize_in(db, tenant, invoice_id, *, key, evidence="census:1#1", facts="9"):
     from datetime import UTC, datetime
 
     from dotmac_kernel.cache import TenantScope
-    from dotmac_payables.contracts import RecognizeApprovedInvoice
+    from dotmac_payables import models as pm
+    from dotmac_payables.contracts import (
+        ApprovedInvoiceRecognitionEvidence,
+        RecognizeApprovedInvoice,
+    )
     from dotmac_payables.service import recognize_approved_invoice
 
+    invoice = db.get(pm.SupplierInvoice, invoice_id)
+    proof = ApprovedInvoiceRecognitionEvidence(
+        tenant_id=tenant,
+        source_owner="legacy",
+        source_invoice_id=f"src:{invoice_id}",
+        source_snapshot_sha256="a" * 64,
+        invoice_id=invoice_id,
+        source_status="APPROVED",
+        source_journal_entry_id=None,
+        source_posted_at=None,
+        source_gl_line_count=0,
+        number=invoice.number,
+        supplier_ref=invoice.supplier_ref,
+        currency_code=invoice.currency_code,
+        total_amount=invoice.total_amount,
+        facts_fingerprint="cv1:" + facts * 64,
+    )
     return recognize_approved_invoice(
         db,
         scope=TenantScope(tenant),
-        command=RecognizeApprovedInvoice(invoice_id, evidence, "u:fin", "appr:1"),
+        command=RecognizeApprovedInvoice(
+            invoice_id,
+            evidence,
+            "u:fin",
+            "appr:1",
+            "legacy",
+            proof.source_invoice_id,
+            "a" * 64,
+            proof.fingerprint(),
+        ),
+        verifier=_RecognitionVerifier(proof),
         idempotency_key=key,
         idempotency_expires_at=None,
         recognized_at=datetime(2026, 9, 4, tzinfo=UTC),
@@ -1382,8 +1421,10 @@ def test_recognition_is_guarded_and_append_only_in_the_database(
     insert = (
         "INSERT INTO mod_payables.invoice_recognitions "
         "(id,tenant_id,invoice_id,evidence_reference,recognized_by,"
-        "approval_reference,recognized_at) VALUES "
-        "(gen_random_uuid(),:tenant,:invoice,'e','u','a',now())"
+        "approval_reference,source_owner,source_invoice_id,source_snapshot_sha256,"
+        "evidence_fingerprint,facts_fingerprint,evidence,recognized_at) VALUES "
+        "(gen_random_uuid(),:tenant,:invoice,'e','u','a','legacy','s','a','f','f',"
+        "'{}'::json,now())"
     )
     # Not APPROVED -> refused (the seeded DRAFT invoices from _seed_tenants).
     with engine.connect() as conn:
@@ -1686,6 +1727,8 @@ def _settled_evidence(db, invoice_id, tenant):
                 "NGN",
                 Decimal("1"),
                 "cv1:" + "1" * 64,
+                "legacy:gl.journal_entry:p1",
+                "v2:journal:p1",
             ),
         ),
         settled_amount=Decimal("300.00"),
@@ -1841,9 +1884,20 @@ def test_settled_admission_postgres_rows_rls_immutability_and_concurrency(
         "INSERT INTO mod_payables.historical_settlements "
         "(id,tenant_id,receipt_id,obligation_id,line_number,source_settlement_id,"
         "payment_ref,settled_on,applied_amount,withholding_amount,currency_code,"
-        "exchange_rate,source_row_fingerprint,recorded_at) "
+        "exchange_rate,source_row_fingerprint,source_journal_ref,"
+        "destination_journal_ref,recorded_at) "
         "SELECT gen_random_uuid(),tenant_id,receipt_id,obligation_id,2,'x','p',"
-        "DATE '2026-08-21',-5,0,'NGN',1,'cv1:x',now() "
+        "DATE '2026-08-21',-5,0,'NGN',1,'cv1:x','s','d',now() "
+        "FROM mod_payables.historical_settlements",
+        # A legacy allocation settles exactly one invoice: the id is unique per
+        # tenant even for a different receipt line.
+        "INSERT INTO mod_payables.historical_settlements "
+        "(id,tenant_id,receipt_id,obligation_id,line_number,source_settlement_id,"
+        "payment_ref,settled_on,applied_amount,withholding_amount,currency_code,"
+        "exchange_rate,source_row_fingerprint,source_journal_ref,"
+        "destination_journal_ref,recorded_at) "
+        "SELECT gen_random_uuid(),tenant_id,receipt_id,obligation_id,2,"
+        "source_settlement_id,'p',DATE '2026-08-21',5,0,'NGN',1,'cv1:x','s','d',now() "
         "FROM mod_payables.historical_settlements",
     ):
         with engine.connect() as conn:

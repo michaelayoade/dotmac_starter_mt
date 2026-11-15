@@ -581,16 +581,21 @@ __all__ += [
 class RecognizeApprovedInvoice:
     """Recognize an imported APPROVED invoice that never reached the owner ledger.
 
-    The assembly binds ``evidence_reference`` to its own reviewed list (for
-    example a census digest) and enforces who may act; this package records the
-    reference, actor and approval reference permanently and refuses anything but
-    an APPROVED invoice with no recognition, obligation or accounting evidence.
+    ``evidence_reference`` (the assembly's reviewed cohort), ``recognized_by`` and
+    ``approval_reference`` are recorded permanently; the assembly enforces who may
+    act. The source fields bind the command to the trusted verifier's snapshot
+    evidence (``ApprovedInvoiceRecognitionEvidence``), which is what proves the
+    legacy invoice was never POSTED.
     """
 
     invoice_id: UUID
     evidence_reference: str
     recognized_by: str
     approval_reference: str
+    source_owner: str
+    source_invoice_id: str
+    source_snapshot_sha256: str
+    evidence_fingerprint: str
 
     def validate(self) -> None:
         if not isinstance(self.invoice_id, UUID):
@@ -598,11 +603,79 @@ class RecognizeApprovedInvoice:
         _required(self.evidence_reference, "evidence reference", 255)
         _required(self.recognized_by, "recognized by", 255)
         _required(self.approval_reference, "approval reference", 255)
+        for value, label in (
+            (self.source_owner, "source owner"),
+            (self.source_invoice_id, "source invoice id"),
+        ):
+            if _required(value, label, 255) != value:
+                raise PayablesError(f"{label} must be canonical")
+        if _fingerprint(self.source_snapshot_sha256) != self.source_snapshot_sha256:
+            raise PayablesError("snapshot digest must be canonical")
+        _historical_digest(self.evidence_fingerprint)
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovedInvoiceRecognitionEvidence:
+    """Verifier proof that a legacy invoice was APPROVED and never POSTED.
+
+    The trusted verifier reads a restored legacy snapshot read-only and returns
+    the legacy status, the absence of any legacy journal entry, posting date and
+    GL lines for the invoice, plus the destination facts it matched.
+    """
+
+    tenant_id: UUID
+    source_owner: str
+    source_invoice_id: str
+    source_snapshot_sha256: str
+    invoice_id: UUID
+    source_status: str
+    source_journal_entry_id: str | None
+    source_posted_at: datetime | None
+    source_gl_line_count: int
+    number: str
+    supplier_ref: str
+    currency_code: str
+    total_amount: Decimal
+    facts_fingerprint: str
+
+    def fingerprint(self) -> str:
+        values: list[tuple[str, object]] = []
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if value is None:
+                value = ABSENT
+            elif isinstance(value, UUID):
+                value = str(value)
+            values.append((field.name, value))
+        return digest_of(
+            "payables.approved-invoice-recognition.v1", encode_fields(values)
+        )
+
+
+class ApprovedInvoiceRecognitionVerifier(Protocol):
+    def verify(
+        self,
+        *,
+        scope: TenantScope,
+        command: RecognizeApprovedInvoice,
+        destination: Session,
+    ) -> ApprovedInvoiceRecognitionEvidence: ...
 
 
 @dataclass(frozen=True, slots=True)
 class HistoricalSettlement:
-    """One legacy settlement of a historical invoice, proven by the verifier."""
+    """One legacy settlement of a historical invoice, proven by the verifier.
+
+    Verifier contract (the ERP assembly implements it): read the restored
+    flip-window legacy snapshot read-only; a settlement is one legacy payment
+    allocation joined to a payment whose status is posted, whose payment journal
+    is POSTED in the legacy GL (``source_journal_ref``) and whose imported journal
+    exists in the destination (``destination_journal_ref``);
+    ``source_row_fingerprint`` is the sha256 of the canonical legacy allocation
+    row; the residual is cross-checked against the legacy GL control-account
+    lines for the invoice. Money is exact two-decimal (correct for NGN); a
+    currency with other minor units is refused until this contract is widened.
+    """
 
     source_settlement_id: str
     payment_ref: str
@@ -612,10 +685,18 @@ class HistoricalSettlement:
     currency_code: str
     exchange_rate: Decimal
     source_row_fingerprint: str
+    source_journal_ref: str
+    destination_journal_ref: str
 
     def validate(self) -> None:
         _required(self.source_settlement_id, "source settlement id", 255)
         _required(self.payment_ref, "legacy payment reference", 255)
+        _required(self.source_journal_ref, "settlement source journal reference", 255)
+        _required(
+            self.destination_journal_ref,
+            "settlement destination journal reference",
+            255,
+        )
         _currency(self.currency_code)
         if not isinstance(self.settled_on, date) or isinstance(
             self.settled_on, datetime
@@ -738,6 +819,8 @@ class HistoricalSettledInvoiceVerifier(Protocol):
 
 
 __all__ += [
+    "ApprovedInvoiceRecognitionEvidence",
+    "ApprovedInvoiceRecognitionVerifier",
     "HistoricalSettledInvoiceCommand",
     "HistoricalSettledInvoiceEvidence",
     "HistoricalSettledInvoiceVerifier",

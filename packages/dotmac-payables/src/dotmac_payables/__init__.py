@@ -5,6 +5,8 @@ from dotmac_payables.contracts import (
     AccountingEntry,
     AccountingReceiptInput,
     ApplyCredit,
+    ApprovedInvoiceRecognitionEvidence,
+    ApprovedInvoiceRecognitionVerifier,
     Conflict,
     ConsequenceSource,
     CreateCreditNote,
@@ -81,6 +83,8 @@ from dotmac_payables.service import (
 __version__ = "0.1.0a5"
 
 __all__ = [
+    "ApprovedInvoiceRecognitionEvidence",
+    "ApprovedInvoiceRecognitionVerifier",
     "HistoricalSettledInvoiceCommand",
     "HistoricalSettledInvoiceEvidence",
     "HistoricalSettledInvoiceVerifier",

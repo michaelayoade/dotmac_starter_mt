@@ -779,6 +779,12 @@ class InvoiceRecognition(Base):
         UniqueConstraint(
             "tenant_id", "invoice_id", name="uq_invoice_recognitions_invoice"
         ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_owner",
+            "source_invoice_id",
+            name="uq_invoice_recognitions_source",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "invoice_id"],
             [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
@@ -794,6 +800,12 @@ class InvoiceRecognition(Base):
     evidence_reference: Mapped[str] = mapped_column(String(255), nullable=False)
     recognized_by: Mapped[str] = mapped_column(String(255), nullable=False)
     approval_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_invoice_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    facts_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     recognized_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -813,9 +825,9 @@ class HistoricalSettlementRecord(Base):
             "line_number",
             name="uq_historical_settlements_number",
         ),
+        # A legacy allocation settles exactly one invoice, across all admissions.
         UniqueConstraint(
             "tenant_id",
-            "receipt_id",
             "source_settlement_id",
             name="uq_historical_settlements_source",
         ),
@@ -859,6 +871,8 @@ class HistoricalSettlementRecord(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
     exchange_rate: Mapped[Decimal] = mapped_column(RATE, nullable=False)
     source_row_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    source_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    destination_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

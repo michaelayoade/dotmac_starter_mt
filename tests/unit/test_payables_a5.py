@@ -15,6 +15,7 @@ from dotmac_kernel.idempotency import IdempotencyConflict, fingerprint_of
 from dotmac_payables import models
 from dotmac_payables.contracts import (
     AccountingReceiptInput,
+    ApprovedInvoiceRecognitionEvidence,
     Conflict,
     CreateSupplierInvoice,
     HistoricalSettledInvoiceCommand,
@@ -287,15 +288,15 @@ def test_database_checks_refuse_a_forged_reversal(db: Session) -> None:
 # --- settled historical admission ---------------------------------------------
 
 
-def _settled_case(db: Session, *, schedule_amount: str = "1075"):
+def _settled_case(db: Session, *, schedule_amount: str = "1075", n: int = 1):
     invoice = create_invoice(
         db,
         scope=TenantScope(TENANT),
         command=CreateSupplierInvoice(
-            number="PINV-H-1",
+            number=f"PINV-H-{n}",
             supplier_ref=SUPPLIER,
             supplier_name_snapshot="Fibre Vendor Ltd",
-            supplier_document_number="H-1",
+            supplier_document_number=f"H-{n}",
             invoice_date=date(2026, 8, 1),
             received_date=date(2026, 8, 2),
             currency_code="NGN",
@@ -313,7 +314,7 @@ def _settled_case(db: Session, *, schedule_amount: str = "1075"):
             ),
             schedule=(ObligationSchedule(date(2026, 8, 31), Decimal(schedule_amount)),),
         ),
-        idempotency_key="h:create",
+        idempotency_key=f"h:create:{n}",
         idempotency_expires_at=None,
         recorded_at=NOW,
     )
@@ -336,6 +337,8 @@ def _settled_case(db: Session, *, schedule_amount: str = "1075"):
             "NGN",
             Decimal("1"),
             "cv1:" + "1" * 64,
+            "legacy:gl.journal_entry:p100",
+            "v2:journal:p100",
         ),
         HistoricalSettlement(
             "alloc:2",
@@ -346,12 +349,14 @@ def _settled_case(db: Session, *, schedule_amount: str = "1075"):
             "NGN",
             Decimal("1"),
             "cv1:" + "2" * 64,
+            "legacy:gl.journal_entry:p101",
+            "v2:journal:p101",
         ),
     )
     evidence = HistoricalSettledInvoiceEvidence(
         tenant_id=TENANT,
         source_owner="legacy",
-        source_invoice_id="source:h1",
+        source_invoice_id=f"source:h{n}",
         source_snapshot_sha256="a" * 64,
         invoice_id=invoice.id,
         source_status="POSTED",
@@ -700,6 +705,57 @@ def _imported_approved(db: Session, number: str = "PINV-R-1", doc: str = "R-1"):
     return invoice
 
 
+def _rec_evidence(invoice, **over):
+    values = {
+        "tenant_id": TENANT,
+        "source_owner": "legacy",
+        "source_invoice_id": f"src:{invoice.id}",
+        "source_snapshot_sha256": "a" * 64,
+        "invoice_id": invoice.id,
+        "source_status": "APPROVED",
+        "source_journal_entry_id": None,
+        "source_posted_at": None,
+        "source_gl_line_count": 0,
+        "number": invoice.number,
+        "supplier_ref": invoice.supplier_ref,
+        "currency_code": invoice.currency_code,
+        "total_amount": invoice.total_amount,
+        "facts_fingerprint": "cv1:" + "9" * 64,
+    }
+    values.update(over)
+    return ApprovedInvoiceRecognitionEvidence(**values)
+
+
+class _RecVerifier:
+    def __init__(self, evidence):
+        self.evidence = evidence
+
+    def verify(self, *, scope, command, destination):
+        return self.evidence
+
+
+def _rec_command(
+    evidence,
+    *,
+    evidence_ref="census:abc#12",
+    actor="user:finance",
+    approval="appr:1",
+    **over,
+):
+    values = {
+        "invoice_id": evidence.invoice_id,
+        "evidence_reference": evidence_ref,
+        "recognized_by": actor,
+        "approval_reference": approval,
+        "source_owner": evidence.source_owner,
+        "source_invoice_id": evidence.source_invoice_id,
+        "source_snapshot_sha256": evidence.source_snapshot_sha256,
+        "evidence_fingerprint": evidence.fingerprint(),
+    }
+    values.update(over)
+    return RecognizeApprovedInvoice(**values)
+
+
 def _recognize(
     db,
     invoice,
@@ -708,11 +764,16 @@ def _recognize(
     evidence="census:abc#12",
     actor="user:finance",
     approval="appr:1",
+    proof=None,
+    command=None,
 ):
+    proof = proof or _rec_evidence(invoice)
     return recognize_approved_invoice(
         db,
         scope=TenantScope(TENANT),
-        command=RecognizeApprovedInvoice(invoice.id, evidence, actor, approval),
+        command=command
+        or _rec_command(proof, evidence_ref=evidence, actor=actor, approval=approval),
+        verifier=_RecVerifier(proof),
         idempotency_key=key,
         idempotency_expires_at=None,
         recognized_at=LATER,
@@ -946,16 +1007,18 @@ def test_recognition_refuses_everything_but_an_unrecognized_approved_invoice(
     with pytest.raises(InvalidTransition, match="already has recognition"):
         _recognize(db, imported, key="r:a")
 
+    proof = _rec_evidence(imported)
     for bad in (
-        RecognizeApprovedInvoice(imported.id, " ", "u", "a"),
-        RecognizeApprovedInvoice(imported.id, "e", " ", "a"),
-        RecognizeApprovedInvoice(imported.id, "e", "u", " "),
+        _rec_command(proof, evidence_ref=" "),
+        _rec_command(proof, actor=" "),
+        _rec_command(proof, approval=" "),
     ):
         with pytest.raises(PayablesError, match="is required"):
             recognize_approved_invoice(
                 db,
                 scope=TenantScope(TENANT),
                 command=bad,
+                verifier=_RecVerifier(proof),
                 idempotency_key="r:bad",
                 idempotency_expires_at=None,
                 recognized_at=LATER,
@@ -965,13 +1028,151 @@ def test_recognition_refuses_everything_but_an_unrecognized_approved_invoice(
 
 def test_recognition_is_tenant_scoped(db: Session) -> None:
     imported = _imported_approved(db)
+    other = uuid.uuid4()
+    proof = _rec_evidence(imported, tenant_id=other)
     with pytest.raises(PayablesError, match="not found"):
         recognize_approved_invoice(
             db,
-            scope=TenantScope(uuid.uuid4()),
-            command=RecognizeApprovedInvoice(imported.id, "e", "u", "a"),
+            scope=TenantScope(other),
+            command=_rec_command(proof),
+            verifier=_RecVerifier(proof),
             idempotency_key="r:x",
             idempotency_expires_at=None,
             recognized_at=LATER,
         )
     assert _count(db, models.PaymentObligation) == 0
+
+
+def test_recognition_requires_proof_the_legacy_invoice_was_never_posted(
+    db: Session,
+) -> None:
+    imported = _imported_approved(db)
+    posted_at = LATER
+    for override, match in (
+        ({"source_status": "POSTED"}, "never posted"),
+        ({"source_journal_entry_id": "je-1"}, "never posted"),
+        ({"source_posted_at": posted_at}, "never posted"),
+        ({"source_gl_line_count": 2}, "never posted"),
+    ):
+        proof = _rec_evidence(imported, **override)
+        with pytest.raises(InvalidTransition, match=match):
+            _recognize(db, imported, proof=proof)
+    # Evidence must be typed, bound to the command and to this invoice.
+    good = _rec_evidence(imported)
+    with pytest.raises(InvalidTransition, match="no typed evidence"):
+        recognize_approved_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=_rec_command(good),
+            verifier=_RecVerifier(object()),
+            idempotency_key="r:t",
+            idempotency_expires_at=None,
+            recognized_at=LATER,
+        )
+    with pytest.raises(Conflict, match="fingerprint differs"):
+        _recognize(
+            db,
+            imported,
+            proof=good,
+            command=_rec_command(good, evidence_fingerprint="cv1:" + "0" * 64),
+        )
+    with pytest.raises(Conflict, match="identity differs"):
+        _recognize(
+            db,
+            imported,
+            proof=_rec_evidence(imported, source_invoice_id="other"),
+            command=_rec_command(good),
+        )
+    with pytest.raises(Conflict, match="differs on number"):
+        _recognize(db, imported, proof=_rec_evidence(imported, number="OTHER"))
+    with pytest.raises(InvalidTransition, match="trusted verifier"):
+        recognize_approved_invoice(
+            db,
+            scope=TenantScope(TENANT),
+            command=_rec_command(good),
+            verifier=None,
+            idempotency_key="r:n",
+            idempotency_expires_at=None,
+            recognized_at=LATER,
+        )
+    assert _count(db, models.InvoiceRecognition) == 0
+    assert _count(db, models.PaymentObligation) == 0
+    # The verifier result is recorded on the permanent row.
+    _recognize(db, imported)
+    row = db.scalars(select(models.InvoiceRecognition)).one()
+    assert row.evidence_fingerprint == good.fingerprint()
+    assert row.evidence["source_status"] == "APPROVED"
+    assert row.source_snapshot_sha256 == "a" * 64
+    with pytest.raises(Conflict, match="other evidence"):
+        _recognize(
+            db,
+            imported,
+            key="r:other",
+            proof=_rec_evidence(imported, facts_fingerprint="cv1:" + "8" * 64),
+        )
+
+
+# --- review hardening: A5-1, A5-2, A5-4 ---------------------------------------
+
+
+def test_settlement_requires_both_journal_references(db: Session) -> None:
+    _, good = _settled_case(db)
+    first, second = good.settlements
+    for field in ("source_journal_ref", "destination_journal_ref"):
+        _refused(
+            db,
+            replace(good, settlements=(replace(first, **{field: " "}), second)),
+            PayablesError,
+            "journal reference is required",
+        )
+    admitted = _admit(db, good)
+    rows = db.scalars(select(models.HistoricalSettlementRecord)).all()
+    assert {(r.source_journal_ref, r.destination_journal_ref) for r in rows} == {
+        ("legacy:gl.journal_entry:p100", "v2:journal:p100"),
+        ("legacy:gl.journal_entry:p101", "v2:journal:p101"),
+    }
+    assert admitted.evidence["settlements"][0]["destination_journal_ref"]
+
+
+def test_one_legacy_settlement_cannot_settle_two_invoices(db: Session) -> None:
+    _, first_evidence = _settled_case(db, n=1)
+    _admit(db, first_evidence)
+    _, second_evidence = _settled_case(db, n=2)
+    # Same legacy allocation ids presented against another invoice.
+    with pytest.raises(Conflict, match="already admitted against an invoice"):
+        _admit(db, second_evidence, key="h:admit:2")
+    assert _count(db, models.HistoricalSettlementRecord) == 2
+
+
+def test_reversal_cannot_reopen_beyond_face_less_history_and_credits(
+    db: Session,
+) -> None:
+    payment, ob = _receipted_payment(db)
+    db.add(
+        models.CreditApplication(
+            tenant_id=TENANT,
+            credit_note_id=uuid.uuid4(),
+            obligation_id=ob.id,
+            amount=Decimal("100"),
+            applied_by="u",
+            applied_at=NOW,
+        )
+    )
+    db.flush()
+    with pytest.raises(InvalidAmount, match="less historical settlements and credit"):
+        _reverse(db, payment)
+    assert payment.status == SupplierPaymentStatus.RECORDED
+
+
+def test_historical_settlement_money_is_two_decimal_only(db: Session) -> None:
+    _, good = _settled_case(db)
+    first, second = good.settlements
+    _refused(
+        db,
+        replace(
+            good,
+            settlements=(replace(first, applied_amount=Decimal("300.001")), second),
+        ),
+        InvalidAmount,
+        "two-decimal",
+    )

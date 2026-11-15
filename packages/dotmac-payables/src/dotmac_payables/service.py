@@ -25,6 +25,8 @@ from dotmac_payables.contracts import (
     AccountingEntry,
     AccountingReceiptInput,
     ApplyCredit,
+    ApprovedInvoiceRecognitionEvidence,
+    ApprovedInvoiceRecognitionVerifier,
     Conflict,
     ConsequenceSource,
     CreateCreditNote,
@@ -1087,7 +1089,9 @@ def _json_value(value: object) -> object:
 
 
 def _evidence_json(
-    evidence: HistoricalUnpaidInvoiceEvidence | HistoricalSettledInvoiceEvidence,
+    evidence: HistoricalUnpaidInvoiceEvidence
+    | HistoricalSettledInvoiceEvidence
+    | ApprovedInvoiceRecognitionEvidence,
 ) -> dict[str, object]:
     return {f.name: _json_value(getattr(evidence, f.name)) for f in fields(evidence)}
 
@@ -1100,8 +1104,12 @@ def _run_verifier(
     db: Session,
     *,
     scope: TenantScope,
-    command: HistoricalUnpaidInvoiceCommand | HistoricalSettledInvoiceCommand,
-    verifier: HistoricalUnpaidInvoiceVerifier | HistoricalSettledInvoiceVerifier,
+    command: HistoricalUnpaidInvoiceCommand
+    | HistoricalSettledInvoiceCommand
+    | RecognizeApprovedInvoice,
+    verifier: HistoricalUnpaidInvoiceVerifier
+    | HistoricalSettledInvoiceVerifier
+    | ApprovedInvoiceRecognitionVerifier,
 ) -> tuple[SupplierInvoice, object]:
     """Lock the invoice, then run the read-only verifier in a discarded savepoint."""
     # All invoice writers and accounting guards share this lock. Verify the
@@ -1409,6 +1417,21 @@ def _admit_historical(
                     "historical invoice already has owner recognition "
                     "or accounting evidence"
                 )
+        if settlements:
+            taken = session.scalar(
+                select(HistoricalSettlementRecord.id)
+                .where(
+                    HistoricalSettlementRecord.tenant_id == scope.tenant_id,
+                    HistoricalSettlementRecord.source_settlement_id.in_(
+                        [item.source_settlement_id for item in settlements]
+                    ),
+                )
+                .limit(1)
+            )
+            if taken is not None:
+                raise Conflict(
+                    "a legacy settlement was already admitted against an invoice"
+                )
         obligation = PaymentObligation(
             tenant_id=scope.tenant_id,
             invoice_id=invoice.id,
@@ -1475,6 +1498,8 @@ def _admit_historical(
                 currency_code=item.currency_code.strip().upper(),
                 exchange_rate=item.exchange_rate,
                 source_row_fingerprint=item.source_row_fingerprint,
+                source_journal_ref=item.source_journal_ref,
+                destination_journal_ref=item.destination_journal_ref,
                 recorded_at=admitted_at,
             )
             session.add(row)
@@ -2223,8 +2248,28 @@ def reverse_supplier_payment(
             )
             invoice = _invoice(session, tenant_id, obligation.invoice_id)
             reopened = _money(obligation.outstanding_amount + allocation.amount)
-            if reopened > obligation.original_amount:
-                raise InvalidAmount("reversal would exceed the obligation face amount")
+            historical = session.scalar(
+                select(func.sum(HistoricalSettlementRecord.applied_amount)).where(
+                    HistoricalSettlementRecord.tenant_id == tenant_id,
+                    HistoricalSettlementRecord.obligation_id == obligation.id,
+                )
+            )
+            credited = session.scalar(
+                select(func.sum(CreditApplication.amount)).where(
+                    CreditApplication.tenant_id == tenant_id,
+                    CreditApplication.obligation_id == obligation.id,
+                )
+            )
+            ceiling = _money(
+                obligation.original_amount
+                - Decimal(historical or 0)
+                - Decimal(credited or 0)
+            )
+            if reopened > ceiling:
+                raise InvalidAmount(
+                    "reversal would exceed the obligation face less historical "
+                    "settlements and credit applications"
+                )
             obligation.outstanding_amount = reopened
             obligation.status = (
                 ObligationStatus.OPEN
@@ -2342,6 +2387,7 @@ def recognize_approved_invoice(
     *,
     scope: TenantScope,
     command: RecognizeApprovedInvoice,
+    verifier: ApprovedInvoiceRecognitionVerifier,
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     recognized_at: datetime,
@@ -2350,24 +2396,67 @@ def recognize_approved_invoice(
 
     Creates the ``invoice_recognized`` event and the obligations from the
     invoice's own schedule exactly as ``approve_invoice`` would, without any
-    status regression or edit to the imported invoice. Refuses unless the invoice
-    is APPROVED with no recognition event, obligation, accounting receipt,
-    historical receipt or earlier recognition record. The permanent
-    ``invoice_recognitions`` row keeps the evidence reference, actor and approval
-    reference; the assembly binds the reference to its reviewed list and enforces
-    who may act.
+    status regression or edit to the imported invoice. A trusted verifier must
+    prove from snapshot evidence that the legacy invoice was APPROVED and never
+    POSTED (no journal entry, posting date or GL lines), otherwise recognizing it
+    and then posting would double count expense, VAT and the control account.
+    Refuses unless the invoice is APPROVED with no recognition event, obligation,
+    accounting receipt, historical receipt or earlier recognition. The permanent
+    ``invoice_recognitions`` row keeps the evidence reference, actor, approval
+    reference and the verifier's evidence; the assembly binds the reference to its
+    reviewed list and enforces who may act.
     """
     command.validate()
+    if verifier is None or not callable(getattr(verifier, "verify", None)):
+        raise InvalidTransition("recognition requires a trusted verifier")
+    canonical_instant(recognized_at)
+    if not isinstance(db, Session) or isinstance(db, scoped_session):
+        raise InvalidTransition("recognition requires a plain Session")
     tenant_id = scope.tenant_id
-    evidence = command.evidence_reference.strip()
+    _, evidence = _run_verifier(db, scope=scope, command=command, verifier=verifier)
+    if not isinstance(evidence, ApprovedInvoiceRecognitionEvidence):
+        raise InvalidTransition("recognition verifier returned no typed evidence")
+    if (
+        evidence.tenant_id,
+        evidence.invoice_id,
+        evidence.source_owner,
+        evidence.source_invoice_id,
+        evidence.source_snapshot_sha256,
+    ) != (
+        tenant_id,
+        command.invoice_id,
+        command.source_owner,
+        command.source_invoice_id,
+        command.source_snapshot_sha256,
+    ):
+        raise Conflict("recognition evidence identity differs from command")
+    evidence_fingerprint = evidence.fingerprint()
+    if evidence_fingerprint != command.evidence_fingerprint:
+        raise Conflict("recognition evidence fingerprint differs from command")
+    from dotmac_payables.contracts import _historical_digest
+
+    _historical_digest(evidence.facts_fingerprint)
+    if (
+        evidence.source_status != "APPROVED"
+        or evidence.source_journal_entry_id is not None
+        or evidence.source_posted_at is not None
+        or type(evidence.source_gl_line_count) is not int
+        or evidence.source_gl_line_count != 0
+    ):
+        raise InvalidTransition(
+            "legacy invoice is not provably APPROVED and never posted "
+            "(status, journal entry, posting date and GL lines must all be absent)"
+        )
+    evidence_ref = command.evidence_reference.strip()
     actor = command.recognized_by.strip()
     approval = command.approval_reference.strip()
     payload = {
         "invoice_id": str(command.invoice_id),
-        "evidence_reference": evidence,
+        "evidence_reference": evidence_ref,
         "approval_reference": approval,
         "approved_by": actor,
         "approved_at": recognized_at.isoformat(),
+        "evidence_fingerprint": evidence_fingerprint,
     }
     request_fingerprint = fingerprint_of(payload)
     # Same payload shape as approve_invoice for the liability event fingerprint.
@@ -2390,12 +2479,21 @@ def recognize_approved_invoice(
         )
         if prior is not None:
             if (
-                prior.evidence_reference != evidence
+                prior.evidence_reference != evidence_ref
                 or prior.recognized_by != actor
                 or prior.approval_reference != approval
+                or prior.evidence_fingerprint != evidence_fingerprint
             ):
                 raise Conflict("invoice was already recognized with other evidence")
             return {"invoice_id": str(invoice.id)}
+        for name, expected in (
+            ("number", evidence.number),
+            ("supplier_ref", evidence.supplier_ref),
+            ("currency_code", evidence.currency_code),
+            ("total_amount", evidence.total_amount),
+        ):
+            if getattr(invoice, name) != expected:
+                raise Conflict(f"recognition destination differs on {name}")
         if invoice.status != InvoiceStatus.APPROVED:
             raise InvalidTransition("only an approved invoice can be recognized")
         for model, predicate in (
@@ -2424,7 +2522,8 @@ def recognize_approved_invoice(
                 is not None
             ):
                 raise InvalidTransition(
-                    "invoice already has recognition, obligation or accounting evidence"
+                    "invoice already has recognition, obligation or "
+                    "accounting evidence"
                 )
         schedule = [
             (
@@ -2441,9 +2540,15 @@ def recognize_approved_invoice(
             InvoiceRecognition(
                 tenant_id=tenant_id,
                 invoice_id=invoice.id,
-                evidence_reference=evidence,
+                evidence_reference=evidence_ref,
                 recognized_by=actor,
                 approval_reference=approval,
+                source_owner=command.source_owner,
+                source_invoice_id=command.source_invoice_id,
+                source_snapshot_sha256=command.source_snapshot_sha256,
+                evidence_fingerprint=evidence_fingerprint,
+                facts_fingerprint=evidence.facts_fingerprint,
+                evidence=_evidence_json(evidence),
                 recognized_at=recognized_at,
             )
         )
@@ -2480,15 +2585,18 @@ def recognize_approved_invoice(
         session.flush()
         return {"invoice_id": str(invoice.id)}
 
-    execute_once(
-        db,
-        tenant_id=tenant_id,
-        scope="payables.recognize_approved_invoice",
-        key=idempotency_key,
-        operation=operation,
-        fingerprint=request_fingerprint,
-        expires_at=idempotency_expires_at,
-    )
+    try:
+        execute_once(
+            db,
+            tenant_id=tenant_id,
+            scope="payables.recognize_approved_invoice",
+            key=idempotency_key,
+            operation=operation,
+            fingerprint=request_fingerprint,
+            expires_at=idempotency_expires_at,
+        )
+    except IntegrityError as exc:
+        raise Conflict("recognition source identity already exists") from exc
     return _invoice(db, tenant_id, command.invoice_id)
 
 

@@ -238,6 +238,12 @@ def upgrade() -> None:
         sa.Column("evidence_reference", sa.String(255), nullable=False),
         sa.Column("recognized_by", sa.String(255), nullable=False),
         sa.Column("approval_reference", sa.String(255), nullable=False),
+        sa.Column("source_owner", sa.String(120), nullable=False),
+        sa.Column("source_invoice_id", sa.String(255), nullable=False),
+        sa.Column("source_snapshot_sha256", sa.String(64), nullable=False),
+        sa.Column("evidence_fingerprint", sa.String(68), nullable=False),
+        sa.Column("facts_fingerprint", sa.String(68), nullable=False),
+        sa.Column("evidence", sa.JSON(), nullable=False),
         sa.Column("recognized_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
             ["tenant_id"],
@@ -260,6 +266,12 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "tenant_id", "invoice_id", name="uq_invoice_recognitions_invoice"
         ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "source_owner",
+            "source_invoice_id",
+            name="uq_invoice_recognitions_source",
+        ),
         schema=_SCHEMA,
     )
     op.create_table(
@@ -277,6 +289,8 @@ def upgrade() -> None:
         sa.Column("currency_code", sa.String(3), nullable=False),
         sa.Column("exchange_rate", sa.Numeric(20, 10), nullable=False),
         sa.Column("source_row_fingerprint", sa.String(68), nullable=False),
+        sa.Column("source_journal_ref", sa.String(255), nullable=False),
+        sa.Column("destination_journal_ref", sa.String(255), nullable=False),
         sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
             ["tenant_id"],
@@ -313,7 +327,6 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "tenant_id",
-            "receipt_id",
             "source_settlement_id",
             name="uq_historical_settlements_source",
         ),

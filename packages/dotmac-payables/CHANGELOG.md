@@ -29,6 +29,19 @@ change. Billing is untouched.
   open obligation). Uses the same receipt table, so the ledger guard and the
   supplier-payment lifecycle treat the residual like any admitted historical
   liability. The unpaid admission is unchanged and shares one implementation.
+- Settled admission ledger binding: every `HistoricalSettlement` and
+  `historical_settlements` row carries the legacy payment journal reference and the
+  imported destination journal reference (both required). ERP verifier contract: read
+  the restored flip-window legacy snapshot read-only; a settlement is one legacy
+  payment allocation on a payment whose status is posted, whose journal is POSTED in
+  the legacy GL and whose imported journal exists; `source_row_fingerprint` is the
+  sha256 of the canonical legacy allocation row; the residual is cross-checked
+  against the legacy GL control-account lines for that invoice. A legacy settlement
+  id is unique per tenant across all admissions (one allocation settles one invoice).
+  Money is exact two-decimal (correct for NGN); other minor-unit currencies are
+  refused until the contract is widened.
+- Reversal ceiling: a reversal may not reopen more than the obligation's face less
+  its historical settlements and credit applications.
 - Recognition of an imported APPROVED invoice (`recognize_approved_invoice`): writes
   the `invoice_recognized` liability event and the obligations from the invoice's own
   schedule exactly as `approve_invoice` would, with no status regression and no edit
@@ -36,8 +49,12 @@ change. Billing is untouched.
   event, obligation, accounting receipt or historical receipt. The evidence
   reference, actor and approval reference are kept in the permanent
   `invoice_recognitions` row, guarded by a database trigger; the assembly binds the
-  reference to its reviewed list and enforces who may act. Idempotent; other
-  evidence for an already recognized invoice conflicts.
+  reference to its reviewed list and enforces who may act. A trusted verifier
+  (`ApprovedInvoiceRecognitionVerifier`, same savepoint-contained read-only model as
+  admission) must prove from snapshot evidence that the legacy invoice was APPROVED
+  and never POSTED (no legacy journal entry, posting date or GL lines); the evidence
+  and its fingerprint are recorded on the permanent row, and the call is refused
+  without it. Idempotent; other evidence for an already recognized invoice conflicts.
 - Add `pa_0005_reversal_settled_history`: nullable reversal columns on
   `supplier_payments`; the status, evidence and separation-of-duties CHECKs and the
   lifecycle trigger are replaced by supersets of the pa_0004 ones (RECORDED ->
