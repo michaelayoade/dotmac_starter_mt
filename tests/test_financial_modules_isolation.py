@@ -344,3 +344,165 @@ def test_payroll_consequence_facts_round_trip_on_postgres(
             (Decimal("10.01"), Decimal("0.00")),
             (Decimal("0.00"), Decimal("10.01")),
         ]
+
+
+def test_payroll_internal_recovery_and_cancel_on_postgres(
+    migrated_module: tuple[ModuleCase, str, str],
+) -> None:
+    """a4 columns and CHECKs through the real migration: internal recovery + cancel."""
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.money import Currency, Money
+    from dotmac_payroll import (
+        EmployeeComponentInput,
+        PayComponentInput,
+        PayRuleInput,
+        approve_payroll_run,
+        assign_employee_pay_structure,
+        build_run_accounting_consequence,
+        calculate_employee_payroll,
+        cancel_payroll_run,
+        create_pay_component,
+        create_pay_structure,
+        create_payroll_run,
+        finalize_payroll_run,
+        publish_pay_structure_revision,
+        record_liability_settlement,
+    )
+    from dotmac_payroll.models import PayrollLiability
+    from sqlalchemy import select
+
+    case, admin_url, app_url = migrated_module
+    if case.manifest.code != "payroll":
+        pytest.skip("payroll-only proof")
+    tenant_a, _ = _seed_tenants(admin_url)
+    ngn = Currency("NGN", 2)
+    now = datetime(2026, 8, 19, 12, tzinfo=UTC)
+
+    def rule(component_id, sequence, **kw):
+        return PayRuleInput(
+            component_id, sequence, "input", None, None, (), False, **kw
+        )
+
+    with _tenant_session(app_url, tenant_a) as session:
+        base = create_pay_component(
+            session,
+            tenant_id=tenant_a,
+            command=PayComponentInput("B", "Base", "earning", "sal", None, None),
+        )
+        loan = create_pay_component(
+            session,
+            tenant_id=tenant_a,
+            command=PayComponentInput("L", "Loan", "deduction", None, "1410", "desk"),
+        )
+        structure = create_pay_structure(
+            session, tenant_id=tenant_a, code="S", name="S", currency=ngn
+        )
+        revision = publish_pay_structure_revision(
+            session,
+            tenant_id=tenant_a,
+            structure_id=structure.id,
+            version=1,
+            effective_from=date(2026, 1, 1),
+            effective_to=None,
+            net_payable_account_ref="2040",
+            rules=(
+                rule(base.id, 1),
+                rule(loan.id, 2, settlement_mode="internal_recovery"),
+            ),
+            published_by_id=uuid.uuid4(),
+            published_at=now,
+        )
+        assign_employee_pay_structure(
+            session,
+            tenant_id=tenant_a,
+            employee_ref="employee:pg-a4",
+            revision_id=revision.id,
+            effective_from=date(2026, 1, 1),
+            effective_to=date(2026, 7, 15),
+            source_ref="people:1",
+            source_version="1",
+        )
+        run = create_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_ref="PG-A4",
+            period_start=date(2026, 7, 1),
+            period_end=date(2026, 7, 31),
+            currency=ngn,
+            created_by_id=uuid.uuid4(),
+            created_at=now,
+        )
+        calculate_employee_payroll(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            employee_ref="employee:pg-a4",
+            proration_factor=Decimal("1"),
+            inputs=(
+                EmployeeComponentInput(base.id, Money.of("1000.10", ngn), "c"),
+                EmployeeComponentInput(loan.id, Money.of("200.05", ngn), "l"),
+            ),
+            calculated_at=now,
+        )
+        approve_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            approved_by_id=uuid.uuid4(),
+            approved_at=now,
+        )
+        finalize_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            finalized_by_id=uuid.uuid4(),
+            finalized_at=now,
+        )
+        recovery = session.scalars(
+            select(PayrollLiability).where(
+                PayrollLiability.run_id == run.id,
+                PayrollLiability.settlement_mode == "internal_recovery",
+            )
+        ).one()
+        assert (recovery.status, recovery.beneficiary_type) == ("settled", "employee")
+        assert recovery.amount_settled == recovery.amount == Decimal("200.05")
+        fact = build_run_accounting_consequence(
+            session, tenant_id=tenant_a, run_id=run.id
+        )
+        assert {x.account_ref: x.credit for x in fact.entries if x.credit} == {
+            "1410": Decimal("200.05"),
+            "2040": Decimal("800.05"),
+        }
+        with pytest.raises(Exception, match="internal recovery"):
+            record_liability_settlement(
+                session,
+                tenant_id=tenant_a,
+                liability_id=recovery.id,
+                amount=Money.of("1.00", ngn),
+                settlement_ref="x",
+                evidence_ref="x",
+                recorded_by_id=uuid.uuid4(),
+                recorded_at=now,
+            )
+        draft = create_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_ref="PG-A4-CANCEL",
+            period_start=date(2026, 8, 1),
+            period_end=date(2026, 8, 31),
+            currency=ngn,
+            created_by_id=uuid.uuid4(),
+            created_at=now,
+        )
+        actor = uuid.uuid4()
+        cancelled = cancel_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=draft.id,
+            cancelled_by_id=actor,
+            reason="duplicate run",
+            cancelled_at=now,
+        )
+        assert (cancelled.status, cancelled.cancelled_by_id) == ("cancelled", actor)

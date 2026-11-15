@@ -2576,6 +2576,7 @@
           "dotmac_payroll/manifest.py",
           "dotmac_payroll/migrations/__init__.py",
           "dotmac_payroll/migrations/versions/py_0001_payroll.py",
+          "dotmac_payroll/migrations/versions/py_0002_settlement_mode_run_cancel.py",
           "dotmac_payroll/models.py",
           "dotmac_payroll/service.py"
         ],

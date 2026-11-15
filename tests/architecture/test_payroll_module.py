@@ -23,7 +23,7 @@ MIGRATION = SOURCE / "migrations/versions/py_0001_payroll.py"
 
 def test_manifest_allocates_one_tenant_only_payroll_lineage() -> None:
     assert module.code == "payroll"
-    assert module.version == "0.1.0a3"
+    assert module.version == "0.1.0a4"
     assert module.short_code == "payroll"
     assert module.migration_prefix == "py"
     assert module.migration_branch == "payroll"
@@ -142,6 +142,6 @@ def test_payroll_migration_forces_rls_and_protects_calculation_evidence() -> Non
             in compact
         )
         assert (
-            f"CREATE POLICY {table}_tenant_isolation " f"ON {module.db_schema}.{table}"
+            f"CREATE POLICY {table}_tenant_isolation ON {module.db_schema}.{table}"
         ) in compact
         assert f'"{table}"' in source
