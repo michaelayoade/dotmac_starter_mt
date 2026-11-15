@@ -64,7 +64,7 @@
   "unpublished": {
     "dotmac-accounting": {
       "declared": "0.1.0a2",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 remains published and tagged as dotmac-accounting-v0.1.0a1, with its released migration bytes unchanged. 0.1.0a2 adds ac_0002_posted_content to freeze OLD and NEW posted source ancestry and serialize source edits with posting; that additive migration requires a new distribution identity. Hosted acceptance, authorized publication and adopter qualification remain separate gates. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a2 publication; candidate allocation authorizes no tag, adoption or production migration.",
+      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 remains published and tagged as dotmac-accounting-v0.1.0a1, with its released migration bytes unchanged. 0.1.0a2 adds ac_0002_posted_content to freeze OLD and NEW posted source ancestry and serialize source edits with posting; that additive migration requires a new distribution identity. It also carries ac_0003_draft_void (governed void of never-posted drafts) and the composed-safe creator fix, adopted under ERP v2 W9/W12 (publication of 0.1.0a2 authorized by Michael, Knowledge register v1279). Hosted acceptance, authorized publication and adopter qualification remain separate gates. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a2 publication; candidate allocation authorizes no tag, adoption or production migration.",
       "state": "declared-unpublished"
     },
     "dotmac-ai-operations": {
