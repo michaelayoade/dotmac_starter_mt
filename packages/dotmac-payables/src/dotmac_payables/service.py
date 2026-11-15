@@ -1299,8 +1299,7 @@ def _admit_historical(
         command=command,
     )
     residual: Decimal
-    if not settled:
-        assert isinstance(evidence, HistoricalUnpaidInvoiceEvidence)
+    if isinstance(evidence, HistoricalUnpaidInvoiceEvidence):
         _check_unpaid_evidence(evidence)
     if (
         evidence.total_amount <= 0
@@ -1311,8 +1310,7 @@ def _admit_historical(
         raise InvalidAmount("historical invoice amounts do not reconcile")
     if not evidence.exchange_rate.is_finite() or evidence.exchange_rate <= 0:
         raise InvalidAmount("historical exchange rate must be positive and finite")
-    if settled:
-        assert isinstance(evidence, HistoricalSettledInvoiceEvidence)
+    if isinstance(evidence, HistoricalSettledInvoiceEvidence):
         residual = _check_settled_evidence(evidence, admitted_at=admitted_at)
         settlements = evidence.settlements
     else:
