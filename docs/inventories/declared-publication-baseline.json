@@ -132,9 +132,9 @@
       "reason": "Unpublished source successor to verified 0.1.0a109. It reserves money_flows / mod_mflows / mf / branch money_flows for the money-flows composition package; the reservation installs no module and transfers no data or writer authority. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
       "state": "declared-unpublished"
     },
-    "dotmac-payables": {
-      "declared": "0.1.0a5",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a4 is published and tagged and its migration bytes remain unchanged. 0.1.0a5 adds the governed reversal of a RECORDED supplier payment, verifier-bound admission of partially settled historical invoices with immutable legacy settlements, and verifier-bound recognition of imported APPROVED invoices that never reached the owner ledger, through the additive pa_0005 migration. Publication is authorized by Michael (W9; register v1302 rulings) but happens only through the release lane after review; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
+    "dotmac-payroll": {
+      "declared": "0.1.0a4",
+      "reason": "Unpublished source successor to published 0.1.0a3 (ERP v2 cutover). It adds the deduction settlement mode (internal_recovery booked as already recovered), the cancel_payroll_run owner command and mid-month-leaver assignment lookup, with additive migration py_0002. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
