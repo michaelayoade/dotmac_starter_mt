@@ -27,6 +27,7 @@ from dotmac_accounting.contracts import (
     PeriodStatus,
     ReverseJournal,
     SourceIdentity,
+    VoidDraftJournal,
 )
 from dotmac_accounting.manifest import module
 from dotmac_accounting.migrations import versions_dir
@@ -58,6 +59,7 @@ from dotmac_accounting.service import (
     reopen_period,
     reverse_journal,
     soft_close_period,
+    void_draft_journal,
 )
 
 __version__ = "0.1.0a2"
@@ -101,6 +103,7 @@ __all__ = [
     "PostedLedgerLine",
     "ReverseJournal",
     "SourceIdentity",
+    "VoidDraftJournal",
     "__version__",
     "create_account",
     "create_account_category",
@@ -117,4 +120,5 @@ __all__ = [
     "reverse_journal",
     "soft_close_period",
     "versions_dir",
+    "void_draft_journal",
 ]

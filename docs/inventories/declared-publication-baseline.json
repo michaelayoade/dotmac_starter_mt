@@ -62,11 +62,6 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-accounting": {
-      "declared": "0.1.0a2",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 remains published and tagged as dotmac-accounting-v0.1.0a1, with its released migration bytes unchanged. 0.1.0a2 adds ac_0002_posted_content to freeze OLD and NEW posted source ancestry and serialize source edits with posting; that additive migration requires a new distribution identity. Hosted acceptance, authorized publication and adopter qualification remain separate gates. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a2 publication; candidate allocation authorizes no tag, adoption or production migration.",
-      "state": "declared-unpublished"
-    },
     "dotmac-ai-operations": {
       "declared": "0.1.0a2",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ai-operations-v0.1.0a1). 0.1.0a2 adds the stateless advisory-protocol contracts (AIAdvisoryInvocation/AIAdvisoryResult/AIActionProposal/AIActionDecision/AIExecutionObservation/AICapabilityExposureRef) and hardens capability-id/digest binding, so src/ no longer matches the bytes that the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication.",
@@ -141,11 +136,6 @@
       "declared": "0.1.0a1",
       "reason": "Unpublished tenant-plane money-flows skeleton (manifest and mf_0001 settle_instances lineage; no flow behaviour). It awaits the kernel migration-namespace allocation, the owners' public exports and the protected release lifecycle. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
       "state": "never-published"
-    },
-    "dotmac-payables": {
-      "declared": "0.1.0a4",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a3 is published and its migration bytes remain unchanged. 0.1.0a4 adds the governed supplier-payment lifecycle (DRAFT, APPROVED, RECORDED or CANCELLED with separation of duties), settlement of open obligations and the provider-neutral payment accounting consequence, through the additive pa_0004 migration. Publication is authorized by Michael (register v1279) but happens only through the release lane after review; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
-      "state": "declared-unpublished"
     },
     "dotmac-positioning": {
       "declared": "0.2.0a2",
