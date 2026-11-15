@@ -19,10 +19,13 @@
   pa_0003/pa_0004 policy). No new tables.
 - Fix the creator helpers (`create_account_category`, `create_account`,
   `create_fiscal_year`, `create_fiscal_period`, `create_dimension`,
-  `create_dimension_value`) to use the kernel's `_transactions.conflict_savepoint`,
-  as the idempotency module does, instead of importing `dotmac_kernel.db`, whose
+  `create_dimension_value`) to use the kernel's public `dotmac_kernel.transactions.conflict_savepoint`
+  instead of importing `dotmac_kernel.db`, whose
   reference runtime fails inside a composed app ("Could not parse SQLAlchemy
-  URL"). Kernel floor unchanged (`_transactions` exists at a85).
+  URL"). Raise the kernel floor from `>=0.1.0a85` to `>=0.1.0a98`, the first kernel
+  carrying the public `dotmac_kernel.transactions` (ERP pins a107).
+- A void is allowed in any period status (it has no ledger effect), including
+  a LOCKED period, so Finance can retire legacy drafts without reopening.
 - Add real PostgreSQL canaries for fresh and exact released-predecessor schemas,
   role/RLS enforcement, reversal parity, observed lock races and safe retry.
   Hosted CI evidence is required before acceptance.

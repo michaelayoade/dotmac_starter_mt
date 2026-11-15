@@ -149,7 +149,7 @@
       "package_dir": "packages/dotmac-accounting",
       "import_name": "dotmac_accounting",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a85",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_accounting",
       "tag_prefix": "dotmac-accounting-v",
       "wheel_contents": {

@@ -171,3 +171,34 @@ def test_downgrade_refuses_once_voided_and_restores_guard_otherwise(
     engine.dispose()
     assert BASELINE  # the baseline lineage is unchanged by ac_0003
     assert Path(ACCOUNTING_VERSIONS / "ac_0003_draft_void.py").is_file()
+
+
+def test_void_is_allowed_in_a_locked_period(migrated_finance) -> None:
+    admin_url, _ = migrated_finance
+    evidence = _seed(admin_url, posted=False)
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        period = conn.scalar(
+            text(
+                "SELECT fiscal_period_id FROM mod_accounting.journal_entries "
+                "WHERE id=:j"
+            ),
+            {"j": evidence.draft},
+        )
+        # Lock via the real transition path (soft close then lock) as the
+        # table owner; the guard only checks the allowed status sequence.
+        for status in ("SOFT_CLOSED", "LOCKED"):
+            conn.execute(
+                text("UPDATE mod_accounting.fiscal_periods SET status=:s WHERE id=:p"),
+                {"s": status, "p": period},
+            )
+        assert (
+            conn.scalar(
+                text("SELECT status FROM mod_accounting.fiscal_periods WHERE id=:p"),
+                {"p": period},
+            )
+            == "LOCKED"
+        )
+    with Session(engine) as db, db.begin():
+        assert _void(db, evidence.tenant, evidence.draft).status.value == "VOID"
+    engine.dispose()

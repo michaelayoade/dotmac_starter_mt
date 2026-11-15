@@ -14,10 +14,10 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
-from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.models import Tenant
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -99,8 +99,8 @@ def _tenant_lock(db: Session, tenant_id: UUID) -> None:
 
 
 def _flush_unique(db: Session, row: object, *, label: str) -> None:
-    # Private kernel helper, as the idempotency module uses: ``dotmac_kernel.db``
-    # builds the reference runtime engine on import and fails in a composed app.
+    # Public engine-free kernel module: ``dotmac_kernel.db`` builds the reference
+    # runtime engine on import and fails in a composed app.
     try:
         with conflict_savepoint(db):
             db.add(row)

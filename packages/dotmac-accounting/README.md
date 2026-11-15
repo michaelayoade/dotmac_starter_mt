@@ -24,7 +24,8 @@ move the authorization check to stale ancestry. The caller owns the transaction.
 (`void_draft_journal`): reason, requester, a distinct approver and an approval
 reference are appended as an immutable `JOURNAL_VOID` period event, and the
 database refuses DRAFT -> VOID without it. A posted or reversed journal is
-never voided; it is corrected only by `reverse_journal`. Downgrade of ac_0003
+never voided; it is corrected only by `reverse_journal`. A void has no ledger
+effect and is allowed whatever the period status, including LOCKED. Downgrade of ac_0003
 refuses once a voided journal or void event exists. Creators use the kernel
 `conflict_savepoint` and work inside a composed application.
 
