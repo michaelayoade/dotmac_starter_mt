@@ -4,8 +4,16 @@
 liabilities, due-date payment obligations, credit applications and immutable
 settlement/accounting observations.
 
-Version `0.1.0a3` is an unpublished candidate and is not adopted by this change.
-It adds `admit_historical_unpaid_invoice` for an already migrated
+Version `0.1.0a4` is an unpublished candidate and is not adopted by this change.
+It adds a governed supplier-payment lifecycle (DRAFT, APPROVED, RECORDED or
+CANCELLED) with preparer, approver and recorder kept distinct, settlement of open
+obligations in the caller's transaction, and a provider-neutral accounting
+consequence (Dr supplier liability, Cr cash, optional Cr withholding tax) that an
+assembly posts and then acknowledges with `record_accounting_receipt`. RECORDED
+asserts that money left through an external channel; payables moves no money,
+calls no provider and writes no ledger.
+
+Version `0.1.0a3` added `admit_historical_unpaid_invoice` for an already migrated
 APPROVED invoice whose trusted assembly verifier establishes a historical
 POSTED, wholly unpaid STANDARD source and exact imported accounting evidence.
 It creates one full-face OPEN obligation, the original recognition event, and
@@ -30,8 +38,9 @@ receipts preserve replay after kernel key retention and later real settlement.
 Changed evidence conflicts. Supplier-issued document numbers may remain NULL
 when historically absent; new document creation still requires them.
 
-It does not own supplier identity, procurement, approval, tax policy,
-inventory, Accounting journals, bank details or payment execution. An assembly
+It does not own supplier identity, procurement, approval decisions, tax policy,
+inventory, Accounting journals, bank details or payment execution; the payment
+record carries only opaque account and instrument references. An assembly
 translates its provider-neutral accounting consequence and supplies settlement
 facts from the payment owner. The package owns `mod_payables` through the
 independent `pa` lineage and never commits or rolls back the caller session.

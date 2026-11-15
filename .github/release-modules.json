@@ -2490,6 +2490,7 @@
           "dotmac_payables/migrations/versions/pa_0001_payables.py",
           "dotmac_payables/migrations/versions/pa_0002_optional_supplier_doc.py",
           "dotmac_payables/migrations/versions/pa_0003_historical_invoice.py",
+          "dotmac_payables/migrations/versions/pa_0004_supplier_payments.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],

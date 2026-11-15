@@ -9,6 +9,7 @@ from dotmac_payables.contracts import (
     ConsequenceSource,
     CreateCreditNote,
     CreateSupplierInvoice,
+    CreateSupplierPayment,
     CreditNoteStatus,
     HistoricalUnpaidInvoiceCommand,
     HistoricalUnpaidInvoiceEvidence,
@@ -22,6 +23,9 @@ from dotmac_payables.contracts import (
     PayableLineInput,
     PayablesError,
     SettlementObservationInput,
+    SupplierPaymentAllocationInput,
+    SupplierPaymentStatus,
+    SupplierPaymentWithholdingInput,
 )
 from dotmac_payables.manifest import module
 from dotmac_payables.migrations import versions_dir
@@ -36,18 +40,26 @@ from dotmac_payables.models import (
     SettlementObservation,
     SupplierInvoice,
     SupplierInvoiceLine,
+    SupplierPayment,
+    SupplierPaymentAllocation,
+    SupplierPaymentWithholding,
 )
 from dotmac_payables.service import (
     admit_historical_unpaid_invoice,
     apply_credit_note,
     approve_credit_note,
     approve_invoice,
+    approve_supplier_payment,
     build_credit_accounting_consequence,
     build_invoice_accounting_consequence,
+    build_payment_accounting_consequence,
+    cancel_supplier_payment,
     create_credit_note,
     create_invoice,
+    create_supplier_payment,
     record_accounting_receipt,
     record_settlement,
+    record_supplier_payment,
     submit_credit_note,
     submit_invoice,
     supplier_liability_balance,
@@ -55,7 +67,7 @@ from dotmac_payables.service import (
     void_invoice,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "HistoricalUnpaidInvoiceCommand",
@@ -90,17 +102,29 @@ __all__ = [
     "SettlementObservationInput",
     "SupplierInvoice",
     "SupplierInvoiceLine",
+    "SupplierPayment",
+    "SupplierPaymentAllocation",
+    "SupplierPaymentAllocationInput",
+    "SupplierPaymentStatus",
+    "SupplierPaymentWithholding",
+    "SupplierPaymentWithholdingInput",
+    "CreateSupplierPayment",
     "__version__",
     "apply_credit_note",
     "approve_credit_note",
     "approve_invoice",
+    "approve_supplier_payment",
     "build_credit_accounting_consequence",
     "build_invoice_accounting_consequence",
+    "build_payment_accounting_consequence",
+    "cancel_supplier_payment",
     "create_credit_note",
     "create_invoice",
+    "create_supplier_payment",
     "module",
     "record_accounting_receipt",
     "record_settlement",
+    "record_supplier_payment",
     "submit_credit_note",
     "submit_invoice",
     "supplier_liability_balance",
