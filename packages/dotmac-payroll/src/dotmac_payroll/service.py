@@ -903,6 +903,15 @@ def record_liability_settlement(
             raise PayrollConflict(
                 "settlement reference was reused with different evidence"
             )
+        if db.scalar(
+            select(PayrollSettlementReversal.id).where(
+                PayrollSettlementReversal.tenant_id == tenant_id,
+                PayrollSettlementReversal.settlement_id == existing.id,
+            )
+        ):
+            raise PayrollConflict(
+                "settlement was reversed; record re-payment under a new reference"
+            )
         return existing
     if liability.amount_settled + amount.amount > liability.amount:
         raise PayrollRuleViolation("settlement exceeds the outstanding liability")
