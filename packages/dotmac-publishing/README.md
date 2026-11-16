@@ -32,3 +32,20 @@ This package is audit-complete but unpublished, unallowlisted, uncomposed and
 unadopted. Backoffice is the first candidate adopter. See
 `docs/inventories/publishing-extraction-dossier.md` and
 `packages/dotmac-publishing/EXTRACTION.toml`.
+
+## Integration checklist
+
+- Pin `dotmac-publishing` in the consuming assembly and register `dotmac_publishing.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`, `OUTBOX_RELAY_V1.name`.
+- Add `dotmac_publishing.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: live catalog proves the complete forced rls plane](../../tests/test_publishing_isolation.py#L183). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_publishing_isolation.py::test_live_catalog_proves_the_complete_forced_rls_plane -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

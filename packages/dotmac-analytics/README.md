@@ -67,3 +67,20 @@ ERP is the qualifying product source and first cutover. Its domain computers
 stay in ERP, emit typed batches in shadow, and retire the legacy
 `OrgMetricSnapshot`/`MetricStore` path only after parity and repair evidence.
 Backoffice is the candidate second independent adopter.
+
+## Integration checklist
+
+- Pin `dotmac-analytics` in the consuming assembly and register `dotmac_analytics.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`.
+- Add `dotmac_analytics.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: live schema contract and rls](../../tests/test_analytics_isolation.py#L120). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_analytics_isolation.py::test_live_schema_contract_and_rls -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

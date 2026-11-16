@@ -109,3 +109,20 @@ two proofs the composition still owes — the claim/proof CHECKs against raw SQL
 and a concurrency rehearsal for the stable-verdict rule that a single-process test
 cannot establish — and the obligation to **delete** the two abandoned V6 branches,
 whose migration slots `main` has since reused.
+
+## Integration checklist
+
+- Pin `dotmac-deployment-control` in the consuming assembly and register `dotmac_deployment_control.module` there.
+- Bind the prerequisites declared by the manifest: `IDEMPOTENCY_LEDGER_V1.name`, `PLATFORM_AUDIT_LOG_V1.name`.
+- Add `dotmac_deployment_control.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: concurrent first arrivals keep one receipt and the winners verdict](../../tests/test_deployment_control_platform_isolation.py#L593). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_deployment_control_platform_isolation.py::test_concurrent_first_arrivals_keep_one_receipt_and_the_winners_verdict -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

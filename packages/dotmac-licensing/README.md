@@ -133,3 +133,18 @@ licence is exactly the artifact that grants authority wherever it lands.
 must migrate **byte-for-byte** (re-serialising changes the digest and invalidates
 the signature) and that the revocation-list lineage's cumulative rule spans the
 cutover.
+
+## Integration checklist
+
+- Pin `dotmac-licensing` in the consuming assembly and register `dotmac_licensing.module` there.
+- Bind the prerequisites declared by the manifest: `IDEMPOTENCY_LEDGER_V1.name`, `PLATFORM_AUDIT_LOG_V1.name`.
+- Add `dotmac_licensing.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Verify the manifest against the Starter registration ledger in the hosted architecture suite.](../../tests/architecture/test_licensing_module.py)
+
+```sh
+poetry run pytest tests/architecture/test_licensing_module.py::TestTheManifestMatchesTheLedger::test_every_manifest_field_matches_its_ledger_row -q
+```

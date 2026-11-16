@@ -37,3 +37,20 @@ The unreleased 0.2.0a1 candidate includes a private Rust depreciation engine.
 Source builds require Rust 1.90.0, a C compiler and make. The owning source
 archive carries its arithmetic core, pinned libmpdec source and BSD license.
 Hosted exact-wheel, source-rebuild and Decimal parity checks gate qualification.
+
+## Integration checklist
+
+- Pin `dotmac-finance` in the consuming assembly and register `dotmac_finance.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_finance.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: live catalog and online role prove tenant isolation](../../tests/test_finance_isolation.py#L124). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_finance_isolation.py::test_live_catalog_and_online_role_prove_tenant_isolation -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

@@ -27,3 +27,20 @@ conformance checks live in `dotmac_campaigns.fakes`.
 All mutators receive a caller-owned SQLAlchemy `Session`, mutate/flush and never
 commit or roll back. The package is tenant-only in V1 and the independent `ca`
 lineage creates every table in `mod_campaigns` with forced RLS.
+
+## Integration checklist
+
+- Pin `dotmac-campaigns` in the consuming assembly and register `dotmac_campaigns.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`, `OUTBOX_RELAY_V1.name`.
+- Add `dotmac_campaigns.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: live catalog proves forced rls and composite tenant contract](../../tests/test_campaigns_isolation.py#L207). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_campaigns_isolation.py::test_live_catalog_proves_forced_rls_and_composite_tenant_contract -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

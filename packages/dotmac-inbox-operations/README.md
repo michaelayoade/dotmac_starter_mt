@@ -142,3 +142,20 @@ as the state change — `transfer_requested`, `conversation_transferred`,
 `escalation_requested` — and Messaging/Integrator owns delivery and its
 outcomes. A command that names no target asks for no alert and enqueues
 nothing, because an event with nowhere to go is a row the relay retries forever.
+
+## Integration checklist
+
+- Pin `dotmac-inbox-operations` in the consuming assembly and register `dotmac_inbox_operations.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_inbox_operations.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: inbox operation rows are cross tenant isolated](../../tests/test_inbox_operations_isolation.py#L99). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_inbox_operations_isolation.py::test_inbox_operation_rows_are_cross_tenant_isolated -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

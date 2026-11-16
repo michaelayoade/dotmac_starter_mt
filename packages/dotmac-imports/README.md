@@ -211,3 +211,20 @@ optimisations require their own source evidence and measured cutover.
 ## Native computation candidate
 
 The released `0.2.0a1` includes a private Rust `_native` extension behind the existing public Python API. Authorization, tenant isolation, transactions and persistence retain their current owners. Installing a matching wheel needs no compiler. Building from source requires the exact Rust and build-tool pins in the packaged `build.py`, plus a C linker; the source archive includes locked Cargo inputs. No Python computation fallback is installed. `0.2.0a2` is source-only until its own release dispatch.
+
+## Integration checklist
+
+- Pin `dotmac-imports` in the consuming assembly and register `dotmac_imports.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_imports.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: rls is enabled forced and has the tenant policy](../../tests/test_imports_isolation.py#L199). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_imports_isolation.py::test_rls_is_enabled_forced_and_has_the_tenant_policy -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

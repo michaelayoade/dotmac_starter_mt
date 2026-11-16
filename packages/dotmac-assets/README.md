@@ -27,3 +27,20 @@ An adopter imports `dotmac_assets.module`, adds
 module's declared prerequisites, and installs the tenant plane in its own
 database. Services lock, mutate, and flush; the adopter's transaction boundary
 commits or rolls back.
+
+## Integration checklist
+
+- Pin `dotmac-assets` in the consuming assembly and register `dotmac_assets.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_assets.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: asset identity is tenant local and creation is evidenced](../../tests/unit/test_assets_service.py#L103). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_assets_service.py::test_asset_identity_is_tenant_local_and_creation_is_evidenced -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

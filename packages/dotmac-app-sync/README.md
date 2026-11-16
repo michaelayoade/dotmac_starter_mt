@@ -23,3 +23,17 @@ SPI and ERP's ProductObservation receiver. One flow has one envelope.
 `0.1.0a1` is declared but intentionally not release-allowlisted. A real product
 pilot must exact-pin the source build and prove one destination-owned receiver
 before the stateless-adapter release lane is opened.
+
+## Integration checklist
+
+- Pin `dotmac-app-sync` in the consumer and import the public contracts from `dotmac_app_sync`.
+
+### Executable reference
+
+[Example: package is stateless and imports no product or transport](../../tests/architecture/test_app_sync_boundary.py#L29). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/architecture/test_app_sync_boundary.py::test_package_is_stateless_and_imports_no_product_or_transport -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

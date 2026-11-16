@@ -52,3 +52,18 @@ changed content under the same identity raises `HealthConflict`. A new key must
 represent a new source observation, not a changed payload. A key cannot prove
 `source_ref` authenticity: Integrator remains the authenticated transport and
 retry-evidence owner, and the assembly supplies its verified source identity.
+
+## Integration checklist
+
+- Pin `dotmac-platform-health` in the consumer and import the public contracts from `dotmac_platform_health`.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: concurrent grants and duplicate arrivals share one durable identity](../../tests/test_platform_health_enrollment_postgres.py#L109). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_platform_health_enrollment_postgres.py::test_concurrent_grants_and_duplicate_arrivals_share_one_durable_identity -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

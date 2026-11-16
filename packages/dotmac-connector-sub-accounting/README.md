@@ -76,3 +76,16 @@ bound or enabled without a separate explicit go-ahead.
 contract. The connector does not author a competing schema; a digest mismatch
 fails composition/binding closed. The port remains disabled pending separate
 activation authority.
+
+## Integration checklist
+
+- Pin `dotmac-connector-sub-accounting` in the consumer and compose its exported `dotmac_connector_sub_accounting.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Map a ready invoice observation into the published accounting contract without network calls. This package example needs a separate hosted run.](../../packages/dotmac-connector-sub-accounting/tests/test_mapping.py)
+
+```sh
+poetry run pytest packages/dotmac-connector-sub-accounting/tests/test_mapping.py::test_maps_a_ready_item_with_no_issues -q
+```

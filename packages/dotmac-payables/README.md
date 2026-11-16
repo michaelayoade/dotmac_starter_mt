@@ -55,3 +55,20 @@ independent `pa` lineage and never commits or rolls back the caller session.
 See `EXTRACTION.toml`, ADR-0042 and
 `docs/inventories/accounting-payables-sources.md` for the product-first
 boundary.
+
+## Integration checklist
+
+- Pin `dotmac-payables` in the consuming assembly and register `dotmac_payables.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`.
+- Add `dotmac_payables.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: live catalog and online reads are tenant isolated](../../tests/test_accounting_payables_isolation.py#L237). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_accounting_payables_isolation.py::test_live_catalog_and_online_reads_are_tenant_isolated -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

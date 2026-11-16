@@ -228,3 +228,17 @@ container. Rootless, remote-daemon, inaccessible namespace, symlinked target,
 and other unsupported layouts refuse. `startup_proc_root` is fixed host-provider
 composition (the `/proc` default; explicit synthetic roots are for tests), not
 request material or a configurable observation target.
+
+## Integration checklist
+
+- Pin `dotmac-deployment-foundation` in the consumer and import the public contracts from `dotmac_deployment_foundation`.
+
+### Executable reference
+
+[Example: a valid bindings object constructs](../../tests/unit/test_deployment_foundation_execution_bindings.py#L71). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_deployment_foundation_execution_bindings.py::test_a_valid_bindings_object_constructs -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

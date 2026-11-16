@@ -43,3 +43,20 @@ owner/cutover decision.
 
 See [`EXTRACTION.toml`](EXTRACTION.toml) and
 [`docs/inventories/work-orders-sources.md`](../../docs/inventories/work-orders-sources.md).
+
+## Integration checklist
+
+- Pin `dotmac-work-orders` in the consuming assembly and register `dotmac_work_orders.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`.
+- Add `dotmac_work_orders.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: every table has forced rls and a tenant policy](../../tests/test_work_orders_isolation.py#L126). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_work_orders_isolation.py::test_every_table_has_forced_rls_and_a_tenant_policy -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

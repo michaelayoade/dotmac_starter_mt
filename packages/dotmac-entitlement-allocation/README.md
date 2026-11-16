@@ -89,3 +89,20 @@ from `__file__` or import the `migrations` package directly. The module's ORM
 relationships are class-bound, so its extraction source may keep same-named
 legacy models loaded during the measured shadow phase without making mapper
 resolution ambiguous.
+
+## Integration checklist
+
+- Pin `dotmac-entitlement-allocation` in the consuming assembly and register `dotmac_entitlement_allocation.module` there.
+- Bind the prerequisites declared by the manifest: `IDEMPOTENCY_LEDGER_V1.name`, `PLATFORM_AUDIT_LOG_V1.name`.
+- Add `dotmac_entitlement_allocation.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: the public migration locator resolves the installed lineage](../../tests/architecture/test_entitlement_allocation_module.py#L58). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/architecture/test_entitlement_allocation_module.py::test_the_public_migration_locator_resolves_the_installed_lineage -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

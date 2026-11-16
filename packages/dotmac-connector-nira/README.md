@@ -85,3 +85,16 @@ checkpoint or retry ledger.
 The wire shape follows the CoCCA reference module NiRA distributes to WHMCS
 registrars; this is an independent Python implementation of that documented
 contract.
+
+## Integration checklist
+
+- Pin `dotmac-connector-nira` in the consumer and compose its exported `dotmac_connector_nira.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Check an availability request against the fixture registry. This package example needs a separate hosted run.](../../packages/dotmac-connector-nira/tests/test_connector.py)
+
+```sh
+poetry run pytest packages/dotmac-connector-nira/tests/test_connector.py::test_check_roundtrip_frames_and_reads -q
+```

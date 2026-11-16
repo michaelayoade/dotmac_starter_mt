@@ -119,3 +119,19 @@ Organization-to-Tenant gate as a hard prerequisite. The vendor control plane is
 cutover 2 — greenfield, no rows to migrate. Plan:
 `docs/superpowers/plans/2026-08-13-ticketing-erp-vendor-cp-adoption.md` in the
 starter.
+
+## Integration checklist
+
+- Pin `dotmac-ticketing` in the consuming assembly and register `dotmac_ticketing.module` there.
+- Bind the prerequisites declared by the manifest: `MODULE_DATABASE_ROLES_V1.name`.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: the standard status vocabulary is exactly nine terms](../../tests/architecture/test_ticketing_module.py#L47). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/architecture/test_ticketing_module.py::test_the_standard_status_vocabulary_is_exactly_nine_terms -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

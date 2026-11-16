@@ -49,3 +49,17 @@ adapter remains `0.1.0a1`; its declared `>=0.1.0a1` core range admits core a2.
 This package is not enrolled in the facility release lane yet. Its first
 adopter is VMID 124 only after two terminal provider-recorded diagnostic runs,
 a cold-reboot repetition, and retirement of the observed-broker inventory.
+
+## Integration checklist
+
+- Pin `dotmac-runner-transport` in the consumer and import the public contracts from `dotmac_runner_transport`.
+
+### Executable reference
+
+[Example: policy is deterministic and a provider change moves its digest](../../tests/unit/test_runner_transport_policy.py#L90). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_runner_transport_policy.py::test_policy_is_deterministic_and_a_provider_change_moves_its_digest -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

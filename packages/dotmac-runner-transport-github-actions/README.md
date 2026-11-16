@@ -36,3 +36,18 @@ the last working release and fails loudly.
 No wildcard or cloud CIDR is admitted. The exact profile is larger than the
 old observed-host list by design: observation is not authority, and a new
 broker shard must not require an emergency firewall edit to upload a job log.
+
+## Integration checklist
+
+- Pin `dotmac-runner-transport-github-actions` in the consumer and import the public contracts from `dotmac_runner_transport_github_actions`.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-runner-transport`.
+
+### Executable reference
+
+[Example: exact snapshot covers broker and results without cloud wildcard](../../tests/unit/test_runner_transport_github_actions.py#L58). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_runner_transport_github_actions.py::test_exact_snapshot_covers_broker_and_results_without_cloud_wildcard -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

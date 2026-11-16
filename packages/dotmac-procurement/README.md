@@ -28,3 +28,20 @@ and ADR-0050.
 The independent `pc` lineage creates twelve forced-RLS tables in
 `mod_procurement`.  Product assemblies pin the release, compose that lineage in
 their own database and translate their local facts through this typed API.
+
+## Integration checklist
+
+- Pin `dotmac-procurement` in the consuming assembly and register `dotmac_procurement.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_procurement.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: live catalog proves the declared forced rls contract](../../tests/test_procurement_isolation.py#L138). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_procurement_isolation.py::test_live_catalog_proves_the_declared_forced_rls_contract -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

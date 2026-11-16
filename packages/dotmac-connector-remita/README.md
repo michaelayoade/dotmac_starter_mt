@@ -46,3 +46,18 @@ product has never seen. Only a connect-phase failure is retryable.
 
 Payment status stays POLL. Remita has no push channel, so there is no
 status-push path to add.
+
+## Integration checklist
+
+- Pin `dotmac-connector-remita` in the consumer and compose its exported `dotmac_connector_remita.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Example: the issuance hash is sha512 over five fields in the documented order](../../tests/unit/test_remita_outbound.py#L120). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_remita_outbound.py::test_the_issuance_hash_is_sha512_over_five_fields_in_the_documented_order -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

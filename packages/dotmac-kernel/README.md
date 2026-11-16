@@ -20,3 +20,17 @@ Status: `0.x` pre-release (the current version is `pyproject.toml`'s
 `dotmac_starter_mt` app/core in the kernel-boundary program. The public surface
 (`__all__` / `COMPATIBILITY.md`), `ProductAssemblySpec`/`create_app`, and the
 `dotmac_kernel.testing` contract-test kit shipped in Tasks 2–6.
+
+## Integration checklist
+
+- Pin `dotmac-kernel` in the consumer and import the public contracts from `dotmac_kernel`.
+
+### Executable reference
+
+[Example: upgrade preserves rows security and historical unknowns](../../tests/test_kernel_audit_history_migration.py#L120). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_kernel_audit_history_migration.py::test_upgrade_preserves_rows_security_and_historical_unknowns -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

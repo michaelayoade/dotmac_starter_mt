@@ -171,3 +171,20 @@ identical locking shape has gone unproven for years. This module's evidence is
 therefore entirely new and lives in `tests/test_numbering_isolation.py`, on real
 migrated PostgreSQL. Each race test carries a sensitivity proof (ADR-0018): a
 companion that removes the guard and asserts the race test then fails.
+
+## Integration checklist
+
+- Pin `dotmac-numbering` in the consuming assembly and register `dotmac_numbering.module` there.
+- Bind the prerequisites declared by the manifest: `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`.
+- Add `dotmac_numbering.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: proof 1 a tenant sees neither series counters nor receipts of another](../../tests/test_numbering_isolation.py#L239). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_numbering_isolation.py::test_proof_1_a_tenant_sees_neither_series_counters_nor_receipts_of_another -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

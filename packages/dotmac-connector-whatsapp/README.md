@@ -62,3 +62,18 @@ provider's contract, and widening one locally would only move the rejection back
 to the provider. A size check applies only where the connector holds the bytes;
 a `link` or pre-uploaded `media_id` is type-checked but not size-checked,
 because its size was never seen.
+
+## Integration checklist
+
+- Pin `dotmac-connector-whatsapp` in the consumer and compose its exported `dotmac_connector_whatsapp.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Example: the distribution and plugin satisfy the released spi](../../tests/unit/test_whatsapp_connector.py#L70). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_whatsapp_connector.py::test_the_distribution_and_plugin_satisfy_the_released_spi -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

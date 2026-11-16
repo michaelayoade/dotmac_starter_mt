@@ -115,3 +115,20 @@ approval tables in the platform-only database even though kernel `public.tenants
 exists there. The `.github/release-modules.json` entry landed with that proof
 rather than ahead of it, which is what ADR-0026 § 8 requires; nothing has been
 published yet.
+
+## Integration checklist
+
+- Pin `dotmac-approvals` in the consuming assembly and register `dotmac_approvals.module` there.
+- Bind the prerequisites declared by the manifest: `MODULE_DATABASE_ROLES_V1.name`, `OUTBOX_RELAY_V1.name`.
+- Add `dotmac_approvals.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: platform only selection is not inferred from provider availability](../../tests/test_approvals_isolation.py#L246). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_approvals_isolation.py::test_platform_only_selection_is_not_inferred_from_provider_availability -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

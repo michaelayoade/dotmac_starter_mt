@@ -173,3 +173,20 @@ The adoption does not make the Workspace an authorization or shared-session
 authority. The directory records application inventory only; authentication
 stays at the Workspace boundary and every target application owns its own
 authorization and session.
+
+## Integration checklist
+
+- Pin `dotmac-application-directory` in the consuming assembly and register `dotmac_application_directory.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_application_directory.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: the module schema and table exist after migration](../../tests/test_application_directory_isolation.py#L168). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_application_directory_isolation.py::test_the_module_schema_and_table_exist_after_migration -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

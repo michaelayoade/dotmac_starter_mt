@@ -96,3 +96,19 @@ transport, verifies the digest, and parses through the kernel contract.
 Do not record this as `PROVENANCE`. Provenance says how an artifact was built;
 the product manifest says which product and capability vocabulary that build
 declares. Conflating them makes presence of one appear to prove the other.
+
+## Integration checklist
+
+- Pin `dotmac-release-catalog` in the consuming assembly and register `dotmac_release_catalog.module` there.
+- Add `dotmac_release_catalog.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: database catalogue migration refuses competing claims on postgres](../../tests/test_release_catalog_immutability.py#L126). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_release_catalog_immutability.py::test_database_catalogue_migration_refuses_competing_claims_on_postgres -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

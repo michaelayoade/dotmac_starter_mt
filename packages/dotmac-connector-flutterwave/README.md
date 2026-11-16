@@ -50,3 +50,18 @@ declines included.
 
 **Not implemented, deliberately:** transfers and payouts. No product consumer
 exists for them.
+
+## Integration checklist
+
+- Pin `dotmac-connector-flutterwave` in the consumer and compose its exported `dotmac_connector_flutterwave.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Example: the manifest maps each capability to exactly one executable mode](../../tests/unit/test_flutterwave_outbound.py#L137). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_flutterwave_outbound.py::test_the_manifest_maps_each_capability_to_exactly_one_executable_mode -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

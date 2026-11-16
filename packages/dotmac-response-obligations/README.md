@@ -90,3 +90,20 @@ owners already authorized — a ticket was answered, a conversation was assigned
 an agent went offline. A permission here would put a second authorization check
 in front of a decision already made, which is how a legitimate state change
 ends up silently not recorded.
+
+## Integration checklist
+
+- Pin `dotmac-response-obligations` in the consuming assembly and register `dotmac_response_obligations.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_response_obligations.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: a priority specific target beats the default](../../tests/unit/test_response_obligations_service.py#L139). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_response_obligations_service.py::test_a_priority_specific_target_beats_the_default -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

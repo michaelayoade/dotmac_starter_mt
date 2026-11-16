@@ -212,3 +212,19 @@ The conformance kit is shipped as library code rather than left in this repo's
 test tree, because a kit that lives in the host's tests cannot be imported by the
 distribution it is meant to certify. It reaches no network and needs no
 credentials.
+
+## Integration checklist
+
+- Pin `dotmac-integration` in the consuming assembly and register `dotmac_integration.module` there.
+- Bind the prerequisites declared by the manifest: `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`, `PLATFORM_AUDIT_LOG_V1.name`.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: first context survives retry rotation and atomic conflict](../../tests/test_integration_receipt_origin.py#L62). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_integration_receipt_origin.py::test_first_context_survives_retry_rotation_and_atomic_conflict -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

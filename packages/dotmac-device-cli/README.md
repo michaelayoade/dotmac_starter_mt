@@ -125,3 +125,17 @@ Writes and `WriteGrant`, the sticky login-failure scope, the remaining read
 operations (`ont_detail`, `service_ports`, autofind, optical, ...), TextFSM
 templates, the transcript synthesiser, the acceptance suite, and any ZTE,
 FiberHome or Nokia command. See `CHANGELOG.md` and ADR-0077.
+
+## Integration checklist
+
+- Pin `dotmac-device-cli` in the consumer and import the public contracts from `dotmac_device_cli`.
+
+### Executable reference
+
+[Example: the shipped layers resolve to two profiles](../../tests/unit/test_device_cli_profiles.py#L30). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_device_cli_profiles.py::test_the_shipped_layers_resolve_to_two_profiles -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

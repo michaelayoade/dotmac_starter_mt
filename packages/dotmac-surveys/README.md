@@ -25,3 +25,20 @@ and lifecycle decisions. Source builds require Rust 1.90.0, a C compiler and
 make. The source archive embeds the canonical arithmetic crate, checksum-pinned
 libmpdec source and BSD license. Hosted qualification and publication remain
 separate.
+
+## Integration checklist
+
+- Pin `dotmac-surveys` in the consuming assembly and register `dotmac_surveys.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_surveys.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: numeric tokens must be canonical ascii integers](../../tests/unit/test_surveys_native.py#L24). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_surveys_native.py::test_numeric_tokens_must_be_canonical_ascii_integers -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

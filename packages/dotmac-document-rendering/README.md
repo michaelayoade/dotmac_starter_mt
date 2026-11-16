@@ -122,3 +122,18 @@ media_type)` binding and requires the statement label set
 semantic projection and `statement_html_v1` serializes it under the same
 data-only policy and embedded logo rules as V3 invoices. There is no statement
 PDF or orchestration service yet.
+
+## Integration checklist
+
+- Pin `dotmac-document-rendering` in the consuming assembly and register `dotmac_document_rendering.module` there.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: distribution is a stateless optional module with no namespace](../../tests/architecture/test_document_rendering_module.py#L142). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/architecture/test_document_rendering_module.py::test_distribution_is_a_stateless_optional_module_with_no_namespace -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

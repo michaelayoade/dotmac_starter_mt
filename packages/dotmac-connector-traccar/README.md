@@ -46,3 +46,18 @@ The connection revision must carry exactly:
 
 Both timeouts must be between 0.1 and 60 seconds. Configuration cannot widen
 the manifest-declared host, port or origin.
+
+## Integration checklist
+
+- Pin `dotmac-connector-traccar` in the consumer and compose its exported `dotmac_connector_traccar.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Example: manifest is an exact request runtime contract](../../tests/unit/test_traccar_connector.py#L108). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_traccar_connector.py::test_manifest_is_an_exact_request_runtime_contract -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

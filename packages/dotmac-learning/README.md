@@ -280,3 +280,20 @@ only permitted existing members cause track offerings to be ensured. Existing
 activation, normal student/admin bulk behavior, and caller transactions retain
 their established semantics. Genuine product Request authorization remains the
 consumer's responsibility; the Learning authority DTO is not independent proof.
+
+## Integration checklist
+
+- Pin `dotmac-learning` in the consuming assembly and register `dotmac_learning.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `PARTY_PERSON_CATALOG_V1.name`, `TENANT_AUDIT_LOG_V1.name`.
+- Add `dotmac_learning.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: reference fields ids and plain uuid meanings](../../tests/test_learning_results.py#L167). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_learning_results.py::test_reference_fields_ids_and_plain_uuid_meanings -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

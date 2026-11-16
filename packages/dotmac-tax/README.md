@@ -162,3 +162,20 @@ staging acceptance on Seabone remains required before any separately authorized
 production authority change. These gates activate no policy or writer. The native
 accepted-proof capability remains bounded to one pristine invoice proof lane;
 this release train does not complete the broader legacy billing cutover.
+
+## Integration checklist
+
+- Pin `dotmac-tax` in the consuming assembly and register `dotmac_tax.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_tax.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: cross tenant predecessor is not found](../../tests/test_tax_policy_supersession.py#L112). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_tax_policy_supersession.py::test_cross_tenant_predecessor_is_not_found -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

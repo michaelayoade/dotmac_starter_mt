@@ -167,3 +167,17 @@ surface above, and proves the real exchange path against that pin.
 - `CHANGELOG.md`
 - `EXTRACTION.toml` — the product-first dossier
 - `docs/inventories/external-identity-sources.md` — the source audit
+
+## Integration checklist
+
+- Pin `dotmac-auth-oidc` in the consumer and import the public contracts from `dotmac_auth_oidc`.
+
+### Executable reference
+
+[Example: a native assertion returns only a verified subject](../../tests/unit/test_auth_oidc_native_verifier.py#L117). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_auth_oidc_native_verifier.py::test_a_native_assertion_returns_only_a_verified_subject -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

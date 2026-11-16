@@ -153,3 +153,20 @@ silently mis-parsing.
 and unreleased.** The a2 reader and derived boundary do not move authority,
 change Vendor's exact pin, or claim that Vendor has adopted them. See
 `EXTRACTION.toml` for the immutable a1 adoption evidence and next gate.
+
+## Integration checklist
+
+- Pin `dotmac-commercial-agreements` in the consuming assembly and register `dotmac_commercial_agreements.module` there.
+- Bind the prerequisites declared by the manifest: `IDEMPOTENCY_LEDGER_V1.name`, `PLATFORM_AUDIT_LOG_V1.name`.
+- Add `dotmac_commercial_agreements.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: the declared database catalog matches the live migrated schema](../../tests/test_commercial_agreements_platform_isolation.py#L869). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_commercial_agreements_platform_isolation.py::test_the_declared_database_catalog_matches_the_live_migrated_schema -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

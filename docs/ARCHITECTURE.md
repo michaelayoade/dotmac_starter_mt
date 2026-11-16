@@ -14,6 +14,22 @@ Start with the [module catalogue](MODULE_CATALOG.md) to choose a package by
 purpose, find its integration entry point, and check its release and adoption
 evidence. Then consult the package README and the composition rules below.
 
+### Verify a module integration
+
+Choose the package by ownership, then pin it in the consuming assembly. Use
+the exported manifest, migration locator and declared prerequisites where the
+package provides them. A stateless package can still require a host adapter
+or configured provider; its README describes that boundary. Keep transaction
+ownership with the assembly and use the owning module's public commands and
+facts to connect workflows.
+
+The package READMEs link to executable repository examples. A manifest or
+migration canary verifies the install surface; a service or connector example
+verifies the behavior named by the test. Run tests on hosted CI: use the unit
+and architecture suite for its fixtures and the Postgres integration suite
+for database isolation and migrations. A passing example does not establish
+that a product has adopted the module.
+
 ### Verify a commercial integration
 
 The assembly translates rated obligations from Subscriptions into Billing commands.

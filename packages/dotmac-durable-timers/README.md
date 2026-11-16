@@ -17,3 +17,20 @@ package exports typed lifecycle/read ports and does not export its ORM models.
 
 All business instants are explicit inputs. The module reads no wall clock and
 never commits or rolls back the caller's transaction.
+
+## Integration checklist
+
+- Pin `dotmac-durable-timers` in the consuming assembly and register `dotmac_durable_timers.module` there.
+- Bind the prerequisites declared by the manifest: `MODULE_DATABASE_ROLES_V1.name`, `OUTBOX_RELAY_V1.name`.
+- Add `dotmac_durable_timers.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: proof 1 concurrent first schedules allocate gapless generations](../../tests/test_durable_timers_isolation.py#L276). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_durable_timers_isolation.py::test_proof_1_concurrent_first_schedules_allocate_gapless_generations -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

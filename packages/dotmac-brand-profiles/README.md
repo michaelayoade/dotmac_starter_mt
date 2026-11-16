@@ -131,3 +131,20 @@ lock-list replacement, metadata, and profile API behavior remain intact. The
 assembly owns rendering.
 This source preparation does not change consumer adoption, which remains held
 until a released module is available and a separately authorized flip is ready.
+
+## Integration checklist
+
+- Pin `dotmac-brand-profiles` in the consuming assembly and register `dotmac_brand_profiles.module` there.
+- Bind the prerequisites declared by the manifest: `MODULE_DATABASE_ROLES_V1.name`, `IDEMPOTENCY_LEDGER_V1.name`.
+- Add `dotmac_brand_profiles.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`, `dotmac-ui`.
+
+### Executable reference
+
+[Example: platform tagline clear audits once and rollback restores](../../tests/unit/test_brand_profile_resolution.py#L293). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_brand_profile_resolution.py::test_platform_tagline_clear_audits_once_and_rollback_restores -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

@@ -35,3 +35,16 @@ single-use secret-fetch endpoint; the shipped default refuses. Live
 FreeRADIUS/NAS shadow parity, enumerating `TEST_RADIUS_*` logins for
 retirement at cutover, and the single-writer flip with incumbent retirement
 remain required inside the separately authorized `network-suite-v1` cutover.
+
+## Integration checklist
+
+- Pin `dotmac-connector-freeradius` in the consumer and compose its exported `dotmac_connector_freeradius.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Render enabled subscriber rows and compare them with the golden projection. Covered by the hosted FreeRADIUS unit job.](../../packages/dotmac-connector-freeradius/tests/test_render.py)
+
+```sh
+poetry run pytest packages/dotmac-connector-freeradius/tests/test_render.py::test_enabled_golden_rows -q
+```

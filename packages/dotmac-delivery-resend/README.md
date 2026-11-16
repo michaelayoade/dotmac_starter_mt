@@ -29,3 +29,18 @@ lineage, no engine.
 Behaviour proof is Academy's ported resend suites
 (`dotmac_academy_v2:tests/test_issue2_reminder_resend_*.py`) re-pointed
 at this package with import-line changes only.
+
+## Integration checklist
+
+- Pin `dotmac-delivery-resend` in the consuming assembly and register `dotmac_delivery_resend.module` there.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: manifest is stateless](../../tests/test_delivery_resend_isolation.py#L17). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_delivery_resend_isolation.py::test_manifest_is_stateless -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

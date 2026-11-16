@@ -124,3 +124,20 @@ from raw attempt inputs, so a caller cannot hand it an unvalidated
 without passing every invariant `AIExecutionObservation` enforces; a
 malformed input is still reported as `AIOperationRefused`, matching every
 other refusal in this module.
+
+## Integration checklist
+
+- Pin `dotmac-ai-operations` in the consuming assembly and register `dotmac_ai_operations.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`.
+- Add `dotmac_ai_operations.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: attribution round trips the exact aware instant through postgres](../../tests/test_ai_operations_attribution_postgres.py#L220). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/test_ai_operations_attribution_postgres.py::test_attribution_round_trips_the_exact_aware_instant_through_postgres -q
+```
+
+Run this example in the hosted Postgres integration environment (`make test-integration` supplies the database configuration).

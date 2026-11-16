@@ -121,3 +121,17 @@ make ui-check   # fail if the committed assets are stale — wired into `make ch
 Tests live with the reference assembly: `tests/unit/test_dotmac_ui_tokens.py`,
 `tests/unit/test_dotmac_ui_a11y.py`, `tests/unit/test_dotmac_ui_consumer.py`,
 and the boundary guard `tests/architecture/test_ui_public_surface.py`.
+
+## Integration checklist
+
+- Pin `dotmac-ui` in the consumer and import the public contracts from `dotmac_ui`.
+
+### Executable reference
+
+[Example: components render on a clean host](../../tests/unit/test_dotmac_ui_components.py#L57). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_dotmac_ui_components.py::test_components_render_on_a_clean_host -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

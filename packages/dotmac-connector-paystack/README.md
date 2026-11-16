@@ -90,3 +90,18 @@ Paystack's protocol evidence is its official
 [API reference](https://paystack.com/docs/api/): the signature is HMAC-SHA512
 over the event payload, and amounts use the provider's ×100 wire scale for every
 supported currency.
+
+## Integration checklist
+
+- Pin `dotmac-connector-paystack` in the consumer and compose its exported `dotmac_connector_paystack.PLUGIN` through the host’s connector configuration.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-integration`.
+
+### Executable reference
+
+[Example: refund is a delivery capability separate from observation](../../tests/unit/test_paystack_outbound_operations.py#L150). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_paystack_outbound_operations.py::test_refund_is_a_delivery_capability_separate_from_observation -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

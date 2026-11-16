@@ -63,3 +63,20 @@ ENABLEd + FORCEd RLS in `pt_0001_party_context`.
 The package is `audit-complete`, not adopted or reuse-proven. It must not be
 released or composed into Sub until the dossier's backfill, shadow, reader,
 writer-retirement, and lineage gates are met.
+
+## Integration checklist
+
+- Pin `dotmac-party` in the consuming assembly and register `dotmac_party.module` there.
+- Bind the prerequisites declared by the manifest: `TENANT_SCOPE_CATALOG_V1.name`, `MODULE_DATABASE_ROLES_V1.name`, `PARTY_PERSON_CATALOG_V1.name`.
+- Add `dotmac_party.versions_dir()` to the assembly’s Alembic version locations and apply the declared lineage on its configured plane before calling persistence APIs.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: customer and contact are concurrent roles not identity tables](../../tests/unit/test_party_service.py#L160). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_party_service.py::test_customer_and_contact_are_concurrent_roles_not_identity_tables -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).

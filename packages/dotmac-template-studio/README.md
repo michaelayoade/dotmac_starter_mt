@@ -128,3 +128,18 @@ parallel-writer problem the source-of-truth standard exists to prevent.
 `dotmac-template-studio`'s version is its own. It is independent of both the
 kernel's release version and `KERNEL_MODULE_CONTRACT_VERSION` — the manifest
 generation it is built against, which is what actually gates loading.
+
+## Integration checklist
+
+- Pin `dotmac-template-studio` in the consumer and import the public contracts from `dotmac_template_studio`.
+- Resolve the declared Starter package dependencies with the assembly pins: `dotmac-kernel`.
+
+### Executable reference
+
+[Example: variables are derived from the body not declared](../../tests/unit/test_template_studio_service.py#L58). This uses the repository’s fixtures and assertions.
+
+```sh
+poetry run pytest tests/unit/test_template_studio_service.py::test_variables_are_derived_from_the_body_not_declared -q
+```
+
+This example is covered by the hosted unit and architecture suite (`make test-unit`).
