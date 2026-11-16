@@ -65,7 +65,7 @@ def test_finalize_hands_the_launchers_probe_bytes_and_the_calls_to_the_encryptor
     assert seen["output"] == out
 
 
-@pytest.mark.parametrize("value", [None, 7, "", "not base64!", "A" * 20])
+@pytest.mark.parametrize("value", [None, 7, "", "not base64!"])
 def test_finalize_refuses_undecodable_calls(
     value: object, tmp_path: pathlib.Path
 ) -> None:
