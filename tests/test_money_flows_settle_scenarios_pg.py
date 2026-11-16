@@ -517,6 +517,7 @@ def test_f4_the_live_schema_obeys_the_vocabulary_rule(scratch):
         assert set(live) == set(INSTANCE_TABLE_ALLOWLIST)
         assert schema_violations(live) == []
         # Planted: the same rule refuses an amount column and a float column.
+        connection.rollback()  # end the read's autobegun transaction
         transaction = connection.begin()
         connection.execute(
             text(
