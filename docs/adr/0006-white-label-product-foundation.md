@@ -275,11 +275,32 @@ present:
    semantics, the same failure behaviour. Similar markup is not a contract.
 2. **A named owner** for the extracted unit, per the Dotmac source-of-truth
    standard.
-3. **A migration and cutover path**: which consumer moves first, what the shadow
-   period is, and how drift is detected afterwards.
+3. **A migration and cutover path**: which consumer moves first, what evidence
+   proves the move (backtest, saved tests, real-record preview), how it rolls
+   out (a guarded rollout on Starter rails), and how drift is detected
+   afterwards.
 
 Absent all three, the duplication is recorded in the inventory and left in place.
 Recording it is the deliverable; removing it is not.
+
+> **Verification correction — 2026-11-16 (owner ruling).** Point 3 originally
+> asked "what the shadow period is". That wording is withdrawn here and in the
+> D2, 2026-08-08 and 2026-08-18 passages below. **No extraction or cutover is
+> gated on a shadow run, a side-by-side run or an N-day parallel window.**
+> Verification is evidence, built once on Starter rails:
+>
+> - **Backtest** over recorded history.
+> - **Saved tests**: golden fixtures and ported parity tests.
+> - **Real-record preview** on a restored copy, never live production.
+> - **Guarded rollout**: scoped, flag- or cap-limited, with a kill switch and a
+>   stated rollback.
+>
+> The gate is zero unexplained differences and resolved exceptions, not elapsed
+> time. The dossier key `shadow_and_drift` keeps its name for now, because it
+> is a schema field in every `EXTRACTION.toml`. Its value records this
+> verification and the drift check, not a shadow period. This correction does
+> not touch the 2026-08-15 "module shadow", which is an empty table with no
+> authority and is a different concept.
 
 ## Inventories (the rest of the F0 deliverable)
 
@@ -424,9 +445,10 @@ blocker instead of adding surface awaiting adopters.
 
 The signed, versioned WS8 licence, applied-state, keyring, and revocation
 contracts survive. ERP's existing format is legacy input only: ERP E10 must
-inventory it, issue or map replacement WS8 state, shadow-verify the cutover,
-and retire the old verifier and writer. There is no permanent dual-authority or
-"accept either forever" mode.
+inventory it, issue or map replacement WS8 state, verify the cutover by
+backtest, saved tests and real-record preview with a guarded rollout (§ 5
+verification correction), and retire the old verifier and writer. There is no
+permanent dual-authority or "accept either forever" mode.
 
 #### D3 — `dotmac-ui` is toolchain-agnostic to consumers
 
@@ -516,7 +538,8 @@ mature, tested implementation. The owner has now resolved that ambiguity:
 4. **Preserve proof and make the cutover repairable.** Every shared distribution
    carries an extraction dossier naming the contract, source repositories and
    paths, source tests preserved as parity proof, two contract consumers, the
-   owner, first cutover, shadow/drift check, and local-copy retirement gate.
+   owner, first cutover, verification and drift check (the `shadow_and_drift`
+   key; see the § 5 verification correction), and local-copy retirement gate.
    Existing distributions predating this amendment are recorded as explicit,
    non-growing debt rather than silently treated as conforming.
 
@@ -544,7 +567,8 @@ first runtime consumer when all of the following hold in checked-in evidence:
    retire;
 3. the replacement imports data only through a versioned API/webhook, never the
    source database, models or filesystem;
-4. the overlap is read-only shadow/reconciliation: the source remains the sole
+4. any overlap is read-only reconciliation, never a shadow run or a timed
+   parallel gate (§ 5 verification correction): the source remains the sole
    writer until one sealed cutover makes the replacement the sole writer and
    fails closed the source mutations; and
 5. the source writer, fallback and obsolete tables still have explicit
