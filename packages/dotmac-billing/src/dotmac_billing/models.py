@@ -6,7 +6,7 @@ position facts are immutable rebuild attestations over those effects.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -22,6 +22,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    Interval,
     Numeric,
     String,
     Text,
@@ -1909,6 +1910,135 @@ class PlatformDocumentWithholdingComponent(Base, _WithholdingComponentColumns):
     __table_args__ = _withholding_component_constraints(tenant=False)
 
 
+class _TermsTail:
+    @declared_attr
+    def recorded_at(cls) -> Mapped[datetime]:
+        # Stamped by the database admission trigger; never a caller value.
+        return mapped_column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=func.clock_timestamp(),
+        )
+
+
+class _AccountTermsColumns(_TermsTail):
+    """One dated version of a billing account's own terms (NULL = use default)."""
+
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    contract_type: Mapped[str | None] = mapped_column(String(16))
+    period: Mapped[str | None] = mapped_column(String(16))
+    postpaid_billing_timing: Mapped[str | None] = mapped_column(String(16))
+    postpaid_grace: Mapped[timedelta | None] = mapped_column(Interval())
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class _DefaultTermsColumns(_TermsTail):
+    """One dated version of the tenant default terms (every term set)."""
+
+    id: Mapped[UUID] = uuid_pk()
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    contract_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    period: Mapped[str] = mapped_column(String(16), nullable=False)
+    postpaid_billing_timing: Mapped[str] = mapped_column(String(16), nullable=False)
+    postpaid_grace: Mapped[timedelta] = mapped_column(Interval(), nullable=False)
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+def _terms_checks(table: str, *, nullable: bool) -> tuple[object, ...]:
+    def member(column: str, values: str) -> str:
+        return (
+            f"({column} IS NULL OR {column} IN ({values}))"
+            if nullable
+            else f"{column} IN ({values})"
+        )
+
+    grace = (
+        "(postpaid_grace IS NULL OR postpaid_grace >= interval '0')"
+        if nullable
+        else "postpaid_grace >= interval '0'"
+    )
+    return (
+        CheckConstraint(
+            member("contract_type", "'prepaid', 'postpaid'"),
+            name=f"ck_{table}_contract_type",
+        ),
+        CheckConstraint(
+            member("period", "'daily', 'monthly', 'quarterly', 'annually'"),
+            name=f"ck_{table}_period",
+        ),
+        CheckConstraint(
+            member("postpaid_billing_timing", "'period_start', 'period_end'"),
+            name=f"ck_{table}_timing",
+        ),
+        CheckConstraint(grace, name=f"ck_{table}_grace"),
+        CheckConstraint(
+            "length(btrim(actor_ref)) > 0 AND length(btrim(reason)) > 0",
+            name=f"ck_{table}_attribution",
+        ),
+    )
+
+
+def _account_terms_args(*, tenant: bool) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}billing_account_terms_versions"
+    scope = ["tenant_id"] if tenant else []
+    return (
+        ForeignKeyConstraint(
+            [*scope, "billing_account_id"],
+            [
+                *(f"{SCHEMA}.{prefix}billing_accounts.{key}" for key in scope),
+                f"{SCHEMA}.{prefix}billing_accounts.id",
+            ],
+            name=f"fk_{table}_account",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            *scope, "billing_account_id", "effective_from", name=f"uq_{table}_effective"
+        ),
+        *_terms_checks(table, nullable=True),
+        schema_table_args(SCHEMA),
+    )
+
+
+def _default_terms_args(*, tenant: bool) -> tuple[object, ...]:
+    prefix = "" if tenant else "platform_"
+    table = f"{prefix}billing_terms_defaults_versions"
+    scope = ["tenant_id"] if tenant else []
+    return (
+        UniqueConstraint(*scope, "effective_from", name=f"uq_{table}_effective"),
+        *_terms_checks(table, nullable=False),
+        schema_table_args(SCHEMA),
+    )
+
+
+class BillingAccountTermsVersion(Base, _TenantRow, _AccountTermsColumns):
+    __tablename__ = "billing_account_terms_versions"
+    __table_args__ = _account_terms_args(tenant=True)
+
+
+class PlatformBillingAccountTermsVersion(Base, _AccountTermsColumns):
+    __tablename__ = "platform_billing_account_terms_versions"
+    __table_args__ = _account_terms_args(tenant=False)
+
+
+class BillingTermsDefaultsVersion(Base, _TenantRow, _DefaultTermsColumns):
+    __tablename__ = "billing_terms_defaults_versions"
+    __table_args__ = _default_terms_args(tenant=True)
+
+
+class PlatformBillingTermsDefaultsVersion(Base, _DefaultTermsColumns):
+    __tablename__ = "platform_billing_terms_defaults_versions"
+    __table_args__ = _default_terms_args(tenant=False)
+
+
 class _NonCashCreditGrantColumns(_EvidenceTime):
     id: Mapped[UUID] = uuid_pk()
     billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
@@ -3369,6 +3499,8 @@ TENANT_TABLES = (
     "receivable_position_facts_v2",
     "withholding_discharges",
     "document_withholding_components",
+    "billing_account_terms_versions",
+    "billing_terms_defaults_versions",
     "billing_accounts",
     "rated_obligations",
     "documents",
@@ -3414,6 +3546,8 @@ PLATFORM_TABLES = (
     "platform_receivable_position_facts_v2",
     "platform_withholding_discharges",
     "platform_document_withholding_components",
+    "platform_billing_account_terms_versions",
+    "platform_billing_terms_defaults_versions",
     "platform_billing_accounts",
     "platform_rated_obligations",
     "platform_documents",
@@ -3464,6 +3598,10 @@ __all__ = [
     "PlatformWithholdingDischarge",
     "DocumentWithholdingComponent",
     "PlatformDocumentWithholdingComponent",
+    "BillingAccountTermsVersion",
+    "PlatformBillingAccountTermsVersion",
+    "BillingTermsDefaultsVersion",
+    "PlatformBillingTermsDefaultsVersion",
     "PLATFORM_TABLES",
     "SCHEMA",
     "TENANT_TABLES",

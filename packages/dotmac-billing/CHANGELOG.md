@@ -2,7 +2,36 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a12 — UNRELEASED
+## 0.1.0a13 — UNRELEASED
+
+Account terms (approved 2026-11-16; new owner work). a12 was published (tag
+`dotmac-billing-v0.1.0a12`); `bi_0018` and later are unreleased and chain after
+`bi_0017_open_documents_index`.
+
+- `bi_0018_account_terms`: two append-only tables on both planes with forced RLS
+  (tenant plane), `SELECT, INSERT` only for the online role and the shared
+  `refuse_mutation` trigger. `billing_account_terms_versions` holds dated versions
+  of an account's own terms (contract type prepaid|postpaid, period
+  daily|monthly|quarterly|annually, postpaid billing timing period_start|period_end,
+  postpaid grace as an interval; each nullable, NULL = use the tenant default).
+  `billing_terms_defaults_versions` holds the tenant default (all four NOT NULL).
+  Unique per (tenant, account, effective_from) and (tenant, effective_from).
+  Back-dating is refused in the database: a BEFORE INSERT trigger stamps
+  `recorded_at` from the database clock and refuses `effective_from < recorded_at`.
+- `record_account_terms(RecordAccountTermsV1)` and
+  `record_default_terms(RecordDefaultTermsV1)`: append-only typed commands in the
+  caller's transaction (no commit, no Python clock read). A back-dated or duplicate
+  `effective_from` is refused (`billing.terms_back_dated`,
+  `billing.terms_version_exists`).
+- `get_effective_account_terms(db, scope=, account_id=, at=) -> AccountTermsV1`:
+  per term, the account's latest version with `effective_from <= at` if that term
+  is set, otherwise the latest default; each term carries its source
+  (`customer`|`default`) and the version id. No default at `at` refuses
+  (`billing.terms_default_missing`). Callers read the terms at the start of the
+  period they charge, so Billing needs no period arithmetic.
+- No behaviour change to any existing Billing command.
+
+## 0.1.0a12 — published 2026-11-12
 
 a11 was published on 2026-11-10 (tag `dotmac-billing-v0.1.0a11`); a12 adds the
 B lane and the entries below. Migrations here (`bi_0015` and later) are unreleased and
