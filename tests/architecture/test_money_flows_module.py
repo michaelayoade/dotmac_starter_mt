@@ -121,6 +121,7 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "accept_withholding_discharge": ANY_MODULE,
     "AcceptWithholdingDischarge": ANY_MODULE,
     "SettlementFundingLane": ANY_MODULE,
+    "BillingRuleViolation": ANY_MODULE,
 }
 # Owner commands only specific flows may touch. Nothing exists yet, so each set
 # is empty. PR E adds the F3 module(s) to the first group and the F5 module to
