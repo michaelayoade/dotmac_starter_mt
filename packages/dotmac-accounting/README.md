@@ -1,5 +1,16 @@
 # dotmac-accounting
 
+## Integrate in a product assembly
+
+Register Accounting in the assembly and apply its tenant migration lineage. Create the chart, posting accounts and an open fiscal period in the tenant context. Submit a balanced draft journal and call `dotmac_accounting.service.post_journal` in the assembly-owned transaction. Verify the resulting ledger entries through Accounting's public read interface.
+
+The [executable service examples](../../tests/unit/test_accounting_service.py) use repository fixtures to show the calls and expected results. From the repository root, after installing development dependencies, run:
+
+```sh
+poetry run pytest tests/unit/test_accounting_service.py -q
+```
+
+
 `dotmac-accounting` owns a tenant's chart of accounts, fiscal years and
 periods, open accounting dimensions, balanced journal posting, reversal and
 immutable ledger/period evidence.

@@ -1,5 +1,16 @@
 # dotmac-collections
 
+## Integrate in a product assembly
+
+Register Collections, choose its supported installation set and apply its migration lineage. Supply scoped receivable evidence from the financial owner, along with the policy and timer ports required for your workflow. Map Billing's invoice-level `ReceivableExposureV1` into `ReceivableObservationV1` in the assembly. Route requested actions to their owning services and return their receipts to Collections.
+
+The [executable service examples](../../tests/unit/test_collections_service_contract.py) use repository fixtures to show the calls and expected results. From the repository root, after installing development dependencies, run:
+
+```sh
+poetry run pytest tests/unit/test_collections_service_contract.py -q
+```
+
+
 Scope-explicit owner of delinquency policy, collection cases, arrangements,
 grace, consequence requests and their immutable receipts. It rereads a typed
 receivables owner before every decision and asks product owners to apply

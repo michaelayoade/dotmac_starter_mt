@@ -1,5 +1,30 @@
 # Architecture
 
+## How Starter fits together
+
+| Layer | Responsibility |
+| --- | --- |
+| Kernel | Provides shared runtime contracts, tenant context, database sessions and module registration. |
+| Domain modules | Own business decisions, public commands and facts, and any declared database lineage. |
+| Adapters | Connect product workflows to external protocols or translate between public contracts. |
+| Product assembly | Pins packages, selects database planes, wires providers and maps outputs between owners. |
+| Shared UI | Supplies presentation primitives and assets for the product's own screens. |
+
+Start with the [module catalogue](MODULE_CATALOG.md) to choose a package by
+purpose, find its integration entry point, and check its release and adoption
+evidence. Then consult the package README and the composition rules below.
+
+### Verify a commercial integration
+
+The assembly translates rated obligations from Subscriptions into Billing commands.
+It can then map Billing's invoice-level exposure into a Collections observation.
+Use the package guides for the scoped calls and their executable examples.
+
+- [Subscriptions](../packages/dotmac-subscriptions/README.md#integrate-with-recurring-billing) and [Billing](../packages/dotmac-billing/README.md#integrate-with-recurring-billing)
+- [Collections](../packages/dotmac-collections/README.md#integrate-in-a-product-assembly)
+- [Payments](../packages/dotmac-payments/README.md#integrate-in-a-product-assembly)
+- [Accounting](../packages/dotmac-accounting/README.md#integrate-in-a-product-assembly)
+
 ## Native domain computation candidates (2026-10-15)
 
 The Rust implementation branch introduces private `_native` extensions owned by

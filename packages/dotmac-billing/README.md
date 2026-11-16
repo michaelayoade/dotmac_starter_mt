@@ -1,5 +1,18 @@
 # dotmac-billing
 
+## Integrate with recurring billing
+
+1. Pin a Billing release and a compatible kernel. Register the Billing manifest, select the tenant or platform installation set that matches the account, and apply its migration lineage.
+2. Resolve the Billing account in the product assembly. Translate the producer's rated output into `AcceptRatedObligationV1`, carrying the source identity, verified service period, exact currency amounts, and applicable tax or FX evidence.
+3. Call `dotmac_billing.service.accept_rated_obligation` inside the assembly's scoped transaction. The assembly owns commit and rollback. A correction needs the Billing identity of the obligation it supersedes.
+
+The [executable composition example](../../tests/architecture/test_cloud_commercial_contract_composition.py) shows the complete mapping with typed fixtures, including currency and precision checks. It exercises the contract translation in a test assembly. Run it from the repository root after installing the development dependencies.
+
+```sh
+poetry run pytest tests/architecture/test_cloud_commercial_contract_composition.py -q
+```
+
+
 `dotmac-billing` is the single reusable owner of operational receivables. It
 accepts immutable rated obligations and independently confirmed settlements,
 owns invoice and credit-note meaning, posts immutable allocation/correction
