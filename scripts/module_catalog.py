@@ -4,7 +4,7 @@
 This script deliberately owns no module metadata.  It joins:
 
 * ``packages/*/EXTRACTION.toml`` for contract, evidence and adoption state;
-* package ``pyproject.toml`` for declared version and kernel requirement;
+* package ``pyproject.toml`` for purpose, declared version and kernel requirement;
 * ``ModuleManifest`` source for persistence-plane and schema declarations; and
 * the three closed release allowlists for publication policy.
 
@@ -65,6 +65,7 @@ class CatalogError(RuntimeError):
 @dataclass(frozen=True)
 class ModuleRecord:
     distribution: str
+    purpose: str
     version: str
     classification: str
     evidence_status: str
@@ -489,6 +490,7 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
                 evidence_status=str(dossier["status"]),
                 source_mode=str(dossier["source_mode"]),
                 owner=str(dossier["owner"]),
+                purpose=str(poetry.get("description") or dossier["contract"]),
                 contract=str(dossier["contract"]),
                 contract_consumers=_string_tuple(
                     dossier.get("contract_consumers"),
@@ -615,6 +617,14 @@ def render_catalog(repo_root: Path = REPO_ROOT) -> str:
         "selection. Each application remains authoritative for its installed pins;",
         "`ModuleRegistry.inventory_payload()` reports that deployment-local state.",
         "",
+        "Use [Subscriptions](#dotmac-subscriptions) for plans, renewals and other",
+        "recurring commercial lifecycle decisions. Use [Billing](#dotmac-billing)",
+        "for invoice and receivable state. Compose both when the product needs",
+        "both workflows and map rated obligations to Billing commands in the assembly.",
+        "Use [Entitlement Allocation](#dotmac-entitlement-allocation) when the",
+        "product must project an activated agreement into grants validated",
+        "against its declared capability catalogue.",
+        "",
         "## Reading the evidence",
         "",
         "- `audit-complete` means the boundary and source inventory are complete; it",
@@ -645,11 +655,11 @@ def render_catalog(repo_root: Path = REPO_ROOT) -> str:
         "",
         "## Catalogue",
         "",
-        "| Distribution | Classification | Evidence | Module capability "
+        "| Distribution | Purpose | Classification | Evidence | Module capability "
         "| Supported installation sets | This assembly installs | Release policy "
         "| Declared version | Kernel requirement | Proven consumers | "
         "Candidate consumers |",
-        "|---|---|---|---|---|---|---|---:|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---:|---|---|---|",
     ]
 
     for record in records:
@@ -667,6 +677,7 @@ def render_catalog(repo_root: Path = REPO_ROOT) -> str:
             + " | ".join(
                 (
                     distribution,
+                    _cell(record.purpose),
                     CLASSIFICATION_LABELS[record.classification],
                     evidence,
                     _persistence_cell(record, repo_root),
@@ -687,7 +698,7 @@ def render_catalog(repo_root: Path = REPO_ROOT) -> str:
     lines.extend(
         [
             "",
-            "## Contracts and ownership",
+            "## When to use each package and how to integrate it",
             "",
             "The dossier linked from each entry remains authoritative for source",
             "paths, parity tests, first cutover, drift proof, local-copy retirement",
@@ -701,12 +712,49 @@ def render_catalog(repo_root: Path = REPO_ROOT) -> str:
         package_target = readme if readme.is_file() else record.dossier_path
         package_link = _relative_link(repo_root, package_target)
         dossier_link = _relative_link(repo_root, record.dossier_path)
+        integration = {
+            "optional-module": (
+                "Pin a published version and its compatible kernel. Register its "
+                "manifest, select its supported database installation set, apply "
+                "its lineage, and wire the public contract in the product assembly."
+            ),
+            "universal-facility": (
+                "Pin the compatible facility version and compose its public "
+                "runtime interfaces at application startup."
+            ),
+            "presentation-foundation": (
+                "Pin the UI package and wire its assets and templates in the "
+                "product's presentation layer."
+            ),
+            "stateless-protocol-adapter": (
+                "Pin the package and configure the documented consumer interface "
+                "in the assembly. Supply transport and credentials where required."
+            ),
+            "stateless-contract-catalogue": (
+                "Pin the catalogue and consume its versioned declarations "
+                "through the documented public package interface."
+            ),
+            "stateless-sql-adapter": (
+                "Pin the adapter and configure access to the provider-owned "
+                "database and any documented transport in the assembly."
+            ),
+        }[record.classification]
+        manifest_link = (
+            f" See the [manifest]({_relative_link(repo_root, record.manifest_path)}) "
+            "for the registration and persistence declarations."
+            if record.manifest_path
+            else ""
+        )
         lines.extend(
             [
                 f"### [`{record.distribution}`]({package_link})",
                 "",
+                f"- **Purpose:** {_cell(record.purpose)}",
+                f"- **When to use it and what it owns:** {_cell(record.contract)}",
+                f"- **Integration:** {integration} See the "
+                f"[package documentation]({package_link}) for its public interfaces."
+                f"{manifest_link}",
                 f"- **Owner:** {_cell(record.owner)}",
-                f"- **Contract:** {_cell(record.contract)}",
                 f"- **Evidence:** `{record.evidence_status}` from "
                 f"[`EXTRACTION.toml`]({dossier_link}); "
                 f"source mode `{record.source_mode}`.",
