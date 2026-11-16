@@ -1,5 +1,18 @@
 # dotmac-subscriptions
 
+## Integrate with recurring billing
+
+1. Pin a Subscriptions release and compatible kernel. Register the Subscriptions manifest and apply its migration lineage for the selected installation set.
+2. Use `RatedObligationOutputV1` as the boundary for rated charges. Carry the occurrence identity, contract version, service period, collection timing, and exact amount into the assembly adapter.
+3. In the assembly, resolve the receivable account and construct Billing's `AcceptRatedObligationV1` command. Preserve the producer's source identity across retries. Treat timer generation as provenance and resolve the prior Billing obligation when mapping corrections.
+
+The [executable composition example](../../tests/architecture/test_cloud_commercial_contract_composition.py) shows the complete mapping with typed fixtures, including currency and precision checks. It exercises the contract translation in a test assembly. Run it from the repository root after installing the development dependencies.
+
+```sh
+poetry run pytest tests/architecture/test_cloud_commercial_contract_composition.py -q
+```
+
+
 Reusable recurring-commercial ownership for explicit tenant and platform
 planes.
 
