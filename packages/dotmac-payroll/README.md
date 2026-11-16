@@ -73,3 +73,15 @@ the asset ref. Cancelling a draft or approved run stores actor, instant and a
 mandatory reason; a finalized run cannot be cancelled. The additive migration
 is `py_0002_mode_and_run_cancel`. This declaration is not publication
 evidence.
+
+The declared `0.1.0a5` successor adds `reverse_liability_settlement`, the
+governed correction for a bank-returned salary credit: whole settlement only,
+mandatory bank return reference and reason, a reverser different from the
+recorder, refused for internal recoveries and for liabilities the settlement
+does not fully settle. It inserts an append-only reversal row and reopens the
+liability (`outstanding`, settled amount reduced) so the payee can be paid again
+under a new settlement reference. `build_settlement_reversal_consequence`
+returns the balanced fact Dr bank cash GL / Cr liability account for the
+assembly to post. The additive migration is `py_0003_settlement_reversal`; its
+downgrade refuses once a reversal exists. This declaration is not publication
+evidence.
