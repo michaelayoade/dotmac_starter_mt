@@ -196,8 +196,11 @@ the prohibition on references that the kernel resolves.
   exportable (irreversible) or extract it from storage; the audit device
   records it and retirement removes the risk afterwards.
 - A sign token is a signing oracle for its two uses; the bounds above limit it.
-- Enforcement is in CP: an architecture test confines the transit adapter to
-  the issuance command, plus a CI job exercising the refusals.
+- Enforcement is in CP (main `db095a02`): the unit test
+  `tests/unit/test_target_transit_custody.py::test_the_module_is_imported_only_by_the_producer_command`
+  confines the transit adapter to the issuance command, and the real-OpenBao
+  CI job `.github/workflows/rehearsal-issuer-harness.yml` exercises the
+  refusals.
 
 ### References
 
