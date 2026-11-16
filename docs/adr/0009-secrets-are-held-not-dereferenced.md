@@ -4,6 +4,7 @@
 - **Scope:** Fleet-wide. The kernel's contract; every product built on it.
 - **Relates to:** ADR-0003 (declared extension points), ADR-0008 (declaration
   registries)
+- **Amended:** 2026-11-16 (Amendment 1: remote non-exportable signing custody)
 
 ## Context
 
@@ -122,3 +123,85 @@ shape — the pattern without the dependency.
 - Neither check alone is sufficient: the runtime proof catches a dereference
   however it is spelled but only on paths a test drives; the static check covers
   every path but only the spellings it knows.
+
+## Amendment 1 (2026-11-16): remote non-exportable signing custody is not dereferencing
+
+The text above is preserved as written. This amendment narrows nothing in it.
+
+### Context
+
+ADR-0009 governs obtaining secret *values*. Transit signing obtains no value:
+the private half never leaves the store, and the caller receives only a
+signature. Left unstated, "never dereferenced" could be read as "transit is
+forbidden" or as "any store call is fine". Michael ruled (2026-11-15/16) that
+the Control V2 deployment authorization and dispatch keys for the Gate 2 a2
+rehearsal are held in OpenBao transit.
+
+### What changes
+
+A product's signer port may request signatures from a remote non-exportable
+key service (OpenBao transit). Key material is still never dereferenced,
+exported or installed. The kernel still ships no store client and resolves
+nothing on a request path; the client lives in the product (CP).
+
+The permission holds only while all of the following are true:
+
+- the keys are non-exportable Ed25519, generated in the service with plaintext
+  backup off, never rotated, and their public identities are pinned in the
+  product; enrollment verifies proof of possession;
+- calls are made only from an operator command, never from a kernel request
+  path or an HTTP handler;
+- every signature is verified locally against the pinned public identity
+  before use;
+- the command fails closed if the service is unreachable: no local-key
+  fallback, no degraded mode;
+- the endpoint and credential are command-time inputs, never configuration
+  defaults;
+- the service's audit device records each sign.
+
+### Scope
+
+a2 rehearsal identities only (the authorization and dispatch keys). The G17
+JWT role gates only the launcher principal and never carries the sign policy.
+Production custody is decided at D3; this amendment grants nothing for it.
+
+### Token and relay constraints
+
+- CP signs through a sign-only policy on exact sign paths, with no batch input.
+- The credential is a per-issuance child token minted by Michael from the
+  ceremony root: 2 uses, at most 10 minutes, bound to a single address, not
+  renewable, delivered on stdin and never stored, logged or placed in argv or
+  the environment. It is revoked by accessor after the session.
+- The route is a relay that exists only during Michael's SSH session and
+  forwards only the two sign paths. Its absence is read back afterwards.
+
+### Retirement
+
+The identities are retired after a2 is published or disposed: the token role
+and policy are deleted and the mount is disabled, which destroys the keys.
+Identity documents are kept read-only for audit and marked retired.
+Production identities are minted at D3 under their own decision.
+
+### Unchanged
+
+Every ADR-0009 rule and both enforcement tests. Settings, `SecretSource` and
+`KeyProvider` semantics are untouched, as are held-not-fetched secrets and
+the prohibition on references that the kernel resolves.
+
+### Consequences
+
+- Issuance depends on OpenBao availability during the ceremony; the kernel
+  read path does not.
+- "Never leaves" holds at the API. An OpenBao root can still make a key
+  exportable (irreversible) or extract it from storage; the audit device
+  records it and retirement removes the risk afterwards.
+- A sign token is a signing oracle for its two uses; the bounds above limit it.
+- Enforcement is in CP: an architecture test confines the transit adapter to
+  the issuance command, plus a CI job exercising the refusals.
+
+### References
+
+- CP `docs/design/transit-custody.md` and the signing-identity mint dossier
+  (a2 transit identities section).
+- Gate 2 exit list: E8 (transit ceremony and identity pinning) and E13
+  (issuance); this amendment merges before E13.
