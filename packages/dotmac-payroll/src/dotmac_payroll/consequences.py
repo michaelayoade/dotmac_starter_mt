@@ -25,12 +25,14 @@ from dotmac_payroll.models import (
     PayrollLiability,
     PayrollLiabilitySettlement,
     PayrollRun,
+    PayrollSettlementReversal,
 )
 from dotmac_payroll.service import PayrollNotFound, PayrollRuleViolation
 
 CONSEQUENCE_OWNER = "payroll"
 RUN_DOCUMENT_KIND = "payroll_run"
 SETTLEMENT_DOCUMENT_KIND = "payroll_liability_settlement"
+SETTLEMENT_REVERSAL_DOCUMENT_KIND = "payroll_settlement_reversal"
 CONSEQUENCE_SOURCE_VERSION = "1"
 _DEBIT = "debit"
 _CREDIT = "credit"
@@ -370,14 +372,77 @@ def build_liability_settlement_consequence(
     )
 
 
+def build_settlement_reversal_consequence(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    reversal_id: UUID,
+    bank_account_ref: str,
+    posting_date: date,
+) -> PayrollAccountingConsequence:
+    """Fact for a reversed settlement: Dr bank cash GL / Cr liability account.
+
+    The bank returned the salary credit, so cash comes back and the employee
+    payable (e.g. 2040) is owed again. Keyed on the reversal id; the amount is
+    the persisted reversal amount. ``posting_date`` is the bank return value
+    date supplied by the caller and covered by the fingerprint. Calls
+    ``db.flush()``; takes no lock.
+
+    Caller duty (the ERP pin; this package stores no bank account and cannot
+    prove it): ``bank_account_ref`` must be the cash GL of the settlement's
+    ORIGINAL posted journal, not the current account mapping. Refuse a
+    mismatch, route a now-retired cash GL to the manual exception queue, and
+    use a ``posting_date`` not earlier than the settlement's posting date.
+    """
+    db.flush()
+    bank = _clean_ref(bank_account_ref, "bank account reference")
+    row = db.execute(
+        select(PayrollSettlementReversal, PayrollLiability)
+        .join(
+            PayrollLiability,
+            (PayrollLiability.tenant_id == PayrollSettlementReversal.tenant_id)
+            & (PayrollLiability.id == PayrollSettlementReversal.liability_id),
+        )
+        .where(
+            PayrollSettlementReversal.tenant_id == tenant_id,
+            PayrollSettlementReversal.id == reversal_id,
+        )
+    ).one_or_none()
+    if row is None:
+        raise PayrollNotFound("payroll settlement reversal not found")
+    reversal, liability = row
+    liability_account = _clean_ref(liability.liability_account_ref, "liability account")
+    if bank == liability_account:
+        raise PayrollRuleViolation(
+            "bank account must differ from the liability account"
+        )
+    if reversal.amount <= 0:
+        raise PayrollRuleViolation("reversal amount must be positive")
+    return _seal(
+        tenant_id=tenant_id,
+        document_kind=SETTLEMENT_REVERSAL_DOCUMENT_KIND,
+        document_id=str(reversal.id),
+        description=reversal.return_ref,
+        posting_date=posting_date,
+        currency_code=liability.currency_code,
+        minor_units=liability.minor_units,
+        raw=[
+            (bank, _DEBIT, reversal.amount),
+            (liability_account, _CREDIT, reversal.amount),
+        ],
+    )
+
+
 __all__ = [
     "CONSEQUENCE_OWNER",
     "CONSEQUENCE_SOURCE_VERSION",
     "RUN_DOCUMENT_KIND",
     "SETTLEMENT_DOCUMENT_KIND",
+    "SETTLEMENT_REVERSAL_DOCUMENT_KIND",
     "PayrollAccountingConsequence",
     "PayrollAccountingEntry",
     "PayrollConsequenceSource",
     "build_liability_settlement_consequence",
     "build_run_accounting_consequence",
+    "build_settlement_reversal_consequence",
 ]
