@@ -245,6 +245,15 @@ def test_a_real_race_both_pass_the_replay_check_then_one_effect(scratch):
             )
             == 2
         )
+        # The loser emitted nothing: exactly one settled event.
+        assert (
+            _count(
+                db,
+                OutboxEvent,
+                OutboxEvent.event_type == "money_flows.settle.settled.v1",
+            )
+            == 1
+        )
 
 
 def test_refused_path_race_the_loser_is_classified_a_replay(scratch):
