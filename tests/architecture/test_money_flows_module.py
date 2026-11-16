@@ -665,14 +665,33 @@ def test_package_version_surfaces_agree() -> None:
     assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a1"
 
 
-def test_public_surface_is_module_plumbing_only() -> None:
+def test_public_surface_is_the_settle_contract() -> None:
     import dotmac_money_flows
 
     assert set(dotmac_money_flows.__all__) == {
+        "DEFAULT_ACCEPTED_SOURCES",
         "SETTLE_ATTENTION_EVENT_TYPE",
         "SETTLE_SETTLED_EVENT_TYPE",
+        "DepositApplication",
+        "SettleConfirmationV1",
+        "SettleInstanceV1",
+        "SettleOutcomeV1",
+        "SettlePolicyReader",
+        "SettlePolicyV1",
+        "SettlePorts",
+        "SettleRefused",
+        "SettleState",
+        "SettleWithholdingV1",
+        "SettlementTargetResolver",
+        "SettlementTargetV1",
         "__version__",
+        "get_settle_instance",
+        "is_settle_replay_conflict",
+        "list_settle_attention",
         "module",
+        "record_settle_refusal",
+        "retry_settle",
+        "settle_confirmation",
         "versions_dir",
     }
     assert [p.name for p in dotmac_money_flows.versions_dir().glob("mf_*.py")] == [
