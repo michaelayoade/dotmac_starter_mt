@@ -261,6 +261,25 @@ def build_run_accounting_consequence(
             raise PayrollRuleViolation(
                 "component liabilities drift from the calculation lines"
             )
+        # Internal recoveries must be booked as already recovered (settled,
+        # employee-side) by finalize; the credit stays on the asset account.
+        internal_components = {
+            str(x.component_id)
+            for x in lines
+            if x.settlement_mode == "internal_recovery" and x.amount > 0
+        }
+        if internal_components != {
+            str(x.component_id)
+            for x in component_liabilities
+            if x.settlement_mode == "internal_recovery"
+        } or any(
+            x.settlement_mode == "internal_recovery"
+            and (x.beneficiary_type != "employee" or x.amount_settled != x.amount)
+            for x in component_liabilities
+        ):
+            raise PayrollRuleViolation(
+                "internal recovery liabilities drift from the calculation lines"
+            )
         net_liabilities = db.scalars(
             select(PayrollLiability).where(
                 PayrollLiability.tenant_id == tenant_id,
@@ -353,9 +372,9 @@ def build_liability_settlement_consequence(
 
 __all__ = [
     "CONSEQUENCE_OWNER",
+    "CONSEQUENCE_SOURCE_VERSION",
     "RUN_DOCUMENT_KIND",
     "SETTLEMENT_DOCUMENT_KIND",
-    "CONSEQUENCE_SOURCE_VERSION",
     "PayrollAccountingConsequence",
     "PayrollAccountingEntry",
     "PayrollConsequenceSource",

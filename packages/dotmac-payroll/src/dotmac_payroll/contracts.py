@@ -29,6 +29,9 @@ class PayRuleInput:
     rate: Decimal | None
     basis_component_ids: tuple[UUID, ...]
     prorates: bool
+    # "external" (default, a3 behaviour) or "internal_recovery": a deduction
+    # recovered against the employee's own balance (e.g. a staff loan asset).
+    settlement_mode: str = "external"
 
 
 @dataclass(frozen=True, slots=True)

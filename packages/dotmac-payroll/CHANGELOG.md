@@ -1,5 +1,31 @@
 # Changelog — dotmac-payroll
 
+## 0.1.0a4 — declared successor
+
+- Deduction `settlement_mode` on `PayRuleInput` (default `external`, exactly the
+  a3 behaviour) and on the stored rule, calculation line and liability:
+  `internal_recovery` marks a deduction recovered against the employee's own
+  balance (for example a staff loan asset such as 1410). Finalize books it as
+  already recovered (settled, employee-side, against the asset account ref) and
+  never creates an outstanding external payable. `record_liability_settlement`
+  refuses internal recoveries. The run accounting consequence still credits the
+  asset ref; it now also refuses internal-recovery drift. Internal recovery is
+  valid only on deduction components.
+- `cancel_payroll_run` (owner command): draft or approved -> cancelled with the
+  actor and a mandatory reason, stored on the run (`cancelled_by_id`,
+  `cancelled_at`, `cancel_reason`) as the audit record; refused once finalized;
+  idempotent for the same actor and reason, conflicting otherwise.
+- Mid-month leavers: when no assignment is active at the period end, the lookup
+  uses min(period_end, assignment end date) of the assignment that ends inside
+  the period; revision effectiveness is checked at that date. Stayers are
+  unchanged.
+- Migration `py_0002_mode_and_run_cancel` is additive (defaulted columns
+  and CHECKs; existing rows backfill to `external`). Downgrade refuses once a
+  cancelled run or an internal-recovery row exists.
+- No change to existing transitions, separation of duties, amounts or the
+  consequence fingerprint for external deductions.
+- Publication and ERP adoption remain separate gates; `0.1.0a3` is unchanged.
+
 ## 0.1.0a3 — declared successor
 
 - Add read-only GL consequence facts: `build_run_accounting_consequence`
