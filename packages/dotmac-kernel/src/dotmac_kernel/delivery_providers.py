@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_kernel import consent, delivery
@@ -160,6 +161,25 @@ class Sent:
         return self.receipt.status
 
 
+def _receipts_for_dispatch(
+    db: Session, tenant_id: UUID, dispatch_id: UUID
+) -> list[CommunicationDelivery]:
+    """Every receipt for one dispatch, newest first."""
+    return list(
+        db.execute(
+            select(CommunicationDelivery)
+            .where(
+                CommunicationDelivery.tenant_id == tenant_id,
+                CommunicationDelivery.dispatch_id == dispatch_id,
+            )
+            .order_by(
+                CommunicationDelivery.occurred_at.desc(),
+                CommunicationDelivery.created_at.desc(),
+            )
+        ).scalars()
+    )
+
+
 def send(
     db: Session,
     tenant_id: UUID,
@@ -176,32 +196,38 @@ def send(
     this returns.
 
     Replay: an existing receipt for the dispatch is returned without calling the
-    provider, EXCEPT a `failed` one, which is retryable and so allows a fresh
-    attempt (consent is re-checked). `accepted`, `delivered`, `rejected`,
-    `bounced` and `complaint` replay. There is no row lock here: serialisation
-    of concurrent attempts for one dispatch is the outbox relay's lease, and the
-    provider idempotency key (`OutboundMessage.idempotency_key`) is what protects
-    against a double send beyond it.
+    provider. The one exception is a dispatch whose receipts are ALL `failed`
+    (the adapter's transient, retryable verdict): that allows a fresh attempt,
+    with consent re-checked and the outcome appended as a new receipt. If ANY
+    receipt is not `failed` (`accepted`, `delivered`, `rejected`, `bounced`,
+    `complaint`), the newest such receipt replays, so a late asynchronous
+    `failed` webhook cannot reopen a dispatch the provider already took.
+
+    Concurrency: delivery is at-least-once, serialised by the relay lease
+    (FOR UPDATE SKIP LOCKED), bounded by `stale_lease_seconds`. This function
+    takes no row lock of its own.
+
+    Adapter contract: a provider adapter that cannot tell whether the provider
+    accepted the message (for example a lost response) must raise, or return
+    `failed` only when the provider honours the `dispatch_id` idempotency key
+    (`OutboundMessage.idempotency_key`). SMTP and most HTTP APIs do not honour
+    it, so returning `failed` for an unknown outcome can double-send.
 
     Flush-only: the receipt and any suppression it triggers belong to the
     caller's transaction.
     """
     fingerprint = message.request_fingerprint
-    existing = delivery.latest_receipt_for_dispatch(
-        db, tenant_id, dispatch_id=message.dispatch_id
-    )
-    if existing is not None:
-        if existing.request_fingerprint != fingerprint:
+    receipts = _receipts_for_dispatch(db, tenant_id, message.dispatch_id)
+    if receipts:
+        if receipts[0].request_fingerprint != fingerprint:
             raise delivery.DeliveryError(
                 "dispatch id was already used for a different message"
             )
-        if existing.status != DELIVERY_FAILED:
-            return Sent(receipt=existing)
-        # `failed` is the adapter's "transient, MAY be retried" verdict (see
-        # `delivery_models`). Replaying it would dead-letter the outbox row with
-        # no further provider call, so fall through to a fresh attempt. The new
-        # outcome is appended as a new receipt and, being newer, becomes the
-        # dispatch's latest. Every other status is final and replays.
+        # Receipts are newest first. Any non-failed receipt is final for this
+        # purpose; only a dispatch that has never got past `failed` may retry.
+        final = next((r for r in receipts if r.status != DELIVERY_FAILED), None)
+        if final is not None:
+            return Sent(receipt=final)
 
     reason = consent.suppression_reason(
         db,

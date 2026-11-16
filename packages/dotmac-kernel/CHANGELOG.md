@@ -17,13 +17,22 @@ here.
 
 ### Fixed
 
-- `dotmac_kernel.delivery_providers.send` no longer replays a `failed` receipt.
-  `failed` is the adapter's transient, retryable verdict, and replaying it made a
-  transient provider failure impossible to retry (the outbox row dead-lettered
-  with no further provider call). A `failed` receipt now allows a fresh attempt
-  that re-checks consent and appends its outcome as a new receipt; `accepted`,
-  `delivered`, `rejected`, `bounced` and `complaint` still replay idempotently,
-  and a fingerprint mismatch is still refused. No public signature changes; no
+- `dotmac_kernel.delivery_providers.send` no longer replays a `failed` receipt
+  when every receipt for the dispatch is `failed`. `failed` is the adapter's
+  transient, retryable verdict, and replaying it meant a direct or handler
+  caller that persisted a `failed` receipt could never retry that dispatch. Such
+  a dispatch now allows a fresh attempt that re-checks consent and appends its
+  outcome as a new receipt. If any receipt for the dispatch is not `failed`
+  (`accepted`, `delivered`, `rejected`, `bounced`, `complaint`), the newest such
+  receipt still replays, so a late asynchronous `failed` webhook cannot reopen
+  a dispatch the provider already took. A fingerprint mismatch is still refused.
+  Adapter contract (documented on `send`): an adapter that cannot tell whether
+  the provider accepted the message must raise, or return `failed` only when the
+  provider honours the `dispatch_id` idempotency key. On the relay path a
+  transport raise already rolls back the tenant transaction, so this change does
+  not by itself make transient retry work end to end through the handler/relay
+  seam; that remains open and is tracked by later delivery work (requeue,
+  deferred outcome, append-only receipts). No public signature changes; no
   version is allocated.
 
 ## 0.1.0a109 — Release inventory

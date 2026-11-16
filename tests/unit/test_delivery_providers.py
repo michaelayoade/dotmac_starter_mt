@@ -15,7 +15,7 @@ import inspect
 from uuid import uuid4
 
 import pytest
-from dotmac_kernel import consent
+from dotmac_kernel import consent, delivery
 from dotmac_kernel.consent_models import REASON_BOUNCE, SCOPE_ALL
 from dotmac_kernel.delivery_models import (
     DELIVERY_ACCEPTED,
@@ -274,6 +274,31 @@ def test_a_retry_after_failure_still_asks_consent_first(db, tenant) -> None:
     outcome = send(db, tenant.id, provider=provider, message=message)
 
     assert isinstance(outcome, Suppressed)
+    assert provider.calls == [message]
+
+
+def test_a_late_failed_webhook_does_not_reopen_an_accepted_dispatch(db, tenant) -> None:
+    provider = FakeProvider(
+        ProviderResult(status=DELIVERY_ACCEPTED, provider_message_id="late-1")
+    )
+    message = _message()
+    first = send(db, tenant.id, provider=provider, message=message)
+    # Asynchronous webhook for the same provider message id.
+    delivery.record_receipt(
+        db,
+        tenant.id,
+        channel="email",
+        address="jane@example.com",
+        provider=provider.name,
+        status=DELIVERY_FAILED,
+        provider_message_id="late-1",
+    )
+    db.expunge_all()
+
+    again = send(db, tenant.id, provider=provider, message=message)
+
+    assert again.status == DELIVERY_ACCEPTED
+    assert again.receipt.id == first.receipt.id
     assert provider.calls == [message]
 
 
