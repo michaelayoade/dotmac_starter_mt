@@ -953,8 +953,16 @@ def reverse_liability_settlement(
     the settlement amount (status back to ``outstanding``) in the caller's
     transaction. Refuses the settlement's own recorder (a second person must
     attest the bank return), internal recoveries, and a liability this
-    settlement does not fully settle. An identical replay returns the existing
-    reversal; a different ``return_ref`` or reason is a conflict.
+    settlement does not fully settle. An identical replay (same return reference,
+    reason and reverser) returns the existing reversal; anything else is a
+    conflict. ``reversed_at`` must be timezone-aware and not before the
+    settlement's ``recorded_at``.
+
+    Caller duty (the ERP pin; this package cannot prove it): the bank account
+    passed to ``build_settlement_reversal_consequence`` must be the cash GL of
+    the settlement's ORIGINAL posted journal, not the current account mapping.
+    Refuse a mismatch, route a now-retired cash GL to the manual exception
+    queue, and post on a date not earlier than the settlement's posting date.
     """
     ref = _clean(return_ref, "bank return reference")
     why = _clean(reason, "reversal reason")

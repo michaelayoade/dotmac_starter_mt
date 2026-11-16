@@ -387,6 +387,12 @@ def build_settlement_reversal_consequence(
     the persisted reversal amount. ``posting_date`` is the bank return value
     date supplied by the caller and covered by the fingerprint. Calls
     ``db.flush()``; takes no lock.
+
+    Caller duty (the ERP pin; this package stores no bank account and cannot
+    prove it): ``bank_account_ref`` must be the cash GL of the settlement's
+    ORIGINAL posted journal, not the current account mapping. Refuse a
+    mismatch, route a now-retired cash GL to the manual exception queue, and
+    use a ``posting_date`` not earlier than the settlement's posting date.
     """
     db.flush()
     bank = _clean_ref(bank_account_ref, "bank account reference")
