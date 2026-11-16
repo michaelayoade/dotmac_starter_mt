@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session
 from dotmac_kernel import consent, delivery
 from dotmac_kernel.delivery_models import (
     DELIVERY_ACCEPTED,
+    DELIVERY_FAILED,
     DELIVERY_STATUSES,
     CommunicationDelivery,
 )
@@ -174,6 +175,14 @@ def send(
     `complaint` receipt will already have suppressed the address by the time
     this returns.
 
+    Replay: an existing receipt for the dispatch is returned without calling the
+    provider, EXCEPT a `failed` one, which is retryable and so allows a fresh
+    attempt (consent is re-checked). `accepted`, `delivered`, `rejected`,
+    `bounced` and `complaint` replay. There is no row lock here: serialisation
+    of concurrent attempts for one dispatch is the outbox relay's lease, and the
+    provider idempotency key (`OutboundMessage.idempotency_key`) is what protects
+    against a double send beyond it.
+
     Flush-only: the receipt and any suppression it triggers belong to the
     caller's transaction.
     """
@@ -186,7 +195,13 @@ def send(
             raise delivery.DeliveryError(
                 "dispatch id was already used for a different message"
             )
-        return Sent(receipt=existing)
+        if existing.status != DELIVERY_FAILED:
+            return Sent(receipt=existing)
+        # `failed` is the adapter's "transient, MAY be retried" verdict (see
+        # `delivery_models`). Replaying it would dead-letter the outbox row with
+        # no further provider call, so fall through to a fresh attempt. The new
+        # outcome is appended as a new receipt and, being newer, becomes the
+        # dispatch's latest. Every other status is final and replays.
 
     reason = consent.suppression_reason(
         db,

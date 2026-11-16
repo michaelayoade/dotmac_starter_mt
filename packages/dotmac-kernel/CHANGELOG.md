@@ -15,6 +15,17 @@ here.
   reservation installs no module, moves no data and transfers no writer
   authority; the published a109 release remains unchanged.
 
+### Fixed
+
+- `dotmac_kernel.delivery_providers.send` no longer replays a `failed` receipt.
+  `failed` is the adapter's transient, retryable verdict, and replaying it made a
+  transient provider failure impossible to retry (the outbox row dead-lettered
+  with no further provider call). A `failed` receipt now allows a fresh attempt
+  that re-checks consent and appends its outcome as a new receipt; `accepted`,
+  `delivered`, `rejected`, `bounced` and `complaint` still replay idempotently,
+  and a fingerprint mismatch is still refused. No public signature changes; no
+  version is allocated.
+
 ## 0.1.0a109 — Release inventory
 
 This inventories proposed source after the published and tagged `0.1.0a108`

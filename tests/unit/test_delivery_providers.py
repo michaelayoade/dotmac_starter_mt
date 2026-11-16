@@ -20,7 +20,10 @@ from dotmac_kernel.consent_models import REASON_BOUNCE, SCOPE_ALL
 from dotmac_kernel.delivery_models import (
     DELIVERY_ACCEPTED,
     DELIVERY_BOUNCED,
+    DELIVERY_COMPLAINT,
+    DELIVERY_DELIVERED,
     DELIVERY_FAILED,
+    DELIVERY_REJECTED,
 )
 from dotmac_kernel.delivery_providers import (
     DeliveryProvider,
@@ -191,6 +194,86 @@ def test_a_persisted_receipt_prevents_an_outbox_retry_from_calling_provider_agai
     assert isinstance(first, Sent)
     assert isinstance(second, Sent)
     assert first.receipt.id == second.receipt.id
+    assert provider.calls == [message]
+
+
+def test_a_failed_receipt_allows_a_fresh_attempt_and_records_its_outcome(
+    db, tenant
+) -> None:
+    message = _message()
+    failing = FakeProvider(
+        ProviderResult(status=DELIVERY_FAILED, response_code="4.2.2")
+    )
+    first = send(db, tenant.id, provider=failing, message=message)
+    db.expunge_all()
+
+    recovered = FakeProvider(
+        ProviderResult(status=DELIVERY_ACCEPTED, provider_message_id="retry-ok")
+    )
+    second = send(db, tenant.id, provider=recovered, message=message)
+
+    assert isinstance(first, Sent) and isinstance(second, Sent)
+    assert first.status == DELIVERY_FAILED
+    assert second.status == DELIVERY_ACCEPTED
+    assert recovered.calls == [message]
+    assert first.receipt.id != second.receipt.id
+    assert second.receipt.dispatch_id == message.dispatch_id
+    # The new outcome is now the dispatch's latest, so a third call replays it.
+    db.expunge_all()
+    third = send(db, tenant.id, provider=recovered, message=message)
+    assert third.receipt.id == second.receipt.id
+    assert recovered.calls == [message]
+
+
+def test_a_second_failure_is_recorded_and_stays_retryable(db, tenant) -> None:
+    message = _message()
+    provider = FakeProvider(ProviderResult(status=DELIVERY_FAILED))
+    send(db, tenant.id, provider=provider, message=message)
+    db.expunge_all()
+    second = send(db, tenant.id, provider=provider, message=message)
+    db.expunge_all()
+    third = send(db, tenant.id, provider=provider, message=message)
+
+    assert provider.calls == [message, message, message]
+    assert len({second.receipt.id, third.receipt.id}) == 2
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        DELIVERY_ACCEPTED,
+        DELIVERY_DELIVERED,
+        DELIVERY_REJECTED,
+        DELIVERY_BOUNCED,
+        DELIVERY_COMPLAINT,
+    ],
+)
+def test_every_non_failed_receipt_still_replays(db, tenant, status) -> None:
+    provider = FakeProvider(ProviderResult(status=status))
+    message = _message()
+    first = send(db, tenant.id, provider=provider, message=message)
+    db.expunge_all()
+    second = send(db, tenant.id, provider=provider, message=message)
+
+    assert first.receipt.id == second.receipt.id
+    assert provider.calls == [message]
+
+
+def test_a_retry_after_failure_still_asks_consent_first(db, tenant) -> None:
+    message = _message()
+    provider = FakeProvider(ProviderResult(status=DELIVERY_FAILED))
+    send(db, tenant.id, provider=provider, message=message)
+    consent.suppress(
+        db,
+        tenant.id,
+        channel="email",
+        address="jane@example.com",
+        scope=SCOPE_ALL,
+        reason=REASON_BOUNCE,
+    )
+    outcome = send(db, tenant.id, provider=provider, message=message)
+
+    assert isinstance(outcome, Suppressed)
     assert provider.calls == [message]
 
 
