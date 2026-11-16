@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from dotmac_billing import OpenReceivableDocumentV1
+from dotmac_billing import BillingRuleViolation, OpenReceivableDocumentV1
 from dotmac_billing.contracts import DueDateBasisStatus
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Currency, Money
@@ -198,9 +198,7 @@ def _ports(target, policy=None):
 
 
 def _command(**kw):
-    return SettleConfirmationV1(
-        confirmation_id=uuid4(), intent_reference="ref-1", occurred_at=NOW, **kw
-    )
+    return SettleConfirmationV1(confirmation_id=uuid4(), intent_reference="ref-1", **kw)
 
 
 def _prepare(ports, command=None):
@@ -337,17 +335,56 @@ def test_refusal_codes_are_short_machine_codes(code):
 
 
 class _Orig(Exception):
-    def __init__(self, name):
-        super().__init__(f"duplicate key {name}")
+    def __init__(self, name, message=None):
+        super().__init__(message or f"duplicate key {name}")
         self.diag = SimpleNamespace(constraint_name=name)
 
 
-def test_only_the_confirmation_uniqueness_violation_is_a_replay():
-    replay = IntegrityError("insert", {}, _Orig("uq_settle_instances_confirmation"))
+@pytest.mark.parametrize(
+    "name",
+    [
+        "uq_settle_instances_confirmation",
+        "settle_instances_pkey",
+        "uq_settle_instances_tenant_id_id",
+    ],
+)
+def test_the_duplicate_confirmation_constraints_are_a_replay(name):
+    assert flows.is_settle_replay_conflict(IntegrityError("insert", {}, _Orig(name)))
+
+
+def test_nothing_else_is_a_replay_not_even_by_message():
     other = IntegrityError("insert", {}, _Orig("some_other_constraint"))
-    assert flows.is_settle_replay_conflict(replay)
+    by_text = IntegrityError(
+        "insert",
+        {},
+        _Orig("some_other_constraint", "mentions uq_settle_instances_confirmation"),
+    )
+    no_diag = IntegrityError(
+        "insert", {}, Exception("uq_settle_instances_confirmation")
+    )
     assert not flows.is_settle_replay_conflict(other)
+    assert not flows.is_settle_replay_conflict(by_text)
+    assert not flows.is_settle_replay_conflict(no_diag)
     assert not flows.is_settle_replay_conflict(ValueError("x"))
+
+
+def test_the_posting_instant_is_the_cash_observation_not_a_caller_choice(monkeypatch):
+    cash, _ = _install(monkeypatch)
+    plan = _prepare(_ports(ACCOUNT))
+    seen = {}
+
+    def capture(db, *, scope, command, accepted_confirmation_evidence):
+        seen["occurred_at"] = command.occurred_at
+        seen["observed_at"] = command.observed_at
+        raise RuntimeError("stop after the claim")
+
+    monkeypatch.setattr(flows, "accept_settlement", capture)
+    with pytest.raises(RuntimeError):
+        flows._execute(
+            None, TenantScope(uuid4()), _command(), plan, uuid4(), recheck=False
+        )
+    assert seen == {"occurred_at": cash.observed_at, "observed_at": cash.observed_at}
+    assert not hasattr(_command(), "occurred_at")
 
 
 # --------------------------------------------------------------------------
@@ -382,7 +419,7 @@ def test_the_walk_reads_every_page(monkeypatch):
 
 def test_a_read_refusal_or_a_stalled_cursor_is_unreadable_not_a_refusal(monkeypatch):
     def refuse(*args, **kwargs):
-        raise ValueError("stale exposure")
+        raise BillingRuleViolation("stale_exposure", "stale exposure")
 
     monkeypatch.setattr(flows, "list_open_receivable_documents", refuse)
     assert flows._walk_open_documents(None, TenantScope(uuid4()), uuid4(), NGN) is None

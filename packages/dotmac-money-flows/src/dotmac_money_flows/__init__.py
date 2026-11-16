@@ -8,6 +8,7 @@ application; Billing and Payments stay the only sources of money facts.
 from dotmac_money_flows.contracts import (
     DEFAULT_ACCEPTED_SOURCES,
     DepositApplication,
+    SettleAttentionCursorV1,
     SettleConfirmationV1,
     SettleInstanceV1,
     SettlementTargetResolver,
@@ -42,6 +43,7 @@ __all__ = [
     "SETTLE_ATTENTION_EVENT_TYPE",
     "SETTLE_SETTLED_EVENT_TYPE",
     "DepositApplication",
+    "SettleAttentionCursorV1",
     "SettleConfirmationV1",
     "SettleInstanceV1",
     "SettleOutcomeV1",

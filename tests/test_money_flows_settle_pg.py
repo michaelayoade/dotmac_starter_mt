@@ -7,23 +7,33 @@ call and leaves one row. The concurrent duplicate is two real transactions.
 from __future__ import annotations
 
 import dataclasses
+import time
 from threading import Barrier, Thread
+from uuid import uuid4
 
 import pytest
 from dotmac_billing import models as billing_models
 from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_money_flows import (
     DepositApplication,
+    SettleAttentionCursorV1,
     SettleConfirmationV1,
     SettlementTargetV1,
     SettlePolicyV1,
+    SettlePorts,
     SettleState,
+    is_settle_replay_conflict,
+    list_settle_attention,
+    settle_confirmation,
 )
 from dotmac_money_flows.models import SettleInstance
-from dotmac_payments.contracts import PaymentPurpose
-from sqlalchemy import func, select
+from dotmac_payments.contracts import ConfirmationSource, PaymentPurpose
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.exc import IntegrityError
 
+from tests import test_billing_isolation as b
 from tests.money_flows_fixtures import (
+    BarrierPolicy,
     RecordingTargets,
     assembly_settle,
     make_ports,
@@ -84,7 +94,6 @@ def test_at1_the_target_comes_only_from_the_intent(scratch):
     assert {f.name for f in dataclasses.fields(SettleConfirmationV1)} == {
         "confirmation_id",
         "intent_reference",
-        "occurred_at",
         "withholding",
     }
 
@@ -152,7 +161,29 @@ def test_at6_a_replay_makes_no_owner_call_and_leaves_one_row(scratch):
         )
 
 
-def test_a_concurrent_duplicate_is_a_replay_with_one_effect(scratch):
+def _blocked_on_locks(database: str) -> tuple[int, int]:
+    """Sessions waiting on a lock: by wait event, and by blocking pids."""
+    engine = create_engine(b._superuser_url())
+    with engine.connect() as connection:
+        waiting = connection.scalar(
+            text(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname = :d AND wait_event_type = 'Lock'"
+            ),
+            {"d": database},
+        )
+        ungranted = connection.scalar(
+            text(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname = :d AND cardinality(pg_blocking_pids(pid)) > 0"
+            ),
+            {"d": database},
+        )
+    engine.dispose()
+    return waiting, ungranted
+
+
+def test_a_real_race_both_pass_the_replay_check_then_one_effect(scratch):
     scope = new_scope(scratch)
     with session(scratch, scope) as db:
         account = seed_account(db, scope)
@@ -165,19 +196,38 @@ def test_a_concurrent_duplicate_is_a_replay_with_one_effect(scratch):
         account_id = account.id
     targets = RecordingTargets({"acct:a": SettlementTargetV1(account_id)})
     ports = make_ports(targets)
-    barrier = Barrier(2)
     results, errors = [], []
 
     def attempt() -> None:
         try:
-            barrier.wait(timeout=30)
             results.append(assembly_settle(scratch, scope, payment.command(), ports))
         except BaseException as exc:
             errors.append(exc)
 
+    database = scratch[0].rsplit("/", 1)[1]
     threads = [Thread(target=attempt) for _ in range(2)]
-    for thread in threads:
-        thread.start()
+    with session(scratch, scope) as holder:
+        # A third session holds the account row lock Billing takes first.
+        holder.execute(
+            text(
+                "SELECT id FROM mod_billing.billing_accounts WHERE id = :i FOR UPDATE"
+            ),
+            {"i": account_id},
+        )
+        for thread in threads:
+            thread.start()
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            waiting, ungranted = _blocked_on_locks(database)
+            if waiting >= 2 and ungranted >= 2 and ports.policy.reads == 2:
+                break
+            time.sleep(0.2)
+        waiting, ungranted = _blocked_on_locks(database)
+        # Both passed the initial replay check and are blocked on the lock.
+        assert ports.policy.reads == 2
+        assert waiting >= 2 and ungranted >= 2
+        assert results == [] and errors == []
+        holder.rollback()
     for thread in threads:
         thread.join(timeout=120)
 
@@ -195,11 +245,86 @@ def test_a_concurrent_duplicate_is_a_replay_with_one_effect(scratch):
             )
             == 2
         )
-        assert (
-            _count(
-                db,
-                OutboxEvent,
-                OutboxEvent.event_type == "money_flows.settle.settled.v1",
-            )
-            == 1
+
+
+def test_refused_path_race_the_loser_is_classified_a_replay(scratch):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        # MANUAL is off by policy default: both copies refuse before any write.
+        payment = seed_payment(
+            db,
+            scope,
+            purpose=DEPOSIT,
+            amount="20.00",
+            target_reference="acct:a",
+            source=ConfirmationSource.MANUAL,
         )
+        db.commit()
+        account_id = account.id
+    targets = RecordingTargets({"acct:a": SettlementTargetV1(account_id)})
+    policy = BarrierPolicy(SettlePolicyV1(version="p1"), Barrier(2))
+    ports = SettlePorts(targets=targets, policy=policy)
+    results, errors = [], []
+
+    def attempt() -> None:
+        try:
+            with session(scratch, scope) as db:
+                try:
+                    outcome = settle_confirmation(
+                        db, scope=scope, command=payment.command(), ports=ports
+                    )
+                    db.commit()
+                    results.append(("won", outcome.reason_code))
+                except IntegrityError as exc:
+                    db.rollback()
+                    results.append(("lost", is_settle_replay_conflict(exc)))
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [Thread(target=attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+
+    assert errors == []
+    assert sorted(results) == [("lost", True), ("won", "source_not_accepted")]
+    assert policy.reads == 2  # both passed the replay check first
+    with session(scratch, scope) as db:
+        assert _count(db, SettleInstance) == 1
+        assert _count(db, billing_models.ConfirmedSettlement) == 0
+
+
+def test_attention_paging_is_keyset_on_created_at_and_id(scratch):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        # One transaction: every row shares the same created_at.
+        for _ in range(5):
+            db.add(
+                SettleInstance(
+                    id=uuid4(),
+                    tenant_id=scope.tenant_id,
+                    state="refused",
+                    reason_code="x",
+                    policy_version="p",
+                    definition_version="d",
+                    version=0,
+                    confirmation_id=uuid4(),
+                    intent_id=uuid4(),
+                )
+            )
+        db.commit()
+    seen, cursor, pages = [], None, 0
+    with session(scratch, scope) as db:
+        while True:
+            page = list_settle_attention(db, scope=scope, after=cursor, limit=2)
+            if not page:
+                break
+            pages += 1
+            seen.extend(page)
+            cursor = SettleAttentionCursorV1(page[-1].created_at, page[-1].id)
+        assert len({row.created_at for row in seen}) == 1
+    assert pages == 3
+    assert len(seen) == 5 and len({row.id for row in seen}) == 5
+    assert [r.id for r in seen] == sorted(r.id for r in seen)

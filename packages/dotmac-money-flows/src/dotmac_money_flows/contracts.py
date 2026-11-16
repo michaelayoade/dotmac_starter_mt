@@ -137,12 +137,13 @@ class SettleConfirmationV1:
 
     ``intent_reference`` addresses the intent exactly as Payments knows it. No
     provider payload is carried: the target is derived only from that intent.
-    ``occurred_at`` is the business instant for the owner postings.
+    There is no caller-chosen instant: Billing's claim and postings use the
+    Payments cash observation's ``observed_at``, the date the cash was received,
+    and a retry uses the same value.
     """
 
     confirmation_id: UUID
     intent_reference: str
-    occurred_at: datetime
     withholding: SettleWithholdingV1 | None = None
 
 
@@ -162,6 +163,14 @@ class SettleOutcomeV1:
     billing_account_id: UUID | None
     replayed: bool
     applied_document_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SettleAttentionCursorV1:
+    """Keyset cursor for ``list_settle_attention`` (the last row's position)."""
+
+    created_at: datetime
+    id: UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +214,7 @@ __all__ = [
     "SETTLE_INSERT_STATES",
     "SETTLE_TRANSITIONS",
     "DepositApplication",
+    "SettleAttentionCursorV1",
     "SettleConfirmationV1",
     "SettleInstanceV1",
     "SettleOutcomeV1",

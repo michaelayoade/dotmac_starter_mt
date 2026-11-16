@@ -674,6 +674,7 @@ def test_public_surface_is_the_settle_contract() -> None:
         "SETTLE_ATTENTION_EVENT_TYPE",
         "SETTLE_SETTLED_EVENT_TYPE",
         "DepositApplication",
+        "SettleAttentionCursorV1",
         "SettleConfirmationV1",
         "SettleInstanceV1",
         "SettleOutcomeV1",

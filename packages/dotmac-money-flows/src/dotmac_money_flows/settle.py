@@ -19,12 +19,28 @@ Assembly contract for ``settle_confirmation``:
   roll back and treat it as the replay of the winner (see
   ``is_settle_replay_conflict``). The owner postings are idempotent on their
   deterministic source references, so the loser leaves no effect.
+
+Assembly order and permissions:
+
+* Commit the Payments confirmation first. Both ``settle_confirmation`` and
+  ``record_settle_refusal`` read it, and the latter runs in a new transaction
+  that cannot see an uncommitted confirmation.
+* Withholding supplied with a source other than MANUAL is refused before any
+  write and the instance stays ``refused``; the person fixes the evidence (or
+  the source) and retries.
+* ``retry_settle`` is a human-triggered command. The assembly must gate it with
+  a permission at least as strong as the manual-cash and withholding
+  permissions, and pass the actor as ``actor_ref``.
+* Billing and Payments state the money: native invoices emit
+  ``billing.receivable.exposure.v1`` (v2 is for imported items), and the
+  instance row and flows events carry references only.
+* The posting instant is the Payments cash observation's ``observed_at``: cash
+  is posted on the date it was received, never a date the caller picks.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -32,6 +48,7 @@ from dotmac_billing import (
     AcceptSettlementV1,
     AcceptWithholdingDischarge,
     AllocationCommand,
+    BillingRuleViolation,
     OpenReceivableDocumentV1,
     SettlementFundingLane,
     accept_settlement,
@@ -49,7 +66,7 @@ from dotmac_payments import (
     get_confirmed_cash_v1,
     get_payment_intent_v1,
 )
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -57,6 +74,7 @@ from dotmac_money_flows.contracts import (
     SETTLE_DEFINITION_VERSION,
     WITHHOLDING_SOURCE,
     DepositApplication,
+    SettleAttentionCursorV1,
     SettleConfirmationV1,
     SettleInstanceV1,
     SettlementTargetV1,
@@ -74,6 +92,14 @@ from dotmac_money_flows.events import (
 from dotmac_money_flows.models import SettleInstance
 
 CONFIRMATION_UNIQUE_CONSTRAINT = "uq_settle_instances_confirmation"
+#: Constraint names a duplicate attempt can trip, as ``mf_0001`` creates them.
+REPLAY_CONSTRAINTS = frozenset(
+    {
+        CONFIRMATION_UNIQUE_CONSTRAINT,
+        "settle_instances_pkey",
+        "uq_settle_instances_tenant_id_id",
+    }
+)
 
 _PAGE_LIMIT = 100
 _INSTANCE_NAMESPACE = uuid5(NAMESPACE_URL, "urn:dotmac:money-flows:settle:v1")
@@ -106,13 +132,17 @@ def instance_id_for(scope: TenantScope, confirmation_id: UUID) -> UUID:
 
 
 def is_settle_replay_conflict(error: BaseException) -> bool:
-    """True if ``error`` is the confirmation uniqueness violation (a replay)."""
+    """True if ``error`` is the duplicate-confirmation violation (a replay).
+
+    A duplicate attempt derives the same deterministic instance id, so the
+    database may report the primary key (or the tenant-and-id unique) before the
+    confirmation constraint. All three mean the same thing. Matches the
+    constraint name the driver reports and nothing else.
+    """
     if not isinstance(error, IntegrityError):
         return False
     diag = getattr(error.orig, "diag", None)
-    if getattr(diag, "constraint_name", None) == CONFIRMATION_UNIQUE_CONSTRAINT:
-        return True
-    return CONFIRMATION_UNIQUE_CONSTRAINT in str(error.orig)
+    return getattr(diag, "constraint_name", None) in REPLAY_CONSTRAINTS
 
 
 def order_open_documents(
@@ -298,7 +328,7 @@ def _prepare(
             exposure = get_document_exposure(
                 db, scope=scope, document_id=target.bound_document_id
             )
-        except ValueError:
+        except BillingRuleViolation:
             exposure = None  # decided after the cash is accepted
         if exposure is not None and (
             exposure.billing_account_id != target.billing_account_id
@@ -340,7 +370,7 @@ def _walk_open_documents(
             if cursor in seen:
                 return None
             seen.append(cursor)
-    except ValueError:
+    except BillingRuleViolation:
         return None
 
 
@@ -365,7 +395,7 @@ def _execute(
             source_settlement_key=cash.external_reference,
             source_version="1",
             amount=cash.confirmed,
-            occurred_at=command.occurred_at,
+            occurred_at=cash.observed_at,
             observed_at=cash.observed_at,
             confirmation_evidence=_EVIDENCE[cash.source.value],
             funding_lane=SettlementFundingLane.AVAILABLE_CREDIT,
@@ -396,7 +426,7 @@ def _execute(
                 settlement_id=settlement.id,
                 document_id=document_id,
                 amount=amount,
-                occurred_at=command.occurred_at,
+                occurred_at=cash.observed_at,
                 source_ref=f"money-flows:settle:{instance_id}:{document_id}",
             ),
         )
@@ -406,7 +436,7 @@ def _execute(
         bound_id = plan.target.bound_document_id
         try:
             exposure = get_document_exposure(db, scope=scope, document_id=bound_id)
-        except ValueError:
+        except BillingRuleViolation:
             exposure = None
         if exposure is None:
             state, reason = SettleState.UNAPPLIED, "bound_document_unreadable"
@@ -453,7 +483,7 @@ def _execute(
                 tax_evidence=wht.tax_evidence,
                 authorization_actor_ref=wht.authorization_actor_ref,
                 authorization_evidence_ref=wht.authorization_evidence_ref,
-                occurred_at=command.occurred_at,
+                occurred_at=cash.observed_at,
                 certificate_observation=wht.certificate_observation,
                 settlement_id=settlement.id,
             ),
@@ -730,12 +760,14 @@ def list_settle_attention(
     db: Session,
     *,
     scope: TenantScope,
-    after: datetime | None = None,
+    after: SettleAttentionCursorV1 | None = None,
     limit: int = 100,
 ) -> tuple[SettleInstanceV1, ...]:
     """Instances needing a person (refused or unapplied), oldest first.
 
-    ``after`` pages by ``created_at``.
+    Keyset paging on ``(created_at, id)``: pass a cursor built from the last
+    instance of the previous page. Rows created in one transaction share a
+    timestamp, so the id breaks the tie and no row is skipped or repeated.
     """
     tenant_id = _tenant(scope)
     statement = select(SettleInstance).where(
@@ -745,7 +777,15 @@ def list_settle_attention(
         ),
     )
     if after is not None:
-        statement = statement.where(SettleInstance.created_at > after)
+        statement = statement.where(
+            or_(
+                SettleInstance.created_at > after.created_at,
+                and_(
+                    SettleInstance.created_at == after.created_at,
+                    SettleInstance.id > after.id,
+                ),
+            )
+        )
     rows = db.execute(
         statement.order_by(SettleInstance.created_at, SettleInstance.id).limit(
             max(1, min(limit, 500))
@@ -756,6 +796,7 @@ def list_settle_attention(
 
 __all__ = [
     "CONFIRMATION_UNIQUE_CONSTRAINT",
+    "REPLAY_CONSTRAINTS",
     "get_settle_instance",
     "instance_id_for",
     "is_settle_replay_conflict",

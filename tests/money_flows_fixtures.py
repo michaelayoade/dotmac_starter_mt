@@ -144,6 +144,23 @@ class FixedPolicy:
         return self.policy
 
 
+class BarrierPolicy(FixedPolicy):
+    """Policy reader that holds every caller until all have reached it.
+
+    ``read`` runs after the replay check, so passing the barrier proves every
+    caller found no existing instance before any of them wrote one.
+    """
+
+    def __init__(self, policy: SettlePolicyV1, barrier) -> None:
+        super().__init__(policy)
+        self.barrier = barrier
+
+    def read(self, db, *, scope):
+        policy = super().read(db, scope=scope)
+        self.barrier.wait(timeout=30)
+        return policy
+
+
 def make_ports(
     targets: RecordingTargets, policy: SettlePolicyV1 | None = None
 ) -> SettlePorts:
@@ -198,7 +215,6 @@ class Payment:
         values = {
             "confirmation_id": self.confirmation_id,
             "intent_reference": self.intent_reference,
-            "occurred_at": NOW,
         }
         values.update(overrides)
         return SettleConfirmationV1(**values)
