@@ -23,11 +23,14 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    inspect,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 SCHEMA = module_schema("mflows")
+_TENANT_ID = inspect(Tenant).local_table.c.id
 
+SETTLE_TABLE = "settle_instances"
 SETTLE_STATES = ("settled", "refused", "unapplied", "resolved")
 SETTLE_TERMINAL_STATES = ("settled", "resolved")
 
@@ -53,7 +56,7 @@ def _states(values: tuple[str, ...]) -> str:
 
 
 class SettleInstance(Base):
-    __tablename__ = "settle_instances"
+    __tablename__ = SETTLE_TABLE
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_settle_instances_tenant_id_id"),
         UniqueConstraint(
@@ -84,7 +87,7 @@ class SettleInstance(Base):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+        Uuid(), ForeignKey(_TENANT_ID, ondelete="CASCADE"), nullable=False
     )
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -112,11 +115,12 @@ class SettleInstance(Base):
 
 
 TENANT_MODELS = (SettleInstance,)
-TENANT_TABLES = tuple(model.__tablename__ for model in TENANT_MODELS)
+TENANT_TABLES = (SETTLE_TABLE,)
 
 __all__ = [
     "COMMON_COLUMNS",
     "SCHEMA",
+    "SETTLE_TABLE",
     "SETTLE_STATES",
     "SETTLE_TERMINAL_STATES",
     "TENANT_MODELS",
