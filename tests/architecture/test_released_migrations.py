@@ -8102,6 +8102,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a4": (
+        "dotmac-payroll",
+        "469f60b47dee3e54cd2410c411c164fa591e9775",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+            "py_0002_mode_and_run_cancel.py": (
+                "8743517c31f90ec941bf57a6ddb93040c4b2b468c06bec0b633b0900e2805135"
+            ),
+        },
+    ),
     "dotmac-payroll-v0.1.0a3": (
         "dotmac-payroll",
         "8b9b7e7cdf58df4d9a68c3112039658521df35fe",
@@ -8807,7 +8819,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-payables": frozenset(),
     # `py_0002` adds deduction settlement_mode and run-cancel evidence; still
     # editable until `dotmac-payroll` 0.1.0a4 is tagged.
-    "dotmac-payroll": frozenset({"py_0002_mode_and_run_cancel.py"}),
+    "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
     # `dotmac-positioning` 0.2.0a2 is tagged.
