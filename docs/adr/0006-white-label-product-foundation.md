@@ -2544,9 +2544,14 @@ domain intent's natural identity is a valid dispatch dedupe key. It does not
 become a second dispatch table.
 
 The kernel's own operational pages (error pages, the login screen) stay code,
-as § 2 already rules. There is no enforcing check yet. Under ADR-0018 this rule
-is unmonitored, not exempt, until a writer census or a product-writer ratchet
-covers it.
+as § 2 already rules.
+
+**Enforcement owner: a product-writer ratchet in CI (ADR-0018).** It fails when
+a Starter-composed product writes its own outbox, calls SMTP directly, or
+hard-codes tenant-facing message copy. It follows ADR-0018: entry-point
+families rather than one directory, a two-directional backlog, and a
+sensitivity proof. It lands with the communication work packages and is not
+built by this amendment. Until it lands, this rule is unmonitored, not exempt.
 
 #### 5g. Kernel delivery owns dispatch identity, and is still not a queue
 
@@ -2662,9 +2667,14 @@ Two questions stay with two owners:
 
 A topic preference is never written into the consent ledger. A consent
 suppression is never used to model a topic. Each send path names its own
-category. The first adopter registers **no marketing categories**, so its mail
-is transactional under the `is_marketing` allowlist. This amendment declares no
-marketing category, and it does not change how another product declares one.
+category.
+
+**"No marketing categories" applies to Academy only.** Academy registers no
+marketing categories, so all its mail is transactional under the
+`is_marketing` allowlist. This is not a fleet-wide rule. Sub's campaigns keep
+their marketing categories (ADR-0056). Any product may still declare its own
+through `register_marketing_categories`, and this amendment does not change
+that mechanism.
 
 **Sequencing constraint.** A hard bounce suppresses an address with scope
 `all`, and that stops password resets. So an operator surface for
