@@ -1237,6 +1237,28 @@
           "sha256": "bdb27ee15cb23ace2a8efd5fdc88ffeaa0ef0b12ccc936e4304868e770f8a9f7"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-payroll",
+      "version": "0.1.0a4",
+      "tag": "dotmac-payroll-v0.1.0a4",
+      "tag_object": "582e1f72e2235299fa71d2b65dc9fc0728e8df0d",
+      "peeled_commit": "469f60b47dee3e54cd2410c411c164fa591e9775",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_payroll-0.1.0a4-py3-none-any.whl": "de567422bc9239ff0d0c725367ff9b24b8501fb302fd3524527729e51c22bd0c"
+      },
+      "verification_run_id": "43814460231",
+      "source_run_id": "43814460231",
+      "release_authority_digest": "sha256:7171d0cf58d1ccf87cb887e0f63fc8bffd1a6d6a8edbbba67181af95ac5753ca",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a109+dev-py3-none-any.whl",
+          "sha256": "bdb27ee15cb23ace2a8efd5fdc88ffeaa0ef0b12ccc936e4304868e770f8a9f7"
+        }
+      ]
     }
   ]
 }
