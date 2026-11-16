@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -991,11 +991,24 @@ def reverse_liability_settlement(
         )
     )
     if existing is not None:
-        if existing.return_ref != ref or existing.reason != why:
+        if (
+            existing.return_ref != ref
+            or existing.reason != why
+            or existing.reversed_by_id != reversed_by_id
+        ):
             raise PayrollConflict(
-                "settlement was already reversed with a different return reference"
+                "settlement was already reversed with different evidence"
             )
         return existing
+    if reversed_at.tzinfo is None or reversed_at.utcoffset() is None:
+        raise PayrollRuleViolation("reversed_at must be timezone-aware")
+    recorded_at = settlement.recorded_at
+    if recorded_at.tzinfo is None:
+        recorded_at = recorded_at.replace(tzinfo=UTC)
+    if reversed_at < recorded_at:
+        raise PayrollRuleViolation(
+            "settlement cannot be reversed before it was recorded"
+        )
     if liability.settlement_mode == "internal_recovery":
         raise PayrollRuleViolation(
             "internal recovery is recovered at finalize and cannot be reversed"

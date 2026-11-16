@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -146,6 +146,41 @@ def test_replay_is_noop_and_different_evidence_conflicts(db: Session) -> None:
         _reverse(db, tenant, settlement, return_ref="RET-OTHER")
     with pytest.raises(PayrollConflict):
         _reverse(db, tenant, settlement, reason="different reason")
+
+
+def test_repay_under_the_reversed_reference_is_a_conflict(db: Session) -> None:
+    tenant, net, settlement = _settled_net_pay(db)
+    _reverse(db, tenant, settlement)
+    with pytest.raises(PayrollConflict, match="new reference"):
+        record_liability_settlement(
+            db,
+            tenant_id=tenant.id,
+            liability_id=net.id,
+            amount=Money.of("900", NGN),
+            settlement_ref="PAY-1",
+            evidence_ref="bank:1",
+            recorded_by_id=RECORDER,
+            recorded_at=NOW,
+        )
+    assert (net.status, net.amount_settled) == ("outstanding", Decimal("0.00"))
+
+
+def test_replay_with_a_different_reverser_is_a_conflict(db: Session) -> None:
+    tenant, _, settlement = _settled_net_pay(db)
+    first = _reverse(db, tenant, settlement)
+    assert _reverse(db, tenant, settlement).id == first.id
+    with pytest.raises(PayrollConflict):
+        _reverse(db, tenant, settlement, reversed_by_id=uuid4())
+
+
+def test_reversed_at_must_be_aware_and_not_before_recorded_at(db: Session) -> None:
+    tenant, net, settlement = _settled_net_pay(db)
+    with pytest.raises(PayrollRuleViolation, match="timezone-aware"):
+        _reverse(db, tenant, settlement, reversed_at=datetime(2026, 8, 20, 12))
+    with pytest.raises(PayrollRuleViolation, match="before it was recorded"):
+        _reverse(db, tenant, settlement, reversed_at=NOW - timedelta(seconds=1))
+    assert net.status == "settled"
+    assert _reverse(db, tenant, settlement, reversed_at=NOW).reversed_at == NOW
 
 
 def test_reverser_equal_to_recorder_is_refused(db: Session) -> None:
