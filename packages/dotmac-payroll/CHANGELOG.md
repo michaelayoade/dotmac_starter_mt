@@ -1,5 +1,29 @@
 # Changelog — dotmac-payroll
 
+## 0.1.0a5 — declared successor
+
+- `reverse_liability_settlement`: governed reversal of one whole recorded
+  settlement whose bank credit was returned (the money never reached the
+  payee). Takes a normalized `return_ref` and a mandatory reason; the reverser
+  must differ from the settlement's recorder; refuses `internal_recovery`
+  liabilities and any liability the settlement does not fully settle. An
+  identical replay returns the existing reversal; a different return reference
+  or reason is a `PayrollConflict`; a settlement can be reversed once.
+- One transaction (flush-only): an append-only `payroll_settlement_reversals`
+  row is inserted, the liability's settled amount is reduced by exactly the
+  settlement amount and its status returns to `outstanding`, so it can be
+  settled again under a new settlement reference. The settlement row is never
+  updated.
+- `build_settlement_reversal_consequence`: read-only fact Dr bank cash GL /
+  Cr liability account (for example 2040), keyed on the reversal id with a
+  stable fingerprint; the bank value date is caller-supplied and fingerprinted.
+- Migration `py_0003_settlement_reversal` is additive (new table, append-only
+  trigger, forced RLS, SELECT/INSERT grants). Downgrade refuses once a reversal
+  exists.
+- Existing a3/a4 transitions, amounts and consequence fingerprints are
+  byte-identical (regression test pins the settlement fact formula).
+- Publication and ERP adoption remain separate gates; `0.1.0a4` is unchanged.
+
 ## 0.1.0a4 — declared successor
 
 - Deduction `settlement_mode` on `PayRuleInput` (default `external`, exactly the
