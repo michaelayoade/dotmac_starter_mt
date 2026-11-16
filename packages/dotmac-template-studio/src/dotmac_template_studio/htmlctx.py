@@ -64,6 +64,12 @@ class _Scanner:
     def feed(self, text: str) -> None:
         i, n = 0, len(text)
         while i < n:
+            if self.state == DATA:
+                # Fast path: element text needs no per-character work.
+                j = text.find("<", i)
+                if j < 0:
+                    return
+                i = j
             ch = text[i]
             state = self.state
             if state == DATA:
