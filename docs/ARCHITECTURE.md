@@ -1,5 +1,19 @@
 # Architecture
 
+## How Starter fits together
+
+| Layer | Responsibility |
+| --- | --- |
+| Kernel | Provides shared runtime contracts, tenant context, database sessions and module registration. |
+| Domain modules | Own business decisions, public commands and facts, and any declared database lineage. |
+| Adapters | Connect product workflows to external protocols or translate between public contracts. |
+| Product assembly | Pins packages, selects database planes, wires providers and maps outputs between owners. |
+| Shared UI | Supplies presentation primitives and assets for the product's own screens. |
+
+Start with the [module catalogue](MODULE_CATALOG.md) to choose a package by
+purpose, find its integration entry point, and check its release and adoption
+evidence. Then consult the package README and the composition rules below.
+
 ## Native domain computation candidates (2026-10-15)
 
 The Rust implementation branch introduces private `_native` extensions owned by
