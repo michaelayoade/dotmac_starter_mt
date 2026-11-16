@@ -14,10 +14,18 @@ Source only; not published, not composed into any assembly.
   columns and an accepted `settlement_id` never change. A resolved row keeps its
   settlement and reason code.
 
+- F1 Settle: `settle_confirmation`, `record_settle_refusal`, `retry_settle`,
+  `get_settle_instance` and `list_settle_attention`, with the typed contracts, the
+  `SettlementTargetResolver` and `SettlePolicyReader` ports and the
+  `SettleRefused` error. Everything runs in the caller's transaction; no commit,
+  rollback, savepoint, clock or timer. The row is written once at its outcome and
+  a replay returns it with no owner call. The target comes only from the payment
+  intent. Manual entry and transfer proof are off by policy default.
+- Depends on `dotmac-billing >=0.1.0a12` and `dotmac-payments >=0.1.0a4`.
+- A database test applies the schema vocabulary rule to the live `mod_mflows`
+  catalog.
+
 ### Before release
 
-- Add an `information_schema` column-vocabulary test over the migrated database
-  (no amount, balance, lease, timer ... column, only common columns and
-  `_id`/`_ref` refs), alongside the first flow behaviour.
 - Raise the kernel floor to the kernel release that carries the `money_flows`
   migration-namespace reservation.

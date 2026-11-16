@@ -348,3 +348,48 @@ def test_only_the_confirmation_uniqueness_violation_is_a_replay():
     assert flows.is_settle_replay_conflict(replay)
     assert not flows.is_settle_replay_conflict(other)
     assert not flows.is_settle_replay_conflict(ValueError("x"))
+
+
+# --------------------------------------------------------------------------
+# Open-document walk: all pages, and a read refusal never refuses the cash
+# --------------------------------------------------------------------------
+def _page(entries, cursor):
+    return SimpleNamespace(entries=tuple(entries), next_cursor=cursor)
+
+
+def test_the_walk_reads_every_page(monkeypatch):
+    first, second, third = (
+        _document(due=1, issued=0),
+        _document(due=2, issued=0),
+        _document(due=3, issued=0),
+    )
+    pages = {
+        None: _page([first], "c1"),
+        "c1": _page([second], "c2"),
+        "c2": _page([third], None),
+    }
+    seen = []
+
+    def read(db, *, scope, account, currency, cursor, limit):
+        seen.append(cursor)
+        return pages[cursor]
+
+    monkeypatch.setattr(flows, "list_open_receivable_documents", read)
+    found = flows._walk_open_documents(None, TenantScope(uuid4()), uuid4(), NGN)
+    assert found == [first, second, third]
+    assert seen == [None, "c1", "c2"]
+
+
+def test_a_read_refusal_or_a_stalled_cursor_is_unreadable_not_a_refusal(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise ValueError("stale exposure")
+
+    monkeypatch.setattr(flows, "list_open_receivable_documents", refuse)
+    assert flows._walk_open_documents(None, TenantScope(uuid4()), uuid4(), NGN) is None
+
+    monkeypatch.setattr(
+        flows,
+        "list_open_receivable_documents",
+        lambda *a, **k: _page([], "same"),
+    )
+    assert flows._walk_open_documents(None, TenantScope(uuid4()), uuid4(), NGN) is None
