@@ -138,7 +138,7 @@
       "state": "never-published"
     },
     "dotmac-payroll": {
-      "declared": "0.1.0a4",
+      "declared": "0.1.0a5",
       "reason": "Unpublished source successor to published 0.1.0a3 (ERP v2 cutover). It adds the deduction settlement mode (internal_recovery booked as already recovered), the cancel_payroll_run owner command and mid-month-leaver assignment lookup, with additive migration py_0002. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record.",
       "state": "declared-unpublished"
     },
