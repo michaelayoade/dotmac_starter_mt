@@ -580,6 +580,60 @@ class PayrollLiabilitySettlement(Base):
     )
 
 
+class PayrollSettlementReversal(Base):
+    """Append-only reversal of one recorded liability settlement (a5).
+
+    A bank-returned salary credit: the money never reached the payee. The
+    settlement row is never updated; this row is the audited correction.
+    """
+
+    __tablename__ = "payroll_settlement_reversals"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_payroll_settlement_reversals_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "settlement_id",
+            name="uq_payroll_settlement_reversals_settlement",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "settlement_id"],
+            [
+                f"{SCHEMA}.payroll_liability_settlements.tenant_id",
+                f"{SCHEMA}.payroll_liability_settlements.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_payroll_settlement_reversals_settlement",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "liability_id"],
+            [
+                f"{SCHEMA}.payroll_liabilities.tenant_id",
+                f"{SCHEMA}.payroll_liabilities.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_payroll_settlement_reversals_liability",
+        ),
+        CheckConstraint("amount > 0", name="ck_payroll_settlement_reversals_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    settlement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    return_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reversed_by_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    reversed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 TENANT_MODELS = (
     PayComponent,
     PayStructure,
@@ -592,6 +646,7 @@ TENANT_MODELS = (
     PayrollCalculationLine,
     PayrollLiability,
     PayrollLiabilitySettlement,
+    PayrollSettlementReversal,
 )
 TENANT_TABLES = tuple(model.__tablename__ for model in TENANT_MODELS)
 
@@ -609,4 +664,5 @@ __all__ = [
     "PayrollLiability",
     "PayrollLiabilitySettlement",
     "PayrollRun",
+    "PayrollSettlementReversal",
 ]
