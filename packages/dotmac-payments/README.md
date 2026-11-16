@@ -1,5 +1,16 @@
 # dotmac-payments
 
+## Integrate in a product assembly
+
+Register Payments and apply its tenant migration lineage. Call `dotmac_payments.service.open_payment_intent` with the tenant scope, a stable reference and the exact amount and currency. Route independently verified confirmation evidence from your provider adapter to Payments. Preserve the original reference and evidence on retry. Exercise confirmation replay and mismatched currency before wiring a real provider.
+
+The [executable service examples](../../tests/unit/test_payments_service.py) use repository fixtures to show the calls and expected results. From the repository root, after installing development dependencies, run:
+
+```sh
+poetry run pytest tests/unit/test_payments_service.py -q
+```
+
+
 Owns the **intent to pay** and the **correlation** between that intent and the
 external fact that it was paid — a provider callback, a reconciliation row, a
 reviewed bank-transfer proof, or a manual entry.
