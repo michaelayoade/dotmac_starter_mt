@@ -65,7 +65,9 @@ def _text(value: object, name: str) -> None:
         )
 
 
-def _member(value: object, allowed: tuple[str, ...], name: str, *, nullable: bool):
+def _member(
+    value: object, allowed: tuple[str, ...], name: str, *, nullable: bool
+) -> None:
     if value is None and nullable:
         return
     if not isinstance(value, str) or value not in allowed:
