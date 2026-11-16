@@ -7,7 +7,7 @@ changes, each called out here.
 
 ## Unreleased
 
-Source change only; no version bump and no migration (ADR-0006 § 5h, § 5i).
+Source change only: the declared version moves to the `0.2.0a6+dev` development marker (not a release), no migration (ADR-0006 § 5h, § 5i).
 
 - `RenderContext` gains additive v2 declarations: `required`, `optional`, `url`,
   `lists` (name to item variables), `sample` and `max_list_items`. A context that
