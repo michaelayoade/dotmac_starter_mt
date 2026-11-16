@@ -105,8 +105,8 @@ def test_unsafe_html_positions_are_refused_at_save(src: str) -> None:
         "<a class='x' href='{link}' title='fixed'>{name}</a>",
         '<img src="{link}" alt="fixed">',
         "<p>a < b {name}</p>",
-        "<!-- note --><p>{name}</p>",
-        "<script>1</script><p>{name}</p>",
+        "<!DOCTYPE html><html><body><p>{name}</p></body></html>",
+        "<p>a<br/>b</p><IMG SRC='{link}' alt=x>",
         '<ul>{#courses}<li><a href="{item_url}">{title}</a></li>{/courses}</ul>',
     ],
 )
@@ -128,11 +128,11 @@ def test_safe_html_positions_pass(src: str) -> None:
     )
 
 
-def test_section_that_changes_tag_state_is_refused() -> None:
+def test_section_inside_a_tag_is_refused() -> None:
     problems = validate_revision(
         CTX, text="{link}", html='<a {#note}href="{link}"{/note}>'
     )
-    assert any("changes the HTML tag state" in p for p in problems)
+    assert any("inside an HTML tag" in p for p in problems)
 
 
 # ── Subject controls ────────────────────────────────────────────────────────
@@ -211,3 +211,113 @@ def test_contexts_are_hashable_legacy_and_v2() -> None:
     assert hash(legacy) == hash(RenderContext(name="l", variables=("a",)))
     assert hash(v2) == hash(v2)
     assert len({legacy, v2, RenderContext(name="l", variables=("a",))}) == 2
+
+
+# ── Fail-closed scanner (round 3) ───────────────────────────────────────────
+
+DESYNC_PROBES = [
+    '<!--><a onclick="-->{name}">',
+    '<!---><a onclick="-->{name}">',
+    '<!-- a --!><a onclick="-->{name}">',
+    "<script></scriptx>{name}</script>",
+    "<style></stylex>{name}</style>",
+    "<p>ok</p><!-- {name} -->",
+    "<?php {name} ?>",
+    "<![CDATA[ {name} ]]>",
+    '</ onclick="><a onclick="{name}">',
+    '<a ="><b onclick="{name}">',
+    '<a "x"=1 title=">{name}">',
+    "<p>unterminated <a href=",
+    "<p>x</p><!doctype html>",
+    "<!doctype html><!doctype html>",
+]
+FORBIDDEN = [
+    "script",
+    "style",
+    "xmp",
+    "iframe",
+    "noembed",
+    "noframes",
+    "noscript",
+    "plaintext",
+    "textarea",
+    "title",
+    "template",
+    "svg",
+    "math",
+    "base",
+    "link",
+    "meta",
+    "object",
+    "embed",
+    "form",
+    "frame",
+    "frameset",
+    "applet",
+]
+
+
+@pytest.mark.parametrize("src", DESYNC_PROBES)
+def test_desync_probes_are_refused(src: str) -> None:
+    values = {"name": "\nalert(1)//", "link": "https://example.com"}
+    assert validate_revision(CTX, text="{link}", html=src)
+    with pytest.raises(RenderRefusedError):
+        render_part(src, values, "html", context=CTX)
+
+
+@pytest.mark.parametrize("tag", FORBIDDEN)
+@pytest.mark.parametrize(
+    "form", ["<{t}>x</{t}>", "<{T}>x</{T}>", "<{t} a=b>", "</{t}>"]
+)
+def test_forbidden_elements_are_refused_anywhere(tag: str, form: str) -> None:
+    src = "<p>{name}</p>" + form.format(t=tag, T=tag.upper())
+    assert validate_revision(CTX, text="{link}", html=src)
+    with pytest.raises(RenderRefusedError):
+        render_part(src, {"name": "n"}, "html", context=CTX)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        '<script src="{link}"></script>',
+        '<iframe src="{link}">',
+        '<embed src="{link}">',
+        '<base href="{link}">',
+        '<link href="{link}">',
+        '<div href="{link}">',
+        '<a src="{link}">',
+        '<img href="{link}">',
+        '<video src="{link}">',
+    ],
+)
+def test_url_values_only_in_a_href_area_href_img_src(src: str) -> None:
+    assert validate_revision(CTX, text="{link}", html=src)
+    with pytest.raises(RenderRefusedError):
+        render_part(src, {"link": "https://example.com"}, "html", context=CTX)
+
+
+@pytest.mark.parametrize(
+    "src",
+    ['<a href="{link}">x</a>', '<area href="{link}">', '<img src="{link}">'],
+)
+def test_allowed_url_element_attribute_pairs(src: str) -> None:
+    out = render_part(src, {"link": "https://example.com"}, "html", context=CTX)
+    assert "https://example.com" in out
+
+
+def test_long_names_are_refused() -> None:
+    assert validate_revision(CTX, text="{link}", html="<" + "a" * 70 + ">")
+    assert validate_revision(CTX, text="{link}", html="<a " + "b" * 70 + "=1>")
+
+
+def test_length_checked_before_parsing() -> None:
+    big = "{" * (MAX_TEMPLATE_CHARS + 1)
+    with pytest.raises(RenderRefusedError, match="exceeds"):
+        render_part(big, {}, "text", context=CTX)
+
+
+@pytest.mark.parametrize("ch", ["\x80", "\x9b", "\u200b", "\u202e", "\ufeff"])
+def test_subject_refuses_remaining_c1_and_format_characters(ch: str) -> None:
+    assert subject_problem("a" + ch) is not None
+    with pytest.raises(RenderRefusedError):
+        render_part("Hi {name}", {"name": ch}, "subject", context=CTX)

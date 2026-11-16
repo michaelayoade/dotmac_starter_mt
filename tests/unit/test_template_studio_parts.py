@@ -488,9 +488,41 @@ def test_values_are_never_reinterpreted_after_substitution() -> None:
     )
 
 
-def test_render_time_is_linear_for_a_large_flat_body() -> None:
-    body = "{name} " * 50_000
-    start = time.perf_counter()
-    out = render_part(body, {"name": "x"}, "html")
-    assert time.perf_counter() - start < 10.0
-    assert out.startswith("x x")
+def _best_time(make, n: int) -> float:
+    best = float("inf")
+    for _ in range(3):
+        src = make(n)
+        start = time.perf_counter()
+        try:
+            render_part(src, {"name": "x"}, "html")
+        except RenderRefusedError:
+            pass  # a refusal must scale linearly too, so time it
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda n: "{name} " * n,
+        lambda n: "<p>{name}</p>" * n,
+        lambda n: "<" + "a" * n + ">",
+        lambda n: "<a " + "b" * n + "=1>",
+        lambda n: "<a " + "b=" + "c" * n + ">",
+        lambda n: '<a title="' + "c" * n + '">',
+    ],
+    ids=[
+        "flat",
+        "tags",
+        "long-tag-name",
+        "long-attr-name",
+        "long-unquoted",
+        "long-quoted",
+    ],
+)
+def test_html_render_time_scales_roughly_linearly(make) -> None:
+    n = 40_000
+    small = _best_time(make, n)
+    large = _best_time(make, 4 * n)
+    # Linear growth gives about 4x; quadratic would give about 16x.
+    assert large < max(small, 0.005) * 9 + 0.05

@@ -121,7 +121,11 @@ def subject_problem(text: str) -> str | None:
     header line or be interpreted as one by a downstream component.
     """
     for ch in text:
-        if ord(ch) < 0x20 or ch in _SUBJECT_BREAKS:
+        if (
+            ord(ch) < 0x20
+            or ch in _SUBJECT_BREAKS
+            or unicodedata.category(ch) in ("Cc", "Cf")
+        ):
             return f"contains the control or line-break character U+{ord(ch):04X}"
     return None
 
@@ -281,11 +285,11 @@ def render_part(
     """
     if part not in ("subject", "text", "html"):
         raise ValueError(f"unknown template part {part!r}")
+    if len(source) > MAX_TEMPLATE_CHARS:
+        raise RenderRefusedError(f"template exceeds {MAX_TEMPLATE_CHARS} characters")
     nodes = parse(source)
     if part == "subject" and any(isinstance(n, Section) for n in nodes):
         raise TemplateSyntaxError("a subject may not contain sections")
-    if len(source) > MAX_TEMPLATE_CHARS:
-        raise RenderRefusedError(f"template exceeds {MAX_TEMPLATE_CHARS} characters")
     if part == "html":
         url_names = getattr(context, "url", ()) if context is not None else ()
         problems = html_placeholder_problems(nodes, url_names)
