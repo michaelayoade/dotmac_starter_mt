@@ -36,6 +36,11 @@ and may change without a contract bump.
   reach Template Studio in-process; the models are not.
 - `rendering.render` — single-brace substitution without loading the module's
   web surface or persistence service.
+- `rendering.render_part` — the part-aware renderer (`subject` / `text` / `html`)
+  with logic-less sections, against a context v2 declaration.
+- `validation.validate_revision` — every problem a revision has against its
+  context, as a list; the function a deploy-time check calls per published
+  revision.
 
 ## What a consumer must NOT do
 

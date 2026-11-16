@@ -5,6 +5,27 @@ follows [Semantic Versioning](https://semver.org). Pre-1.0 (`0.x`, incl. this
 alpha) the surface is still settling — a `0.MINOR` bump may carry breaking
 changes, each called out here.
 
+## Unreleased
+
+Source change only; no version bump and no migration (ADR-0006 § 5h, § 5i).
+
+- `RenderContext` gains additive v2 declarations: `required`, `optional`, `url`,
+  `lists` (name to item variables), `sample` and `max_list_items`. A context that
+  declares only `variables` is unchanged.
+- New `rendering.render_part` renders one part: `text` raw, `html` escaped with
+  `url` values scheme-checked (http, https, mailto) and attribute-escaped,
+  `subject` refusing CR/LF. Adds logic-less sections `{#name}…{/name}` and
+  `{^name}…{/name}` (depth at most 2, bounded list length and output). The
+  existing `render()` and flat placeholder pattern are untouched.
+- New `validation.validate_revision` / `check_revision`. `create_version` and
+  `update_version` now refuse unknown variables, missing `required` variables,
+  mis-nested or unbalanced sections, undeclared section names and item variables
+  used outside their list. A saved `{#x}` in a legacy context that declares no
+  lists is now refused (it previously saved and rendered literally).
+- `render_published` renders through `render_part`; flat templates are
+  byte-identical, and a subject whose rendered value contains CR/LF is now
+  refused.
+
 ## 0.2.0a5 — 2026-09-30
 
 - Add `service.compose_email` for lossless, ordered composition of already
