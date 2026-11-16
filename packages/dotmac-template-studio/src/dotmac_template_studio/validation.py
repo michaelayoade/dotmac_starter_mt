@@ -23,7 +23,11 @@ Rules, in addition to the flat-placeholder rules of § 5b:
    name used as a flat placeholder is refused, and an optional scalar may be used
    as a flat placeholder only inside its own section (it may be absent, so
    anywhere else it could render half-substituted).
-5. Every `required` variable must appear as a top-level placeholder in each body
+5. In the html part a placeholder may appear only in element text, or as the
+   whole value of a quoted `href`/`src` when declared `url` (`htmlctx`).
+6. A subject may contain no line break or control character; every part is
+   bounded by `MAX_TEMPLATE_CHARS`.
+7. Every `required` variable must appear as a top-level placeholder in each body
    part present (text, and html when given). A subject is exempt. Occurrences
    inside sections do not count: a section may render zero times.
 """
@@ -35,6 +39,8 @@ from typing import Any
 
 from dotmac_kernel.exceptions import BadRequestError
 
+from dotmac_template_studio.htmlctx import html_placeholder_problems
+from dotmac_template_studio.rendering import MAX_TEMPLATE_CHARS, subject_problem
 from dotmac_template_studio.sections import (
     DOUBLE_BRACE_SECTION,
     Section,
@@ -51,6 +57,12 @@ def _validate_part(
     label: str, source: str, context: Any, *, is_subject: bool
 ) -> list[str]:
     problems: list[str] = []
+    if len(source) > MAX_TEMPLATE_CHARS:
+        return [f"{label}: longer than {MAX_TEMPLATE_CHARS} characters"]
+    if is_subject:
+        reason = subject_problem(source)
+        if reason:
+            problems.append(f"{label}: the subject {reason}")
     double = sorted(
         {"{{" + m + "}}" for m in _DOUBLE_BRACE.findall(source)}
         | {m.strip() for m in DOUBLE_BRACE_SECTION.findall(source)}
@@ -66,6 +78,10 @@ def _validate_part(
         problems.append(f"{label}: {exc}")
         return problems
 
+    if label == "html":
+        problems += [
+            f"{label}: {p}" for p in html_placeholder_problems(nodes, context.url)
+        ]
     scalars: frozenset[str] = frozenset(context.variables)
     optional: frozenset[str] = frozenset(context.optional)
     lists = context.lists

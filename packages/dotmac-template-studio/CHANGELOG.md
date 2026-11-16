@@ -23,8 +23,27 @@ Source change only: the declared version moves to the `0.2.0a6+dev` development 
   used outside their list. A saved `{#x}` in a legacy context that declares no
   lists is now refused (it previously saved and rendered literally).
 - `render_published` renders through `render_part`; flat templates are
-  byte-identical, and a subject whose rendered value contains CR/LF is now
-  refused.
+  byte-identical.
+- Html part: a placeholder is allowed only in element text, or as the whole
+  value of a quoted `href`/`src` when the variable is declared `url`; any other
+  in-tag, comment or script/style position is refused at save and at render.
+  `url` values also refuse control and invisible format characters.
+- A list's item variables are never filled from outer values; a context may not
+  declare one name as both a scalar and an item variable.
+- A subject refuses every line break and control character (NUL, tab, C0, DEL,
+  NEL, U+2028/2029), in its source at save and in its rendered result. Each part
+  is bounded to 1,000,000 characters at save.
+
+### Render-time behaviour change (upgrade note)
+
+Rows already published before this change are not re-validated on upgrade, but
+`render_published` now parses every body and subject at send time. A published
+row containing a section-like token (`{#a}`, `{^a}`, `{/x}`) that does not form
+a valid declared section, or a subject containing a line break or control
+character, now raises `BadRequestError` when rendered instead of sending the
+text literally. A consumer MUST run `validation.validate_revision` over every
+one of its published revisions (the TS-6 sweep) and repair or republish any that
+report problems BEFORE bumping its pin to a release containing this change.
 
 ## 0.2.0a5 — 2026-09-30
 

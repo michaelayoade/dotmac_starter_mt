@@ -70,7 +70,6 @@ from __future__ import annotations
 import re
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Any
 
 from dotmac_kernel.exceptions import BadRequestError
@@ -81,6 +80,32 @@ from dotmac_template_studio.rendering import (
     RenderRefusedError,
     check_url,
 )
+
+
+class FrozenMap(Mapping):
+    """A read-only, hashable mapping: what a frozen context stores its dicts as."""
+
+    __slots__ = ("_data", "_hash")
+
+    def __init__(self, data: Mapping[str, Any]) -> None:
+        self._data = dict(data)
+        self._hash = hash(frozenset(self._data.items()))
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __hash__(self) -> int:
+        return self._hash
+
+    def __repr__(self) -> str:
+        return f"FrozenMap({self._data!r})"
+
 
 _NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -174,6 +199,14 @@ class RenderContext:
                 "that can supply nothing would reject every placeholder"
             )
         item_names = frozenset().union(*lists.values()) if lists else frozenset()
+        shadowed = scalars & item_names
+        if shadowed:
+            raise ValueError(
+                f"render context {self.name!r}: {sorted(shadowed)} are declared "
+                "both as a scalar variable and as a list item variable — a list's "
+                "item variables are never filled from outer values, so give them "
+                "distinct names"
+            )
         for variable in url:
             self._check_name("url", variable)
         stray = url - scalars - item_names
@@ -196,7 +229,7 @@ class RenderContext:
         object.__setattr__(self, "required", required)
         object.__setattr__(self, "optional", optional)
         object.__setattr__(self, "url", url)
-        object.__setattr__(self, "lists", MappingProxyType(lists))
+        object.__setattr__(self, "lists", FrozenMap(lists))
         object.__setattr__(self, "sample", self._freeze_sample(scalars, lists, url))
 
     def _check_name(self, label: str, variable: str) -> None:
@@ -244,7 +277,7 @@ class RenderContext:
                         self._check_sample_value(
                             f"{key}.{item_key}", item_key, item_value, url
                         )
-                    rows.append(MappingProxyType(dict(row)))
+                    rows.append(FrozenMap(row))
                 frozen[key] = tuple(rows)
             elif key in scalars:
                 self._check_sample_value(key, key, value, url)
@@ -254,7 +287,7 @@ class RenderContext:
                     f"render context {self.name!r}: sample names {key!r}, which "
                     "the context does not declare"
                 )
-        return MappingProxyType(frozen)
+        return FrozenMap(frozen)
 
     def _check_sample_value(
         self, label: str, name: str, value: Any, url: frozenset[str]
@@ -329,6 +362,7 @@ def _reset_for_tests(contexts: Iterable[RenderContext] | None = None) -> Any:
 
 
 __all__ = [
+    "FrozenMap",
     "RenderContext",
     "RenderContextConflictError",
     "UnknownRenderContextError",

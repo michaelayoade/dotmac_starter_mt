@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import html as _html
 import re
+import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit
 
+from dotmac_template_studio.htmlctx import html_placeholder_problems
 from dotmac_template_studio.sections import (
     Section,
     TemplateSyntaxError,
@@ -66,6 +68,8 @@ MAX_LIST_ITEMS = 100
 HARD_MAX_LIST_ITEMS = 500
 # Two nested lists of 100 items multiply; bound what a render may produce.
 MAX_RENDERED_CHARS = 1_000_000
+# Save-time bound on each part's source, consistent with the render cap.
+MAX_TEMPLATE_CHARS = MAX_RENDERED_CHARS
 # The only URL schemes a `url` value may carry in the html part.
 ALLOWED_URL_SCHEMES = frozenset({"http", "https", "mailto"})
 
@@ -83,9 +87,10 @@ def check_url(value: str) -> str:
     """
     if not isinstance(value, str) or not value:
         raise RenderRefusedError("a url value must be a non-empty string")
-    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+    if any(ch.isspace() or unicodedata.category(ch) in ("Cc", "Cf") for ch in value):
         raise RenderRefusedError(
-            "a url value may not contain whitespace or control characters"
+            "a url value may not contain whitespace, control or invisible "
+            "format characters"
         )
     try:
         parts = urlsplit(value)
@@ -105,8 +110,27 @@ def check_url(value: str) -> str:
     return value
 
 
+_SUBJECT_BREAKS = frozenset("\x7f\x85\u2028\u2029")
+
+
+def subject_problem(text: str) -> str | None:
+    """Why `text` may not appear in a subject, or None.
+
+    Refuses every line break `str.splitlines()` recognises and every C0 control
+    (including NUL and tab) plus DEL and the C1 NEL: any of them can start a new
+    header line or be interpreted as one by a downstream component.
+    """
+    for ch in text:
+        if ord(ch) < 0x20 or ch in _SUBJECT_BREAKS:
+            return f"contains the control or line-break character U+{ord(ch):04X}"
+    return None
+
+
 def _present(value: Any) -> bool:
     return isinstance(value, str) and value != ""
+
+
+_Scope = tuple[frozenset[str], Mapping[str, Any]]
 
 
 class _Renderer:
@@ -137,6 +161,9 @@ class _Renderer:
             if context is not None
             else frozenset()
         )
+        self.item_names: frozenset[str] = frozenset().union(
+            *(frozenset(v) for v in self.lists.values())
+        )
         cap = getattr(context, "max_list_items", None) if context is not None else None
         self.max_items = min(cap or MAX_LIST_ITEMS, HARD_MAX_LIST_ITEMS)
 
@@ -154,10 +181,10 @@ class _Renderer:
         if self.part == "text":
             return value
         if self.part == "subject":
-            if "\r" in value or "\n" in value:
+            problem = subject_problem(value)
+            if problem:
                 raise RenderRefusedError(
-                    f"value for {name!r} contains a line break, which a subject "
-                    "may not carry"
+                    f"value for {name!r} {problem}, which a subject may not carry"
                 )
             return value
         if name in self.url_names:
@@ -167,13 +194,17 @@ class _Renderer:
                 raise RenderRefusedError(f"value for {name!r}: {exc}") from exc
         return _html.escape(value, quote=True)
 
-    def lookup(self, name: str, scopes: list[Mapping[str, Any]]) -> Any:
-        for scope in reversed(scopes):
-            if name in scope:
-                return scope[name]
+    def lookup(self, name: str, scopes: list[_Scope]) -> Any:
+        # A list's declared item variable is answered by the item alone: a
+        # missing one is missing, never filled from an outer value.
+        for allowed, item in reversed(scopes):
+            if name in allowed:
+                return item.get(name)
+        if name in self.item_names:
+            return None  # an item variable outside any list scope
         return self.values.get(name)
 
-    def run(self, nodes: list[Any], scopes: list[Mapping[str, Any]]) -> None:
+    def run(self, nodes: list[Any], scopes: list[_Scope]) -> None:
         for node in nodes:
             if isinstance(node, Text):
                 self.emit(node.value)
@@ -187,7 +218,7 @@ class _Renderer:
             else:
                 self.section(node, scopes)
 
-    def section(self, node: Section, scopes: list[Mapping[str, Any]]) -> None:
+    def section(self, node: Section, scopes: list[_Scope]) -> None:
         name = node.name
         if name in self.lists:
             raw = self.values.get(name)
@@ -212,9 +243,7 @@ class _Renderer:
                     raise RenderRefusedError(
                         f"every item of list {name!r} must be a mapping"
                     )
-                # Only the declared item vocabulary is visible in an item scope.
-                scope = {k: v for k, v in item.items() if k in allowed}
-                self.run(node.children, [*scopes, scope])
+                self.run(node.children, [*scopes, (allowed, item)])
             return
         if name in self.optional:
             present = _present(self.values.get(name))
@@ -255,12 +284,19 @@ def render_part(
     nodes = parse(source)
     if part == "subject" and any(isinstance(n, Section) for n in nodes):
         raise TemplateSyntaxError("a subject may not contain sections")
+    if len(source) > MAX_TEMPLATE_CHARS:
+        raise RenderRefusedError(f"template exceeds {MAX_TEMPLATE_CHARS} characters")
+    if part == "html":
+        url_names = getattr(context, "url", ()) if context is not None else ()
+        problems = html_placeholder_problems(nodes, url_names)
+        if problems:
+            raise RenderRefusedError("unsafe html placeholder: " + "; ".join(problems))
     renderer = _Renderer(part, values, context, strict)
     renderer.run(nodes, [])
     if part == "subject":
-        result = "".join(renderer.out)
-        if "\r" in result or "\n" in result:
-            raise RenderRefusedError("the rendered subject contains a line break")
+        problem = subject_problem("".join(renderer.out))
+        if problem:
+            raise RenderRefusedError(f"the rendered subject {problem}")
     if strict and renderer.missing:
         names = ", ".join(sorted(set(renderer.missing)))
         raise MissingTemplateValueError(
@@ -274,9 +310,11 @@ __all__ = [
     "HARD_MAX_LIST_ITEMS",
     "MAX_LIST_ITEMS",
     "MAX_RENDERED_CHARS",
+    "MAX_TEMPLATE_CHARS",
     "MissingTemplateValueError",
     "RenderRefusedError",
     "check_url",
     "render",
     "render_part",
+    "subject_problem",
 ]

@@ -320,7 +320,7 @@ def test_render_published_renders_sections_not_literally(db, tenant) -> None:
     )
     assert subject == "Reset Ada"
     assert body == "https://example.com/r\n[A][B]"
-    with pytest.raises(BadRequestError, match="line break"):
+    with pytest.raises(BadRequestError, match="line-break"):
         service.render_published(
             db,
             tenant.id,
