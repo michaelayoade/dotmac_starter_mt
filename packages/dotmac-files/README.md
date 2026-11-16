@@ -1,5 +1,18 @@
 # dotmac-files
 
+## Integrate file uploads
+
+1. Register the Files manifest in the product assembly and apply its migration lineage for the supported installation set. Bind the storage provider in that assembly.
+2. Resolve the trusted `TenantScope` or `PlatformScope` and build a `FilePolicy` that limits bytes, extensions and media types for the product workflow.
+3. Call `prepare_upload` with the provider, scope, policy, original filename, declared media type and byte chunks. Use the returned file identity and detected media type. The module constructs the storage key from scope and generated identity.
+
+The [upload examples](../../tests/unit/test_files.py) use an in-memory provider and verify the stored bytes, checksum, detected media type and tenant or platform storage key. Run them from the repository root after installing development dependencies.
+
+```sh
+poetry run pytest tests/unit/test_files.py -q -k upload
+```
+
+
 `dotmac-files` is the optional owner of stored bytes on explicit tenant and
 platform security planes. It validates an incoming stream, writes it beneath a
 trusted immutable key, records its physical metadata, streams it back through
