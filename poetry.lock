@@ -2197,7 +2197,7 @@ url = "packages/dotmac-tax"
 
 [[package]]
 name = "dotmac-template-studio"
-version = "0.2.0a6"
+version = "0.2.0a6+dev"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 optional = false
 python-versions = ">=3.11,<3.14"
