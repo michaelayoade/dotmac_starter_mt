@@ -13,6 +13,8 @@ include = [
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
 dotmac-kernel = ">=0.1.0a109"
+dotmac-billing = ">=0.1.0a12"
+dotmac-payments = ">=0.1.0a4"
 sqlalchemy = "^2.0"
 
 [build-system]
