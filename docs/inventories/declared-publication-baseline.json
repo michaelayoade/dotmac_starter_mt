@@ -139,7 +139,7 @@
     },
     "dotmac-payroll": {
       "declared": "0.1.0a5",
-      "reason": "Unpublished source successor to 0.1.0a4 (ERP v2 cutover). It adds the governed settlement reversal for bank-returned salary credits (reverse_liability_settlement and build_settlement_reversal_consequence), with additive migration py_0003; the a4 successor (deduction settlement mode, run cancel, mid-month leavers, py_0002) is itself still unpublished. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record.",
+      "reason": "Unpublished source successor to published 0.1.0a4 (ERP v2 cutover). It adds the governed settlement reversal for bank-returned salary credits (reverse_liability_settlement and build_settlement_reversal_consequence), with additive migration py_0003. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
