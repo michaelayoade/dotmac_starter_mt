@@ -506,3 +506,293 @@ def test_payroll_internal_recovery_and_cancel_on_postgres(
             cancelled_at=now,
         )
         assert (cancelled.status, cancelled.cancelled_by_id) == ("cancelled", actor)
+
+
+def _alembic_config(case: ModuleCase):
+    from alembic.config import Config
+
+    config = Config(str(REPO_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    config.set_main_option("version_locations", f"{KERNEL_VERSIONS} {case.versions}")
+    return config
+
+
+def test_payroll_settlement_reversal_on_postgres(
+    migrated_module: tuple[ModuleCase, str, str],
+) -> None:
+    """a5 reversal through the real migration, RLS role and append-only trigger."""
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.money import Currency, Money
+    from dotmac_payroll import (
+        EmployeeComponentInput,
+        PayComponentInput,
+        PayrollConflict,
+        PayrollRuleViolation,
+        PayRuleInput,
+        approve_payroll_run,
+        assign_employee_pay_structure,
+        build_settlement_reversal_consequence,
+        calculate_employee_payroll,
+        create_pay_component,
+        create_pay_structure,
+        create_payroll_run,
+        finalize_payroll_run,
+        publish_pay_structure_revision,
+        record_liability_settlement,
+        reverse_liability_settlement,
+    )
+    from dotmac_payroll.models import (
+        PayrollLiability,
+        PayrollLiabilitySettlement,
+        PayrollSettlementReversal,
+    )
+    from sqlalchemy import select
+
+    case, admin_url, app_url = migrated_module
+    if case.manifest.code != "payroll":
+        pytest.skip("payroll-only proof")
+    tenant_a, tenant_b = _seed_tenants(admin_url)
+    ngn = Currency("NGN", 2)
+    now = datetime(2026, 8, 19, 12, tzinfo=UTC)
+    recorder, reverser = uuid.uuid4(), uuid.uuid4()
+
+    def rule(component_id, sequence, **kw):
+        return PayRuleInput(
+            component_id, sequence, "input", None, None, (), False, **kw
+        )
+
+    def reverse(session, settlement, **kw):
+        args = {
+            "tenant_id": tenant_a,
+            "settlement_id": settlement.id,
+            "return_ref": "RET-PG-1",
+            "reason": "account closed",
+            "reversed_by_id": reverser,
+            "reversed_at": now,
+        }
+        args.update(kw)
+        return reverse_liability_settlement(session, **args)
+
+    with _tenant_session(app_url, tenant_a) as session:
+        base = create_pay_component(
+            session,
+            tenant_id=tenant_a,
+            command=PayComponentInput("B", "Base", "earning", "sal", None, None),
+        )
+        loan = create_pay_component(
+            session,
+            tenant_id=tenant_a,
+            command=PayComponentInput("L", "Loan", "deduction", None, "1410", "desk"),
+        )
+        structure = create_pay_structure(
+            session, tenant_id=tenant_a, code="S", name="S", currency=ngn
+        )
+        revision = publish_pay_structure_revision(
+            session,
+            tenant_id=tenant_a,
+            structure_id=structure.id,
+            version=1,
+            effective_from=date(2026, 1, 1),
+            effective_to=None,
+            net_payable_account_ref="2040",
+            rules=(
+                rule(base.id, 1),
+                rule(loan.id, 2, settlement_mode="internal_recovery"),
+            ),
+            published_by_id=uuid.uuid4(),
+            published_at=now,
+        )
+        assign_employee_pay_structure(
+            session,
+            tenant_id=tenant_a,
+            employee_ref="employee:pg-a5",
+            revision_id=revision.id,
+            effective_from=date(2026, 1, 1),
+            effective_to=None,
+            source_ref="people:1",
+            source_version="1",
+        )
+        run = create_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_ref="PG-A5",
+            period_start=date(2026, 7, 1),
+            period_end=date(2026, 7, 31),
+            currency=ngn,
+            created_by_id=uuid.uuid4(),
+            created_at=now,
+        )
+        calculate_employee_payroll(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            employee_ref="employee:pg-a5",
+            proration_factor=Decimal("1"),
+            inputs=(
+                EmployeeComponentInput(base.id, Money.of("1000.10", ngn), "c"),
+                EmployeeComponentInput(loan.id, Money.of("200.05", ngn), "l"),
+            ),
+            calculated_at=now,
+        )
+        approve_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            approved_by_id=uuid.uuid4(),
+            approved_at=now,
+        )
+        finalize_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            finalized_by_id=uuid.uuid4(),
+            finalized_at=now,
+        )
+        liabilities = session.scalars(
+            select(PayrollLiability).where(PayrollLiability.run_id == run.id)
+        ).all()
+        net = next(x for x in liabilities if x.liability_key == "employee-net-pay")
+        recovery = next(
+            x for x in liabilities if x.settlement_mode == "internal_recovery"
+        )
+        assert net.amount == Decimal("800.05")
+        settlement = record_liability_settlement(
+            session,
+            tenant_id=tenant_a,
+            liability_id=net.id,
+            amount=Money.of("800.05", ngn),
+            settlement_ref="PAY-PG-1",
+            evidence_ref="bank:1",
+            recorded_by_id=recorder,
+            recorded_at=now,
+        )
+        # Reverser equal to the recorder is refused; nothing changes.
+        with pytest.raises(PayrollRuleViolation, match="different person"):
+            reverse(session, settlement, reversed_by_id=recorder)
+        assert net.status == "settled"
+        # Internal recovery refused even with a forged settlement row.
+        forged = PayrollLiabilitySettlement(
+            tenant_id=tenant_a,
+            liability_id=recovery.id,
+            amount=recovery.amount,
+            settlement_ref="FORGED",
+            evidence_ref="x",
+            recorded_by_id=recorder,
+            recorded_at=now,
+        )
+        session.add(forged)
+        session.flush()
+        with pytest.raises(PayrollRuleViolation, match="internal recovery"):
+            reverse(session, forged)
+
+        reversal = reverse(session, settlement)
+        assert reversal.amount == Decimal("800.05")
+        assert (net.status, net.amount_settled) == ("outstanding", Decimal("0"))
+        # Replay no-op; different return reference conflicts.
+        assert reverse(session, settlement).id == reversal.id
+        with pytest.raises(PayrollConflict):
+            reverse(session, settlement, return_ref="RET-OTHER")
+        fact = build_settlement_reversal_consequence(
+            session,
+            tenant_id=tenant_a,
+            reversal_id=reversal.id,
+            bank_account_ref="bank:main",
+            posting_date=date(2026, 8, 5),
+        )
+        assert (
+            sum(e.debit for e in fact.entries)
+            == sum(e.credit for e in fact.entries)
+            == Decimal("800.05")
+        )
+        assert {e.account_ref: e.debit for e in fact.entries if e.debit} == {
+            "bank:main": Decimal("800.05")
+        }
+        assert {e.account_ref: e.credit for e in fact.entries if e.credit} == {
+            "2040": Decimal("800.05")
+        }
+        # Re-settleable under a new reference.
+        again = record_liability_settlement(
+            session,
+            tenant_id=tenant_a,
+            liability_id=net.id,
+            amount=Money.of("800.05", ngn),
+            settlement_ref="PAY-PG-2",
+            evidence_ref="bank:2",
+            recorded_by_id=recorder,
+            recorded_at=now,
+        )
+        assert net.status == "settled" and again.id != settlement.id
+        # A partially-settled liability cannot be reversed: reverse PAY-PG-2
+        # then re-pay in two pieces.
+        reverse(session, again, return_ref="RET-PG-2")
+        part = record_liability_settlement(
+            session,
+            tenant_id=tenant_a,
+            liability_id=net.id,
+            amount=Money.of("300.00", ngn),
+            settlement_ref="PAY-PG-3",
+            evidence_ref="bank:3",
+            recorded_by_id=recorder,
+            recorded_at=now,
+        )
+        with pytest.raises(PayrollRuleViolation, match="fully settle"):
+            reverse(session, part, return_ref="RET-PG-3")
+        session.commit()
+
+    # Append-only: the online role has no UPDATE/DELETE grant, and the evidence
+    # trigger refuses even the owner role.
+    with _tenant_session(app_url, tenant_a) as session:
+        for statement in (
+            "UPDATE mod_payroll.payroll_settlement_reversals SET reason = 'x'",
+            "DELETE FROM mod_payroll.payroll_settlement_reversals",
+        ):
+            with pytest.raises(DBAPIError):
+                session.execute(text(statement))
+            session.rollback()
+        # Tenant isolation: another tenant sees no reversals.
+    with _tenant_session(app_url, tenant_b) as session:
+        assert session.scalars(select(PayrollSettlementReversal)).all() == []
+    admin = create_engine(admin_url)
+    for statement in (
+        "UPDATE mod_payroll.payroll_settlement_reversals SET reason = 'x'",
+        "DELETE FROM mod_payroll.payroll_settlement_reversals",
+    ):
+        with pytest.raises(DBAPIError, match="append-only"), admin.begin() as conn:
+            conn.execute(text(statement))
+    admin.dispose()
+
+    # Downgrade guard: refused while reversals exist (even though the schema
+    # is otherwise unchanged), and the lineage is still at py_0003.
+    from alembic import command
+
+    os.environ["MIGRATION_DATABASE_URL"] = admin_url
+    with pytest.raises(RuntimeError, match="a5 downgrade refused"):
+        command.downgrade(_alembic_config(case), "py_0002_mode_and_run_cancel")
+    admin = create_engine(admin_url)
+    with admin.connect() as conn:
+        heads = conn.execute(text("SELECT version_num FROM public.alembic_version"))
+        assert "py_0003_settlement_reversal" in heads.scalars().all()
+    admin.dispose()
+
+
+def test_payroll_a5_downgrade_succeeds_when_no_reversal_exists(
+    migrated_module: tuple[ModuleCase, str, str],
+) -> None:
+    from alembic import command
+
+    case, admin_url, _ = migrated_module
+    if case.manifest.code != "payroll":
+        pytest.skip("payroll-only proof")
+    os.environ["MIGRATION_DATABASE_URL"] = admin_url
+    config = _alembic_config(case)
+    command.downgrade(config, "py_0002_mode_and_run_cancel")
+    admin = create_engine(admin_url)
+    with admin.connect() as conn:
+        gone = conn.execute(
+            text("SELECT to_regclass('mod_payroll.payroll_settlement_reversals')")
+        ).scalar_one()
+        assert gone is None
+    admin.dispose()
+    command.upgrade(config, "heads")

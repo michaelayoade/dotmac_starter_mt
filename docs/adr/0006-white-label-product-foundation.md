@@ -275,11 +275,32 @@ present:
    semantics, the same failure behaviour. Similar markup is not a contract.
 2. **A named owner** for the extracted unit, per the Dotmac source-of-truth
    standard.
-3. **A migration and cutover path**: which consumer moves first, what the shadow
-   period is, and how drift is detected afterwards.
+3. **A migration and cutover path**: which consumer moves first, what evidence
+   proves the move (backtest, saved tests, real-record preview), how it rolls
+   out (a guarded rollout on Starter rails), and how drift is detected
+   afterwards.
 
 Absent all three, the duplication is recorded in the inventory and left in place.
 Recording it is the deliverable; removing it is not.
+
+> **Verification correction — 2026-11-16 (owner ruling).** Point 3 originally
+> asked "what the shadow period is". That wording is withdrawn here and in the
+> D2, 2026-08-08 and 2026-08-18 passages below. **No extraction or cutover is
+> gated on a shadow run, a side-by-side run or an N-day parallel window.**
+> Verification is evidence, built once on Starter rails:
+>
+> - **Backtest** over recorded history.
+> - **Saved tests**: golden fixtures and ported parity tests.
+> - **Real-record preview** on a restored copy, never live production.
+> - **Guarded rollout**: scoped, flag- or cap-limited, with a kill switch and a
+>   stated rollback.
+>
+> The gate is zero unexplained differences and resolved exceptions, not elapsed
+> time. The dossier key `shadow_and_drift` keeps its name for now, because it
+> is a schema field in every `EXTRACTION.toml`. Its value records this
+> verification and the drift check, not a shadow period. This correction does
+> not touch the 2026-08-15 "module shadow", which is an empty table with no
+> authority and is a different concept.
 
 ## Inventories (the rest of the F0 deliverable)
 
@@ -424,9 +445,10 @@ blocker instead of adding surface awaiting adopters.
 
 The signed, versioned WS8 licence, applied-state, keyring, and revocation
 contracts survive. ERP's existing format is legacy input only: ERP E10 must
-inventory it, issue or map replacement WS8 state, shadow-verify the cutover,
-and retire the old verifier and writer. There is no permanent dual-authority or
-"accept either forever" mode.
+inventory it, issue or map replacement WS8 state, verify the cutover by
+backtest, saved tests and real-record preview with a guarded rollout (§ 5
+verification correction), and retire the old verifier and writer. There is no
+permanent dual-authority or "accept either forever" mode.
 
 #### D3 — `dotmac-ui` is toolchain-agnostic to consumers
 
@@ -516,7 +538,8 @@ mature, tested implementation. The owner has now resolved that ambiguity:
 4. **Preserve proof and make the cutover repairable.** Every shared distribution
    carries an extraction dossier naming the contract, source repositories and
    paths, source tests preserved as parity proof, two contract consumers, the
-   owner, first cutover, shadow/drift check, and local-copy retirement gate.
+   owner, first cutover, verification and drift check (the `shadow_and_drift`
+   key; see the § 5 verification correction), and local-copy retirement gate.
    Existing distributions predating this amendment are recorded as explicit,
    non-growing debt rather than silently treated as conforming.
 
@@ -544,7 +567,8 @@ first runtime consumer when all of the following hold in checked-in evidence:
    retire;
 3. the replacement imports data only through a versioned API/webhook, never the
    source database, models or filesystem;
-4. the overlap is read-only shadow/reconciliation: the source remains the sole
+4. any overlap is read-only reconciliation, never a shadow run or a timed
+   parallel gate (§ 5 verification correction): the source remains the sole
    writer until one sealed cutover makes the replacement the sole writer and
    fails closed the source mutations; and
 5. the source writer, fallback and obsolete tables still have explicit
@@ -840,6 +864,9 @@ literal `{{amount}}` to customers. Accordingly:
   (ported from ERP's proven *workflow-rule* version history, not designed fresh).
 - Its contract is now **what the message says**. It renders and returns
   `(subject, body)`. It does not decide whether to send, to whom, or over what.
+  **Amended 2026-11-16 (§ 5h, § 5i):** a render now returns a subject, a
+  sanitized HTML part and a text part, and the grammar gains logic-less
+  sections. The one decision is unchanged.
 
 This supersedes the section 2 ownership map's implicit reading that Template
 Studio owns tenant document templates. It remains a module, not a kernel facility.
@@ -926,6 +953,11 @@ appear in both. Sub's predates the kernel's. ADR-0014 already routes
 non-transactional effects to the outbox, and sending an email is the canonical
 one. The delivery owner therefore reduces to a receipt table, a provider seam,
 and the feedback loop below.
+
+> **Widened by the 2026-11-16 amendment (§ 5g).** Kernel delivery also owns
+> dispatch identity: the dedupe key, the rendered snapshot and its template
+> provenance. It is still not a queue. Attempts, backoff, leasing and
+> dead-letter stay with the kernel outbox.
 
 **Channel policy is a setting, not a subsystem.**
 `docs/inventories/channel-policy-sources.md` found Sub stores its entire policy as
@@ -2076,8 +2108,11 @@ which event facts share a proven payment episode, the bounded wait, and what a
 late fact means. The module owns only the reusable content operation. Consent,
 channel policy, intent and delivery retain their § 5c owners. No product cutover
 is implied by this source addition; the extraction dossier still requires Sub
-to pin a released version, shadow rendering, and retire or gate its local
-renderer at the cutover.
+to pin a released version, prove its seeded templates with saved tests,
+real-record preview and backtest, roll out per tenant, and retire or gate its
+local renderer at the cutover. (Wording corrected by the 2026-11-16 amendment;
+this sentence originally required "shadow rendering", which that amendment
+withdraws.)
 
 The source audit found no qualifying production multi-message composition
 implementation to port: Sub renders one template at a time, ERP's template
@@ -2089,7 +2124,8 @@ The substitution function is also exposed from the package's pure `rendering`
 module. Importing that module must not assemble Template Studio's routes,
 models, or Kernel web dependencies. The existing `service.render` delegates to
 the same function and retains its authoring error contract. This lets Sub run
-shadow parity under its own runtime before any authoring or delivery cutover.
+saved parity tests under its own runtime before any authoring or delivery
+cutover. (Originally "shadow parity"; corrected by the 2026-11-16 amendment.)
 
 ## Consequences
 
@@ -2481,3 +2517,230 @@ after response start cannot retract headers or create a second response, and
 is not a guarantee of database commit success. Actual ASGI message capture on
 the target pair proves this distinction; ordinary metadata-mocked unit tests
 prove only refusal and inactive behavior on the older reference framework.
+
+
+### Decision amendment — 2026-11-16 (one send path for every composed app)
+
+Owner ruling, 2026-11-16, on an internal plan for the first adopter of the
+communication owners. That adopter is Academy. Today its mail copy is written in
+Python and sent through a product-local outbox table. The ruling requires every
+message to be composed and edited in the UI. This amendment continues the
+§ 5a–5e communication series. It decides contracts only. It ships no code,
+bumps no version, and authorizes no release, migration, credential or product
+adoption. Each implementation step is reviewed on its own.
+
+Evidence revision: Starter `main` at `469f60b4`, which carries
+`dotmac-template-studio` 0.2.0a6 and the kernel `delivery`, `consent` and
+`channel_policy` facilities.
+
+#### 5f. Every composed app sends through the four owners
+
+An application composed from Starter sends every tenant-facing message through
+the four owners in § 5d:
+
+| Owner | The decision |
+|---|---|
+| `dotmac-template-studio` | what the message says |
+| kernel `consent` | may this address be contacted on this channel for this category |
+| kernel `channel_policy` | which channels carry this class of message |
+| kernel `delivery` | dispatch identity, provider seam, receipt and feedback loop |
+
+The product keeps the domain decisions: which messages exist, what triggers
+them, who receives them, the variable values, and product eligibility (§ 5j).
+It also keeps any domain projection applied after a send is accepted.
+
+Two shapes are therefore defects, not variations:
+
+- **A per-app outbox.** A product table that holds rendered mail, dedupes it
+  and is retried by a product worker is a second writer for the delivery owner.
+  It is retired through the existing adoption ladder (the 2026-08-12 and
+  2026-08-29 amendments). It is not wrapped or extended.
+- **Hard-coded copy.** A subject or body for a tenant-facing message, written
+  in product code, is a second writer for Template Studio. Seeded revision 1
+  may transcribe today's copy, but the copy then lives in Template Studio and an
+  operator can edit it.
+
+This composes with ADR-0056 and ADR-0075 and does not replace them. A domain
+owner keeps its own intent record: a campaign delivery intent, or a renewal
+step identified by (subscription, period, step). That record says which message
+should exist. Kernel delivery records what was rendered and sent for it. The
+domain intent's natural identity is a valid dispatch dedupe key. It does not
+become a second dispatch table.
+
+The kernel's own operational pages (error pages, the login screen) stay code,
+as § 2 already rules.
+
+**Enforcement owner: a product-writer ratchet in CI (ADR-0018).** It fails when
+a Starter-composed product writes its own outbox, calls SMTP directly, or
+hard-codes tenant-facing message copy. It follows ADR-0018: entry-point
+families rather than one directory, a two-directional backlog, and a
+sensitivity proof. It lands with the communication work packages and is not
+built by this amendment. Until it lands, this rule is unmonitored, not exempt.
+
+#### 5g. Kernel delivery owns dispatch identity, and is still not a queue
+
+**This widens § 5d**, which reduced delivery to a receipt table, a provider
+seam and the feedback loop. Kernel delivery now also owns a **dispatch
+identity record**, with tenant RLS (FORCE), holding:
+
+- a dedupe key, unique per tenant, that domain code may query by key;
+- the rendered snapshot: channel, address, category, subject, HTML part, text
+  part, an allowlisted header set and attachment references;
+- template provenance: slug, channel and published revision, or a declared
+  `legacy:<source>` marker for content carried forward byte-for-byte from a
+  retired product outbox;
+- the request fingerprint that binds the dispatch id to that content.
+
+Rendering happens when the message is enqueued, and the snapshot is what gets
+sent. A later template edit never changes a message that is already queued.
+
+It is **still not a queue**. Attempts, backoff, leasing, stale reclaim and
+dead-letter stay with the kernel outbox relay (ADR-0014). The outbox payload
+carries only the dispatch id. Reset links, invite tokens and other personal
+data therefore never pass through the cross-tenant dispatcher connection. The
+relay loads the dispatch in a tenant-RLS session and calls `send()`. Receipts
+remain the record of outcomes.
+
+Rendered bodies are personal data at rest. After a dispatch reaches a terminal
+state and a retention period has passed, its bodies are redacted. The
+fingerprint and provenance are kept.
+
+**Why the widening.** Without it, every adopter rebuilds the same thing: a
+dedupe key, a rendered snapshot and a read-back for domain code. That is
+exactly the product outbox that § 5f forbids, and it would be built once per
+product.
+
+Two rules bind the implementation. Neither widens anything:
+
+- **Replay must not swallow a retry.** At `469f60b4`, `send()` returns any
+  earlier receipt for the dispatch id without calling the provider, and that
+  includes a `failed` receipt. A transient failure can therefore never be
+  retried. Replay may short-circuit only on a receipt that cannot be retried.
+  A `failed` receipt allows a new attempt under the same dispatch id and
+  fingerprint. This is a known defect, and it is fixed before any adopter
+  sends.
+- **Receipts are append-only evidence.** The runtime roles lose UPDATE and
+  DELETE on receipts. This is a tightening.
+
+A transport outcome of "deferred", where a host admission gate holds delivery,
+does not charge a relay attempt. Requeuing a dead dispatch is an explicit,
+audited command.
+
+#### 5h. Template Studio authors sanitized HTML plus a text part
+
+This amends § 5b's `(subject, body)` contract. A template revision carries a
+subject, an HTML part and a text part. The existing single `body` becomes the
+text part, so templates that exist today keep rendering unchanged.
+
+- **The HTML is sanitized when it is saved.** The sanitizer applies an
+  allowlist of tags, attributes and inline-style properties. It refuses
+  scripts, event-handler attributes and URL schemes outside the allowlist.
+- **The sanitizer is `nh3`.** This is a **new third-party runtime dependency**
+  of `dotmac-template-studio` only, never of the kernel. It ships compiled
+  wheels, which is why it sits on an optional module and not in core
+  (§ 5a point 2). Whether its style-property filter is strict enough is
+  **unverified**. The implementing step must prove it against an adversarial
+  corpus before release. If it cannot, the widening comes back to the owner. The
+  allowlist is not loosened to fit.
+- **Escaping depends on the part.** The HTML part HTML-escapes every value. A
+  `url` variable is checked against the allowed schemes and attribute-escaped.
+  The text part inserts values raw. A subject refuses CR and LF.
+- **Preview is sandboxed.** HTML is previewed only in a sandboxed frame with
+  scripts disabled. The admin surface never marks authored content as safe.
+- **The send context declares more.** It declares `required`, `optional` and
+  `url` variables, declared `lists` with their item variables, and `sample`
+  values for preview. A revision that omits a required variable is refused at
+  save time, so a password-reset template cannot be published without its
+  link. A deploy-time check confirms that every published revision still
+  validates against its current context.
+- **The controls are unchanged.** Publishing stays under the existing publish
+  permission and is audited. Publishing an earlier revision is still the
+  rollback.
+
+#### 5i. Logic-less sections
+
+Digests, invitations and reports need lists and optional lines. The flat
+single-brace placeholder cannot express them, and the 2026-09-30 composition
+seam joins whole rendered bodies, so it cannot either. The grammar therefore
+gains one construct:
+
+- `{#name}…{/name}` iterates over a declared list, using only that list's
+  declared item variables. Over a declared optional scalar it renders zero or
+  one times.
+- `{^name}…{/name}` renders when the list is empty or the scalar is absent.
+
+The construct is logic-less: no expressions, filters, helpers, partials or
+computed values. Nesting depth is at most 2. List length is bounded by the
+context. Balanced tags and vocabulary are checked at save time. The
+placeholder grammar stays single-brace with a closed per-context allowlist, and
+the new tokens do not match today's placeholder pattern.
+
+When a branch changes what a message means, it becomes a separate template
+that the product selects. It is not written as a conditional. Product-pre-
+rendered list blobs were rejected because they would leave digest copy in code.
+
+#### 5j. Product topic preferences are eligibility, not consent
+
+Two questions stay with two owners:
+
+- **Product eligibility: does this person want this optional topic?** The
+  product decides this before rendering, from its own preference store. Starter
+  never reads a product's preference store.
+- **Kernel consent: may this address be contacted on this channel for this
+  category?** `send()` checks this every time, as part of its structure.
+
+A topic preference is never written into the consent ledger. A consent
+suppression is never used to model a topic. Each send path names its own
+category.
+
+**"No marketing categories" applies to Academy only.** Academy registers no
+marketing categories, so all its mail is transactional under the
+`is_marketing` allowlist. This is not a fleet-wide rule. Sub's campaigns keep
+their marketing categories (ADR-0056). Any product may still declare its own
+through `register_marketing_categories`, and this amendment does not change
+that mechanism.
+
+**Sequencing constraint.** A hard bounce suppresses an address with scope
+`all`, and that stops password resets. So an operator surface for
+suppressions and receipts must exist before any adopter's transport moves onto
+kernel delivery.
+
+#### Verification is evidence, never a shadow run
+
+An adopter's move onto these owners is proven on four rails:
+
+- **Saved tests.** Each send context has a golden fixture, including hostile
+  characters, an empty list and a maximum list. The output must be byte-equal
+  to the current renderer's output, apart from declared known corrections.
+- **Real-record preview.** On a restored copy, never live production, rebuild
+  contexts from real records and compare. The evidence is counts and hashes
+  only.
+- **Backtest.** For messages that do not depend on when they were sent,
+  compare against stored sent messages.
+- **Guarded rollout.** Roll out one tenant at a time behind a flag, with a
+  rollback.
+
+The gate is zero unexplained differences. Shadow rendering, side-by-side runs
+and elapsed-time windows are not used. This replaces the "shadow rendering"
+and "shadow parity" wording in the 2026-09-30 amendment and in Template
+Studio's extraction dossier. The general wording in § 5 point 3 is not changed
+here. Neither is the 2026-08-15 "module shadow", which is a different concept:
+an empty table with no authority.
+
+#### Widenings, stated explicitly
+
+1. Kernel delivery's scope grows by dispatch identity (§ 5g, widening § 5d).
+2. A new third-party runtime dependency, `nh3`, in `dotmac-template-studio`
+   (§ 5h).
+3. Template Studio accepts authored HTML, which is a stored-XSS surface. It is
+   bounded by sanitize-on-save, per-part escaping, the sandboxed preview and
+   the publish permission (§ 5h).
+4. The template grammar gains sections (§ 5i).
+5. Rendered bodies, including tokens, are stored at rest in the dispatch
+   record. This is bounded by FORCE RLS, an id-only outbox payload and redaction
+   after retention (§ 5g).
+
+The relay's new database login credential, and the custody of SMTP passwords,
+are **not** granted here. They belong to ADR-0009 and to their own owner ruling.
+How an adopter corrects its current escaping defects, and how its legacy rows
+move, are adopter cutover decisions. They are not foundation contracts.
