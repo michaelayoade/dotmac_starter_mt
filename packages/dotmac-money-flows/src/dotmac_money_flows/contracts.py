@@ -151,8 +151,8 @@ class SettleConfirmationV1:
 class SettleOutcomeV1:
     """What a call decided. References only.
 
-    ``applied_document_ids`` lists documents this call allocated cash to; it is
-    empty on a replay because the instance does not store it.
+    ``applied_document_ids`` lists documents this call paid whole from the
+    balance; it is empty on a replay because the instance does not store it.
     """
 
     instance_id: UUID
