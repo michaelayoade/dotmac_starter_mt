@@ -405,6 +405,25 @@ needed. Billing a9 is an unpublished source allocation carried completely by a10
 it is superseded rather than required as an intermediate publication.
 
 
+## Account terms: cutover order and corrections
+
+Dated, append-only contract terms (`record_account_terms`, `record_default_terms`,
+`get_effective_account_terms`).
+
+- Cutover order: record the tenant default and each migrated customer's terms
+  BEFORE the flip, with `effective_from` = the flip instant. Once live, a caller
+  (Sub-thin) always sends a future `effective_from`, for example the next period
+  start.
+- Terms cannot be back-dated: `effective_from` earlier than the database recording
+  instant is refused (`billing.terms_back_dated`), so a version already in effect can
+  never be superseded.
+- To correct a not-yet-effective version, record a new version at the same
+  `effective_from`. At one `effective_from` only the latest recorded version counts
+  and it replaces the earlier one wholly (a term it leaves unset falls back to the
+  tenant default, not to the superseded row); both rows stay. Re-recording identical
+  terms at that instant is an exact retry and is refused (`billing.terms_version_exists`).
+
+
 ## Final release and adoption gates
 
 The final serial publication train is Payroll a2 → Tax a7 → Billing a10.
