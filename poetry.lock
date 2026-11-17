@@ -1491,9 +1491,10 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-billing = ">=0.1.0a12"
+dotmac-billing = ">=0.1.0a13"
 dotmac-kernel = ">=0.1.0a109"
 dotmac-payments = ">=0.1.0a4"
+dotmac-service-access-policy = ">=0.1.0a2"
 sqlalchemy = "^2.0"
 
 [package.source]

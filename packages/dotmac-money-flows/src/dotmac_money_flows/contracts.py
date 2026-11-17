@@ -1,4 +1,4 @@
-"""Typed contracts, ports and the refusal error of the F1 Settle flow.
+"""Typed contracts, ports and errors of the F1 Settle and F2 FundedCharge flows.
 
 Nothing here stores or computes an amount. Amount-bearing values (the owner's
 money type) appear only as transient inputs the caller hands to an owner call;
@@ -18,6 +18,7 @@ from dotmac_kernel.money import Money
 from sqlalchemy.orm import Session
 
 SETTLE_DEFINITION_VERSION = "settle.v1"
+FUNDED_CHARGE_DEFINITION_VERSION = "funded_charge.v1"
 
 #: Confirmation sources a tenant accepts out of the box. Manual entry and
 #: transfer proof stay off until a maker-checker flow is composed.
@@ -207,13 +208,272 @@ class SettleRefused(Exception):
         return str(self.args[0])
 
 
+# --------------------------------------------------------------------------
+# F2 FundedCharge
+# --------------------------------------------------------------------------
+class FundedChargeState(StrEnum):
+    """Where a FundedCharge instance stands.
+
+    ``pending`` is a due charge the balance does not cover in full: nothing is in
+    the ledger. ``discharged`` means the invoice was issued and paid from account
+    credit in one transaction. ``attention_required`` means an owner refused to
+    post a charge the balance covers. ``withdrawn`` means the charge source no
+    longer holds the charge (or the contract is no longer prepaid).
+    """
+
+    PENDING = "pending"
+    DISCHARGED = "discharged"
+    ATTENTION_REQUIRED = "attention_required"
+    WITHDRAWN = "withdrawn"
+
+
+#: States an instance may be first written in. The database trigger holds the
+#: same table.
+FUNDED_CHARGE_INSERT_STATES = frozenset(
+    {
+        FundedChargeState.PENDING,
+        FundedChargeState.DISCHARGED,
+        FundedChargeState.ATTENTION_REQUIRED,
+    }
+)
+
+#: Allowed transitions out of a non-terminal state (``mf_0002`` trigger graph).
+#: ``discharged`` and ``withdrawn`` are terminal and absent.
+FUNDED_CHARGE_TRANSITIONS: dict[FundedChargeState, frozenset[FundedChargeState]] = {
+    FundedChargeState.PENDING: frozenset(
+        {
+            FundedChargeState.DISCHARGED,
+            FundedChargeState.ATTENTION_REQUIRED,
+            FundedChargeState.WITHDRAWN,
+        }
+    ),
+    FundedChargeState.ATTENTION_REQUIRED: frozenset(
+        {
+            FundedChargeState.ATTENTION_REQUIRED,
+            FundedChargeState.PENDING,
+            FundedChargeState.DISCHARGED,
+            FundedChargeState.WITHDRAWN,
+        }
+    ),
+}
+
+
+def funded_charge_transition_allowed(
+    old: FundedChargeState, new: FundedChargeState
+) -> bool:
+    return new in FUNDED_CHARGE_TRANSITIONS.get(old, frozenset())
+
+
+@dataclass(frozen=True, slots=True)
+class RatedChargeKeyV1:
+    """The immutable identity of one rated charge, as its source knows it.
+
+    The identity must not depend on the service period dates: the period of a
+    prepaid charge is unknown while the charge is pending, and the instance's
+    ``charge_ref`` never changes. Use, for example, the subscription and a
+    renewal sequence.
+    """
+
+    source_system: str
+    source_kind: str
+    source_fact_id: str
+    source_fact_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class RatedChargeV1:
+    """What the charge source says about one charge right now (a transient input).
+
+    ``total`` is the tax-inclusive amount. The contract type is not carried: it
+    is a Billing account term, read by F2 from Billing at the period start.
+    """
+
+    key: RatedChargeKeyV1
+    billing_account_id: UUID
+    service_ref: str | None
+    total: Money
+    due_at: datetime
+
+
+class RatedChargeSource(Protocol):
+    """Port: the assembly's rating of prepaid charges, over its own contracts.
+
+    * ``read`` returns the charge as the source holds it now, or ``None`` when
+      the charge no longer exists (withdrawn, superseded or terminated).
+    * ``issue_command`` returns the complete Billing ``IssueRatedInvoiceV3``
+      (with Tax evidence) for ``issue_at``. The identity is the key's, the
+      service period is ``[issue_at, issue_at + the period of the Billing terms
+      effective at issue_at)`` with a verified status, and ``reference_date`` and
+      ``due_at`` come from ``issue_at``. The source, not flows, schedules the
+      next charge at the end of the paid period: flows has no scheduler.
+    """
+
+    def read(
+        self, db: Session, *, scope: TenantScope, key: RatedChargeKeyV1
+    ) -> RatedChargeV1 | None: ...
+
+    def issue_command(
+        self,
+        db: Session,
+        *,
+        scope: TenantScope,
+        key: RatedChargeKeyV1,
+        issue_at: datetime,
+    ) -> Any: ...
+
+
+@dataclass(frozen=True, slots=True)
+class FundedChargePolicyV1:
+    """Versioned tenant policy for F2, pinned on the instance it decided.
+
+    ``reevaluation_batch_cap`` bounds the pending charges examined per
+    transaction; the rest continue by event. The value is a policy default the
+    tenant overrides, not a decision made here.
+    """
+
+    version: str
+    reevaluation_batch_cap: int = 20
+
+
+class FundedChargePolicyReader(Protocol):
+    """Port: read the tenant's current F2 policy."""
+
+    def read(self, db: Session, *, scope: TenantScope) -> FundedChargePolicyV1: ...
+
+
+@dataclass(frozen=True, slots=True)
+class FundedChargePorts:
+    """The assembly-supplied ports F2 reads through.
+
+    ``obligation_sources`` is Billing's ``ObligationSourceRegistry`` and
+    ``numbering`` its ``NumberingProvider``; both are handed to Billing untouched.
+    """
+
+    charges: RatedChargeSource
+    policy: FundedChargePolicyReader
+    obligation_sources: Any
+    numbering: Any
+
+
+@dataclass(frozen=True, slots=True)
+class StartFundedChargeV1:
+    """Start the funding of one charge at its due time."""
+
+    key: RatedChargeKeyV1
+
+
+@dataclass(frozen=True, slots=True)
+class FundedChargeCursorV1:
+    """Keyset cursor on ``(created_at, id)`` (the last row's position)."""
+
+    created_at: datetime
+    id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class SettledFundsV1:
+    """New funds on an account: the settlement that landed.
+
+    The account is only a claim: Billing refuses a pair that does not belong
+    together. ``after`` is set only on a continuation event and resumes the
+    re-evaluation after the last row examined, so skipped rows are not
+    re-examined forever.
+    """
+
+    billing_account_id: UUID
+    settlement_id: UUID
+    after: FundedChargeCursorV1 | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FundedChargeOutcomeV1:
+    """What a call decided. References only."""
+
+    instance_id: UUID
+    state: FundedChargeState
+    reason_code: str | None
+    version: int
+    billing_account_id: UUID
+    document_id: UUID | None
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FundedChargeInstanceV1:
+    """Read view of a persisted instance (references and state only)."""
+
+    id: UUID
+    charge_ref: str
+    state: FundedChargeState
+    reason_code: str | None
+    policy_version: str
+    definition_version: str
+    version: int
+    billing_account_id: UUID
+    service_ref: str | None
+    obligation_id: UUID | None
+    document_id: UUID | None
+    credit_draw_id: UUID | None
+    funding_settlement_id: UUID | None
+    actor_ref: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FundedChargeRefused(Exception):
+    """A caller error or flows-level refusal with a stable machine code.
+
+    Raised as ``FundedChargeRefused(code)`` for errors that write nothing (an
+    unknown charge, a charge that is not prepaid, a stale ``expected_version``).
+    """
+
+    @property
+    def code(self) -> str:
+        """The stable machine code (the first argument)."""
+        return str(self.args[0])
+
+
+class FundedChargeStepFailed(Exception):
+    """An owner refused to post one pending charge during re-evaluation.
+
+    Raised as ``FundedChargeStepFailed(instance_id, code)`` from the owner's
+    exception. The caller rolls back, then calls ``record_funded_charge_attention``
+    in a NEW transaction with these two values.
+    """
+
+    @property
+    def instance_id(self) -> UUID:
+        return UUID(str(self.args[0]))
+
+    @property
+    def code(self) -> str:
+        return str(self.args[1])
+
+
 __all__ = [
     "DEFAULT_ACCEPTED_SOURCES",
+    "FUNDED_CHARGE_DEFINITION_VERSION",
+    "FUNDED_CHARGE_INSERT_STATES",
+    "FUNDED_CHARGE_TRANSITIONS",
     "SETTLE_DEFINITION_VERSION",
     "WITHHOLDING_SOURCE",
     "SETTLE_INSERT_STATES",
     "SETTLE_TRANSITIONS",
     "DepositApplication",
+    "FundedChargeCursorV1",
+    "FundedChargeInstanceV1",
+    "FundedChargeOutcomeV1",
+    "FundedChargePolicyReader",
+    "FundedChargePolicyV1",
+    "FundedChargePorts",
+    "FundedChargeRefused",
+    "FundedChargeState",
+    "FundedChargeStepFailed",
+    "RatedChargeKeyV1",
+    "RatedChargeSource",
+    "RatedChargeV1",
+    "SettledFundsV1",
+    "StartFundedChargeV1",
     "SettleAttentionCursorV1",
     "SettleConfirmationV1",
     "SettleInstanceV1",
@@ -226,5 +486,6 @@ __all__ = [
     "SettleWithholdingV1",
     "SettlementTargetResolver",
     "SettlementTargetV1",
+    "funded_charge_transition_allowed",
     "settle_transition_allowed",
 ]
