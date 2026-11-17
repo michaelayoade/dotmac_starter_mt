@@ -194,6 +194,7 @@ def create_version(
         body=payload.body,
         subject=payload.subject,
         author_party_id=actor.id,
+        html_body=payload.html_body,
     )
     write_audit_event(
         db,
@@ -218,6 +219,12 @@ def update_version(
     tenant: Tenant = Depends(require_tenant),
     actor: Party = Depends(require_permission("template_studio.templates.manage")),
 ) -> TemplateVersion:
+    # An omitted `html_body` keeps the html part; an explicit null removes it.
+    html_args: dict[str, str | None] = (
+        {"html_body": payload.html_body}
+        if "html_body" in payload.model_fields_set
+        else {}
+    )
     revision = service.update_version(
         db,
         tenant.id,
@@ -225,6 +232,7 @@ def update_version(
         version,
         body=payload.body,
         subject=payload.subject,
+        **html_args,
     )
     write_audit_event(
         db,
@@ -284,7 +292,9 @@ def render_template(
     reads state, and a per-render trail entry would flood the tenant's audit log
     with one row per outbound message.
     """
-    subject, body = service.render_published(
+    rendered = service.render_published_parts(
         db, tenant.id, slug, channel, payload.values
     )
-    return RenderResult(subject=subject, body=body)
+    return RenderResult(
+        subject=rendered.subject, body=rendered.text, html=rendered.html
+    )

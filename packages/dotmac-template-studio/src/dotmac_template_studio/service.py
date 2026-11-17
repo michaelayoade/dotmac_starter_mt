@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -70,6 +71,7 @@ from dotmac_template_studio.composition import (
     compose_email as compose_email,
 )
 from dotmac_template_studio.contexts import RenderContext, get_context
+from dotmac_template_studio.htmlsanitize import sanitize_html
 from dotmac_template_studio.models import Template, TemplateVersion
 from dotmac_template_studio.rendering import (
     _PLACEHOLDER,
@@ -90,7 +92,9 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,98}[a-z0-9]$")
 _CHANNEL = re.compile(r"^[a-z][a-z0-9_]{0,19}$")
 
 
-def extract_variables(body: str, subject: str | None = None) -> list[str]:
+def extract_variables(
+    body: str, subject: str | None = None, html: str | None = None
+) -> list[str]:
     """The placeholder names a revision's content actually references, sorted.
 
     Derived rather than declared, so the stored list cannot drift from the body.
@@ -98,6 +102,8 @@ def extract_variables(body: str, subject: str | None = None) -> list[str]:
     found = set(_PLACEHOLDER.findall(body))
     if subject:
         found |= set(_PLACEHOLDER.findall(subject))
+    if html:
+        found |= set(_PLACEHOLDER.findall(html))
     return sorted(found)
 
 
@@ -278,6 +284,40 @@ def delete_template(db: Session, tenant_id: UUID, template_id: UUID) -> None:
 # ── Versions ────────────────────────────────────────────────────────────────
 
 
+class _Unset:
+    """Sentinel: "the caller did not mention this field"."""
+
+
+_UNSET = _Unset()
+
+
+def _stored_html(
+    html: str | None,
+    context: RenderContext,
+    *,
+    subject: str | None,
+    body: str,
+) -> str | None:
+    """The sanitized html to store. Call only after `check_revision` passed it.
+
+    `check_revision` already refuses any html the sanitizer would change, so the
+    output equals the source up to re-serialisation; storing the OUTPUT (never
+    the source) is what keeps unsanitized markup out of the table. The stored
+    text is then validated AGAIN against the full revision rules, because what is
+    stored is what renders: any difference between source and output that the
+    source-side rules could not see is caught here, before anything is saved.
+    """
+    if html is None:
+        return None
+    result = sanitize_html(html)
+    if result.problems:  # unreachable after check_revision; fail closed anyway
+        raise BadRequestError("html part refused: " + "; ".join(result.problems))
+    check_revision(
+        context, subject=subject, text=body, html=result.html, kind_hint="stored html"
+    )
+    return result.html
+
+
 def list_versions(
     db: Session, tenant_id: UUID, template_id: UUID
 ) -> list[TemplateVersion]:
@@ -325,8 +365,12 @@ def create_version(
     body: str,
     subject: str | None = None,
     author_party_id: UUID | None = None,
+    html_body: str | None = None,
 ) -> TemplateVersion:
     """Add a new revision. The version number is allocated here.
+
+    `html_body` is the optional html part: validated, then sanitized, and the
+    SANITIZED html is what is stored. Html the sanitizer would change is refused.
 
     Validated against the parent template's render context BEFORE anything is
     stored — an unsendable revision never reaches the database, so it can never
@@ -334,7 +378,14 @@ def create_version(
     """
     template = get_template(db, tenant_id, template_id)
     check_revision(
-        get_context(template.context), subject=subject, text=body, kind_hint="version"
+        get_context(template.context),
+        subject=subject,
+        text=body,
+        html=html_body,
+        kind_hint="version",
+    )
+    stored_html = _stored_html(
+        html_body, get_context(template.context), subject=subject, body=body
     )
     highest = db.execute(
         select(func.max(TemplateVersion.version)).where(
@@ -348,7 +399,8 @@ def create_version(
         version=(highest or 0) + 1,
         subject=subject,
         body=body,
-        variables=extract_variables(body, subject),
+        html_body=stored_html,
+        variables=extract_variables(body, subject, stored_html),
         author_party_id=author_party_id,
     )
     db.add(version)
@@ -364,8 +416,11 @@ def update_version(
     *,
     body: str | None = None,
     subject: str | None = None,
+    html_body: str | None | _Unset = _UNSET,
 ) -> TemplateVersion:
     """Edit a DRAFT revision in place.
+
+    `html_body` left out keeps the html part; `None` removes it.
 
     Refuses a published revision: "what was sent" must not change after the fact.
     Editing published content is a new version, which is what `create_version`
@@ -380,15 +435,21 @@ def update_version(
         )
     new_body = revision.body if body is None else body
     new_subject = revision.subject if subject is None else subject
+    new_html = revision.html_body if isinstance(html_body, _Unset) else html_body
     check_revision(
         get_context(template.context),
         subject=new_subject,
         text=new_body,
+        html=new_html,
         kind_hint="version",
+    )
+    stored_html = _stored_html(
+        new_html, get_context(template.context), subject=new_subject, body=new_body
     )
     revision.body = new_body
     revision.subject = new_subject
-    revision.variables = extract_variables(new_body, new_subject)
+    revision.html_body = stored_html
+    revision.variables = extract_variables(new_body, new_subject, stored_html)
     db.flush()
     return revision
 
@@ -425,6 +486,35 @@ def render_published(
     `(slug, channel)` and never by a version number: which revision is live is
     this module's decision, not theirs.
     """
+    rendered = render_published_parts(
+        db, tenant_id, slug, channel, values, strict=strict, with_html=False
+    )
+    return rendered.subject, rendered.text
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedTemplate:
+    """A published revision rendered into its parts. `html` is None without one."""
+
+    subject: str | None
+    text: str
+    html: str | None = None
+
+
+def render_published_parts(
+    db: Session,
+    tenant_id: UUID,
+    slug: str,
+    channel: str,
+    values: Mapping[str, Any],
+    *,
+    strict: bool | None = None,
+    with_html: bool = True,
+) -> RenderedTemplate:
+    """Render every part of a template's PUBLISHED revision.
+
+    `render_published` is this minus the html part, kept for its callers.
+    """
     if strict is None:
         # The FLAG decides, unless a caller was explicit. A preview screen
         # passes `strict=False` because it knows it has no values yet; everyone
@@ -448,8 +538,16 @@ def render_published(
             if revision.subject
             else None
         )
-        return subject, render_part(
+        text = render_part(
             revision.body, values, "text", context=context, strict=strict
         )
+        html = (
+            render_part(
+                revision.html_body, values, "html", context=context, strict=strict
+            )
+            if with_html and revision.html_body
+            else None
+        )
+        return RenderedTemplate(subject=subject, text=text, html=html)
     except (MissingTemplateValueError, RenderRefusedError, TemplateSyntaxError) as exc:
         raise BadRequestError(str(exc)) from exc
