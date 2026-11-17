@@ -166,6 +166,7 @@ class Start:
     expected_host_incarnation: str
     window_seconds: int
     evidence_seconds: int
+    proceed_seconds: int
 
 
 def _token(data: dict[str, Any], key: str) -> str:
@@ -229,6 +230,7 @@ def parse_start(data: dict[str, Any]) -> Start:
         expected_host_incarnation=_token(data, "expected_host_incarnation"),
         window_seconds=_bounded_int(data, "window_seconds", low=1, high=1800),
         evidence_seconds=_bounded_int(data, "evidence_seconds", low=1, high=600),
+        proceed_seconds=_bounded_int(data, "proceed_seconds", low=1, high=600),
     )
 
 
@@ -346,16 +348,11 @@ class Session:
             execution_plan = receipt_v2.acquire_execution_plan(
                 base_plan, bindings=bindings, spec=spec
             )
-            # BEFORE the grant: authorization consumes the Control dispatch, and
-            # a process on the wrong host must not burn one.
+            # Every refusal that can be decided WITHOUT consuming anything comes
+            # first. Authorization consumes the Control dispatch, so a process on
+            # the wrong host, with a lease that does not hold, or a plan that
+            # does not name this controller must not burn one.
             self.machine_id = self._placement(execution_plan, start)
-            grant = establish_authorization(
-                descriptor_digest=descriptor_digest,
-                target=start.host_id,
-                authorization_document=None,
-                execution_plan=execution_plan,
-                prepared=prepared,
-            )
             if execution_plan.controller_ssh_fingerprint != str(controller_identity):
                 raise _Unfit("the authorized plan does not name the controller")
             if not execution_plan.exposure_reconciliations:
@@ -363,25 +360,37 @@ class Session:
                     "Lane 3 exposure rehearsal is blocked: the trusted plan has "
                     "no exposure reconciliations; no deployment or provocation ran"
                 )
+            # The launcher's READ-ONLY copy. The release is the launcher's to
+            # write. Loaded and checked BEFORE the grant, for the same reason.
+            lease = load_lease(start.host_id, directory=str(start.lease_dir))
+            lease.covers(
+                now=datetime.now(UTC), authorization_run_id=start.authorization_run
+            )
+            if controller_identity != lease.controller_identity_fingerprint:
+                raise _Unfit("the controller identity does not match the held lease")
+            plan_digest = str(execution_plan.digest())
+            channel.send(
+                "ready",
+                {
+                    "host_id": start.host_id,
+                    "machine_id": self.machine_id,
+                    "plan_digest": plan_digest,
+                },
+            )
+            # The placement gate BLOCKS: nothing is consumed or locked until the
+            # launcher, which holds the pins out of band, says to proceed.
+            self._await_proceed(start, plan_digest)
+            grant = establish_authorization(
+                descriptor_digest=descriptor_digest,
+                target=start.host_id,
+                authorization_document=None,
+                execution_plan=execution_plan,
+                prepared=prepared,
+            )
         ctx.vm_installation_id = self.machine_id
-
-        # The launcher's READ-ONLY copy. The release is the launcher's to write.
-        lease = load_lease(start.host_id, directory=str(start.lease_dir))
-        lease.covers(
-            now=datetime.now(UTC), authorization_run_id=start.authorization_run
-        )
-        if controller_identity != lease.controller_identity_fingerprint:
-            raise _Unfit("the controller identity does not match the held lease")
+        # Held only now: a refusal before the grant keeps the standing it had
+        # (no lease in hand, no release), as before this change.
         ctx.lease = lease
-
-        channel.send(
-            "ready",
-            {
-                "host_id": start.host_id,
-                "machine_id": self.machine_id,
-                "plan_digest": str(execution_plan.digest()),
-            },
-        )
 
         with deployment_lock(
             spec.product,
@@ -431,6 +440,23 @@ class Session:
             lease_run=lease.authorization_run_id,
             controller_identity=controller_identity,
         )
+
+    def _await_proceed(self, start: Start, plan_digest: str) -> None:
+        """Block until the launcher says `proceed` for THIS plan, or refuse.
+
+        Any other frame, a timeout, EOF or a proceed naming another plan is a
+        clean refusal with the host untouched: no dispatch consumed, no lock.
+        """
+        try:
+            kind, data = self.channel.receive(
+                "proceed", "abort", timeout=start.proceed_seconds
+            )
+        except ChannelRefused as exc:
+            raise _Unfit(
+                f"the launcher did not authorize proceeding ({exc.code})"
+            ) from None
+        if kind != "proceed" or data["plan_digest"] != plan_digest:
+            raise _Unfit("the launcher did not authorize proceeding with this plan")
 
     def _placement(self, execution_plan: Any, start: Start) -> str:
         try:
