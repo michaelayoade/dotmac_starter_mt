@@ -696,8 +696,11 @@ def test_public_surface_is_the_settle_contract() -> None:
         "settle_confirmation",
         "versions_dir",
     }
-    assert [p.name for p in dotmac_money_flows.versions_dir().glob("mf_*.py")] == [
-        "mf_0001_settle_instances.py"
+    assert sorted(
+        p.name for p in dotmac_money_flows.versions_dir().glob("mf_*.py")
+    ) == [
+        "mf_0001_settle_instances.py",
+        "mf_0002_funded_charge_instances.py",
     ]
 
 
@@ -714,11 +717,13 @@ def test_real_tables_are_allowlisted_instance_tables() -> None:
         assert schema_violations(created) == [], path
         assert foreign_key_violations(path.read_text("utf-8")) == [], path
         assert migration_security_violations(path.read_text("utf-8")) == [], path
-    assert set(_orm_schema()["settle_instances"]) == set(
-        migration_schema(
-            (MIGRATIONS / "mf_0001_settle_instances.py").read_text("utf-8")
-        )["settle_instances"]
-    )
+    for table, migration in (
+        ("settle_instances", "mf_0001_settle_instances.py"),
+        ("funded_charge_instances", "mf_0002_funded_charge_instances.py"),
+    ):
+        assert set(_orm_schema()[table]) == set(
+            migration_schema((MIGRATIONS / migration).read_text("utf-8"))[table]
+        )
 
 
 def test_orm_foreign_keys_target_only_tenants_or_own_schema() -> None:

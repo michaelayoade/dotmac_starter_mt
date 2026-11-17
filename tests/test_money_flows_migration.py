@@ -156,8 +156,8 @@ def test_table_has_forced_rls_and_no_delete_grant(migrated) -> None:
                     "AND constraint_type = 'FOREIGN KEY'"
                 )
             )
-            == 1
-        )  # the kernel tenants table only
+            == 2
+        )  # the kernel tenants table only, once per instance table
     engine.dispose()
 
 

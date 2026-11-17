@@ -36,3 +36,13 @@ Source only; not published, not composed into any assembly.
   not an account's open documents), so none was built here.
 - Raise the kernel floor to the kernel release that carries the `money_flows`
   migration-namespace reservation.
+
+- Migration `mf_0002` creates `funded_charge_instances` (F2 FundedCharge) with
+  forced row-level security, no DELETE grant and a guard trigger: insert only as
+  pending, discharged or attention_required at version 0; pending to discharged,
+  attention_required or withdrawn; attention_required to attention_required,
+  pending, discharged or withdrawn; discharged and withdrawn terminal; version
+  advances by exactly one; identity columns and recorded discharge references
+  never change. There is no deadline, timer or cancellation: `deadline_at` and
+  `resolution_ref` exist only as common columns and CHECKs pin them NULL.
+  `mf_0001` is unchanged. No flow behaviour yet.
