@@ -58,11 +58,11 @@ this module is where the map is honoured rather than described.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from email.utils import getaddresses
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -124,6 +124,18 @@ ALLOWED_ATTACHMENT_CONTENT_TYPES: frozenset[str] = frozenset(
     }
 )
 
+#: The extensions each allowed content type may carry, so a filename cannot
+#: contradict the declared type (`invoice.pdf.exe` as application/pdf).
+_EXTENSIONS_BY_CONTENT_TYPE: dict[str, tuple[str, ...]] = {
+    "application/pdf": ("pdf",),
+    "image/png": ("png",),
+    "image/jpeg": ("jpg", "jpeg"),
+    "image/gif": ("gif",),
+    "text/plain": ("txt",),
+    "text/csv": ("csv",),
+    "text/calendar": ("ics",),
+}
+
 _WINDOWS_RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{i}" for i in range(1, 10)}
@@ -169,6 +181,15 @@ def _has_control(value: str) -> bool:
     )
 
 
+def _bad_subject_char(ch: str) -> bool:
+    """Control, line/paragraph separator, surrogate or bidi embedding/override/
+    isolate. Format characters such as ZWJ, ZWNJ, soft hyphen and RLM, and
+    unassigned code points (newer emoji), are legitimate subject text."""
+    return unicodedata.category(ch) in ("Cc", "Zl", "Zp", "Cs") or (
+        "\u202a" <= ch <= "\u202e" or "\u2066" <= ch <= "\u2069"
+    )
+
+
 def _is_printable_ascii(value: str) -> bool:
     return all(0x20 <= ord(ch) <= 0x7E for ch in value)
 
@@ -184,15 +205,61 @@ def _valid_addr_spec(addr: str) -> bool:
     )
 
 
+_PHRASE = (
+    rf'(?:{_ATOM}(?: +{_ATOM})*|"(?:[\x20\x21\x23-\x5b\x5d-\x7e]|\\[\x20-\x7e])*")'
+)
+_MAILBOX_RE = re.compile(rf"(?:(?P<phrase>{_PHRASE}) +)?<(?P<angle>[^<>\s]+)>")
+
+
 def _check_reply_to(value: str) -> None:
-    if ";" in value:
-        raise ValueError("Reply-To must be exactly one mailbox (no group syntax)")
-    parsed = getaddresses([value])
-    if len(parsed) != 1:
-        raise ValueError("Reply-To must be exactly one mailbox")
-    name, addr = parsed[0]
-    if "@" in name or not _valid_addr_spec(addr):
-        raise ValueError("Reply-To must be one valid mailbox")
+    """One mailbox, validated as the exact string that will be sent.
+
+    Either a bare addr-spec, or `phrase <addr-spec>` where the phrase is plain
+    atoms or one quoted string with no `@`. No comments, encoded words, routes,
+    groups, lists or trailing text: the whole value must match.
+    """
+    message = "Reply-To must be one plain mailbox: addr-spec or phrase <addr-spec>"
+    if "=?" in value or "(" in value or ")" in value:
+        raise ValueError(message)
+    if _valid_addr_spec(value):
+        return
+    match = _MAILBOX_RE.fullmatch(value)
+    if (
+        match is None
+        or "@" in (match.group("phrase") or "")
+        or not _valid_addr_spec(match.group("angle"))
+    ):
+        raise ValueError(message)
+
+
+def _is_dns_hostname(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return False
+    # A numeric last label is never a real TLD (and `127.1` style forms are IPs).
+    return bool(_DOMAIN_RE.fullmatch(host)) and not host.rsplit(".", 1)[1].isdigit()
+
+
+_MAILTO_UNSAFE_ESCAPE_RE = re.compile(r"%(?:[01][0-9a-f]|7f)", re.IGNORECASE)
+_MAILTO_SUBJECT_RE = re.compile(r"subject=[A-Za-z0-9%._~!*'+,/:@-]*")
+
+
+def _check_mailto(rest: str) -> None:
+    """`mailto:` item: one valid address, optionally `?subject=` and nothing else.
+
+    Any percent-escaped control (CR, LF, ...) is refused anywhere in the item, and
+    `cc`, `bcc`, `to`, `body` and every other query field are refused.
+    """
+    if _MAILTO_UNSAFE_ESCAPE_RE.search(rest):
+        raise ValueError("List-Unsubscribe mailto has an escaped control character")
+    addr, _, query = rest.partition("?")
+    if "%" in addr or not _valid_addr_spec(addr):
+        raise ValueError("List-Unsubscribe mailto needs a valid address")
+    if query and not _MAILTO_SUBJECT_RE.fullmatch(query):
+        raise ValueError("List-Unsubscribe mailto allows only a subject= field")
 
 
 def _check_list_unsubscribe(value: str) -> bool:
@@ -203,20 +270,25 @@ def _check_list_unsubscribe(value: str) -> bool:
         )
     https = False
     for uri in _UNSUB_ITEM_RE.findall(value):
+        if _MAILTO_UNSAFE_ESCAPE_RE.search(uri):
+            raise ValueError("List-Unsubscribe item has an escaped control character")
         lowered = uri.lower()
         if lowered.startswith("https:"):
             try:
                 parts = urlsplit(uri)
                 host = parts.hostname
+                parts.port  # noqa: B018 - raises ValueError on a bad port
             except ValueError as exc:
                 raise ValueError("List-Unsubscribe has an unparseable URL") from exc
             if not host or "@" in parts.netloc:
                 raise ValueError("List-Unsubscribe https URL needs a host, no userinfo")
+            if not _is_dns_hostname(host):
+                raise ValueError(
+                    "List-Unsubscribe https host must be a DNS name, not an IP literal"
+                )
             https = True
         elif lowered.startswith("mailto:"):
-            addr = uri[len("mailto:") :].split("?", 1)[0]
-            if not _valid_addr_spec(addr):
-                raise ValueError("List-Unsubscribe mailto needs a valid address")
+            _check_mailto(uri[len("mailto:") :])
         else:
             raise ValueError("List-Unsubscribe items must be https: or mailto:")
     return https
@@ -371,15 +443,18 @@ class AttachmentRef:
             )
         name = unicodedata.normalize("NFC", self.filename)
         object.__setattr__(self, "filename", name)
-        stem = name.split(".", 1)[0].rstrip(" ").upper()
-        extension = name.rsplit(".", 1)[1] if "." in name.strip(".") else ""
+        # Lookalikes (superscript digits, fullwidth letters and slash) are
+        # judged on the NFKC form too.
+        compat = unicodedata.normalize("NFKC", name)
+        stem = compat.split(".", 1)[0].rstrip(" ").upper()
+        extension = compat.rsplit(".", 1)[1] if "." in compat.strip(".") else ""
         if (
             not name
             or name != name.strip()
             or name in (".", "..")
             or len(name) > MAX_ATTACHMENT_FILENAME_LENGTH
             or name.endswith((".", " "))
-            or any(ch in _FILENAME_FORBIDDEN for ch in name)
+            or any(ch in _FILENAME_FORBIDDEN for ch in name + compat)
             or stem in _WINDOWS_RESERVED
             or len(extension) > MAX_ATTACHMENT_EXTENSION_LENGTH
             or _has_control(name)
@@ -399,6 +474,12 @@ class AttachmentRef:
             raise ValueError(
                 "attachment content_type must be one of "
                 f"{', '.join(sorted(ALLOWED_ATTACHMENT_CONTENT_TYPES))}"
+            )
+        allowed = _EXTENSIONS_BY_CONTENT_TYPE[self.content_type]
+        if extension.lower() not in allowed:
+            raise ValueError(
+                f"attachment filename extension must be one of "
+                f".{', .'.join(allowed)} for {self.content_type}"
             )
 
 
@@ -447,11 +528,12 @@ class OutboundMessage:
         if not (self.category or "").strip():
             raise ValueError("category is required")
         if self.subject is not None and (
-            not isinstance(self.subject, str) or _has_control(self.subject)
+            not isinstance(self.subject, str)
+            or any(_bad_subject_char(ch) for ch in self.subject)
         ):
             raise ValueError(
-                "subject must be a string with no control characters or line "
-                "separators"
+                "subject must be a string with no control characters, line "
+                "separators, lone surrogates or bidi override/embedding controls"
             )
         for label, part in (
             ("body", self.body),

@@ -24,10 +24,15 @@ here.
   - Headers: `Reply-To` (exactly one mailbox), `In-Reply-To` (one msg-id),
     `References` (msg-ids), `List-Unsubscribe` (comma list of bracketed https or
     mailto items) and `List-Unsubscribe-Post` (exactly `List-Unsubscribe=One-Click`,
-    which also requires an https item). Anything else, and any control,
+    which also requires an https item). `mailto:` items allow only a `subject=`
+    field and no escaped control characters; https hosts must be DNS names, not
+    IP literals. `Reply-To` is validated as the exact string sent: a bare
+    addr-spec or `phrase <addr-spec>`, with no comments, encoded words, routes or
+    trailing text. Anything else, and any control,
     non-ASCII or oversized value, is refused. `Message-ID` is not caller-settable.
-  - Attachments: at most 10; filenames are NFC-normalised and must be portable
-    bare names; `content_type` must be in `ALLOWED_ATTACHMENT_CONTENT_TYPES`
+  - Attachments: at most 10; filenames are NFC-normalised, must be portable
+    bare names (reserved names and forbidden characters are also checked on the
+    NFKC form) and must end in an extension that matches the content type; `content_type` must be in `ALLOWED_ATTACHMENT_CONTENT_TYPES`
     (pdf, png, jpeg, gif, plain, csv, calendar).
   - `html` and `headers` are email-only.
 - `request_fingerprint` v2: a legacy-shaped message (text part only) hashes the
@@ -53,9 +58,14 @@ here.
   non-string `body`, and differing `body`/`text` are refused at construction.
   `dataclasses.replace(m, body=...)` alone now raises when `text` is set (see
   `COMPATIBILITY.md`).
-- `subject` is refused at construction if it contains any control character
-  (including CR, LF, NUL, VT, FF, FS, NEL) or a line/paragraph separator.
-  Subjects with CR/LF were previously accepted.
+- `subject` is refused at construction if it contains a control character
+  (Cc: CR, LF, NUL, VT, FF, FS, NEL, tab), a line/paragraph separator, a lone
+  surrogate or a bidi embedding/override/isolate control (U+202A-202E,
+  U+2066-2069). Format characters (ZWJ, ZWNJ, soft hyphen, RLM) and unassigned
+  code points (newer emoji) stay allowed. Subjects with CR/LF were previously
+  accepted.
+- `body` (and `text`/`html`) over 1 MiB of UTF-8, and any part containing a lone
+  surrogate, are refused at construction; both were previously accepted.
 
 ### Fixed
 

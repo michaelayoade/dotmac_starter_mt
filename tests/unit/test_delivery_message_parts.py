@@ -211,7 +211,10 @@ def test_attachment_fields_and_order_are_all_covered() -> None:
         _m(text="x", attachments=[_doc(kind="storage")]),
         _m(text="x", attachments=[_doc(ref="doc-2")]),
         _m(text="x", attachments=[_doc(filename="other.pdf")]),
-        _m(text="x", attachments=[_doc(content_type="text/plain")]),
+        _m(
+            text="x",
+            attachments=[_doc(filename="invoice.txt", content_type="text/plain")],
+        ),
         _m(text="x", attachments=[_doc(), _doc(ref="doc-2")]),
         _m(text="x"),
     ]
@@ -464,6 +467,12 @@ def test_caller_mutation_after_construction_cannot_change_the_message() -> None:
         "lpt9.csv",
         "CON.tar.gz",
         "x." + "a" * 17,
+        "COM\u00b9.pdf",
+        "a\uff0fb.pdf",
+        "\uff43\uff4f\uff4e.pdf",
+        "\uff21\uff35\uff38.pdf",
+        "a\uff1ab.pdf",
+        "a\uff0ab.pdf",
         "a\u200bb.pdf",
         "a\u202eb.pdf",
         "a\u2028b.pdf",
@@ -476,7 +485,6 @@ def test_bad_filenames_are_refused(filename) -> None:
 
 def test_good_filenames_are_accepted_and_nfc_normalised() -> None:
     assert _doc(filename="invoice-2026.pdf").filename == "invoice-2026.pdf"
-    assert _doc(filename="x." + "a" * 16).filename == "x." + "a" * 16
     assert _doc(filename="COM10.pdf").filename == "COM10.pdf"
     decomposed = "cafe\u0301.pdf"
     composed = "caf\u00e9.pdf"
@@ -488,7 +496,10 @@ def test_good_filenames_are_accepted_and_nfc_normalised() -> None:
 
 
 def test_filename_bound_is_inclusive() -> None:
-    assert _doc(filename="a" * 255).filename == "a" * 255
+    name = "a" * 251 + ".pdf"
+    assert len(name) == 255 and _doc(filename=name).filename == name
+    with pytest.raises(ValueError, match="filename"):
+        _doc(filename="a" * 252 + ".pdf")
 
 
 @pytest.mark.parametrize(
@@ -513,7 +524,41 @@ def test_bad_content_types_are_refused(content_type) -> None:
 
 @pytest.mark.parametrize("content_type", sorted(ALLOWED_ATTACHMENT_CONTENT_TYPES))
 def test_good_content_types_are_accepted(content_type) -> None:
-    assert _doc(content_type=content_type).content_type == content_type
+    extension = {"image/jpeg": "jpg", "text/plain": "txt", "text/calendar": "ics"}.get(
+        content_type, content_type.split("/")[1]
+    )
+    ref = _doc(filename=f"f.{extension.upper()}", content_type=content_type)
+    assert ref.content_type == content_type
+
+
+def test_every_allowed_content_type_has_an_extension_mapping() -> None:
+    from dotmac_kernel import delivery_providers as dp
+
+    assert set(dp._EXTENSIONS_BY_CONTENT_TYPE) == ALLOWED_ATTACHMENT_CONTENT_TYPES
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("invoice.pdf.exe", "application/pdf"),
+        ("invoice.exe", "application/pdf"),
+        ("invoice", "application/pdf"),
+        ("invoice.pdf", "text/plain"),
+        ("a.png", "image/jpeg"),
+        ("a.jpg", "image/png"),
+        ("a.txt", "text/csv"),
+        (".pdf", "image/gif"),
+    ],
+)
+def test_the_extension_must_match_the_content_type(filename, content_type) -> None:
+    with pytest.raises(ValueError, match="filename"):
+        _doc(filename=filename, content_type=content_type)
+
+
+def test_jpeg_takes_either_extension_case_insensitively() -> None:
+    _doc(filename="a.JPG", content_type="image/jpeg")
+    _doc(filename="a.jpeg", content_type="image/jpeg")
+    _doc(filename="INVOICE.PDF")
 
 
 def test_the_content_type_allowlist_is_exactly_this() -> None:
@@ -948,3 +993,147 @@ def test_replace_needs_body_and_text_together() -> None:
     with pytest.raises(ValueError, match="legacy name"):
         dataclasses.replace(message, body="new")
     assert dataclasses.replace(message, body="new", text="new").text == "new"
+
+
+# ── Round 2 ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a@b.example junk",
+        "<a@b.example> trailing",
+        "a@b.example>",
+        "<@relay.example:evil@evil.example>",
+        "=?utf-8?b?c3VwcG9ydEBiYW5rLmV4YW1wbGU=?= <evil@evil.example>",
+        "=?utf-8?q?support=40bank.example?= <evil@evil.example>",
+        "evil@evil.example (support@bank.example)",
+        "(support@bank.example) evil@evil.example",
+        '"support@bank.example" <evil@evil.example>',
+        "support@bank.example <evil@evil.example>",
+        '"a=?utf-8?q?b?=" <evil@evil.example>',
+        "Name <a@example.com>, Other <c@example.org>",
+        "Name <a@example.com> <c@example.org>",
+        "a@example.com, ",
+        "Name  <a@example.com> x",
+        '"unterminated <a@example.com>',
+        "Name<a@example.com>x",
+        "Bob\t<a@example.com>",
+    ],
+)
+def test_reply_to_round_two_bypasses_are_refused(value) -> None:
+    with pytest.raises(ValueError, match="Reply-To"):
+        _m(text="x", headers={"Reply-To": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a@example.com",
+        "Support <support@example.com>",
+        "Support  Team <support@example.com>",
+        '"Support, Team" <support@example.com>',
+        '"A \\"quoted\\" name" <support@example.com>',
+        "<support@example.com>",
+    ],
+)
+def test_reply_to_accepts_plain_mailboxes(value) -> None:
+    _m(text="x", headers={"Reply-To": value})
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "\u202ax",
+        "\u202bx",
+        "\u202cx",
+        "\u202dx",
+        "\u202ex",
+        "\u2066x",
+        "\u2067x",
+        "\u2068x",
+        "\u2069x",
+        "a\ud800b",
+        "a\tb",
+        "a\x7fb",
+    ],
+)
+def test_subject_refuses_controls_surrogates_and_bidi_overrides(bad) -> None:
+    with pytest.raises(ValueError, match="subject"):
+        _m(text="x", subject=bad)
+
+
+@pytest.mark.parametrize(
+    "good",
+    [
+        "Welcome \U0001f468\u200d\U0001f469\u200d\U0001f467",
+        "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645",
+        "\u0915\u094d\u200d\u0937",
+        "Re\u00adgistration",
+        "Hello \u200f\u05e9\u05dc\u05d5\u05dd",
+        "\ufeffHello",
+        "Hi \U0001fae9",
+        "\u2764\ufe0f",
+        "Caf\u00e9 \u2615 \u65e5\u672c\u8a9e",
+    ],
+)
+def test_subject_keeps_legitimate_format_and_unassigned_characters(good) -> None:
+    assert _m(text="x", subject=good).subject == good
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "<mailto:u@example.com?subject=unsub>",
+        "<mailto:u@example.com>",
+        "<MAILTO:u@example.com?subject=a%20b>",
+    ],
+)
+def test_mailto_allows_only_a_subject(value) -> None:
+    _m(text="x", headers={"List-Unsubscribe": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "<mailto:u@example.com?cc=v@example.org>",
+        "<mailto:u@example.com?bcc=v@example.org>",
+        "<mailto:u@example.com?to=v@example.org>",
+        "<mailto:u@example.com?body=x>",
+        "<mailto:u@example.com?body=%0D%0ABcc:%20v@example.org>",
+        "<mailto:u@example.com?subject=a%0ab>",
+        "<mailto:u@example.com?subject=a%0Db>",
+        "<mailto:u@example.com?subject=a&cc=v@example.org>",
+        "<mailto:u@example.com?subject=a?cc=v@example.org>",
+        "<mailto:u@example.com,v@example.org>",
+        "<mailto:u%40evil.example@example.com>",
+        "<https://example.com/%0d%0aBcc:x>",
+        "<https://example.com/a%0Ab>",
+    ],
+)
+def test_unsubscribe_items_refuse_extra_fields_and_escaped_controls(value) -> None:
+    with pytest.raises(ValueError, match="List-Unsubscribe"):
+        _m(text="x", headers={"List-Unsubscribe": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "<https://[::1]/u>",
+        "<https://127.0.0.1/u>",
+        "<https://127.1/u>",
+        "<https://2130706433/u>",
+        "<https://localhost/u>",
+        "<https://[2001:db8::1]/u>",
+        "<https://example.com:bad/u>",
+        "<https://192.0.2.1/u>",
+    ],
+)
+def test_https_unsubscribe_needs_a_dns_hostname(value) -> None:
+    with pytest.raises(ValueError, match="List-Unsubscribe"):
+        _m(text="x", headers={"List-Unsubscribe": value})
+
+
+def test_https_unsubscribe_accepts_dns_names_ports_and_punycode() -> None:
+    for host in ("good.example", "xn--ggle-0nda.example:8443", "a.b.example"):
+        _m(text="x", headers={"List-Unsubscribe": f"<https://{host}/u?t=1>"})
