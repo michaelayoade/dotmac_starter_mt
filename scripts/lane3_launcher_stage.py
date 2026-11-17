@@ -7,15 +7,21 @@ can check on this side; it never decides anything about the host.
 
 ## What is pinned, and what is a required input
 
-* **The host key.** A :class:`PinnedHostKey` is built from a `known_hosts` file
-  the launcher is GIVEN, together with the fingerprint it is expected to carry.
-  It refuses unless the file holds exactly one plain key line whose derived
-  fingerprint equals the expected one, then writes its OWN private copy keyed by
-  a `HostKeyAlias`. The same object is what `ssh_argv` uses, and `ssh_argv`
-  re-reads the private copy and re-derives the fingerprint on every call, so the
-  key that was checked is the key that is used. Which enrolled value is the pin
-  (exit-list U3) is not decided here: the fingerprint is a required input with no
-  default.
+* **The host key (U3, ruled).** `host_incarnation` IS the target's Ed25519 SSH
+  host-key fingerprint, recorded per VM in the E10 provisioning receipt. A
+  :class:`PinnedHostKey` is built from a `known_hosts` file the launcher is GIVEN,
+  with three required typed inputs and no defaults: the fingerprint pin, the
+  expected `host_incarnation` and the VM alias. It refuses unless the file holds
+  exactly one plain Ed25519 key line (any other key type is refused) whose
+  fingerprint equals BOTH the pin and `host_incarnation`, then writes its OWN
+  private copy keyed by the alias, which is the `HostKeyAlias`. All of that
+  happens before any SSH connection is made. The same object is what `ssh_argv`
+  uses, and `ssh_argv` re-reads the private copy on every call, so the key that
+  was checked is the key that is used.
+* **The clock.** Freshness is judged on the lease store's database time (U5).
+  The session still must not start on a host whose own clock has drifted, so CP's
+  skew command runs on the target and :func:`require_clock_skew` turns its exit
+  status into a :class:`ClockSkewPassed` proof that :func:`launch_argv` demands.
 * **The artifacts.** Each file is read ONCE into a :class:`StagedFile`, hashed
   and compared with the digest the launcher pinned; the bytes that were hashed
   are the bytes that are sent. Names come from a closed allowlist, so a name can
@@ -53,6 +59,7 @@ from dotmac_deployment_foundation.lease import release_path
 __all__ = [
     "ARTIFACT_NAMES",
     "ENVIRONMENT_ALLOWLIST",
+    "ClockSkewPassed",
     "PinnedHostKey",
     "RunResult",
     "StageRefused",
@@ -60,6 +67,7 @@ __all__ = [
     "clock_skew_argv",
     "launch_argv",
     "load_staged_file",
+    "require_clock_skew",
     "ssh_argv",
     "stage_artifacts",
     "teardown_argv",
@@ -94,7 +102,8 @@ ENVIRONMENT_ALLOWLIST: Final = frozenset(
 _RUN_DIR: Final = re.compile(r"/run/lane3\.[A-Za-z0-9]{6,32}")
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
 _FINGERPRINT: Final = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
-_KEY_TYPE: Final = re.compile(r"ssh-[a-z0-9]+|ecdsa-sha2-nistp[0-9]+")
+_ED25519: Final = "ssh-ed25519"
+_ALIAS: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
 _WHEEL_NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,200}\.whl")
 _LEASE_NAME: Final = re.compile(r"[A-Za-z0-9._-]{1,200}\.json")
 
@@ -164,6 +173,11 @@ class PinnedHostKey:
     known_hosts: pathlib.Path
 
     @property
+    def host_incarnation(self) -> str:
+        """What the plan's `host_incarnation` must equal: this key's fingerprint."""
+        return self.fingerprint
+
+    @property
     def line(self) -> str:
         return f"{self.alias} {self.key_type} {self.key_b64}\n"
 
@@ -173,19 +187,25 @@ class PinnedHostKey:
         source: pathlib.Path,
         expected_fingerprint: str,
         *,
+        expected_host_incarnation: str,
+        alias: str,
         private_dir: pathlib.Path,
     ) -> PinnedHostKey:
-        """Check `source` against `expected_fingerprint`; write the private copy.
+        """Check `source` against both pins; write the private copy. No SSH.
 
-        Exactly one plain key line: no marker, no wildcard or negated pattern, no
-        comma-separated host list, no hashed host. A file that could match another
-        host, or hold a second key, is not a pin. The copy is keyed by an alias
-        derived from the key itself, never by the address in the source file.
+        Exactly one plain Ed25519 key line: no marker, no wildcard or negated
+        pattern, no comma-separated host list, no hashed host, no other key type.
+        The copy is keyed by `alias` (the VM alias from the provisioning receipt),
+        never by the address in the source file.
         """
-        if not isinstance(expected_fingerprint, str) or not _FINGERPRINT.fullmatch(
-            expected_fingerprint
+        for value, code in (
+            (expected_fingerprint, "host-key-fingerprint-required"),
+            (expected_host_incarnation, "host-incarnation-required"),
         ):
-            raise StageRefused("host-key-fingerprint-required")
+            if not isinstance(value, str) or not _FINGERPRINT.fullmatch(value):
+                raise StageRefused(code)
+        if not isinstance(alias, str) or not _ALIAS.fullmatch(alias):
+            raise StageRefused("host-key-alias-required")
         try:
             text = source.read_text(encoding="ascii")
         except (OSError, UnicodeDecodeError):
@@ -199,12 +219,13 @@ class PinnedHostKey:
             raise StageRefused("known-hosts-line-shape")
         if any(ch in fields[0] for ch in "*?!,"):
             raise StageRefused("known-hosts-host-pattern")
-        if not _KEY_TYPE.fullmatch(fields[1]):
-            raise StageRefused("known-hosts-key-type")
+        if fields[1] != _ED25519:
+            raise StageRefused("host-key-not-ed25519")
         actual = _fingerprint_of(fields[2])
         if actual != expected_fingerprint:
             raise StageRefused("host-key-fingerprint-mismatch")
-        alias = "lane3-" + hashlib.sha256(fields[2].encode("ascii")).hexdigest()[:16]
+        if actual != expected_host_incarnation:
+            raise StageRefused("host-incarnation-mismatch")
         path = _write_private(private_dir, "known_hosts", None)
         pin = cls(
             alias=alias,
@@ -495,6 +516,46 @@ def clock_skew_argv(
     )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class ClockSkewPassed:
+    """Proof that CP's skew check passed on THIS run directory's target."""
+
+    run_dir: str
+
+
+def require_clock_skew(
+    *,
+    run: Runner,
+    run_dir: str,
+    destination: str,
+    identity: str,
+    pin: PinnedHostKey,
+    connect_timeout: int,
+    extra_env: Mapping[str, str],
+) -> ClockSkewPassed:
+    """Run CP's skew check on the target; only exit 0 yields the proof.
+
+    CP's command exits 0 within the limit and 2 on any refusal; anything else
+    (an SSH failure, a missing module) is a failed check, never a pass.
+    """
+    result = run(
+        clock_skew_argv(
+            run_dir=run_dir,
+            destination=destination,
+            identity=identity,
+            pin=pin,
+            connect_timeout=connect_timeout,
+            extra_env=extra_env,
+        ),
+        None,
+    )
+    if result.exit_code == 0:
+        return ClockSkewPassed(run_dir=run_dir)
+    if result.exit_code == 2:
+        raise StageRefused("clock-skew-exceeded")
+    raise StageRefused("clock-skew-check-failed")
+
+
 def launch_argv(
     *,
     run_dir: str,
@@ -503,8 +564,15 @@ def launch_argv(
     pin: PinnedHostKey,
     connect_timeout: int,
     extra_env: Mapping[str, str],
+    skew: ClockSkewPassed,
 ) -> list[str]:
-    """The session, in the candidate venv, `-E -P`, with the channel on stdio."""
+    """The session, in the candidate venv, `-E -P`, with the channel on stdio.
+
+    Refused unless `skew` is the proof for this very run directory: a session
+    cannot be launched on a target whose clock was not checked.
+    """
+    if not isinstance(skew, ClockSkewPassed) or skew.run_dir != run_dir:
+        raise StageRefused("clock-skew-not-checked")
     tail = "venv/bin/python -E -P scripts/lane3_target_session.py"
     return ssh_argv(
         destination=destination,

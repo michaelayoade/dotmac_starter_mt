@@ -17,6 +17,9 @@ from dotmac_deployment_foundation.lease_release import (  # noqa: E402
     CleanupDisposition,
     TerminalRefusal,
 )
+from lane3_lease_store import LeaseStanding  # noqa: E402
+
+from tests.unit.lane3_store_support import FakeStore  # noqa: E402
 
 MACHINE = "0123456789abcdef0123456789abcdef"
 DIGEST = "sha256:" + "a" * 64
@@ -47,29 +50,52 @@ def terminal_data(**overrides: Any) -> dict[str, Any]:
     return data
 
 
-def test_the_lease_store_is_a_required_input_with_no_default() -> None:
-    for store in ("", "   ", None):
-        with pytest.raises(custody.LeaseCustodyRefused) as refusal:
-            custody.take_custody(
-                target="host-a",
-                lease_store=store,  # type: ignore[arg-type]
-                authorization_run="run-1",
-                controller_identity=object(),  # type: ignore[arg-type]
-                now=None,  # type: ignore[arg-type]
-            )
-        assert refusal.value.code == "lease-store-required"
+def _custody(store, **overrides):
+    arguments = {
+        "store": store,
+        "host_id": "host-a",
+        "authorization_run": "run-1",
+        "controller_identity": "fp-launch-key",
+        "ttl_seconds": 600,
+    }
+    arguments.update(overrides)
+    return custody.take_custody(**arguments)
 
 
-def test_a_missing_lease_is_not_held(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize("store", [None, "/var/leases", object()])
+def test_the_lease_store_is_a_required_interface_not_a_path(store) -> None:
     with pytest.raises(custody.LeaseCustodyRefused) as refusal:
-        custody.take_custody(
-            target="host-a",
-            lease_store=str(tmp_path),
-            authorization_run="run-1",
-            controller_identity=object(),  # type: ignore[arg-type]
-            now=None,  # type: ignore[arg-type]
-        )
-    assert refusal.value.code == "lease-not-held"
+        _custody(store)
+    assert refusal.value.code == "store-lacks-interface"
+
+
+def test_a_store_without_database_time_is_refused_before_anything_is_taken() -> None:
+    store = FakeStore(authority="runner")
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store)
+    assert refusal.value.code == "store-lacks-database-time"
+    assert not store._rows
+
+
+def test_custody_is_taken_exclusively_from_the_store() -> None:
+    store = FakeStore()
+    held = _custody(store)
+    assert held.lease.controller_identity_fingerprint == "fp-launch-key"
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, authorization_run="run-2")
+    assert refusal.value.code == "lease-held-by-another-run"
+
+
+def test_a_lease_naming_another_controller_is_refused() -> None:
+    class Other(FakeStore):
+        def acquire_exclusive(self, **kwargs):
+            held = super().acquire_exclusive(**kwargs)
+            held.lease.controller_identity_fingerprint = "someone-else"
+            return held
+
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(Other())
+    assert refusal.value.code == "lease-names-another-controller"
 
 
 def test_a_staging_directory_that_others_can_read_is_refused(
@@ -148,77 +174,125 @@ def test_an_unknown_act_disposition_is_refused() -> None:
 
 
 @pytest.fixture
-def recorded(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, Any, Any]]:
-    calls: list[tuple[Any, Any, Any]] = []
+def written(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """`build_release` stands in for the OIDC-proven builder; what it was asked
+    to build is recorded on the context it was given."""
+    contexts: list[Any] = []
 
-    def fake(ctx: Any, args: Any, outcome: Any) -> str:
-        calls.append((ctx, args, outcome))
-        return "release-digest"
+    def fake_build(ctx: Any, args: Any, outcome: Any) -> Any:
+        contexts.append((ctx, outcome))
+        return "RELEASE-RECORD"
 
-    monkeypatch.setattr(custody.controller_half, "record_terminal", fake)
-    return calls
+    monkeypatch.setattr(custody.controller_half, "build_release", fake_build)
+    return contexts
 
 
-def _release(data: dict[str, Any], **overrides: Any) -> str:
+def _release(data: dict[str, Any], store=None, **overrides: Any) -> str:
+    store = FakeStore() if store is None else store
+    held = _custody(store)
     arguments: dict[str, Any] = {
-        "lease": object(),
-        "controller_identity": object(),
+        "store": store,
+        "held": held,
+        "controller_identity": "fp-launch-key",
         "expected_machine_id": MACHINE,
         "verified_receipt_digest": DIGEST,
         "ready_seen": False,
         "release_args": object(),
     }
     arguments.update(overrides)
+    _release.store = store  # type: ignore[attr-defined]
     return custody.release_for(custody.parse_terminal(data), **arguments)
 
 
-def test_a_verified_receipt_releases_with_the_receipt_outcome(recorded) -> None:
+def test_a_verified_receipt_releases_into_the_same_store(written) -> None:
     assert _release(terminal_data()) == "release-digest"
-    ctx, _, outcome = recorded[0]
+    ctx, outcome = written[0]
     assert outcome.receipt_digest == DIGEST
     assert ctx.lease is not None
     assert ctx.vm_installation_id == MACHINE
+    ((record, mutated),) = _release.store.releases  # type: ignore[attr-defined]
+    assert record == "RELEASE-RECORD"
+    assert mutated is True
 
 
-def test_a_receipt_digest_the_launcher_did_not_verify_writes_nothing(recorded) -> None:
+def test_a_receipt_digest_the_launcher_did_not_verify_writes_nothing(written) -> None:
     with pytest.raises(custody.LeaseCustodyRefused) as refusal:
         _release(terminal_data(), verified_receipt_digest="sha256:" + "b" * 64)
     assert refusal.value.code == "terminal-receipt-unverified"
-    assert not recorded
+    assert not written
+    assert not _release.store.releases  # type: ignore[attr-defined]
 
 
-def test_another_machine_writes_nothing(recorded) -> None:
+def test_another_machine_writes_nothing(written) -> None:
     with pytest.raises(custody.LeaseCustodyRefused) as refusal:
         _release(terminal_data(), expected_machine_id="f" * 32)
     assert refusal.value.code == "terminal-machine-mismatch"
-    assert not recorded
+    assert not written
 
 
-def test_a_named_refusal_releases_with_that_member(recorded) -> None:
+def test_a_named_refusal_releases_with_that_member(written) -> None:
     member = TerminalRefusal.HOST_STATE_UNCERTIFIED
     _release(terminal_data(receipt_digest="", refusal=member.value))
-    assert recorded[0][2].refusal is member
+    assert written[0][1].refusal is member
 
 
-def test_an_unnameable_refusal_passes_no_outcome(recorded) -> None:
-    _release(terminal_data(receipt_digest="", lease_in_hand=False))
-    ctx, _, outcome = recorded[0]
-    assert outcome is None
-    assert ctx.lease is None
+def test_an_unnameable_refusal_writes_no_release_and_the_lease_is_left_to_expire(
+    written,
+) -> None:
+    store = FakeStore()
+    result = _release(
+        terminal_data(receipt_digest="", lease_in_hand=False), store=store
+    )
+    assert result == ""
+    assert not written
+    assert not store.releases
+    store.advance(10_000)
+    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
 
 
 def test_a_target_that_reports_no_mutation_is_not_believed_after_ready(
-    recorded,
+    written,
 ) -> None:
     """Once `ready` was seen the host is not provably untouched, whatever the
-    target says about itself."""
-    data = terminal_data(host_mutated=False)
-    _release(data, ready_seen=True)
-    assert recorded[0][0].host_mutated is True
+    target says about itself: the store is told `host_mutated=True`."""
+    _release(terminal_data(host_mutated=False), ready_seen=True)
+    assert written[0][0].host_mutated is True
+    assert _release.store.releases[0][1] is True  # type: ignore[attr-defined]
 
 
-def test_without_ready_the_targets_own_report_stands(recorded) -> None:
+def test_without_ready_the_targets_own_report_stands(written) -> None:
     _release(terminal_data(host_mutated=False), ready_seen=False)
-    assert recorded[0][0].host_mutated is False
-    _release(terminal_data(host_mutated=True), ready_seen=False)
-    assert recorded[1][0].host_mutated is True
+    assert written[0][0].host_mutated is False
+    assert _release.store.releases[0][1] is False  # type: ignore[attr-defined]
+
+
+def test_a_release_the_workload_cannot_prove_is_not_written(
+    written, monkeypatch
+) -> None:
+    def refuse(*_: Any) -> Any:
+        raise custody.controller_half.PrincipalUnprovable("no token")
+
+    monkeypatch.setattr(custody.controller_half, "build_release", refuse)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _release(terminal_data())
+    assert refusal.value.code == "release-not-writable"
+    assert not _release.store.releases  # type: ignore[attr-defined]
+
+
+def test_an_expired_lease_is_never_released_as_untouched(written) -> None:
+    store = FakeStore()
+    held = _custody(store)
+    store.advance(10_000)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        custody.release_for(
+            custody.parse_terminal(terminal_data(host_mutated=False)),
+            store=store,
+            held=held,
+            controller_identity="fp-launch-key",
+            expected_machine_id=MACHINE,
+            verified_receipt_digest=DIGEST,
+            ready_seen=False,
+            release_args=object(),
+        )
+    assert refusal.value.code == "lease-expired"
+    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED

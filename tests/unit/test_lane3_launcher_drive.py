@@ -27,6 +27,7 @@ import lane3_session_channel as channel_module  # noqa: E402
 from dotmac_deployment_foundation.rehearsal import ExecutionRunBindingV1  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
 
+from tests.unit.lane3_store_support import FakeStore  # noqa: E402
 from tests.unit.test_lane3_launcher_lease import MACHINE, terminal_data  # noqa: E402
 from tests.unit.test_lane3_launcher_probe import INPUTS, _measurers  # noqa: E402
 
@@ -48,10 +49,22 @@ def ends() -> Any:
 
 
 def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
+    store = overrides.pop("store", None) or FakeStore()
+    held = overrides.pop("held", None) or store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=600,
+    )
+    keys = sorted(channel_module._SPEC["start"][1] - {"store_time"})
     values: dict[str, Any] = {
-        # The channel refuses a start frame that is not the closed key set, so
-        # the test must send exactly that set (the values are not inspected).
-        "start": dict.fromkeys(sorted(channel_module._SPEC["start"][1]), "x"),
+        # The channel refuses a start frame outside its closed key set, so the
+        # test sends exactly that set (values are not inspected). The driver adds
+        # `store_time` itself, from the store.
+        "start": dict.fromkeys(keys, "x"),
+        "store": store,
+        "held": held,
+        "authorization_run": "run-1",
         "expected_host_id": "host-a",
         "expected_machine_id": MACHINE,
         "execution_run": ExecutionRunBindingV1(1, 2, 1),
@@ -450,3 +463,79 @@ def test_the_stderr_file_is_create_only(tmp_path) -> None:
         launcher.open_ssh_channel(
             [sys.executable, "-c", "pass"], stderr_path=path, stderr_limit=10
         )
+
+
+# ── U5: the store's time, and its covers(), gate the run ────────────────────
+
+
+def test_the_start_frame_carries_the_stores_time_not_the_runners(
+    ends, tmp_path
+) -> None:
+    store = FakeStore()
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        _, data = chan.receive("start", timeout=5)
+        seen["store_time"] = data["store_time"]
+        chan.send("terminal", terminal_data(receipt_digest=""))
+
+    _run(ends, _inputs(tmp_path, store=store), script)
+    assert seen["store_time"] == store.database_time().isoformat()
+
+
+def test_a_store_that_cannot_supply_database_time_sends_nothing(ends, tmp_path) -> None:
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    store = FakeStore(authority="runner")
+    held = FakeStore().acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="x",
+        ttl_seconds=60,
+    )
+    result = _run(ends, _inputs(tmp_path, store=store, held=held), script)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "store-lacks-database-time"
+    assert result.terminal is None
+
+
+def test_covers_is_judged_on_store_time_before_the_target_is_let_go(
+    ends, tmp_path
+) -> None:
+    store = FakeStore()
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        assert front(chan, seen)
+        # By the time the target reads `proceed`, the store has already judged it.
+        seen["covers_before_proceed"] = list(store.covers_calls)
+        chan.send("terminal", terminal_data(receipt_digest=""))
+
+    _run(ends, _inputs(tmp_path, store=store), script)
+    assert seen["covers_before_proceed"] == [("run-1", store.database_time())]
+
+
+def test_a_lease_the_store_says_has_expired_aborts_the_target_before_the_lock(
+    ends, tmp_path
+) -> None:
+    store = FakeStore()
+    inputs = _inputs(tmp_path, store=store)
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        chan.receive("start", timeout=5)
+        store.advance(10_000)  # the lease lapses on STORE time while it starts
+        chan.send("ready", _ready())
+        seen["kind"] = chan.receive("proceed", "abort", timeout=5)[0]
+        chan.send("terminal", terminal_data(receipt_digest="", lease_in_hand=False))
+
+    result = _run(ends, inputs, script)
+    assert seen["kind"] == "abort"
+    assert result.refusal_code == "lease-expired"
+    assert result.ready_seen is True

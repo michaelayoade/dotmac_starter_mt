@@ -37,11 +37,33 @@ def _line(host: str = "target.example.invalid") -> str:
     return f"{host} ssh-ed25519 {KEY_B64}\n"
 
 
-def _pin(tmp_path: pathlib.Path, text: str | None = None) -> stage.PinnedHostKey:
-    source = _known_hosts(tmp_path, _line() if text is None else text)
+ALIAS = "vm-alpha"
+OTHER_FINGERPRINT = "SHA256:" + "B" * 43
+
+
+def _from_file(
+    tmp_path: pathlib.Path,
+    text: str | None = None,
+    *,
+    fingerprint: object = FINGERPRINT,
+    incarnation: object = FINGERPRINT,
+    alias: object = ALIAS,
+    private_dir: pathlib.Path | None = None,
+) -> stage.PinnedHostKey:
+    source = tmp_path / "source_known_hosts"
+    if text is not None or not source.exists():
+        source.write_text(_line() if text is None else text, encoding="ascii")
     return stage.PinnedHostKey.from_file(
-        source, FINGERPRINT, private_dir=tmp_path / "pin"
+        source,
+        fingerprint,  # type: ignore[arg-type]
+        expected_host_incarnation=incarnation,  # type: ignore[arg-type]
+        alias=alias,  # type: ignore[arg-type]
+        private_dir=tmp_path / "pin" if private_dir is None else private_dir,
     )
+
+
+def _pin(tmp_path: pathlib.Path, text: str | None = None) -> stage.PinnedHostKey:
+    return _from_file(tmp_path, text)
 
 
 # ── the pinned host key object ──────────────────────────────────────────────
@@ -52,9 +74,10 @@ def test_a_matching_single_key_is_pinned_into_a_private_copy(
 ) -> None:
     pin = _pin(tmp_path, "# comment\n" + _line())
     assert pin.fingerprint == FINGERPRINT
-    assert pin.alias.startswith("lane3-")
+    assert pin.alias == ALIAS
+    assert pin.host_incarnation == FINGERPRINT
     copy = pin.known_hosts
-    assert copy.read_text() == f"{pin.alias} ssh-ed25519 {KEY_B64}\n"
+    assert copy.read_text() == f"{ALIAS} ssh-ed25519 {KEY_B64}\n"
     assert "target.example.invalid" not in copy.read_text()
     assert (copy.stat().st_mode & 0o777) == 0o600
     assert (copy.parent.stat().st_mode & 0o777) == 0o700
@@ -72,7 +95,7 @@ def test_a_matching_single_key_is_pinned_into_a_private_copy(
         (_line("a.example.invalid,b.example.invalid"), "known-hosts-host-pattern"),
         ("host ssh-ed25519\n", "known-hosts-line-shape"),
         ("host ssh-ed25519 !!!notbase64\n", "known-hosts-key-invalid"),
-        (f"host ssh-ed25519; {KEY_B64}\n", "known-hosts-key-type"),
+        (f"host ssh-ed25519; {KEY_B64}\n", "host-key-not-ed25519"),
     ],
 )
 def test_a_file_that_is_not_a_pin_is_refused(
@@ -86,11 +109,7 @@ def test_a_file_that_is_not_a_pin_is_refused(
 
 def test_another_keys_fingerprint_is_refused(tmp_path: pathlib.Path) -> None:
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.PinnedHostKey.from_file(
-            _known_hosts(tmp_path, _line()),
-            "SHA256:" + "A" * 43,
-            private_dir=tmp_path / "pin",
-        )
+        _from_file(tmp_path, fingerprint="SHA256:" + "A" * 43)
     assert refusal.value.code == "host-key-fingerprint-mismatch"
 
 
@@ -99,20 +118,14 @@ def test_the_expected_fingerprint_is_required(
     tmp_path: pathlib.Path, expected: object
 ) -> None:
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.PinnedHostKey.from_file(
-            _known_hosts(tmp_path, _line()),
-            expected,  # type: ignore[arg-type]
-            private_dir=tmp_path / "pin",
-        )
+        _from_file(tmp_path, fingerprint=expected)
     assert refusal.value.code == "host-key-fingerprint-required"
 
 
 def test_the_private_copy_is_create_only(tmp_path: pathlib.Path) -> None:
     _pin(tmp_path)
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.PinnedHostKey.from_file(
-            tmp_path / "source_known_hosts", FINGERPRINT, private_dir=tmp_path / "pin"
-        )
+        _from_file(tmp_path)
     assert refusal.value.code == "private-file-unavailable"
 
 
@@ -123,9 +136,7 @@ def test_a_private_directory_others_can_enter_is_refused(
     open_dir.mkdir()
     open_dir.chmod(0o755)
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.PinnedHostKey.from_file(
-            _known_hosts(tmp_path, _line()), FINGERPRINT, private_dir=open_dir
-        )
+        _from_file(tmp_path, private_dir=open_dir)
     assert refusal.value.code == "private-directory-unsafe"
 
 
@@ -356,7 +367,7 @@ def test_every_remote_call_uses_the_pinned_argv_shape(tmp_path: pathlib.Path) ->
     for argv in target.argvs:
         assert argv[:4] == ["ssh", "-T", "-F", "/dev/null"]
         assert "StrictHostKeyChecking=yes" in argv
-        assert any(a.startswith("HostKeyAlias=lane3-") for a in argv)
+        assert f"HostKeyAlias={ALIAS}" in argv
 
 
 def test_the_lease_is_staged_under_foundations_filename_not_lease_json(
@@ -479,11 +490,26 @@ def _common(tmp_path: pathlib.Path) -> dict:
     }
 
 
+def _launch(tmp_path: pathlib.Path, **overrides):
+    arguments = {
+        "run_dir": RUN_DIR,
+        "destination": DESTINATION,
+        "identity": "/run/key",
+        "connect_timeout": 20,
+        "extra_env": {},
+        "skew": stage.ClockSkewPassed(run_dir=RUN_DIR),
+    }
+    arguments.update(overrides)
+    if "pin" not in arguments:
+        arguments["pin"] = _pin(tmp_path)
+    return stage.launch_argv(**arguments)
+
+
 def test_the_session_launches_isolated_with_materials_by_path(
     tmp_path: pathlib.Path,
 ) -> None:
-    remote = stage.launch_argv(
-        **_common(tmp_path),
+    remote = _launch(
+        tmp_path,
         extra_env={"AUTHORIZATION_VERIFICATION_IDENTITY": "/run/lane3.x/id.json"},
     )[-1]
     assert "venv/bin/python -E -P scripts/lane3_target_session.py" in remote
@@ -530,7 +556,7 @@ def test_a_name_not_on_the_allowlist_is_refused(
     tmp_path: pathlib.Path, name: str
 ) -> None:
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.launch_argv(**_common(tmp_path), extra_env={name: "value"})
+        _launch(tmp_path, extra_env={name: "value"})
     assert refusal.value.code == "environment-name-refused"
 
 
@@ -538,10 +564,7 @@ def test_an_environment_value_with_a_control_character_is_refused(
     tmp_path: pathlib.Path,
 ) -> None:
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.launch_argv(
-            **_common(tmp_path),
-            extra_env={"DISPATCH_VERIFICATION_IDENTITY": "a\nb"},
-        )
+        _launch(tmp_path, extra_env={"DISPATCH_VERIFICATION_IDENTITY": "a\nb"})
     assert refusal.value.code == "environment-value-refused"
 
 
@@ -550,8 +573,130 @@ def test_a_run_directory_outside_run_lane3_is_refused_everywhere(
 ) -> None:
     bad = dict(_common(tmp_path), run_dir="/run/other")
     with pytest.raises(stage.StageRefused):
-        stage.launch_argv(**bad, extra_env={})
+        _launch(tmp_path, run_dir="/run/other", pin=bad["pin"])
     with pytest.raises(stage.StageRefused):
         stage.clock_skew_argv(**bad, extra_env={})
     with pytest.raises(stage.StageRefused):
         stage.teardown_argv(**bad)
+
+
+# ── U3: host_incarnation IS the Ed25519 host-key fingerprint ────────────────
+
+
+def test_an_incarnation_that_is_not_the_keys_fingerprint_refuses(
+    tmp_path: pathlib.Path,
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _from_file(tmp_path, incarnation=OTHER_FINGERPRINT)
+    assert refusal.value.code == "host-incarnation-mismatch"
+    assert not (tmp_path / "pin" / "known_hosts").exists()
+
+
+@pytest.mark.parametrize("incarnation", ["", None, "SHA256:short", 5, "plain-text"])
+def test_the_incarnation_is_a_required_typed_input(
+    tmp_path: pathlib.Path, incarnation: object
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _from_file(tmp_path, incarnation=incarnation)
+    assert refusal.value.code == "host-incarnation-required"
+
+
+@pytest.mark.parametrize(
+    "key_type", ["ssh-rsa", "ecdsa-sha2-nistp256", "sk-ssh-ed25519@openssh.com"]
+)
+def test_a_key_that_is_not_ed25519_refuses(
+    tmp_path: pathlib.Path, key_type: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _from_file(tmp_path, f"target.example.invalid {key_type} {KEY_B64}\n")
+    assert refusal.value.code == "host-key-not-ed25519"
+    assert not (tmp_path / "pin" / "known_hosts").exists()
+
+
+@pytest.mark.parametrize(
+    "alias", ["", None, "Has Space", "UPPER", "-lead", "a" * 64, 5]
+)
+def test_the_vm_alias_is_a_required_typed_input(
+    tmp_path: pathlib.Path, alias: object
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _from_file(tmp_path, alias=alias)
+    assert refusal.value.code == "host-key-alias-required"
+
+
+def test_the_vm_alias_is_the_host_key_alias_and_the_copys_host_token(
+    tmp_path: pathlib.Path,
+) -> None:
+    pin = _from_file(tmp_path, alias="vm-0042.lane3")
+    argv = stage.ssh_argv(
+        destination=DESTINATION,
+        identity="/run/key",
+        pin=pin,
+        connect_timeout=20,
+        remote="true",
+    )
+    assert "HostKeyAlias=vm-0042.lane3" in argv
+    assert pin.known_hosts.read_text().split()[0] == "vm-0042.lane3"
+
+
+def test_pinning_runs_no_ssh_at_all(tmp_path: pathlib.Path) -> None:
+    """The check is pure: constructing the pin takes no runner and connects to
+    nothing, so a mismatch is refused before any SSH beyond it."""
+    import inspect
+
+    assert "run" not in inspect.signature(stage.PinnedHostKey.from_file).parameters
+    with pytest.raises(stage.StageRefused):
+        _from_file(tmp_path, incarnation=OTHER_FINGERPRINT)
+
+
+# ── the clock: CP's skew check gates the launch ─────────────────────────────
+
+
+def _skew(tmp_path: pathlib.Path, exit_code: int):
+    calls: list[list[str]] = []
+
+    def run(argv, stdin):
+        calls.append(list(argv))
+        return stage.RunResult(exit_code)
+
+    proof = None
+    try:
+        proof = stage.require_clock_skew(run=run, extra_env={}, **_common(tmp_path))
+    finally:
+        _skew.calls = calls  # type: ignore[attr-defined]
+    return proof
+
+
+def test_a_passing_skew_check_yields_the_proof_for_this_run_directory(
+    tmp_path: pathlib.Path,
+) -> None:
+    proof = _skew(tmp_path, 0)
+    assert proof == stage.ClockSkewPassed(run_dir=RUN_DIR)
+    assert "-m vendor_cp.deployment.database_clock" in _skew.calls[0][-1]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "code"),
+    [
+        (2, "clock-skew-exceeded"),
+        (255, "clock-skew-check-failed"),
+        (1, "clock-skew-check-failed"),
+    ],
+)
+def test_a_failing_skew_check_never_yields_a_proof(
+    tmp_path: pathlib.Path, exit_code: int, code: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, exit_code)
+    assert refusal.value.code == code
+
+
+@pytest.mark.parametrize(
+    "skew", [None, "ok", stage.ClockSkewPassed("/run/lane3.OTHERRUN12")]
+)
+def test_a_session_cannot_launch_without_the_skew_proof_for_its_run(
+    tmp_path: pathlib.Path, skew: object
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(tmp_path, skew=skew)
+    assert refusal.value.code == "clock-skew-not-checked"

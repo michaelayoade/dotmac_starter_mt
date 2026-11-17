@@ -1,28 +1,29 @@
-"""Lane 3, the LAUNCHER half of lease custody and release (E7 / T4).
+"""Lane 3, the LAUNCHER half of lease custody and release (E7 / T4, U5).
 
 The release principal is the GitHub workload (`HostLeaseReleaseV1` accepts only
 `github_actions_workload`), and only the launcher holds the OIDC token that
 proves it. Moving the write onto the target would need a new principal kind
-(Foundation bytes) or token forwarding (rejected), so custody stays here:
+(Foundation bytes) or token forwarding (rejected), so custody stays here.
 
-* BEFORE launch the launcher loads the lease from the store it was told to use,
-  checks it covers this authorization run and names this run's launch key, and
-  stages a READ-ONLY COPY for the target's pre-mutation `covers()` recheck. The
-  copy is written by Foundation's own writer into a private staging directory,
-  never serialized here;
-* AFTER the run the target reports a closed terminal outcome. This module parses
-  it back into the types the existing terminal record understands and hands it to
-  `exposure_rehearsal_runner.record_terminal`, which builds `HostLeaseReleaseV1`
-  as the proven workload and writes it through the package's create-only writer.
-  There is no second writer, and nothing here builds a release itself.
+## One store, on database time (U5)
 
-## Fail-closed
+Custody and release both go through a :class:`~lane3_lease_store.LeaseStore`, the
+interface this lane requires of the CP production database. :func:`take_custody`
+refuses a store that cannot supply database time and takes the lease exclusively
+under the store's row lock; expiry and `covers` are judged on store time. The
+release is built here as the proven workload and written into THAT SAME store via
+`store.release(..., host_mutated=...)`; there is no second ledger.
 
-The lease store location is a required input with no default (exit-list U5: the
-authoritative store under ephemeral runners is not yet decided). A terminal
-report that disagrees with what the launcher independently knows (the machine id
-it pinned, the receipt digest it verified) writes NO release, so the lease stays
-held, which is the designed outcome of an unprovable run.
+* BEFORE launch the launcher holds the lease and stages a READ-ONLY COPY for the
+  target, written by Foundation's own writer, never serialized here;
+* AFTER the run the target reports a closed terminal outcome, parsed here back
+  into the types Foundation owns. A report the launcher cannot reconcile with what
+  it knows (the pinned machine id, the receipt digest it verified) writes NO
+  release;
+* a runner that dies, or a target that never reports, writes no release: the
+  lease expires on store time and the host is treated as MUTATED, never released
+  as untouched. Once the target has reported `ready` the launcher forces
+  `host_mutated=True` whatever the target says.
 """
 
 from __future__ import annotations
@@ -33,7 +34,6 @@ import pathlib
 import shlex
 import stat
 import sys
-from datetime import datetime
 from typing import Any, Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -42,11 +42,17 @@ import exposure_rehearsal_runner as controller_half
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
-from dotmac_deployment_foundation.lease import HostLease, load_lease, write_lease
+from dotmac_deployment_foundation.lease import HostLease, write_lease
 from dotmac_deployment_foundation.lease_release import (
     CleanupDisposition,
     TerminalOutcome,
     TerminalRefusal,
+)
+from lane3_lease_store import (
+    HeldLease,
+    LeaseStore,
+    StoreRefused,
+    require_database_time,
 )
 
 __all__ = [
@@ -74,23 +80,29 @@ class LeaseCustodyRefused(Exception):
 
 def take_custody(
     *,
-    target: str,
-    lease_store: str,
+    store: LeaseStore,
+    host_id: str,
     authorization_run: str,
     controller_identity: ControllerSshFingerprintV1,
-    now: datetime,
-) -> HostLease:
-    """The held lease, or a refusal. `lease_store` has no default (U5)."""
-    if not isinstance(lease_store, str) or not lease_store.strip():
-        raise LeaseCustodyRefused("lease-store-required")
+    ttl_seconds: int,
+) -> HeldLease:
+    """The exclusively held lease, or a refusal. The store is a required input.
+
+    A store that cannot supply database time is refused before anything is taken.
+    """
     try:
-        lease = load_lease(target, directory=lease_store)
-        lease.covers(now=now, authorization_run_id=authorization_run)
-    except controller_half.DeploymentFoundationError:
-        raise LeaseCustodyRefused("lease-not-held") from None
-    if controller_identity != lease.controller_identity_fingerprint:
+        checked = require_database_time(store)
+        held = checked.acquire_exclusive(
+            host_id=host_id,
+            authorization_run=authorization_run,
+            controller_identity=controller_identity,
+            ttl_seconds=ttl_seconds,
+        )
+    except StoreRefused as exc:
+        raise LeaseCustodyRefused(exc.code) from None
+    if controller_identity != held.lease.controller_identity_fingerprint:
         raise LeaseCustodyRefused("lease-names-another-controller")
-    return lease
+    return held
 
 
 def stage_readonly_copy(lease: HostLease, staging_dir: pathlib.Path) -> pathlib.Path:
@@ -242,42 +254,53 @@ def parse_terminal(data: dict[str, Any]) -> Terminal:
 def release_for(
     terminal: Terminal,
     *,
-    lease: HostLease,
+    store: LeaseStore,
+    held: HeldLease,
     controller_identity: ControllerSshFingerprintV1,
     expected_machine_id: str,
     verified_receipt_digest: str,
     ready_seen: bool,
     release_args: argparse.Namespace,
 ) -> str:
-    """Write the release for this terminal report, or none. Returns its digest.
+    """Write the release into the lease's own store, or none. Returns its digest.
 
-    NONE is written, and the lease stays held, when the report cannot be
-    reconciled with what the launcher knows: a machine id other than the pinned
-    one, or a receipt digest other than the one it verified. `release_args`
-    carries the fields `record_terminal` reads (`target`, `lease_dir` = the REAL
-    store, `vm_slot`, the revisions, `principal_audience`, output paths).
+    NONE is written (returns `""`), and the lease is left to expire on store time
+    as a mutated host, when the report names no member of Foundation's closed
+    vocabulary. A report the launcher cannot reconcile with what it knows raises
+    and writes nothing. `release_args` carries the fields `build_release` reads
+    (`vm_slot`, the revisions, `candidate_version`, `authorization_run`,
+    `principal_audience`, `timeout`).
     """
     if terminal.machine_id and terminal.machine_id != expected_machine_id:
         raise LeaseCustodyRefused("terminal-machine-mismatch")
     if terminal.receipt_digest:
         if terminal.receipt_digest != verified_receipt_digest:
             raise LeaseCustodyRefused("terminal-receipt-unverified")
-        outcome: TerminalOutcome | None = TerminalOutcome(
-            receipt_digest=terminal.receipt_digest
-        )
+        outcome = TerminalOutcome(receipt_digest=terminal.receipt_digest)
     elif terminal.refusal is not None:
         outcome = TerminalOutcome(refusal=terminal.refusal)
     else:
-        outcome = None
-    ctx = controller_half.TerminalContext()
-    ctx.lease = lease if terminal.lease_in_hand else None
-    ctx.controller_identity = controller_identity
+        return ""
     # Once the target reported `ready` it was on the host with a plan in hand, so
     # the launcher can no longer vouch that the host is untouched: whatever the
     # target reports about its own mutation, it is recorded as attempted.
-    ctx.host_mutated = terminal.host_mutated or ready_seen
+    host_mutated = terminal.host_mutated or ready_seen
+    ctx = controller_half.TerminalContext()
+    ctx.lease = held.lease if terminal.lease_in_hand else None
+    ctx.controller_identity = controller_identity
+    ctx.host_mutated = host_mutated
     ctx.vm_installation_id = terminal.machine_id
     ctx.acts.extend(terminal.acts)
     ctx.notes.extend(terminal.notes)
     ctx.receipt_digest = terminal.receipt_digest
-    return controller_half.record_terminal(ctx, release_args, outcome)
+    try:
+        release = controller_half.build_release(ctx, release_args, outcome)
+    except (
+        controller_half.ReleaseNotWritable,
+        controller_half.PrincipalUnprovable,
+    ):
+        raise LeaseCustodyRefused("release-not-writable") from None
+    try:
+        return store.release(held, release=release, host_mutated=host_mutated)
+    except StoreRefused as exc:
+        raise LeaseCustodyRefused(exc.code) from None

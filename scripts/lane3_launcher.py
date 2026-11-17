@@ -41,6 +41,7 @@ import lane3_evidence_finalization as evidence_finalization
 import lane3_launcher_evidence as launcher_evidence
 import lane3_launcher_lease as launcher_lease
 import lane3_launcher_probe as launcher_probe
+import lane3_lease_store
 from dotmac_deployment_foundation.rehearsal import (
     ExecutionRunBindingV1,
     RehearsalReceiptV2,
@@ -60,7 +61,11 @@ __all__ = [
 class DriveInputs:
     """Everything one drive needs. Every field is required; nothing defaults."""
 
+    #: Every start key EXCEPT `store_time`: the driver adds that from the store.
     start: dict[str, Any]
+    store: lane3_lease_store.LeaseStore
+    held: lane3_lease_store.HeldLease
+    authorization_run: str
     expected_host_id: str
     expected_machine_id: str
     execution_run: ExecutionRunBindingV1
@@ -120,7 +125,15 @@ def _terminal(
 def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
     result = DriveResult(terminal=None)
     try:
-        channel.send("start", inputs.start)
+        # The target's only notion of "now" is the STORE's time, taken here, not
+        # this runner's or the target's own clock.
+        try:
+            lane3_lease_store.require_database_time(inputs.store)
+            store_time = inputs.store.database_time()
+        except lane3_lease_store.StoreRefused as exc:
+            result.refusal_code = exc.code
+            return result
+        channel.send("start", {**inputs.start, "store_time": store_time.isoformat()})
         kind, data = channel.receive("ready", "terminal", timeout=inputs.ready_seconds)
         if kind == "terminal":
             return _finish_terminal(result, data)
@@ -135,6 +148,13 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             return _terminal(
                 channel, inputs.terminal_seconds, result, "placement-mismatch"
             )
+        # The lease must still cover this run on STORE time at the moment the
+        # target is let go. A store that says no aborts the target here.
+        try:
+            inputs.store.covers(inputs.held, authorization_run=inputs.authorization_run)
+        except lane3_lease_store.StoreRefused as exc:
+            _abort(channel, "lease-not-covering")
+            return _terminal(channel, inputs.terminal_seconds, result, exc.code)
         # The gate: the target takes no grant and no lock until it reads this.
         channel.send("proceed", {"plan_digest": data["plan_digest"]})
 
