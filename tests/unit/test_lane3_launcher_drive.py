@@ -48,7 +48,9 @@ def ends() -> Any:
 
 def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
     values: dict[str, Any] = {
-        "start": {"any": "frame"},
+        # The channel refuses a start frame that is not the closed key set, so
+        # the test must send exactly that set (the values are not inspected).
+        "start": dict.fromkeys(sorted(channel_module._SPEC["start"][1]), "x"),
         "expected_host_id": "host-a",
         "expected_machine_id": MACHINE,
         "execution_run": ExecutionRunBindingV1(1, 2, 1),
