@@ -1,5 +1,9 @@
 """PostgreSQL proof of the money-flows ``mf_0002`` FundedCharge instance table."""
 
+# ``migrated`` is the shared fixture from test_money_flows_migration, imported by
+# name so pytest registers it here; test arguments then shadow the import.
+# ruff: noqa: F401, F811
+
 from __future__ import annotations
 
 import hashlib
@@ -15,15 +19,10 @@ from tests.test_money_flows_migration import (
     VERSIONS,
     _as_tenant,
     _tenant,
+    migrated,
 )
 
 TABLE = "mod_mflows.funded_charge_instances"
-
-
-@pytest.fixture
-def migrated(_mf_migrated):
-    """The shared mf_0001 fixture: a database migrated to every money_flows head."""
-    return _mf_migrated
 
 
 MF_0001_SHA256 = "fa10195f884f7e6d7404e03af52d90003d24b91b7813f6c93ee1ea0c2f3ea03e"
