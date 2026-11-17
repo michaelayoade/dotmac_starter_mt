@@ -14,5 +14,11 @@ caller owns the transaction. The assembly supplies two ports (target resolution
 and policy) and, around an owner refusal, rolls back and records the refusal in a
 new transaction; a uniqueness violation on the confirmation is a replay.
 
+The second flow, F2 FundedCharge, pays a due prepaid charge from account credit
+(invoice and credit draw in one transaction) or holds it `pending` with nothing
+in the ledger. The contract type comes from Billing's account terms, the charge
+and its invoice command from an assembly-supplied `RatedChargeSource`, and the
+service access signal (PREPAID_DEPLETED) leaves as a refs-only outbox event.
+
 Only an assembly imports this package. The Starter reference app does not
 compose it; the intended consumer is the Sub thin-client deployment.

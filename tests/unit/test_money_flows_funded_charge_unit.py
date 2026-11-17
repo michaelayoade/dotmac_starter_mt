@@ -1,0 +1,773 @@
+"""Unit proofs for money-flows F2 FundedCharge: graph, identity, decisions.
+
+No Postgres: owners are replaced by plain fakes at the module seam, and the
+instance table is exercised on in-memory SQLite (schema stripped) where a query
+decides something (the access aggregate, paging).
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import UTC, datetime, timedelta
+from itertools import product
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+from dotmac_billing import BillingRuleViolation
+from dotmac_kernel.cache import TenantScope
+from dotmac_kernel.money import Currency, Money
+from dotmac_money_flows import (
+    FundedChargeCursorV1,
+    FundedChargePolicyV1,
+    FundedChargePorts,
+    FundedChargeRefused,
+    FundedChargeState,
+    FundedChargeStepFailed,
+    RatedChargeKeyV1,
+    RatedChargeV1,
+    SettledFundsV1,
+    StartFundedChargeV1,
+)
+from dotmac_money_flows import funded_charge as flows
+from dotmac_money_flows.contracts import (
+    FUNDED_CHARGE_INSERT_STATES,
+    FUNDED_CHARGE_TRANSITIONS,
+    funded_charge_transition_allowed,
+)
+from dotmac_money_flows.models import FundedChargeInstance
+from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+NGN = Currency("NGN", 2)
+DUE = datetime(2026, 11, 20, tzinfo=UTC)
+SCOPE = TenantScope(uuid4())
+ACCOUNT = uuid4()
+MIGRATION = next(
+    Path(__file__)
+    .resolve()
+    .parents[2]
+    .glob(
+        "packages/dotmac-money-flows/src/dotmac_money_flows/migrations/versions/"
+        "mf_0002_funded_charge_instances.py"
+    )
+)
+KEY = RatedChargeKeyV1("src", "kind", "fact-1", "1")
+
+
+def _money(amount: str) -> Money:
+    return Money.of(amount, NGN)
+
+
+def _charge(total: str = "10.00", *, key: RatedChargeKeyV1 = KEY, due=DUE):
+    return RatedChargeV1(key, ACCOUNT, "service:one", _money(total), due)
+
+
+# --------------------------------------------------------------------------
+# Transition table
+# --------------------------------------------------------------------------
+def test_the_python_table_matches_the_database_trigger():
+    source = " ".join(MIGRATION.read_text(encoding="utf-8").split())
+    insertable = re.search(r"NEW\.state NOT IN \(([^)]*)\)", source)
+    assert insertable is not None
+    assert {s.strip(" '") for s in insertable.group(1).split(",")} == {
+        s.value for s in FUNDED_CHARGE_INSERT_STATES
+    }
+    pairs = set()
+    for old, new_clause in re.findall(
+        r"OLD\.state = '(\w+)'\s+AND NEW\.state (IN \([^)]*\)|= '\w+')", source
+    ):
+        for new in re.findall(r"'(\w+)'", new_clause):
+            pairs.add((old, new))
+    assert pairs == {
+        (old.value, new.value)
+        for old, news in FUNDED_CHARGE_TRANSITIONS.items()
+        for new in news
+    }
+    assert pairs == {
+        (old.value, new.value)
+        for old, new in product(FundedChargeState, FundedChargeState)
+        if funded_charge_transition_allowed(old, new)
+    }
+    for terminal in (FundedChargeState.DISCHARGED, FundedChargeState.WITHDRAWN):
+        assert terminal not in FUNDED_CHARGE_TRANSITIONS
+
+
+# --------------------------------------------------------------------------
+# The charge identity
+# --------------------------------------------------------------------------
+def test_the_charge_ref_is_alias_proof():
+    a = flows.charge_ref_for(RatedChargeKeyV1("a", "bc", "d", "1"))
+    b = flows.charge_ref_for(RatedChargeKeyV1("ab", "c", "d", "1"))
+    c = flows.charge_ref_for(RatedChargeKeyV1("a", "b", "cd", "1"))
+    d = flows.charge_ref_for(RatedChargeKeyV1("1:a", "", "", ""))
+    assert len({a, b, c, d}) == 4
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        KEY,
+        RatedChargeKeyV1("1:a", "2:bc", "::", "3"),
+        RatedChargeKeyV1("", "", "", ""),
+        RatedChargeKeyV1("sistema", "tipo", "é" * 40, "ü"),
+    ],
+)
+def test_the_charge_ref_round_trips_to_its_key(key):
+    assert flows.key_for_charge_ref(flows.charge_ref_for(key)) == key
+
+
+def test_a_charge_ref_over_1024_bytes_is_refused_by_bytes_not_characters():
+    just_fits = RatedChargeKeyV1("s", "k", "x" * 1000, "1")
+    assert len(flows.charge_ref_for(just_fits).encode()) <= 1024
+    with pytest.raises(ValueError):
+        flows.charge_ref_for(RatedChargeKeyV1("s", "k", "x" * 1100, "1"))
+    # 600 characters, 1200 bytes: under the character count, over the byte cap.
+    with pytest.raises(ValueError):
+        flows.charge_ref_for(RatedChargeKeyV1("s", "k", "é" * 600, "1"))
+
+
+def test_a_malformed_charge_ref_is_not_a_key():
+    with pytest.raises(ValueError):
+        flows.key_for_charge_ref("1:a1:b")
+
+
+def test_the_instance_id_is_deterministic_and_tenant_scoped():
+    ref = flows.charge_ref_for(KEY)
+    assert flows.instance_id_for(SCOPE, ref) == flows.instance_id_for(SCOPE, ref)
+    assert flows.instance_id_for(SCOPE, ref) != flows.instance_id_for(
+        TenantScope(uuid4()), ref
+    )
+
+
+@pytest.mark.parametrize("name", sorted(flows.REPLAY_CONSTRAINTS))
+def test_the_duplicate_charge_constraints_are_a_replay(name):
+    orig = SimpleNamespace(diag=SimpleNamespace(constraint_name=name))
+    assert flows.is_funded_charge_replay_conflict(IntegrityError("x", {}, orig))
+
+
+def test_nothing_else_is_a_replay_not_even_by_message():
+    other = IntegrityError(
+        "x", {}, SimpleNamespace(diag=SimpleNamespace(constraint_name="ck_other"))
+    )
+    by_text = IntegrityError("uq_funded_charge_instances_charge", {}, Exception())
+    assert not flows.is_funded_charge_replay_conflict(other)
+    assert not flows.is_funded_charge_replay_conflict(by_text)
+    assert not flows.is_funded_charge_replay_conflict(ValueError("x"))
+
+
+# --------------------------------------------------------------------------
+# Command checks and the period instant
+# --------------------------------------------------------------------------
+def _command(*, key=KEY, account=ACCOUNT, total="10.00", status="verified", start=DUE):
+    return SimpleNamespace(
+        obligation=SimpleNamespace(
+            source_system=key.source_system,
+            source_kind=key.source_kind,
+            source_fact_id=key.source_fact_id,
+            source_fact_version=key.source_fact_version,
+            billing_account_id=account,
+            total_amount=_money(total),
+            service_period=SimpleNamespace(
+                status=SimpleNamespace(value=status), starts_at=start
+            ),
+        )
+    )
+
+
+def test_a_command_that_is_the_charges_own_passes():
+    assert flows._command_matches(_command(), KEY, ACCOUNT, _charge(), DUE)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _command(key=RatedChargeKeyV1("src", "kind", "other", "1")),
+        _command(key=RatedChargeKeyV1("src", "kind", "fact-1", "2")),
+        _command(account=uuid4()),
+        _command(total="10.01"),
+        _command(status="unknown_unverified"),
+        _command(start=DUE + timedelta(seconds=1)),
+        _command(start=None),
+    ],
+)
+def test_a_command_that_is_not_the_charges_own_is_refused(command):
+    assert not flows._command_matches(command, KEY, ACCOUNT, _charge(), DUE)
+
+
+class _Policy:
+    def __init__(self, cap=20):
+        self.policy = FundedChargePolicyV1("p1", cap)
+        self.reads = 0
+
+    def read(self, db, *, scope):
+        self.reads += 1
+        return self.policy
+
+
+class _Charges:
+    def __init__(self, *charges):
+        self.charges = {charge.key: charge for charge in charges}
+        self.reads = []
+        self.issues = []
+
+    def read(self, db, *, scope, key):
+        self.reads.append(key)
+        return self.charges.get(key)
+
+    def issue_command(self, db, *, scope, key, issue_at):
+        self.issues.append((key, issue_at))
+        return _command(key=key, start=issue_at)
+
+
+def _ports(charges, cap=20):
+    return FundedChargePorts(charges, _Policy(cap), object(), object())
+
+
+def _boom(*args, **kwargs):
+    raise AssertionError("an owner was called")
+
+
+def _spy_discharge(monkeypatch):
+    seen = []
+
+    def discharge(ctx, row, charge, *, charge_ref, issue_at, funding_settlement_id):
+        seen.append((issue_at, funding_settlement_id))
+        target = row or SimpleNamespace(
+            id=uuid4(),
+            billing_account_id=ACCOUNT,
+            reason_code=None,
+            version=0,
+            document_id=None,
+        )
+        target.state = "discharged"
+        return target
+
+    monkeypatch.setattr(flows, "_discharge", discharge)
+    monkeypatch.setattr(flows, "_signal", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    return seen
+
+
+def test_a_started_charge_that_is_funded_is_issued_at_its_due_instant(monkeypatch):
+    seen = _spy_discharge(monkeypatch)
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
+    monkeypatch.setattr(flows, "_fits", lambda *a, **k: True)
+    charges = _Charges(_charge())
+
+    outcome = flows.start_funded_charge(
+        None,
+        scope=SCOPE,
+        command=StartFundedChargeV1(KEY),
+        ports=_ports(charges),
+    )
+
+    assert outcome.state is FundedChargeState.DISCHARGED
+    assert seen == [(DUE, None)]
+
+
+@pytest.mark.parametrize(
+    "cash_at, expected",
+    [(-5, DUE), (0, DUE), (5, DUE + timedelta(days=5))],
+    ids=["cash before due", "cash at due", "cash after due"],
+)
+def test_a_re_evaluated_charge_is_issued_at_the_later_of_due_and_the_cash(
+    monkeypatch, cash_at, expected
+):
+    seen = _spy_discharge(monkeypatch)
+    monkeypatch.setattr(flows, "_fits", lambda *a, **k: True)
+    settlement = SimpleNamespace(
+        occurred_at=DUE + timedelta(days=cash_at), settlement_id=uuid4()
+    )
+    row = SimpleNamespace(
+        charge_ref=flows.charge_ref_for(KEY),
+        service_ref="service:one",
+        billing_account_id=ACCOUNT,
+    )
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges(_charge())), "p1")
+
+    flows._reevaluate(ctx, row, settlement)
+
+    assert seen == [(expected, settlement.settlement_id)]
+
+
+@pytest.mark.parametrize("funded_by", [None, 3])
+def test_a_retry_is_issued_at_due_or_the_later_funding_cash(monkeypatch, funded_by):
+    seen = _spy_discharge(monkeypatch)
+    row = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=SCOPE.tenant_id,
+        version=2,
+        state="attention_required",
+        charge_ref=flows.charge_ref_for(KEY),
+        service_ref="service:one",
+        billing_account_id=ACCOUNT,
+        funding_settlement_id=None if funded_by is None else uuid4(),
+        reason_code="x",
+        document_id=None,
+    )
+    monkeypatch.setattr(flows, "_find_id", lambda *a, **k: row)
+    monkeypatch.setattr(flows, "get_funding_availability", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_fits", lambda *a, **k: True)
+    monkeypatch.setattr(
+        flows,
+        "get_confirmed_settlement",
+        lambda *a, **k: SimpleNamespace(
+            observed_at=DUE + timedelta(days=funded_by or 0)
+        ),
+    )
+
+    flows.retry_funded_charge(
+        None,
+        scope=SCOPE,
+        instance_id=row.id,
+        expected_version=2,
+        actor_ref="staff:1",
+        ports=_ports(_Charges(_charge())),
+    )
+
+    assert seen == [(DUE + timedelta(days=funded_by or 0), None)]
+
+
+# --------------------------------------------------------------------------
+# Refusals before any write, and replays
+# --------------------------------------------------------------------------
+def test_a_replay_calls_no_owner(monkeypatch):
+    row = SimpleNamespace(
+        id=uuid4(),
+        state="discharged",
+        reason_code=None,
+        version=1,
+        billing_account_id=ACCOUNT,
+        document_id=uuid4(),
+    )
+    for name in (
+        "get_effective_account_terms",
+        "get_funding_availability",
+        "get_confirmed_settlement",
+        "issue_rated_invoice",
+        "apply_available_credit",
+        "get_document_exposure",
+    ):
+        monkeypatch.setattr(flows, name, _boom)
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: row)
+    charges = _Charges(_charge())
+    ports = _ports(charges)
+
+    outcome = flows.start_funded_charge(
+        None, scope=SCOPE, command=StartFundedChargeV1(KEY), ports=ports
+    )
+
+    assert outcome.replayed and outcome.state is FundedChargeState.DISCHARGED
+    assert charges.reads == [] and ports.policy.reads == 0
+
+
+def test_an_unknown_charge_is_refused_with_no_row_and_no_owner_call(monkeypatch):
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_write", _boom)
+    monkeypatch.setattr(flows, "get_effective_account_terms", _boom)
+    with pytest.raises(FundedChargeRefused) as refused:
+        flows.start_funded_charge(
+            None,
+            scope=SCOPE,
+            command=StartFundedChargeV1(KEY),
+            ports=_ports(_Charges()),
+        )
+    assert refused.value.code == "charge_not_found"
+
+
+def test_a_charge_that_is_not_prepaid_is_refused_with_no_row(monkeypatch):
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: False)
+    monkeypatch.setattr(flows, "_write", _boom)
+    monkeypatch.setattr(flows, "get_funding_availability", _boom)
+    ports = _ports(_Charges(_charge()))
+    with pytest.raises(FundedChargeRefused) as refused:
+        flows.start_funded_charge(
+            None, scope=SCOPE, command=StartFundedChargeV1(KEY), ports=ports
+        )
+    assert refused.value.code == "not_prepaid"
+    assert ports.policy.reads == 0
+
+
+def test_a_re_evaluated_row_that_is_no_longer_prepaid_is_withdrawn_unposted(
+    monkeypatch,
+):
+    written = []
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: False)
+    monkeypatch.setattr(
+        flows, "_write", lambda ctx, row, **kw: written.append(kw) or row
+    )
+    monkeypatch.setattr(flows, "issue_rated_invoice", _boom)
+    charges = _Charges(_charge())
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(charges), "p1")
+    row = SimpleNamespace(billing_account_id=ACCOUNT)
+
+    flows._discharge(
+        ctx,
+        row,
+        _charge(),
+        charge_ref=flows.charge_ref_for(KEY),
+        issue_at=DUE,
+        funding_settlement_id=None,
+    )
+
+    assert [(w["state"], w["reason_code"]) for w in written] == [
+        (FundedChargeState.WITHDRAWN, "contract_type_changed")
+    ]
+    assert charges.issues == []
+
+
+def test_a_command_that_is_not_the_charges_own_goes_to_attention_with_no_post(
+    monkeypatch,
+):
+    written = []
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
+    monkeypatch.setattr(
+        flows, "_write", lambda ctx, row, **kw: written.append(kw) or row
+    )
+    monkeypatch.setattr(flows, "issue_rated_invoice", _boom)
+    charges = _Charges(_charge())
+    charges.issue_command = lambda *a, **k: _command(start=DUE + timedelta(days=1))
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(charges), "p1")
+
+    flows._discharge(
+        ctx,
+        None,
+        _charge(),
+        charge_ref=flows.charge_ref_for(KEY),
+        issue_at=DUE,
+        funding_settlement_id=None,
+    )
+
+    assert [(w["state"], w["reason_code"]) for w in written] == [
+        (FundedChargeState.ATTENTION_REQUIRED, "charge_command_mismatch")
+    ]
+
+
+def test_a_retry_names_its_actor_and_a_stale_version_before_the_source(monkeypatch):
+    row = SimpleNamespace(
+        id=uuid4(),
+        version=3,
+        state="attention_required",
+        billing_account_id=ACCOUNT,
+    )
+    monkeypatch.setattr(flows, "_find_id", lambda *a, **k: row)
+    monkeypatch.setattr(flows, "get_funding_availability", lambda *a, **k: None)
+    charges = _Charges(_charge())
+    ports = _ports(charges)
+    kwargs = {"scope": SCOPE, "instance_id": row.id, "ports": ports}
+    with pytest.raises(FundedChargeRefused) as nameless:
+        flows.retry_funded_charge(None, expected_version=3, actor_ref=" ", **kwargs)
+    with pytest.raises(FundedChargeRefused) as stale:
+        flows.retry_funded_charge(
+            None, expected_version=2, actor_ref="staff:1", **kwargs
+        )
+    row.state = "pending"
+    with pytest.raises(FundedChargeRefused) as wrong_state:
+        flows.retry_funded_charge(
+            None, expected_version=3, actor_ref="staff:1", **kwargs
+        )
+    assert [e.value.code for e in (nameless, stale, wrong_state)] == [
+        "actor_required",
+        "stale_version",
+        "retry_not_allowed",
+    ]
+    assert charges.reads == [] and ports.policy.reads == 0
+
+
+def test_attention_names_exactly_one_of_instance_and_key():
+    ports = _ports(_Charges())
+    for kwargs in ({}, {"instance_id": uuid4(), "key": KEY}):
+        with pytest.raises(ValueError):
+            flows.record_funded_charge_attention(
+                None, scope=SCOPE, code="x", ports=ports, **kwargs
+            )
+    with pytest.raises(ValueError):
+        flows.record_funded_charge_attention(
+            None, scope=SCOPE, code="Not A Code", ports=ports, key=KEY
+        )
+
+
+# --------------------------------------------------------------------------
+# Re-evaluation: greedy whole-only order, the cap, the continuation
+# --------------------------------------------------------------------------
+class _Rows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def execute(self, statement):
+        return self
+
+    def scalars(self):
+        return iter(self.rows)
+
+
+def _pending(total, created):
+    key = RatedChargeKeyV1("src", "kind", f"fact-{total}-{created}", "1")
+    row = SimpleNamespace(
+        id=uuid4(),
+        created_at=DUE + timedelta(minutes=created),
+        charge_ref=flows.charge_ref_for(key),
+        service_ref=f"service:{created}",
+        billing_account_id=ACCOUNT,
+        state="pending",
+    )
+    return row, _charge(total, key=key)
+
+
+def _evaluate(monkeypatch, rows, balance, cap):
+    """Run ``on_settlement_settled`` over fake rows; return (order, funded, events)."""
+    charges = _Charges(*(charge for _, charge in rows))
+    remaining = [Money.of(balance, NGN)]
+    order, funded, events = [], [], []
+
+    def fits(ctx, charge):
+        order.append(charge.key.source_fact_id)
+        return remaining[0] >= charge.total
+
+    def discharge(ctx, row, charge, *, charge_ref, issue_at, funding_settlement_id):
+        remaining[0] = remaining[0] - charge.total
+        funded.append(charge.key.source_fact_id)
+        row.state = "discharged"
+        row.reason_code, row.version, row.document_id = None, 1, uuid4()
+        return row
+
+    monkeypatch.setattr(flows, "_fits", fits)
+    monkeypatch.setattr(flows, "_discharge", discharge)
+    monkeypatch.setattr(flows, "_signal", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    monkeypatch.setattr(
+        flows,
+        "get_confirmed_settlement",
+        lambda *a, **k: SimpleNamespace(occurred_at=DUE, settlement_id=uuid4()),
+    )
+    monkeypatch.setattr(flows, "_enqueue_reevaluate", lambda *args: events.append(args))
+    outcomes = flows.on_settlement_settled(
+        _Rows([row for row, _ in rows]),
+        scope=SCOPE,
+        event=SettledFundsV1(ACCOUNT, uuid4()),
+        ports=_ports(charges, cap),
+    )
+    return order, funded, events, outcomes
+
+
+def test_pending_charges_are_funded_oldest_first_whole_only_skipping_misfits(
+    monkeypatch,
+):
+    rows = [_pending("10.00", 1), _pending("3.00", 2), _pending("4.00", 3)]
+    order, funded, events, outcomes = _evaluate(monkeypatch, rows, "5.00", cap=10)
+    # 5.00 never touches the 10.00 charge; the 3.00 fits; 4.00 no longer does.
+    assert order == [row[1].key.source_fact_id for row in rows]
+    assert funded == [rows[1][1].key.source_fact_id]
+    assert len(outcomes) == 1 and events == []
+
+
+def test_the_cap_bounds_the_batch_and_the_continuation_resumes_after_the_last(
+    monkeypatch,
+):
+    rows = [_pending("1.00", index) for index in range(1, 6)]
+    order, funded, events, outcomes = _evaluate(monkeypatch, rows, "100.00", cap=2)
+    assert len(order) == 2 and len(funded) == 2 and len(outcomes) == 2
+    ((_, tenant, account, settlement, after),) = events
+    assert (tenant, account) == (SCOPE.tenant_id, ACCOUNT)
+    assert after == FundedChargeCursorV1(rows[1][0].created_at, rows[1][0].id)
+
+
+def test_a_cap_of_exactly_the_pending_rows_enqueues_no_continuation(monkeypatch):
+    rows = [_pending("1.00", index) for index in range(1, 3)]
+    _, funded, events, _ = _evaluate(monkeypatch, rows, "100.00", cap=2)
+    assert len(funded) == 2 and events == []
+
+
+def test_a_cap_below_one_is_refused():
+    with pytest.raises(ValueError):
+        flows.on_settlement_settled(
+            None,
+            scope=SCOPE,
+            event=SettledFundsV1(ACCOUNT, uuid4()),
+            ports=_ports(_Charges(), 0),
+        )
+
+
+def test_an_owner_refusal_names_the_failed_row_and_keeps_the_code(monkeypatch):
+    rows = [_pending("1.00", 1), _pending("1.00", 2)]
+
+    def refuse(*args, **kwargs):
+        raise BillingRuleViolation("tax_evidence_invalid", "bad evidence")
+
+    monkeypatch.setattr(flows, "_reevaluate", refuse)
+    monkeypatch.setattr(
+        flows,
+        "get_confirmed_settlement",
+        lambda *a, **k: SimpleNamespace(occurred_at=DUE),
+    )
+    with pytest.raises(FundedChargeStepFailed) as failed:
+        flows.on_settlement_settled(
+            _Rows([row for row, _ in rows]),
+            scope=SCOPE,
+            event=SettledFundsV1(ACCOUNT, uuid4()),
+            ports=_ports(_Charges()),
+        )
+    assert failed.value.instance_id == rows[0][0].id
+    assert failed.value.code == "billing.tax_evidence_invalid"
+    assert isinstance(failed.value.__cause__, BillingRuleViolation)
+
+
+def test_a_withdrawn_charge_is_recorded_and_the_loop_moves_on(monkeypatch):
+    written = []
+    monkeypatch.setattr(
+        flows, "_write", lambda ctx, row, **kw: written.append(kw) or row
+    )
+    monkeypatch.setattr(flows, "_signal", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    row = SimpleNamespace(
+        charge_ref=flows.charge_ref_for(KEY),
+        service_ref=None,
+        billing_account_id=ACCOUNT,
+    )
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges()), "p1")
+
+    assert flows._reevaluate(ctx, row, SimpleNamespace(occurred_at=DUE)) is row
+
+    assert [(w["state"], w["reason_code"]) for w in written] == [
+        (FundedChargeState.WITHDRAWN, "charge_withdrawn")
+    ]
+
+
+# --------------------------------------------------------------------------
+# The access signal (SQLite stands in for the aggregate query)
+# --------------------------------------------------------------------------
+@pytest.fixture
+def db():
+    engine = create_engine(
+        "sqlite://", execution_options={"schema_translate_map": {"mod_mflows": None}}
+    )
+    FundedChargeInstance.__table__.create(engine)
+    with Session(engine) as session:
+        yield session
+
+
+_REFS = {"obligation_id": uuid4(), "document_id": uuid4(), "credit_draw_id": uuid4()}
+
+
+def _instance(db, state, *, service="service:one", version=0, account=ACCOUNT):
+    row = FundedChargeInstance(
+        id=uuid4(),
+        tenant_id=SCOPE.tenant_id,
+        state=state,
+        reason_code="x" if state in ("attention_required", "withdrawn") else None,
+        policy_version="p",
+        definition_version="d",
+        version=version,
+        charge_ref=f"ref-{uuid4()}",
+        billing_account_id=account,
+        service_ref=service,
+        **_REFS if state == "discharged" else {},
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+@pytest.mark.parametrize(
+    "states, active",
+    [
+        ([], False),
+        (["pending"], True),
+        (["attention_required"], False),  # D-F2-7: our own refusal leaves it on
+        (["discharged", "withdrawn"], False),
+        (["attention_required", "pending"], True),
+        (["discharged", "pending", "attention_required"], True),
+    ],
+)
+def test_the_service_is_off_exactly_while_a_pending_row_exists(db, states, active):
+    for state in states:
+        _instance(db, state)
+    _instance(db, "pending", service="service:other")
+    assert flows._service_state(db, SCOPE.tenant_id, "service:one")[0] is active
+
+
+def test_the_source_version_is_the_sum_of_version_plus_one_and_only_rises(db):
+    seen = []
+    first = _instance(db, "pending")
+    seen.append(flows._service_state(db, SCOPE.tenant_id, "service:one")[1])
+    first.state, first.version = "discharged", 1
+    first.obligation_id, first.document_id, first.credit_draw_id = _REFS.values()
+    db.flush()
+    seen.append(flows._service_state(db, SCOPE.tenant_id, "service:one")[1])
+    _instance(db, "pending")  # the next charge of the same service
+    seen.append(flows._service_state(db, SCOPE.tenant_id, "service:one")[1])
+    assert seen == [1, 2, 3]
+    assert seen == sorted(set(seen))
+
+
+def _signal_ctx(db):
+    return flows._Ctx(db, SCOPE, SCOPE.tenant_id, _ports(_Charges()), "p1")
+
+
+def test_the_signal_is_emitted_only_when_the_service_state_changes(db, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        flows, "enqueue_event", lambda db, **kwargs: sent.append(kwargs)
+    )
+    row = _instance(db, "pending")
+    ctx = _signal_ctx(db)
+
+    flows._signal(ctx, row, False, DUE)  # off -> on: changed
+    flows._signal(ctx, row, True, DUE)  # still on: nothing
+    row.state, row.version = "discharged", 1
+    row.obligation_id, row.document_id, row.credit_draw_id = _REFS.values()
+    db.flush()
+    flows._signal(ctx, row, True, DUE)  # on -> off: changed
+
+    assert [e["payload"]["active"] for e in sent] == [True, False]
+    assert [e["payload"]["source_version"] for e in sent] == [1, 2]
+    assert {e["event_type"] for e in sent} == {"money_flows.funded_charge.access.v1"}
+    payload = sent[0]["payload"]
+    assert payload["signal"] == "PREPAID_DEPLETED"
+    assert payload["service_reference"] == "service:one"
+    assert payload["observed_at"] == DUE.isoformat()
+    assert payload["source_reference"] == f"money_flows:funded_charge:{row.id}"
+
+
+def test_a_row_without_a_service_emits_no_signal(db, monkeypatch):
+    monkeypatch.setattr(flows, "enqueue_event", _boom)
+    row = _instance(db, "pending", service=None)
+    flows._signal(_signal_ctx(db), row, False, DUE)
+
+
+# --------------------------------------------------------------------------
+# Reads: keyset paging and the clamped limit
+# --------------------------------------------------------------------------
+def test_listing_pages_by_keyset_and_clamps_the_limit(db):
+    created = datetime(2026, 1, 1)
+    rows = [_instance(db, "pending") for _ in range(5)]
+    for row in rows:
+        row.created_at = created  # one transaction: every row ties on created_at
+    db.flush()
+    seen, cursor = [], None
+    while True:
+        page = flows.list_pending_funded_charges(
+            db, scope=SCOPE, billing_account_id=ACCOUNT, after=cursor, limit=2
+        )
+        if not page:
+            break
+        seen.extend(page)
+        cursor = FundedChargeCursorV1(page[-1].created_at, page[-1].id)
+    assert [row.id for row in seen] == sorted(row.id for row in rows)
+    assert (
+        len(
+            flows.list_pending_funded_charges(
+                db, scope=SCOPE, billing_account_id=ACCOUNT, limit=0
+            )
+        )
+        == 1
+    )
+    assert (
+        flows.list_pending_funded_charges(db, scope=SCOPE, billing_account_id=uuid4())
+        == ()
+    )
