@@ -121,8 +121,6 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "OpenReceivableDocumentV1": ANY_MODULE,
     "accept_settlement": ANY_MODULE,
     "AcceptSettlementV1": ANY_MODULE,
-    "allocate_settlement": ANY_MODULE,
-    "AllocationCommand": ANY_MODULE,
     "accept_withholding_discharge": ANY_MODULE,
     "AcceptWithholdingDischarge": ANY_MODULE,
     "SettlementFundingLane": ANY_MODULE,
@@ -140,7 +138,13 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
 # the F5 behaviour tests.
 F3_ONLY_CALLERS: frozenset[str] = frozenset()
 F5_REVERSAL_CALLERS: frozenset[str] = frozenset()
+# C2a: F1 pays whole invoices from the balance, so Settle (and only Settle) may
+# draw available credit. F2-DESIGN restricts the same call to funded_charge.py;
+# that module joins this set when it lands. Nothing else may draw credit.
+CREDIT_DRAW_CALLERS: frozenset[str] = frozenset({"settle.py"})
 RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
+    "apply_available_credit": CREDIT_DRAW_CALLERS,
+    "ApplyAvailableCreditCommand": CREDIT_DRAW_CALLERS,
     "void_document": F3_ONLY_CALLERS,
     "grant_non_cash_credit": F3_ONLY_CALLERS,
     "issue_credit_note": F3_ONLY_CALLERS,
@@ -768,8 +772,14 @@ def test_real_package_uses_no_dunder_name_or_attribute() -> None:
 def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None:
     for path in _source_files():
         assert forbidden_call_violations(path.read_text("utf-8"), _relative(path)) == []
-    # Nothing may be allowlisted yet: PR E adds the F3/F5 modules deliberately.
-    assert all(not callers for callers in RESTRICTED_CALLERS.values())
+    # Only the credit draw is allowlisted (C2a: settle.py). PR E adds the F3/F5
+    # modules deliberately.
+    assert {n for n, callers in RESTRICTED_CALLERS.items() if callers} == {
+        "apply_available_credit",
+        "ApplyAvailableCreditCommand",
+    }
+    assert RESTRICTED_CALLERS["apply_available_credit"] == frozenset({"settle.py"})
+    assert RESTRICTED_CALLERS["ApplyAvailableCreditCommand"] == frozenset({"settle.py"})
     for callers in RESTRICTED_CALLERS.values():
         for relative in callers:
             assert (MODULE_ROOT / relative).is_file(), relative
@@ -1105,7 +1115,8 @@ def test_planted_always_forbidden_calls_are_refused(source: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(RESTRICTED_CALLERS))
 def test_restricted_commands_are_refused_outside_their_allowlist(name: str) -> None:
-    assert forbidden_call_violations(f"billing.{name}(db)", "settle.py"), name
+    if "settle.py" not in RESTRICTED_CALLERS[name]:
+        assert forbidden_call_violations(f"billing.{name}(db)", "settle.py"), name
     assert forbidden_call_violations(f"billing.{name}(db)", "adjust.py"), name
     imported = f"from dotmac_billing import {name}\n{name}(db)"
     assert forbidden_call_violations(imported, "adjust.py"), name
@@ -1130,9 +1141,19 @@ def test_an_unlisted_owner_name_is_denied_by_default(source: str) -> None:
     assert forbidden_call_violations(source, "settle.py"), source
 
 
+def test_the_credit_draw_is_accepted_in_settle_and_nowhere_else() -> None:
+    source = (
+        "from dotmac_billing import apply_available_credit, "
+        "ApplyAvailableCreditCommand\n"
+        "apply_available_credit(db)\n"
+    )
+    assert forbidden_call_violations(source, "settle.py") == []
+    assert forbidden_call_violations(source, "adjust.py")
+
+
 def test_the_listed_owner_calls_are_accepted() -> None:
     source = (
-        "from dotmac_billing import accept_settlement, AllocationCommand\n"
+        "from dotmac_billing import accept_settlement, AcceptSettlementV1\n"
         "from dotmac_payments import get_confirmed_cash_v1\n"
     )
     assert forbidden_call_violations(source, "settle.py") == []
