@@ -28,13 +28,16 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timedelta
 from typing import Final
 
 from dotmac_deployment_foundation.engine.run import CommandResult
 
 __all__ = [
     "MACHINE_ID_PATH",
+    "AnchoredClock",
     "PlacementRefused",
     "local_runner",
     "placement_self_check",
@@ -127,3 +130,29 @@ def placement_self_check(
         raise PlacementRefused("the plan's host_incarnation is not the pinned one")
     if machine_id != expected_machine_id:
         raise PlacementRefused("this machine's id is not the pinned machine id")
+
+
+class AnchoredClock:
+    """Store time, carried forward by this host's MONOTONIC clock.
+
+    The lease store is the CP database (E7 / U5), and expiry is judged on its
+    clock, never on this host's wall clock: a backdated target would otherwise
+    accept an expired lease. The launcher passes the store's time in the start
+    frame; this clock anchors to it and advances by monotonic elapsed time only,
+    which a wall-clock change cannot move. `now()` never reads the wall clock.
+    """
+
+    def __init__(
+        self,
+        anchor: datetime,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if not isinstance(anchor, datetime) or anchor.tzinfo is None:
+            raise PlacementRefused("the store time is not a timezone-aware instant")
+        self._anchor = anchor
+        self._monotonic = monotonic
+        self._started = monotonic()
+
+    def now(self) -> datetime:
+        return self._anchor + timedelta(seconds=self._monotonic() - self._started)

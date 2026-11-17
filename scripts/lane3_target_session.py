@@ -100,6 +100,7 @@ from lane3_exposure_evidence import (
 from lane3_exposure_recording import RecordingExposureEffects
 from lane3_session_channel import Channel, ChannelRefused
 from lane3_target_runner import (
+    AnchoredClock,
     PlacementRefused,
     local_runner,
     placement_self_check,
@@ -167,6 +168,7 @@ class Start:
     window_seconds: int
     evidence_seconds: int
     proceed_seconds: int
+    store_time: datetime
 
 
 def _token(data: dict[str, Any], key: str) -> str:
@@ -194,6 +196,18 @@ def _absolute(data: dict[str, Any], key: str) -> pathlib.Path:
     if not path.is_absolute() or ".." in path.parts:
         raise _Unfit(f"start field {key} is not a normalized absolute path")
     return pathlib.Path(text)
+
+
+def _instant(data: dict[str, Any], key: str) -> datetime:
+    """A timezone-aware ISO-8601 instant: the lease store's (database) time."""
+    text = _token(data, key)
+    try:
+        value = datetime.fromisoformat(text)
+    except ValueError:
+        raise _Unfit(f"start field {key} is not an instant") from None
+    if value.tzinfo is None:
+        raise _Unfit(f"start field {key} carries no timezone")
+    return value
 
 
 def parse_start(data: dict[str, Any]) -> Start:
@@ -231,6 +245,7 @@ def parse_start(data: dict[str, Any]) -> Start:
         window_seconds=_bounded_int(data, "window_seconds", low=1, high=1800),
         evidence_seconds=_bounded_int(data, "evidence_seconds", low=1, high=600),
         proceed_seconds=_bounded_int(data, "proceed_seconds", low=1, high=600),
+        store_time=_instant(data, "store_time"),
     )
 
 
@@ -303,10 +318,15 @@ class Session:
         self.started = datetime.now(UTC).isoformat()
         self.machine_id = ""
         self.receipt_digest = ""
+        #: Store time, carried by monotonic elapsed time. Set when a run starts;
+        #: every lease-liveness decision in this process reads it, never the wall
+        #: clock.
+        self.clock: AnchoredClock | None = None
 
     def run(self, start: Start) -> None:
         ctx, channel = self.ctx, self.channel
         results = controller_half.Results()
+        self.clock = clock = AnchoredClock(start.store_time)
 
         with controller_half.refusal_of(_Unfit):
             controller_identity = ControllerSshFingerprintV1.parse(
@@ -363,9 +383,7 @@ class Session:
             # The launcher's READ-ONLY copy. The release is the launcher's to
             # write. Loaded and checked BEFORE the grant, for the same reason.
             lease = load_lease(start.host_id, directory=str(start.lease_dir))
-            lease.covers(
-                now=datetime.now(UTC), authorization_run_id=start.authorization_run
-            )
+            lease.covers(now=clock.now(), authorization_run_id=start.authorization_run)
             if controller_identity != lease.controller_identity_fingerprint:
                 raise _Unfit("the controller identity does not match the held lease")
             plan_digest = str(execution_plan.digest())
@@ -520,9 +538,8 @@ class Session:
 
         # Recheck the held lease and identity immediately before the only
         # mutating authority; the Executor keeps its own prestate drift guard.
-        lease.covers(
-            now=datetime.now(UTC), authorization_run_id=start.authorization_run
-        )
+        assert self.clock is not None
+        lease.covers(now=self.clock.now(), authorization_run_id=start.authorization_run)
         if (
             execution_plan.host_id != start.host_id
             or execution_plan.controller_ssh_fingerprint != str(controller_identity)

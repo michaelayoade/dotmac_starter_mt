@@ -11,6 +11,7 @@ SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from lane3_target_runner import (  # noqa: E402
+    AnchoredClock,
     PlacementRefused,
     local_runner,
     placement_self_check,
@@ -116,3 +117,37 @@ def test_a_refusal_names_the_field_and_never_a_value() -> None:
         _check(machine_id=OTHER_MACHINE)
     assert OTHER_MACHINE not in str(refusal.value)
     assert MACHINE not in str(refusal.value)
+
+
+# ── U5: store time carried by the monotonic clock ───────────────────────────
+
+
+def test_the_anchored_clock_advances_only_by_monotonic_elapsed_time() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    ticks = iter([100.0, 100.0, 130.5])
+    anchor = datetime(2026, 11, 17, 5, 0, 0, tzinfo=UTC)
+    clock = AnchoredClock(anchor, monotonic=lambda: next(ticks))
+    assert clock.now() == anchor
+    assert clock.now() == anchor + timedelta(seconds=30.5)
+
+
+def test_the_anchored_clock_never_reads_the_wall_clock() -> None:
+    import inspect
+
+    source = inspect.getsource(AnchoredClock.now)
+    for forbidden in ("datetime.now", "time.time", "utcnow", "gmtime"):
+        assert forbidden not in source
+
+
+@pytest.mark.parametrize("anchor", [None, "2026-11-17T05:00:00+00:00", 5])
+def test_a_non_instant_anchor_is_refused(anchor: object) -> None:
+    with pytest.raises(PlacementRefused):
+        AnchoredClock(anchor)  # type: ignore[arg-type]
+
+
+def test_a_naive_anchor_is_refused() -> None:
+    from datetime import datetime
+
+    with pytest.raises(PlacementRefused):
+        AnchoredClock(datetime(2026, 11, 17, 5, 0, 0))
