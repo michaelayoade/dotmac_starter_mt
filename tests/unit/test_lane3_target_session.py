@@ -48,6 +48,7 @@ START: dict[str, Any] = {
     "expected_host_incarnation": "incarnation-1",
     "window_seconds": 300,
     "evidence_seconds": 60,
+    "proceed_seconds": 30,
 }
 
 
@@ -93,6 +94,8 @@ def test_a_complete_start_parses() -> None:
         ("timeout", "120"),
         ("window_seconds", 100000),
         ("evidence_seconds", 0),
+        ("proceed_seconds", 0),
+        ("proceed_seconds", 601),
         ("expected_machine_id", ""),
         ("expected_host_incarnation", ""),
     ],
@@ -282,3 +285,89 @@ def test_the_channel_leaves_stdout_before_anything_else_in_main() -> None:
 def test_the_placement_check_precedes_the_grant() -> None:
     source = SOURCE.read_text(encoding="utf-8")
     assert source.index("self._placement(") < source.index("establish_authorization(")
+
+
+# ── the placement gate blocks (H1) and the lease precedes the grant (H2) ────
+
+
+def _gate(tmp_pairs):
+    """A session whose launcher end is returned for scripting."""
+    import os
+
+    from lane3_session_channel import Channel
+
+    to_target_read, to_target_write = os.pipe()
+    to_launcher_read, to_launcher_write = os.pipe()
+    launcher = Channel(to_launcher_read, to_target_write, role="launcher")
+    target = Channel(to_target_read, to_launcher_write, role="target")
+    tmp_pairs.extend([launcher, target])
+    return launcher, session.Session(target)
+
+
+@pytest.fixture
+def gate():
+    ends: list[Any] = []
+    yield lambda: _gate(ends)
+    for end in ends:
+        end.close()
+
+
+def _start(**overrides: Any):
+    data = copy.deepcopy(START)
+    data.update(overrides)
+    return session.parse_start(data)
+
+
+def test_a_proceed_for_this_plan_releases_the_gate(gate) -> None:
+    launcher, live = gate()
+    launcher.send("proceed", {"plan_digest": "sha256:plan"})
+    live._await_proceed(_start(), "sha256:plan")
+
+
+def test_an_abort_instead_of_proceed_is_a_clean_refusal(gate) -> None:
+    launcher, live = gate()
+    launcher.send("abort", {"reason": "placement-mismatch"})
+    with pytest.raises(session.controller_half.PreconditionUnfit):
+        live._await_proceed(_start(), "sha256:plan")
+    assert live.ctx.host_mutated is False
+
+
+def test_a_proceed_naming_another_plan_is_refused(gate) -> None:
+    launcher, live = gate()
+    launcher.send("proceed", {"plan_digest": "sha256:other"})
+    with pytest.raises(session.controller_half.PreconditionUnfit):
+        live._await_proceed(_start(), "sha256:plan")
+
+
+def test_silence_is_a_refusal_not_a_hang(gate) -> None:
+    _, live = gate()
+    with pytest.raises(session.controller_half.PreconditionUnfit):
+        live._await_proceed(_start(proceed_seconds=1), "sha256:plan")
+
+
+def test_eof_is_a_refusal(gate) -> None:
+    launcher, live = gate()
+    launcher.close()
+    with pytest.raises(session.controller_half.PreconditionUnfit):
+        live._await_proceed(_start(), "sha256:plan")
+
+
+def test_nothing_is_consumed_or_locked_before_the_launcher_says_proceed() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    proceed = source.index("self._await_proceed(")
+    assert proceed < source.index("establish_authorization(")
+    assert proceed < source.index("deployment_lock(")
+    assert source.index('"ready"') < proceed
+
+
+def test_the_lease_is_checked_before_the_dispatch_is_consumed() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    grant = source.index("establish_authorization(")
+    assert source.index("load_lease(") < grant
+    assert source.index(".covers(") < grant
+    assert source.index("lease.controller_identity_fingerprint") < grant
+
+
+def test_the_lease_is_held_in_the_terminal_context_only_after_the_grant() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    assert source.index("establish_authorization(") < source.index("ctx.lease = lease")
