@@ -53,7 +53,7 @@ import binascii
 import dataclasses
 import pathlib
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 # See `exposure_rehearsal_runner`: with `-E -P` the script's directory is not
@@ -196,6 +196,21 @@ def _absolute(data: dict[str, Any], key: str) -> pathlib.Path:
     if not path.is_absolute() or ".." in path.parts:
         raise _Unfit(f"start field {key} is not a normalized absolute path")
     return pathlib.Path(text)
+
+
+#: A lease that would lapse inside this window is not enough to start on: the run
+#: needs the probe window and the evidence round trip after the Executor.
+LEASE_SAFETY_MARGIN: Final = timedelta(seconds=60)
+
+
+def require_lease_margin(lease: Any, now: datetime) -> None:
+    """Refuse unless the lease outlives `now` by at least the safety margin."""
+    try:
+        expires = datetime.fromisoformat(str(lease.expires_at))
+    except ValueError:
+        raise _Unfit("the lease carries no readable expiry") from None
+    if expires.tzinfo is None or expires - now < LEASE_SAFETY_MARGIN:
+        raise _Unfit("the lease is too close to its expiry to start")
 
 
 def _instant(data: dict[str, Any], key: str) -> datetime:
@@ -384,6 +399,7 @@ class Session:
             # write. Loaded and checked BEFORE the grant, for the same reason.
             lease = load_lease(start.host_id, directory=str(start.lease_dir))
             lease.covers(now=clock.now(), authorization_run_id=start.authorization_run)
+            require_lease_margin(lease, clock.now())
             if controller_identity != lease.controller_identity_fingerprint:
                 raise _Unfit("the controller identity does not match the held lease")
             plan_digest = str(execution_plan.digest())
@@ -392,6 +408,7 @@ class Session:
                 {
                     "host_id": start.host_id,
                     "machine_id": self.machine_id,
+                    "host_incarnation": str(execution_plan.host_incarnation),
                     "plan_digest": plan_digest,
                 },
             )
@@ -540,6 +557,7 @@ class Session:
         # mutating authority; the Executor keeps its own prestate drift guard.
         assert self.clock is not None
         lease.covers(now=self.clock.now(), authorization_run_id=start.authorization_run)
+        require_lease_margin(lease, self.clock.now())
         if (
             execution_plan.host_id != start.host_id
             or execution_plan.controller_ssh_fingerprint != str(controller_identity)

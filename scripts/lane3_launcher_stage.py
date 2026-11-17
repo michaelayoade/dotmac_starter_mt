@@ -48,6 +48,7 @@ import pathlib
 import re
 import shlex
 import stat
+import struct
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Final
@@ -65,6 +66,7 @@ __all__ = [
     "StageRefused",
     "StagedFile",
     "clock_skew_argv",
+    "control_fingerprint_of",
     "launch_argv",
     "load_staged_file",
     "require_clock_skew",
@@ -162,6 +164,40 @@ def _fingerprint_of(blob_b64: str) -> str:
     return "SHA256:" + digest.rstrip("=")
 
 
+def _ed25519_raw_key(blob_b64: str) -> bytes:
+    """The raw 32-byte Ed25519 public key inside an OpenSSH wire-format blob."""
+    try:
+        blob = base64.b64decode(blob_b64.encode("ascii"), validate=True)
+        (name_length,) = struct.unpack(">I", blob[:4])
+        name = blob[4 : 4 + name_length]
+        offset = 4 + name_length
+        (key_length,) = struct.unpack(">I", blob[offset : offset + 4])
+        raw = blob[offset + 4 : offset + 4 + key_length]
+    except (binascii.Error, UnicodeEncodeError, struct.error):
+        raise StageRefused("known-hosts-key-invalid") from None
+    if (
+        name != b"ssh-ed25519"
+        or key_length != 32
+        or len(raw) != 32
+        or offset + 4 + key_length != len(blob)
+    ):
+        raise StageRefused("known-hosts-key-invalid")
+    return raw
+
+
+def control_fingerprint_of(blob_b64: str) -> str:
+    """The key's fingerprint in the form Control and the CP plan use.
+
+    OpenSSH fingerprints (`SHA256:` + base64) hash the SSH WIRE blob. Control's
+    `PublicKeyFingerprintV1` (read at CP db095a02 / Control `digests.py`) hashes
+    the RAW 32-byte public key and spells it `sha256:` + 64 lower-case hex, which
+    is also the only form Foundation accepts for `installed_signer_fingerprint`
+    and so for the plan's `host_incarnation`. They are two digests of the same
+    key; this is the explicit normalisation between them.
+    """
+    return "sha256:" + hashlib.sha256(_ed25519_raw_key(blob_b64)).hexdigest()
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class PinnedHostKey:
     """A host key checked once and used from a private copy, by one object."""
@@ -174,8 +210,14 @@ class PinnedHostKey:
 
     @property
     def host_incarnation(self) -> str:
-        """What the plan's `host_incarnation` must equal: this key's fingerprint."""
+        """The ruled `host_incarnation` in its OpenSSH `SHA256:` form (E10 receipt)."""
         return self.fingerprint
+
+    @property
+    def control_fingerprint(self) -> str:
+        """The same key in Control's `sha256:<hex>` form: what the CP plan's
+        `host_incarnation` and the session's placement check compare."""
+        return control_fingerprint_of(self.key_b64)
 
     @property
     def line(self) -> str:
@@ -221,6 +263,7 @@ class PinnedHostKey:
             raise StageRefused("known-hosts-host-pattern")
         if fields[1] != _ED25519:
             raise StageRefused("host-key-not-ed25519")
+        _ed25519_raw_key(fields[2])
         actual = _fingerprint_of(fields[2])
         if actual != expected_fingerprint:
             raise StageRefused("host-key-fingerprint-mismatch")
@@ -516,17 +559,33 @@ def clock_skew_argv(
     )
 
 
+_ISSUE: Final = object()
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class ClockSkewPassed:
-    """Proof that CP's skew check passed on THIS run directory's target."""
+    """Proof that CP's skew check passed for THIS run, on THIS host.
+
+    Constructible only through :func:`require_clock_skew`: a caller cannot mint
+    one, because the private issue token is not exported.
+    """
 
     run_dir: str
+    run_id: str
+    host_id: str
+    _token: object = dataclasses.field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._token is not _ISSUE:
+            raise StageRefused("clock-skew-proof-forged")
 
 
 def require_clock_skew(
     *,
     run: Runner,
     run_dir: str,
+    run_id: str,
+    host_id: str,
     destination: str,
     identity: str,
     pin: PinnedHostKey,
@@ -536,8 +595,11 @@ def require_clock_skew(
     """Run CP's skew check on the target; only exit 0 yields the proof.
 
     CP's command exits 0 within the limit and 2 on any refusal; anything else
-    (an SSH failure, a missing module) is a failed check, never a pass.
+    (an SSH failure, a missing module) is a failed check, never a pass. The proof
+    is bound to the run directory, the run id and the host.
     """
+    if not run_id or not host_id:
+        raise StageRefused("clock-skew-binding-required")
     result = run(
         clock_skew_argv(
             run_dir=run_dir,
@@ -550,7 +612,9 @@ def require_clock_skew(
         None,
     )
     if result.exit_code == 0:
-        return ClockSkewPassed(run_dir=run_dir)
+        return ClockSkewPassed(
+            run_dir=run_dir, run_id=run_id, host_id=host_id, _token=_ISSUE
+        )
     if result.exit_code == 2:
         raise StageRefused("clock-skew-exceeded")
     raise StageRefused("clock-skew-check-failed")
@@ -565,13 +629,19 @@ def launch_argv(
     connect_timeout: int,
     extra_env: Mapping[str, str],
     skew: ClockSkewPassed,
+    run_id: str,
+    host_id: str,
 ) -> list[str]:
     """The session, in the candidate venv, `-E -P`, with the channel on stdio.
 
-    Refused unless `skew` is the proof for this very run directory: a session
-    cannot be launched on a target whose clock was not checked.
+    Refused unless `skew` is the proof for this very run directory, run id and
+    host: a session cannot be launched on a target whose clock was not checked.
     """
-    if not isinstance(skew, ClockSkewPassed) or skew.run_dir != run_dir:
+    if not isinstance(skew, ClockSkewPassed) or (
+        skew.run_dir,
+        skew.run_id,
+        skew.host_id,
+    ) != (run_dir, run_id, host_id):
         raise StageRefused("clock-skew-not-checked")
     tail = "venv/bin/python -E -P scripts/lane3_target_session.py"
     return ssh_argv(

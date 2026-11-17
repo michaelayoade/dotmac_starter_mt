@@ -127,7 +127,7 @@ _SPEC: Final[dict[str, tuple[str, frozenset[str], int]]] = {
     # target -> launcher
     "ready": (
         "target",
-        frozenset({"host_id", "machine_id", "plan_digest"}),
+        frozenset({"host_id", "machine_id", "host_incarnation", "plan_digest"}),
         DEFAULT_FRAME_LIMIT,
     ),
     "window_open": ("target", frozenset({"deadline_seconds"}), DEFAULT_FRAME_LIMIT),

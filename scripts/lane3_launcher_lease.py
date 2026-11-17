@@ -29,6 +29,7 @@ release is built here as the proven workload and written into THAT SAME store vi
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import shlex
@@ -56,12 +57,16 @@ from lane3_lease_store import (
 )
 
 __all__ = [
+    "EVIDENCE_FILE",
+    "RELEASE_FILE",
     "LeaseCustodyRefused",
     "Terminal",
     "parse_terminal",
     "release_for",
+    "release_with_record",
     "stage_readonly_copy",
     "take_custody",
+    "write_terminal_records",
 ]
 
 _MAX_ACTS: Final = 64
@@ -251,7 +256,7 @@ def parse_terminal(data: dict[str, Any]) -> Terminal:
     )
 
 
-def release_for(
+def release_with_record(
     terminal: Terminal,
     *,
     store: LeaseStore,
@@ -261,10 +266,10 @@ def release_for(
     verified_receipt_digest: str,
     ready_seen: bool,
     release_args: argparse.Namespace,
-) -> str:
-    """Write the release into the lease's own store, or none. Returns its digest.
+) -> tuple[str, Any]:
+    """Write the release into the lease's own store, or none: `(digest, record)`.
 
-    NONE is written (returns `""`), and the lease is left to expire on store time
+    NONE is written (`("", None)`), and the lease is left to expire on store time
     as a mutated host, when the report names no member of Foundation's closed
     vocabulary. A report the launcher cannot reconcile with what it knows raises
     and writes nothing. `release_args` carries the fields `build_release` reads
@@ -273,18 +278,24 @@ def release_for(
     """
     if terminal.machine_id and terminal.machine_id != expected_machine_id:
         raise LeaseCustodyRefused("terminal-machine-mismatch")
+    # Once the target reported `ready` it was on the host with a plan in hand, so
+    # the launcher can no longer vouch that the host is untouched: whatever the
+    # target reports about its own mutation, it is recorded as attempted.
+    host_mutated = terminal.host_mutated or ready_seen
     if terminal.receipt_digest:
         if terminal.receipt_digest != verified_receipt_digest:
             raise LeaseCustodyRefused("terminal-receipt-unverified")
         outcome = TerminalOutcome(receipt_digest=terminal.receipt_digest)
     elif terminal.refusal is not None:
-        outcome = TerminalOutcome(refusal=terminal.refusal)
+        refusal = terminal.refusal
+        # `PRECONDITION_UNFIT` asserts an untouched host. With the host recorded
+        # as mutated that claim is false, so it degrades exactly as the target's
+        # own classifier degrades it, and can never close as REUSABLE.
+        if refusal is TerminalRefusal.PRECONDITION_UNFIT and host_mutated:
+            refusal = TerminalRefusal.HOST_STATE_UNCERTIFIED
+        outcome = TerminalOutcome(refusal=refusal)
     else:
-        return ""
-    # Once the target reported `ready` it was on the host with a plan in hand, so
-    # the launcher can no longer vouch that the host is untouched: whatever the
-    # target reports about its own mutation, it is recorded as attempted.
-    host_mutated = terminal.host_mutated or ready_seen
+        return "", None
     ctx = controller_half.TerminalContext()
     ctx.lease = held.lease if terminal.lease_in_hand else None
     ctx.controller_identity = controller_identity
@@ -301,6 +312,50 @@ def release_for(
     ):
         raise LeaseCustodyRefused("release-not-writable") from None
     try:
-        return store.release(held, release=release, host_mutated=host_mutated)
+        digest = store.release(held, release=release, host_mutated=host_mutated)
     except StoreRefused as exc:
         raise LeaseCustodyRefused(exc.code) from None
+    return digest, release
+
+
+def release_for(terminal: Terminal, **kwargs: Any) -> str:
+    """:func:`release_with_record`, reduced to the release digest (`""` for none)."""
+    return release_with_record(terminal, **kwargs)[0]
+
+
+# The names the existing `exposure-rehearsal.yml` upload step publishes
+# (`lane3-terminal-release`), so these records reach the store on every outcome.
+RELEASE_FILE: Final = "lane3-lease-release.json"
+EVIDENCE_FILE: Final = "lane3-terminal-evidence.json"
+
+
+def _create_only(path: pathlib.Path, text: str) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(text)
+
+
+def write_terminal_records(
+    directory: pathlib.Path,
+    *,
+    evidence: dict[str, Any],
+    release_record: Any | None,
+) -> list[pathlib.Path]:
+    """Create-only terminal records for EVERY outcome. Never overwrites.
+
+    The evidence file is always written, so a refusal, a release and a no-release
+    each leave a record and absence is never silent. The release file is a copy of
+    the release document and exists only when a release was written to the store.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    written: list[pathlib.Path] = []
+    if release_record is not None:
+        path = directory / RELEASE_FILE
+        _create_only(
+            path, json.dumps(release_record.as_document(), indent=2, allow_nan=False)
+        )
+        written.append(path)
+    path = directory / EVIDENCE_FILE
+    _create_only(path, json.dumps(evidence, indent=2, allow_nan=False) + "\n")
+    written.append(path)
+    return written

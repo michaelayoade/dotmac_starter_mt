@@ -151,3 +151,37 @@ def test_a_naive_anchor_is_refused() -> None:
 
     with pytest.raises(PlacementRefused):
         AnchoredClock(datetime(2026, 11, 17, 5, 0, 0))
+
+
+# ── CLOCK_BOOTTIME, failing closed ──────────────────────────────────────────
+
+
+def test_the_anchored_clock_fails_closed_without_clock_boottime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+    from datetime import UTC, datetime
+
+    monkeypatch.delattr(time, "CLOCK_BOOTTIME", raising=False)
+    with pytest.raises(PlacementRefused):
+        AnchoredClock(datetime(2026, 11, 17, 5, 0, 0, tzinfo=UTC))
+
+
+def test_the_default_clock_source_is_boottime_not_monotonic() -> None:
+    import inspect
+
+    source = inspect.getsource(AnchoredClock.__init__)
+    assert "CLOCK_BOOTTIME" in source
+    assert "time.monotonic" not in source
+
+
+@pytest.mark.skipif(
+    not hasattr(__import__("time"), "CLOCK_BOOTTIME"),
+    reason="CLOCK_BOOTTIME exists only where the target runs (Linux)",
+)
+def test_the_default_anchored_clock_advances_on_the_boottime_clock() -> None:
+    from datetime import UTC, datetime
+
+    clock = AnchoredClock(datetime(2026, 11, 17, 5, 0, 0, tzinfo=UTC))
+    first = clock.now()
+    assert clock.now() >= first

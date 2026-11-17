@@ -14,6 +14,7 @@ import os
 import pathlib
 import sys
 import threading
+import types
 from collections.abc import Callable
 from typing import Any
 
@@ -27,11 +28,13 @@ import lane3_session_channel as channel_module  # noqa: E402
 from dotmac_deployment_foundation.rehearsal import ExecutionRunBindingV1  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
 
+from tests.unit import test_lane3_launcher_stage as stage_tests  # noqa: E402
 from tests.unit.lane3_store_support import FakeStore  # noqa: E402
 from tests.unit.test_lane3_launcher_lease import MACHINE, terminal_data  # noqa: E402
 from tests.unit.test_lane3_launcher_probe import INPUTS, _measurers  # noqa: E402
 
 Channel = channel_module.Channel
+RUN_DIR = stage_tests.RUN_DIR
 CIPHERTEXT = b"age-encryption.org/v1\nstand-in"
 
 
@@ -48,6 +51,27 @@ def ends() -> Any:
         target_end.close()
 
 
+def _plan(**overrides: Any) -> launcher.SessionPlan:
+    values: dict[str, Any] = {
+        "run_dir": RUN_DIR,
+        "deploy_dir": "/srv/lane3",
+        "lock_dir": "/var/lock/dotmac",
+        "foundation_revision": "a" * 40,
+        "candidate_source_revision": "b" * 40,
+        "foundation_artifact": "sha256:" + "c" * 64,
+        "candidate_version": "0.4.0a2",
+        "probe_vantage_ref": "vantage@1",
+        "execution_run": ExecutionRunBindingV1(1, 2, 1),
+        "expected_machine_id": MACHINE,
+        "timeout": 120,
+        "window_seconds": 5,
+        "evidence_seconds": 5,
+        "proceed_seconds": 5,
+    }
+    values.update(overrides)
+    return launcher.SessionPlan(**values)
+
+
 def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
     store = overrides.pop("store", None) or FakeStore()
     held = overrides.pop("held", None) or store.acquire_exclusive(
@@ -56,31 +80,17 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
         controller_identity="SHA256:" + "A" * 43,
         ttl_seconds=600,
     )
-    keys = sorted(channel_module._SPEC["start"][1] - {"store_time"})
     values: dict[str, Any] = {
-        # The channel refuses a start frame outside its closed key set, so the
-        # test sends exactly that set (values are not inspected). The driver adds
-        # `store_time` itself, from the store.
-        "start": dict.fromkeys(keys, "x"),
+        "pin": stage_tests._pin(tmp_path),
         "store": store,
         "held": held,
-        "authorization_run": "run-1",
-        "expected_host_id": "host-a",
-        "expected_machine_id": MACHINE,
-        "execution_run": ExecutionRunBindingV1(1, 2, 1),
-        "controller_identity": "SHA256:" + "A" * 43,
-        "lease_id": "run-1",
+        "plan": _plan(),
         "probe_inputs": INPUTS,
         "qualified_evidence": {"vantage": {}},
         "fixture_digest": "sha256:" + "f" * 64,
-        "foundation_revision": "a" * 40,
-        "foundation_artifact": "sha256:" + "c" * 64,
-        "probe_vantage_ref": "vantage@1",
         "encryption": object(),
         "evidence_output": tmp_path / "bundle.age",
         "ready_seconds": 5.0,
-        "window_seconds": 5.0,
-        "evidence_seconds": 5.0,
         "terminal_seconds": 5.0,
         "measurers": _measurers(),
     }
@@ -112,8 +122,19 @@ def _run(
     return result
 
 
-def _ready(host: str = "host-a", machine: str = MACHINE) -> dict[str, str]:
-    return {"host_id": host, "machine_id": machine, "plan_digest": "sha256:" + "d" * 64}
+def _ready(
+    host: str = "host-a",
+    machine: str = MACHINE,
+    incarnation: str | None = None,
+) -> dict[str, str]:
+    return {
+        "host_id": host,
+        "machine_id": machine,
+        "host_incarnation": (
+            stage_tests.CONTROL_FINGERPRINT if incarnation is None else incarnation
+        ),
+        "plan_digest": "sha256:" + "d" * 64,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -539,3 +560,302 @@ def test_a_lease_the_store_says_has_expired_aborts_the_target_before_the_lock(
     assert seen["kind"] == "abort"
     assert result.refusal_code == "lease-expired"
     assert result.ready_seen is True
+
+
+# ── M3: identity is DERIVED from the pin and the lease, not a free dict ─────
+
+
+def test_drive_inputs_have_no_free_start_dict_or_identity_fields() -> None:
+    names = set(launcher.DriveInputs.__slots__)
+    for derived in (
+        "start",
+        "expected_host_id",
+        "expected_host_incarnation",
+        "controller_identity",
+        "lease_id",
+        "lease_dir",
+        "execution_run",
+        "authorization_run",
+    ):
+        assert derived not in names, derived
+    assert {"pin", "held", "store", "plan"} <= names
+
+
+def test_the_start_frame_is_derived_from_the_lease_the_pin_and_the_plan(
+    ends, tmp_path
+) -> None:
+    store = FakeStore()
+    inputs = _inputs(tmp_path, store=store)
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        _, data = chan.receive("start", timeout=5)
+        seen["start"] = data
+        chan.send("terminal", terminal_data(receipt_digest=""))
+
+    _run(ends, inputs, script)
+    start = seen["start"]
+    assert start["host_id"] == "host-a"
+    assert start["authorization_run"] == "run-1"
+    assert start["controller_identity"] == "SHA256:" + "A" * 43
+    assert start["lease_dir"] == f"{RUN_DIR}/lease"
+    assert start["descriptor"] == f"{RUN_DIR}/product.toml"
+    assert start["authorization_document"] == f"{RUN_DIR}/authorization.json"
+    assert start["execution_run"] == {
+        "repository_id": 1,
+        "run_id": 2,
+        "run_attempt": 1,
+    }
+    # Control's form of the pinned key, not the OpenSSH spelling the pin was
+    # given in: the plan's host_incarnation is `sha256:<hex>` of the raw key.
+    assert start["expected_host_incarnation"] == stage_tests.CONTROL_FINGERPRINT
+    assert start["expected_host_incarnation"] != stage_tests.FINGERPRINT
+    assert start["store_time"] == store.database_time().isoformat()
+
+
+@pytest.mark.parametrize(
+    "incarnation",
+    [
+        "sha256:" + "0" * 64,  # another key
+        stage_tests.FINGERPRINT,  # the right key in the WRONG (OpenSSH) spelling
+        "",
+    ],
+)
+def test_a_ready_whose_incarnation_is_not_the_pinned_key_never_reaches_the_lock(
+    ends, tmp_path, incarnation: str
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        assert not front(chan, seen, _ready(incarnation=incarnation))
+
+    result = _run(ends, _inputs(tmp_path), script)
+    assert "lock_taken" not in seen
+    assert seen["gate_frame"] == "abort"
+    assert result.refusal_code == "placement-mismatch"
+
+
+# ── LOW: store_time is sanity-checked against the held lease's window ───────
+
+
+def test_a_store_time_outside_the_lease_window_sends_nothing(ends, tmp_path) -> None:
+    import dataclasses
+    from datetime import timedelta
+
+    store = FakeStore()
+    held = store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=600,
+    )
+    future = dataclasses.replace(
+        held, acquired_at=store.database_time() + timedelta(hours=1)
+    )
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    result = _run(ends, _inputs(tmp_path, store=store, held=future), script)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "store-time-outside-lease-window"
+
+
+def test_a_store_time_after_the_lease_expired_sends_nothing(ends, tmp_path) -> None:
+    store = FakeStore()
+    held = store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=60,
+    )
+    store.advance(120)
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    result = _run(ends, _inputs(tmp_path, store=store, held=held), script)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "store-time-outside-lease-window"
+
+
+# ── M4: a terminal record for every outcome, create-only ────────────────────
+
+
+class _Receipt:
+    def sha256_digest(self) -> str:
+        return DIGEST
+
+
+DIGEST = "sha256:" + "a" * 64
+
+
+def _conclude(tmp_path, result, store=None, *, held=None, name="out"):
+    store = store or FakeStore()
+    held = held or store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=600,
+    )
+    return launcher.conclude(
+        result,
+        store=store,
+        held=held,
+        controller_identity="SHA256:" + "A" * 43,
+        expected_machine_id=MACHINE,
+        release_args=object(),
+        output_dir=tmp_path / name,
+    )
+
+
+def _evidence(tmp_path, name="out") -> dict[str, Any]:
+    return json.loads((tmp_path / name / "lane3-terminal-evidence.json").read_text())
+
+
+@pytest.fixture
+def builds(monkeypatch):
+    from tests.unit.lane3_store_support import release_for
+
+    def fake(ctx, args, outcome):
+        lease = ctx.lease
+        return release_for(
+            FakeStore(),
+            types.SimpleNamespace(lease=lease),
+        )
+
+    monkeypatch.setattr(launcher.launcher_lease.controller_half, "build_release", fake)
+
+
+def test_no_terminal_report_still_leaves_a_record_and_no_release(tmp_path) -> None:
+    result = launcher.DriveResult(terminal=None, refusal_code="channel-timeout")
+    conclusion = _conclude(tmp_path, result)
+    assert conclusion.outcome == "no_terminal"
+    assert conclusion.release_digest == ""
+    evidence = _evidence(tmp_path)
+    assert evidence["outcome"] == "no_terminal"
+    assert evidence["drive_refusal_code"] == "channel-timeout"
+    assert evidence["release_written"] is False
+    assert evidence["lease_left_to_expire_as_mutated"] is True
+    assert not (tmp_path / "out" / "lane3-lease-release.json").exists()
+
+
+def test_a_report_the_launcher_will_not_reconcile_is_a_recorded_refusal(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()),  # names a receipt nobody verified
+        ready_seen=True,
+        plan_digest=PLAN,
+    )
+    conclusion = _conclude(tmp_path, result)
+    assert conclusion.outcome == "refused"
+    assert conclusion.custody_code == "terminal-receipt-unverified"
+    evidence = _evidence(tmp_path)
+    assert evidence["outcome"] == "refused"
+    assert evidence["custody_code"] == "terminal-receipt-unverified"
+    assert evidence["release_written"] is False
+    assert evidence["ready_seen"] is True
+    assert evidence["host_mutated_recorded"] is True
+
+
+def test_a_verified_receipt_leaves_the_release_and_the_evidence(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    store = FakeStore()
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()),
+        receipt=_Receipt(),
+        ready_seen=True,
+        plan_digest=PLAN,
+    )
+    conclusion = _conclude(tmp_path, result, store)
+    assert conclusion.outcome == "released"
+    assert conclusion.release_digest == "release-digest"
+    assert {p.name for p in conclusion.paths} == {
+        "lane3-lease-release.json",
+        "lane3-terminal-evidence.json",
+    }
+    evidence = _evidence(tmp_path)
+    assert evidence["outcome"] == "released"
+    assert evidence["release_written"] is True
+    assert evidence["receipt_digest"] == DIGEST
+    # and the release went into the SAME store the lease was taken from
+    assert store.standing("host-a").value == "released"
+
+
+def test_a_target_report_naming_no_member_leaves_evidence_and_no_release(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data(receipt_digest="", lease_in_hand=False)),
+        ready_seen=False,
+    )
+    conclusion = _conclude(tmp_path, result)
+    assert conclusion.outcome == "no_release"
+    evidence = _evidence(tmp_path)
+    assert evidence["outcome"] == "no_release"
+    assert evidence["target_reported"] is True
+    assert evidence["lease_left_to_expire_as_mutated"] is True
+
+
+def test_an_unexpected_failure_still_leaves_its_record_then_propagates(
+    tmp_path, monkeypatch
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    def boom(*_: Any) -> Any:
+        raise RuntimeError("builder exploded")
+
+    monkeypatch.setattr(launcher.launcher_lease.controller_half, "build_release", boom)
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()), receipt=_Receipt(), ready_seen=True
+    )
+    with pytest.raises(RuntimeError):
+        _conclude(tmp_path, result)
+    assert _evidence(tmp_path)["outcome"] == "error"
+
+
+def test_the_terminal_records_are_create_only(tmp_path) -> None:
+    result = launcher.DriveResult(terminal=None)
+    _conclude(tmp_path, result)
+    with pytest.raises(FileExistsError):
+        _conclude(tmp_path, result)
+
+
+def test_the_evidence_carries_no_secret_or_address_fields(tmp_path) -> None:
+    result = launcher.DriveResult(terminal=None, ready_seen=True, plan_digest=PLAN)
+    _conclude(tmp_path, result)
+    assert set(_evidence(tmp_path)) == {
+        "document",
+        "version",
+        "outcome",
+        "drive_refusal_code",
+        "custody_code",
+        "release_written",
+        "release_digest",
+        "lease_left_to_expire_as_mutated",
+        "ready_seen",
+        "plan_digest",
+        "receipt_digest",
+        "target_reported",
+        "target_refusal",
+        "target_host_mutated",
+        "host_mutated_recorded",
+        "cleanup",
+        "target_exit_status",
+    }

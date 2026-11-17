@@ -132,6 +132,10 @@ def placement_self_check(
         raise PlacementRefused("this machine's id is not the pinned machine id")
 
 
+def _boottime() -> float:
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
 class AnchoredClock:
     """Store time, carried forward by this host's MONOTONIC clock.
 
@@ -146,10 +150,17 @@ class AnchoredClock:
         self,
         anchor: datetime,
         *,
-        monotonic: Callable[[], float] = time.monotonic,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         if not isinstance(anchor, datetime) or anchor.tzinfo is None:
             raise PlacementRefused("the store time is not a timezone-aware instant")
+        if monotonic is None:
+            # CLOCK_BOOTTIME keeps counting across suspend, which `monotonic`
+            # does not; a lease clock that stops while the VM sleeps would let a
+            # lapsed lease look live. Where it is unavailable this fails CLOSED.
+            if not hasattr(time, "CLOCK_BOOTTIME"):
+                raise PlacementRefused("CLOCK_BOOTTIME is unavailable on this host")
+            monotonic = _boottime
         self._anchor = anchor
         self._monotonic = monotonic
         self._started = monotonic()

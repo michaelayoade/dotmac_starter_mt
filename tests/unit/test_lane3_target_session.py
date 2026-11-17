@@ -404,3 +404,53 @@ def test_the_start_frames_store_time_is_parsed_as_an_aware_instant() -> None:
     start = session.parse_start(copy.deepcopy(START))
     assert start.store_time.tzinfo is not None
     assert start.store_time.isoformat() == "2026-11-17T05:00:00+00:00"
+
+
+# ── LOW: a safety margin before expiry; ready carries the host incarnation ──
+
+
+def _lease_expiring_in(seconds: float):
+    import types
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 11, 17, 5, 0, 0, tzinfo=UTC)
+    lease = types.SimpleNamespace(
+        expires_at=(now + timedelta(seconds=seconds)).isoformat()
+    )
+    return lease, now
+
+
+def test_a_lease_with_the_full_margin_left_is_accepted() -> None:
+    lease, now = _lease_expiring_in(session.LEASE_SAFETY_MARGIN.total_seconds())
+    session.require_lease_margin(lease, now)
+
+
+@pytest.mark.parametrize("seconds", [0, 1, 59.9, -5])
+def test_a_lease_that_would_lapse_inside_the_margin_is_refused(seconds: float) -> None:
+    lease, now = _lease_expiring_in(seconds)
+    with pytest.raises(session.controller_half.PreconditionUnfit):
+        session.require_lease_margin(lease, now)
+
+
+def test_a_lease_with_an_unreadable_or_naive_expiry_is_refused() -> None:
+    import types
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 11, 17, 5, 0, 0, tzinfo=UTC)
+    for expires in ("not a time", "2026-11-17T09:00:00", ""):
+        with pytest.raises(session.controller_half.PreconditionUnfit):
+            session.require_lease_margin(types.SimpleNamespace(expires_at=expires), now)
+
+
+def test_the_margin_is_enforced_after_both_covers_checks() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    assert source.count("require_lease_margin(lease,") == 2
+    first = source.index(".covers(")
+    second = source.index(".covers(", first + 1)
+    assert first < source.index("require_lease_margin(lease,") < second
+    assert second < source.rindex("require_lease_margin(lease,")
+
+
+def test_ready_carries_the_plans_host_incarnation() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    assert '"host_incarnation": str(execution_plan.host_incarnation)' in source

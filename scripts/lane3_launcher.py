@@ -32,6 +32,7 @@ import pathlib
 import subprocess
 import sys
 import threading
+from datetime import datetime
 from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -41,6 +42,7 @@ import lane3_evidence_finalization as evidence_finalization
 import lane3_launcher_evidence as launcher_evidence
 import lane3_launcher_lease as launcher_lease
 import lane3_launcher_probe as launcher_probe
+import lane3_launcher_stage as lane3_stage
 import lane3_lease_store
 from dotmac_deployment_foundation.rehearsal import (
     ExecutionRunBindingV1,
@@ -49,41 +51,91 @@ from dotmac_deployment_foundation.rehearsal import (
 from lane3_session_channel import Channel, ChannelRefused
 
 __all__ = [
+    "Conclusion",
     "DriveInputs",
     "DriveResult",
+    "SessionPlan",
     "StderrSink",
+    "build_start",
+    "conclude",
     "drive",
     "open_ssh_channel",
 ]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class SessionPlan:
+    """The start parameters that are NOT derivable from the pin or the lease.
+
+    Everything that identifies the host, the lease, the controller or the run is
+    deliberately absent: :func:`drive` derives those itself from the pinned host
+    key and the held lease, so a caller cannot hand the target a start frame that
+    disagrees with either.
+    """
+
+    run_dir: str
+    deploy_dir: str
+    lock_dir: str
+    foundation_revision: str
+    candidate_source_revision: str
+    foundation_artifact: str
+    candidate_version: str
+    probe_vantage_ref: str
+    execution_run: ExecutionRunBindingV1
+    expected_machine_id: str
+    timeout: int
+    window_seconds: int
+    evidence_seconds: int
+    proceed_seconds: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class DriveInputs:
     """Everything one drive needs. Every field is required; nothing defaults."""
 
-    #: Every start key EXCEPT `store_time`: the driver adds that from the store.
-    start: dict[str, Any]
+    pin: lane3_stage.PinnedHostKey
     store: lane3_lease_store.LeaseStore
     held: lane3_lease_store.HeldLease
-    authorization_run: str
-    expected_host_id: str
-    expected_machine_id: str
-    execution_run: ExecutionRunBindingV1
-    controller_identity: str
-    lease_id: str
+    plan: SessionPlan
     probe_inputs: launcher_probe.ProbeInputs
     qualified_evidence: dict[str, Any]
     fixture_digest: str
-    foundation_revision: str
-    foundation_artifact: str
-    probe_vantage_ref: str
     encryption: evidence_finalization.EncryptionContext
     evidence_output: pathlib.Path
     ready_seconds: float
-    window_seconds: float
-    evidence_seconds: float
     terminal_seconds: float
     measurers: launcher_probe.Measurers | None = None
+
+
+def build_start(inputs: DriveInputs, store_time: datetime) -> dict[str, Any]:
+    """The start frame, DERIVED: identity from lease and pin, time from the store."""
+    plan, lease = inputs.plan, inputs.held.lease
+    run_dir = plan.run_dir
+    return {
+        "foundation_revision": plan.foundation_revision,
+        "candidate_source_revision": plan.candidate_source_revision,
+        "foundation_artifact": plan.foundation_artifact,
+        "authorization_run": lease.authorization_run_id,
+        "controller_identity": str(lease.controller_identity_fingerprint),
+        "host_id": lease.target,
+        "candidate_version": plan.candidate_version,
+        "descriptor": f"{run_dir}/product.toml",
+        "authorization_document": f"{run_dir}/authorization.json",
+        "deploy_dir": plan.deploy_dir,
+        "lock_dir": plan.lock_dir,
+        "lease_dir": f"{run_dir}/lease",
+        "timeout": plan.timeout,
+        "probe_vantage_ref": plan.probe_vantage_ref,
+        "execution_run": plan.execution_run.as_document(),
+        # The plan's `host_incarnation` is Control's `sha256:<hex>` of the raw
+        # key; the pinned key is normalised into that form explicitly.
+        "expected_machine_id": plan.expected_machine_id,
+        "expected_host_incarnation": inputs.pin.control_fingerprint,
+        "window_seconds": plan.window_seconds,
+        "evidence_seconds": plan.evidence_seconds,
+        "proceed_seconds": plan.proceed_seconds,
+        "store_time": store_time.isoformat(),
+    }
 
 
 @dataclasses.dataclass(slots=True)
@@ -133,15 +185,20 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         except lane3_lease_store.StoreRefused as exc:
             result.refusal_code = exc.code
             return result
-        channel.send("start", {**inputs.start, "store_time": store_time.isoformat()})
+        held = inputs.held
+        if not held.acquired_at <= store_time < held.expires_at:
+            result.refusal_code = "store-time-outside-lease-window"
+            return result
+        channel.send("start", build_start(inputs, store_time))
         kind, data = channel.receive("ready", "terminal", timeout=inputs.ready_seconds)
         if kind == "terminal":
             return _finish_terminal(result, data)
         result.ready_seen = True
         result.plan_digest = data["plan_digest"]
         if (
-            data["host_id"] != inputs.expected_host_id
-            or data["machine_id"] != inputs.expected_machine_id
+            data["host_id"] != inputs.held.lease.target
+            or data["machine_id"] != inputs.plan.expected_machine_id
+            or data["host_incarnation"] != inputs.pin.control_fingerprint
             or not data["plan_digest"]
         ):
             _abort(channel, "placement-mismatch")
@@ -151,7 +208,9 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         # The lease must still cover this run on STORE time at the moment the
         # target is let go. A store that says no aborts the target here.
         try:
-            inputs.store.covers(inputs.held, authorization_run=inputs.authorization_run)
+            inputs.store.covers(
+                inputs.held, authorization_run=inputs.held.lease.authorization_run_id
+            )
         except lane3_lease_store.StoreRefused as exc:
             _abort(channel, "lease-not-covering")
             return _terminal(channel, inputs.terminal_seconds, result, exc.code)
@@ -159,7 +218,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         channel.send("proceed", {"plan_digest": data["plan_digest"]})
 
         kind, data = channel.receive(
-            "window_open", "terminal", timeout=inputs.window_seconds
+            "window_open", "terminal", timeout=inputs.plan.window_seconds
         )
         if kind == "terminal":
             return _finish_terminal(result, data)
@@ -182,7 +241,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         channel.send("external_results", {"rows": rows})
 
         kind, data = channel.receive(
-            "evidence_request", "terminal", timeout=inputs.evidence_seconds
+            "evidence_request", "terminal", timeout=inputs.plan.evidence_seconds
         )
         if kind == "terminal":
             return _finish_terminal(result, data)
@@ -207,7 +266,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         )
 
         kind, data = channel.receive(
-            "receipt", "terminal", timeout=inputs.evidence_seconds
+            "receipt", "terminal", timeout=inputs.plan.evidence_seconds
         )
         if kind == "terminal":
             return _finish_terminal(result, data)
@@ -217,15 +276,17 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
                 receipt_b64=data["receipt_b64"],
                 receipt_digest=data["receipt_digest"],
                 ciphertext=result.ciphertext,
-                execution_run=inputs.execution_run,
-                controller_identity=inputs.controller_identity,
-                lease_id=inputs.lease_id,
-                host_id=inputs.expected_host_id,
+                execution_run=inputs.plan.execution_run,
+                controller_identity=str(
+                    inputs.held.lease.controller_identity_fingerprint
+                ),
+                lease_id=inputs.held.lease.authorization_run_id,
+                host_id=inputs.held.lease.target,
                 sent_rows=rows,
-                foundation_revision=inputs.foundation_revision,
-                foundation_artifact=inputs.foundation_artifact,
+                foundation_revision=inputs.plan.foundation_revision,
+                foundation_artifact=inputs.plan.foundation_artifact,
                 fixture_digest=inputs.fixture_digest,
-                probe_vantage_ref=inputs.probe_vantage_ref,
+                probe_vantage_ref=inputs.plan.probe_vantage_ref,
                 plan_digest=result.plan_digest,
             )
         except launcher_evidence.EvidenceHandBackRefused as exc:
@@ -234,6 +295,94 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
     except ChannelRefused as exc:
         result.refusal_code = exc.code
         return result
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Conclusion:
+    """How a run ended, and the records it left. `outcome` is closed."""
+
+    outcome: str
+    release_digest: str
+    custody_code: str
+    paths: tuple[pathlib.Path, ...]
+
+
+def conclude(
+    result: DriveResult,
+    *,
+    store: lane3_lease_store.LeaseStore,
+    held: lane3_lease_store.HeldLease,
+    controller_identity: Any,
+    expected_machine_id: str,
+    release_args: Any,
+    output_dir: pathlib.Path,
+) -> Conclusion:
+    """Release if there is a reconcilable terminal report, and ALWAYS leave records.
+
+    Outcomes: `released`, `refused` (a terminal report the launcher would not
+    reconcile or could not write), `no_release` (a report naming no member of the
+    closed vocabulary) and `no_terminal` (the target never reported). In every
+    one the create-only evidence file is written, so a refusal, a release and a
+    no-release are each on record and absence is never silent. When no release is
+    written the lease is left to EXPIRE on store time as a mutated host.
+    """
+    outcome, digest, custody_code, record = "no_terminal", "", "", None
+    verified = result.receipt.sha256_digest() if result.receipt is not None else ""
+    error: BaseException | None = None
+    if result.terminal is not None:
+        try:
+            digest, record = launcher_lease.release_with_record(
+                result.terminal,
+                store=store,
+                held=held,
+                controller_identity=controller_identity,
+                expected_machine_id=expected_machine_id,
+                verified_receipt_digest=verified,
+                ready_seen=result.ready_seen,
+                release_args=release_args,
+            )
+            outcome = "released" if digest else "no_release"
+        except launcher_lease.LeaseCustodyRefused as exc:
+            outcome, custody_code = "refused", exc.code
+        except Exception as exc:
+            outcome, error = "error", exc
+    terminal = result.terminal
+    evidence = {
+        "document": "lane3-launcher-terminal",
+        "version": 1,
+        "outcome": outcome,
+        "drive_refusal_code": result.refusal_code,
+        "custody_code": custody_code,
+        "release_written": bool(digest),
+        "release_digest": digest,
+        "lease_left_to_expire_as_mutated": not digest,
+        "ready_seen": result.ready_seen,
+        "plan_digest": result.plan_digest,
+        "receipt_digest": verified,
+        "target_reported": terminal is not None,
+        "target_refusal": (
+            terminal.refusal.value
+            if terminal is not None and terminal.refusal is not None
+            else ""
+        ),
+        "target_host_mutated": bool(terminal.host_mutated) if terminal else None,
+        "host_mutated_recorded": bool(
+            (terminal.host_mutated if terminal else False) or result.ready_seen
+        ),
+        "cleanup": terminal.cleanup.value if terminal is not None else "",
+        "target_exit_status": terminal.exit_status if terminal is not None else None,
+    }
+    paths = launcher_lease.write_terminal_records(
+        output_dir, evidence=evidence, release_record=record if digest else None
+    )
+    if error is not None:
+        raise error
+    return Conclusion(
+        outcome=outcome,
+        release_digest=digest,
+        custody_code=custody_code,
+        paths=tuple(paths),
+    )
 
 
 def _finish_terminal(result: DriveResult, data: dict[str, Any]) -> DriveResult:

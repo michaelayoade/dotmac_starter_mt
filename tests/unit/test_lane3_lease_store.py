@@ -13,7 +13,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import lane3_lease_store as contract  # noqa: E402
 
-from tests.unit.lane3_store_support import FakeStore, conformance  # noqa: E402
+from tests.unit.lane3_store_support import CASES, FakeStore  # noqa: E402
 
 
 def test_a_store_with_database_time_is_accepted() -> None:
@@ -65,5 +65,68 @@ def test_the_contract_names_exactly_the_standings_the_destroy_gate_reads() -> No
     }
 
 
-def test_the_reference_fake_passes_the_conformance_suite() -> None:
-    conformance(FakeStore, lambda store, seconds: store.advance(seconds))
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_the_reference_fake_passes_each_conformance_case(name: str) -> None:
+    """One test per rule, so a store that breaks one rule fails by its name."""
+    CASES[name](FakeStore, lambda store, seconds: store.advance(seconds))
+
+
+def test_the_conformance_cases_cover_every_rule_in_the_contract() -> None:
+    assert set(CASES) == {
+        "exclusive_under_concurrent_acquires",
+        "covers_is_judged_on_store_time",
+        "expiry_is_a_mutated_host_never_a_clean_release",
+        "no_reacquire_after_expiry",
+        "no_reacquire_after_a_mutated_release",
+        "an_untouched_release_may_be_reacquired",
+        "only_an_explicit_reprovision_marker_reopens_a_mutated_host",
+        "only_one_release",
+        "a_release_must_match_the_held_lease",
+        "the_lease_document_expiry_is_the_rows",
+        "the_ttl_is_capped",
+        "released_at_is_store_time_not_the_runners",
+    }
+
+
+# A store with the old behaviour must FAIL the new cases: these are the planted
+# violations, so the suite is shown to bite rather than assumed to.
+
+
+class _WipesHistory(FakeStore):
+    """Overwrites an expired or mutated row, as the first fake did."""
+
+    def acquire_exclusive(self, **kwargs):
+        host = kwargs["host_id"]
+        row = self._rows.get(host)
+        if row is not None and (row["released"] or self._now >= row["expires_at"]):
+            del self._rows[host]
+        return super().acquire_exclusive(**kwargs)
+
+
+class _NoLock(FakeStore):
+    """Checks then writes with no row lock."""
+
+    def acquire_exclusive(self, **kwargs):
+        import time
+
+        host = kwargs["host_id"]
+        row = self._rows.get(host)
+        live = row and not row["released"] and self._now < row["expires_at"]
+        time.sleep(0.05)
+        if live:
+            raise contract.StoreRefused("lease-held-by-another-run")
+        self._rows.pop(host, None)
+        return FakeStore.acquire_exclusive(self, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("broken", "case"),
+    [
+        (_WipesHistory, "no_reacquire_after_expiry"),
+        (_WipesHistory, "no_reacquire_after_a_mutated_release"),
+        (_NoLock, "exclusive_under_concurrent_acquires"),
+    ],
+)
+def test_a_store_that_breaks_a_rule_fails_that_case(broken, case: str) -> None:
+    with pytest.raises(AssertionError):
+        CASES[case](broken, lambda store, seconds: store.advance(seconds))

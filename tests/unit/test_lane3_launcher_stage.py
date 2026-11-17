@@ -9,6 +9,7 @@ import hashlib
 import os
 import pathlib
 import shlex
+import struct
 import sys
 
 import pytest
@@ -18,7 +19,10 @@ sys.path.insert(0, str(SCRIPTS))
 
 import lane3_launcher_stage as stage  # noqa: E402
 
-BLOB = b"not a real key, a stand-in blob"
+RAW_KEY = bytes(range(32))
+# An OpenSSH wire-format ed25519 blob: string "ssh-ed25519", string <32 raw bytes>.
+BLOB = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + RAW_KEY
+CONTROL_FINGERPRINT = "sha256:" + hashlib.sha256(RAW_KEY).hexdigest()
 RUN_DIR = "/run/lane3.ABCDEFGH12"
 KEY_B64 = base64.b64encode(BLOB).decode("ascii")
 FINGERPRINT = "SHA256:" + base64.b64encode(
@@ -490,6 +494,11 @@ def _common(tmp_path: pathlib.Path) -> dict:
     }
 
 
+def _proof(tmp_path: pathlib.Path, **overrides) -> stage.ClockSkewPassed:
+    """A skew proof obtained the only way there is: through the check."""
+    return _skew(tmp_path, 0, **overrides)
+
+
 def _launch(tmp_path: pathlib.Path, **overrides):
     arguments = {
         "run_dir": RUN_DIR,
@@ -497,11 +506,27 @@ def _launch(tmp_path: pathlib.Path, **overrides):
         "identity": "/run/key",
         "connect_timeout": 20,
         "extra_env": {},
-        "skew": stage.ClockSkewPassed(run_dir=RUN_DIR),
+        "run_id": "run-1",
+        "host_id": "host-a",
     }
     arguments.update(overrides)
     if "pin" not in arguments:
         arguments["pin"] = _pin(tmp_path)
+    if "skew" not in arguments:
+        keys = (
+            "run_dir",
+            "run_id",
+            "host_id",
+            "destination",
+            "identity",
+            "pin",
+            "connect_timeout",
+        )
+        arguments["skew"] = stage.require_clock_skew(
+            run=lambda argv, stdin: stage.RunResult(0),
+            extra_env={},
+            **{k: arguments[k] for k in keys},
+        )
     return stage.launch_argv(**arguments)
 
 
@@ -652,26 +677,26 @@ def test_pinning_runs_no_ssh_at_all(tmp_path: pathlib.Path) -> None:
 # ── the clock: CP's skew check gates the launch ─────────────────────────────
 
 
-def _skew(tmp_path: pathlib.Path, exit_code: int):
+def _skew(tmp_path: pathlib.Path, exit_code: int, **overrides):
     calls: list[list[str]] = []
 
     def run(argv, stdin):
         calls.append(list(argv))
         return stage.RunResult(exit_code)
 
-    proof = None
+    arguments = {"run_id": "run-1", "host_id": "host-a", **_common(tmp_path)}
+    arguments.update(overrides)
     try:
-        proof = stage.require_clock_skew(run=run, extra_env={}, **_common(tmp_path))
+        return stage.require_clock_skew(run=run, extra_env={}, **arguments)
     finally:
         _skew.calls = calls  # type: ignore[attr-defined]
-    return proof
 
 
 def test_a_passing_skew_check_yields_the_proof_for_this_run_directory(
     tmp_path: pathlib.Path,
 ) -> None:
     proof = _skew(tmp_path, 0)
-    assert proof == stage.ClockSkewPassed(run_dir=RUN_DIR)
+    assert (proof.run_dir, proof.run_id, proof.host_id) == (RUN_DIR, "run-1", "host-a")
     assert "-m vendor_cp.deployment.database_clock" in _skew.calls[0][-1]  # type: ignore[attr-defined]
 
 
@@ -691,12 +716,83 @@ def test_a_failing_skew_check_never_yields_a_proof(
     assert refusal.value.code == code
 
 
-@pytest.mark.parametrize(
-    "skew", [None, "ok", stage.ClockSkewPassed("/run/lane3.OTHERRUN12")]
-)
-def test_a_session_cannot_launch_without_the_skew_proof_for_its_run(
+@pytest.mark.parametrize("skew", [None, "ok", object()])
+def test_a_session_cannot_launch_without_the_skew_proof(
     tmp_path: pathlib.Path, skew: object
 ) -> None:
     with pytest.raises(stage.StageRefused) as refusal:
         _launch(tmp_path, skew=skew)
     assert refusal.value.code == "clock-skew-not-checked"
+
+
+def test_a_skew_proof_cannot_be_constructed_by_a_caller() -> None:
+    base = {"run_dir": RUN_DIR, "run_id": "run-1", "host_id": "host-a"}
+    for arguments in (base, {**base, "_token": object()}):
+        with pytest.raises(stage.StageRefused) as refusal:
+            stage.ClockSkewPassed(**arguments)
+        assert refusal.value.code == "clock-skew-proof-forged"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_dir", "/run/lane3.OTHERRUN12"),
+        ("run_id", "run-2"),
+        ("host_id", "host-b"),
+    ],
+)
+def test_a_skew_proof_for_another_run_directory_run_or_host_is_refused(
+    tmp_path: pathlib.Path, field: str, value: str
+) -> None:
+    proof = _proof(tmp_path)  # issued for RUN_DIR / run-1 / host-a
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(other, skew=proof, **{field: value})
+    assert refusal.value.code == "clock-skew-not-checked"
+
+
+@pytest.mark.parametrize("missing", ["run_id", "host_id"])
+def test_the_skew_check_requires_its_bindings(
+    tmp_path: pathlib.Path, missing: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, **{missing: ""})
+    assert refusal.value.code == "clock-skew-binding-required"
+
+
+# ── U3: the plan's host_incarnation is Control's form, derived explicitly ───
+
+
+def test_the_pins_control_fingerprint_is_sha256_hex_of_the_raw_key(
+    tmp_path: pathlib.Path,
+) -> None:
+    pin = _pin(tmp_path)
+    assert pin.control_fingerprint == CONTROL_FINGERPRINT
+    assert pin.control_fingerprint != pin.host_incarnation
+    assert pin.host_incarnation == FINGERPRINT
+
+
+def test_the_two_fingerprint_spellings_are_different_digests_of_one_key() -> None:
+    """OpenSSH hashes the wire blob; Control hashes the raw key. Not the same."""
+    assert FINGERPRINT.startswith("SHA256:")
+    assert CONTROL_FINGERPRINT.startswith("sha256:")
+    openssh_hex = base64.b64decode(FINGERPRINT[7:] + "=").hex()
+    assert openssh_hex != CONTROL_FINGERPRINT[7:]
+    assert stage.control_fingerprint_of(KEY_B64) == CONTROL_FINGERPRINT
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 31) + RAW_KEY[:31],
+        struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + RAW_KEY + b"x",
+        struct.pack(">I", 7) + b"ssh-rsa" + struct.pack(">I", 32) + RAW_KEY,
+        b"",
+        b"\x00\x00",
+    ],
+)
+def test_a_blob_that_is_not_a_canonical_ed25519_key_is_refused(blob: bytes) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.control_fingerprint_of(base64.b64encode(blob).decode("ascii"))
+    assert refusal.value.code == "known-hosts-key-invalid"

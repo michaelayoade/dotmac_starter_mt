@@ -3,8 +3,10 @@ from a terminal report the launcher could reconcile with what it knows itself.""
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
+import types
 from typing import Any
 
 import pytest
@@ -19,7 +21,7 @@ from dotmac_deployment_foundation.lease_release import (  # noqa: E402
 )
 from lane3_lease_store import LeaseStanding  # noqa: E402
 
-from tests.unit.lane3_store_support import FakeStore  # noqa: E402
+from tests.unit.lane3_store_support import FakeStore, release_for  # noqa: E402
 
 MACHINE = "0123456789abcdef0123456789abcdef"
 DIGEST = "sha256:" + "a" * 64
@@ -181,7 +183,15 @@ def written(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
     def fake_build(ctx: Any, args: Any, outcome: Any) -> Any:
         contexts.append((ctx, outcome))
-        return "RELEASE-RECORD"
+        lease = ctx.lease
+        # Matches the held lease, as the real builder's record does.
+        return release_for(
+            FakeStore(),
+            types.SimpleNamespace(lease=lease),
+            lease_digest=lease.digest,
+            released_by=types.SimpleNamespace(subject=lease.workload_principal),
+            controller_identity_fingerprint=lease.controller_identity_fingerprint,
+        )
 
     monkeypatch.setattr(custody.controller_half, "build_release", fake_build)
     return contexts
@@ -201,6 +211,7 @@ def _release(data: dict[str, Any], store=None, **overrides: Any) -> str:
     }
     arguments.update(overrides)
     _release.store = store  # type: ignore[attr-defined]
+    _release.held = held  # type: ignore[attr-defined]
     return custody.release_for(custody.parse_terminal(data), **arguments)
 
 
@@ -296,3 +307,106 @@ def test_an_expired_lease_is_never_released_as_untouched(written) -> None:
         )
     assert refusal.value.code == "lease-expired"
     assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
+
+
+# ── M2: a mutated host can never close as untouched ─────────────────────────
+
+
+def test_a_precondition_refusal_after_ready_degrades_to_state_uncertified(
+    written,
+) -> None:
+    data = terminal_data(
+        receipt_digest="", refusal=TerminalRefusal.PRECONDITION_UNFIT.value
+    )
+    _release(data, ready_seen=True)
+    assert written[0][1].refusal is TerminalRefusal.HOST_STATE_UNCERTIFIED
+
+
+def test_a_precondition_refusal_before_ready_keeps_its_member(written) -> None:
+    data = terminal_data(
+        receipt_digest="",
+        refusal=TerminalRefusal.PRECONDITION_UNFIT.value,
+        host_mutated=False,
+    )
+    _release(data, ready_seen=False)
+    assert written[0][1].refusal is TerminalRefusal.PRECONDITION_UNFIT
+
+
+def test_a_precondition_refusal_the_target_says_mutated_degrades_too(written) -> None:
+    data = terminal_data(
+        receipt_digest="",
+        refusal=TerminalRefusal.PRECONDITION_UNFIT.value,
+        host_mutated=True,
+    )
+    _release(data, ready_seen=False)
+    assert written[0][1].refusal is TerminalRefusal.HOST_STATE_UNCERTIFIED
+
+
+def test_other_refusal_members_are_not_rewritten(written) -> None:
+    member = TerminalRefusal.EVIDENCE_UNREADABLE
+    _release(terminal_data(receipt_digest="", refusal=member.value), ready_seen=True)
+    assert written[0][1].refusal is member
+
+
+# ── M4: terminal records for EVERY outcome ──────────────────────────────────
+
+
+def test_the_record_names_are_the_ones_the_existing_upload_step_publishes() -> None:
+    workflow = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / ".github"
+        / "workflows"
+        / "exposure-rehearsal.yml"
+    ).read_text(encoding="utf-8")
+    assert f"            {custody.RELEASE_FILE}\n" in workflow
+    assert f"            {custody.EVIDENCE_FILE}\n" in workflow
+
+
+def test_the_evidence_record_is_written_even_with_no_release(
+    tmp_path: pathlib.Path,
+) -> None:
+    paths = custody.write_terminal_records(
+        tmp_path, evidence={"outcome": "no_terminal"}, release_record=None
+    )
+    assert [p.name for p in paths] == [custody.EVIDENCE_FILE]
+    assert json.loads((tmp_path / custody.EVIDENCE_FILE).read_text()) == {
+        "outcome": "no_terminal"
+    }
+    assert not (tmp_path / custody.RELEASE_FILE).exists()
+
+
+def test_a_release_leaves_both_records(tmp_path: pathlib.Path) -> None:
+    record = types.SimpleNamespace(as_document=lambda: {"release": "doc"})
+    paths = custody.write_terminal_records(
+        tmp_path, evidence={"outcome": "released"}, release_record=record
+    )
+    assert {p.name for p in paths} == {custody.EVIDENCE_FILE, custody.RELEASE_FILE}
+    assert json.loads((tmp_path / custody.RELEASE_FILE).read_text()) == {
+        "release": "doc"
+    }
+
+
+def test_the_records_are_create_only_and_private(tmp_path: pathlib.Path) -> None:
+    custody.write_terminal_records(tmp_path, evidence={"a": 1}, release_record=None)
+    path = tmp_path / custody.EVIDENCE_FILE
+    assert (path.stat().st_mode & 0o777) == 0o600
+    with pytest.raises(FileExistsError):
+        custody.write_terminal_records(tmp_path, evidence={"a": 2}, release_record=None)
+    assert json.loads(path.read_text()) == {"a": 1}
+
+
+def test_release_with_record_returns_the_record_it_wrote(written) -> None:
+    store = FakeStore()
+    held = _custody(store)
+    digest, record = custody.release_with_record(
+        custody.parse_terminal(terminal_data()),
+        store=store,
+        held=held,
+        controller_identity="fp-launch-key",
+        expected_machine_id=MACHINE,
+        verified_receipt_digest=DIGEST,
+        ready_seen=False,
+        release_args=object(),
+    )
+    assert digest == "release-digest"
+    assert record is store.releases[0][0]

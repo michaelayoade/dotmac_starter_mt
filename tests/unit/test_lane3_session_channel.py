@@ -273,3 +273,15 @@ def test_the_proceed_frame_carries_exactly_the_plan_digest(pair) -> None:
     assert refusal.value.code == "frame-data-keys"
     launcher.send("proceed", {"plan_digest": "sha256:x"})
     assert target.receive("proceed", timeout=2)[1] == {"plan_digest": "sha256:x"}
+
+
+def test_the_ready_frame_must_carry_the_hosts_incarnation(pair) -> None:
+    launcher, target, _, _ = pair
+    base = {"host_id": "h", "machine_id": "m", "plan_digest": "p"}
+    with pytest.raises(ChannelRefused) as refusal:
+        target.send("ready", base)
+    assert refusal.value.code == "frame-data-keys"
+    target.send("ready", {**base, "host_incarnation": "sha256:" + "0" * 64})
+    assert launcher.receive("ready", timeout=2)[1]["host_incarnation"].startswith(
+        "sha256:"
+    )
