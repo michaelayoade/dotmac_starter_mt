@@ -116,8 +116,6 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "OpenReceivableDocumentV1": ANY_MODULE,
     "accept_settlement": ANY_MODULE,
     "AcceptSettlementV1": ANY_MODULE,
-    "allocate_settlement": ANY_MODULE,
-    "AllocationCommand": ANY_MODULE,
     "accept_withholding_discharge": ANY_MODULE,
     "AcceptWithholdingDischarge": ANY_MODULE,
     "SettlementFundingLane": ANY_MODULE,
@@ -1127,7 +1125,7 @@ def test_the_credit_draw_is_accepted_in_settle_and_nowhere_else() -> None:
 
 def test_the_listed_owner_calls_are_accepted() -> None:
     source = (
-        "from dotmac_billing import accept_settlement, AllocationCommand\n"
+        "from dotmac_billing import accept_settlement, AcceptSettlementV1\n"
         "from dotmac_payments import get_confirmed_cash_v1\n"
     )
     assert forbidden_call_violations(source, "settle.py") == []
