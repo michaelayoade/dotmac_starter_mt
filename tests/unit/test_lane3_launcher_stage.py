@@ -242,7 +242,7 @@ def test_ssh_inputs_that_could_inject_options_are_refused(
     with pytest.raises(stage.StageRefused):
         stage.ssh_argv(
             destination=bad,
-            identity="/k",
+            identity=_identity(tmp_path),
             pin=_pin(tmp_path),
             connect_timeout=20,
             remote="true",
@@ -256,7 +256,7 @@ def test_the_connect_timeout_is_required_and_bounded(
     with pytest.raises(stage.StageRefused) as refusal:
         stage.ssh_argv(
             destination=DESTINATION,
-            identity="/k",
+            identity=_identity(tmp_path),
             pin=_pin(tmp_path),
             connect_timeout=timeout,  # type: ignore[arg-type]
             remote="true",

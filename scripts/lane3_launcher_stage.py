@@ -707,6 +707,9 @@ def launch_argv(
         skew.host_id,
     ) != (run_dir, run_id, host_id):
         raise StageRefused("clock-skew-not-checked")
+    # The binding matches; the TOKEN must still cover exactly these values, which
+    # catches a proof whose fields were changed after it was issued.
+    skew.verify()
     tail = "venv/bin/python -E -P scripts/lane3_target_session.py"
     return ssh_argv(
         destination=destination,
