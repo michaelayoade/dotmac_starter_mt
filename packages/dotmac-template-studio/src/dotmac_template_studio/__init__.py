@@ -36,6 +36,11 @@ and may change without a contract bump.
   reach Template Studio in-process; the models are not.
 - `rendering.render` — single-brace substitution without loading the module's
   web surface or persistence service.
+- `rendering.render_part` — the part-aware renderer (`subject` / `text` / `html`)
+  with logic-less sections, against a context v2 declaration.
+- `validation.validate_revision` — every problem a revision has against its
+  context, as a list; the function a deploy-time check calls per published
+  revision.
 
 ## What a consumer must NOT do
 
@@ -72,7 +77,7 @@ _PKG_DIR = Path(__file__).resolve().parent
 # moved. Pre-1.0 a `0.MINOR` bump is how this package signals that (CHANGELOG).
 # a3 replaces a foreign revision edge with the logical prerequisite contract;
 # a5 adds lossless composition of rendered email parts.
-__version__ = "0.2.0a6"
+__version__ = "0.2.0a6+dev"
 
 
 def migrations_dir() -> Path:
