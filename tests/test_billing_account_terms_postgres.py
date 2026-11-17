@@ -356,11 +356,11 @@ def test_online_role_has_select_insert_only_and_rows_are_immutable(plane):
         try:
             with owner.connect() as connection:
                 for table in tables:
-                    with pytest.raises(DBAPIError, match="append"):
+                    with pytest.raises(DBAPIError, match="immutable"):
                         connection.execute(
                             text(f"UPDATE mod_billing.{table} SET reason = 'x'")
                         )
-                    with pytest.raises(DBAPIError, match="append"):
+                    with pytest.raises(DBAPIError, match="immutable"):
                         connection.execute(text(f"DELETE FROM mod_billing.{table}"))
         finally:
             owner.dispose()
@@ -430,10 +430,10 @@ def test_rls_is_forced_and_tenants_are_isolated():
 
         base = _base()
         with _session(url, scope_a) as session_a:
-            account_a = _account(session_a, scope_a)
+            account_a_id = _account(session_a, scope_a).id
             record_default_terms(session_a, command=_default(scope_a, base))
             record_account_terms(
-                session_a, command=_terms(scope_a, account_a.id, base, period="daily")
+                session_a, command=_terms(scope_a, account_a_id, base, period="daily")
             )
             session_a.commit()
         with _session(url, scope_b) as session_b:
@@ -448,12 +448,12 @@ def test_rls_is_forced_and_tenants_are_isolated():
             # tenant B cannot see, resolve or write against tenant A's account
             with pytest.raises(BillingRuleViolation) as unseen:
                 get_effective_account_terms(
-                    session_b, scope=scope_b, account_id=account_a.id, at=base
+                    session_b, scope=scope_b, account_id=account_a_id, at=base
                 )
             assert unseen.value.code == "billing.account_not_found"
             with pytest.raises(BillingRuleViolation) as unwritable:
                 record_account_terms(
-                    session_b, command=_terms(scope_b, account_a.id, base)
+                    session_b, command=_terms(scope_b, account_a_id, base)
                 )
             assert unwritable.value.code == "billing.account_not_found"
             # raw insert naming tenant A is stopped by the policy's WITH CHECK

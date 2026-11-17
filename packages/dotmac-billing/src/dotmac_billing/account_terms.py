@@ -29,7 +29,7 @@ from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from sqlalchemy import select
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_billing import models
@@ -234,9 +234,6 @@ def _append(db: Session, scope: Scope, row: Any) -> TermsVersionRefV1:
                 "terms_version_exists",
                 "terms are already recorded for that effective_from",
             ) from exc
-        raise
-    except DBAPIError as exc:
-        code = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
         if code == "23514" and "back-dated" in str(exc.orig):
             raise BillingRuleViolation(
                 "terms_back_dated",
