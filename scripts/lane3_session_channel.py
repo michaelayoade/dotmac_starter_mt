@@ -111,6 +111,7 @@ _SPEC: Final[dict[str, tuple[str, frozenset[str], int]]] = {
                 "window_seconds",
                 "evidence_seconds",
                 "proceed_seconds",
+                "store_time",
             }
         ),
         DEFAULT_FRAME_LIMIT,
