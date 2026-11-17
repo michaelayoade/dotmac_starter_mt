@@ -222,7 +222,7 @@ def test_a_verified_receipt_releases_into_the_same_store(written) -> None:
     assert ctx.lease is not None
     assert ctx.vm_installation_id == MACHINE
     ((record, mutated),) = _release.store.releases  # type: ignore[attr-defined]
-    assert record == "RELEASE-RECORD"
+    assert record.lease_digest == _release.held.lease.digest  # type: ignore[attr-defined]
     assert mutated is True
 
 
