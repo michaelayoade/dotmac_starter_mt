@@ -59,11 +59,21 @@ class TemplateRead(BaseModel):
 
 class VersionCreate(BaseModel):
     body: str = Field(min_length=1)
+    html_body: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional html part. Refused (not stripped) if it holds markup "
+            "outside the allowed email subset; stored sanitized."
+        ),
+    )
     subject: str | None = Field(default=None, max_length=300)
 
 
 class VersionUpdate(BaseModel):
     body: str | None = Field(default=None, min_length=1)
+    # Omitted leaves the html part alone; an explicit null removes it.
+    html_body: str | None = Field(default=None, min_length=1)
     subject: str | None = Field(default=None, max_length=300)
 
 
@@ -75,6 +85,7 @@ class VersionRead(BaseModel):
     version: int
     subject: str | None
     body: str
+    html_body: str | None = None
     variables: list[str]
     author_party_id: UUID | None
     published_at: datetime | None
@@ -91,6 +102,8 @@ class RenderRequest(BaseModel):
 class RenderResult(BaseModel):
     subject: str | None
     body: str
+    # Present only when the published revision has an html part.
+    html: str | None = None
 
 
 __all__ = [

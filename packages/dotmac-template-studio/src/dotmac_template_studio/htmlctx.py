@@ -13,7 +13,8 @@ into script execution). The rules:
   refused.
 - Markup whose parsing rules are too subtle to track is refused outright, with
   or without placeholders: every `<!` (comments, CDATA, bogus comments) except a
-  single leading `<!doctype html>`, every `<?`, an end tag whose name does not
+  single leading `<!doctype html>` or the exact XHTML 1.0 Transitional doctype
+  string, every `<?`, an end tag whose name does not
   start with an ASCII letter (`</ x>` is a bogus comment), and the elements in
   `FORBIDDEN_ELEMENTS` (script, style and the other raw-text, embedding,
   form and namespace elements), case-insensitively.
@@ -63,7 +64,15 @@ FORBIDDEN_ELEMENTS = frozenset(
     }
 )
 MAX_NAME_CHARS = 64
-_DOCTYPE = "<!doctype html>"
+DOCTYPE_HTML = "<!doctype html>"
+# The XHTML 1.0 Transitional doctype common in email HTML. A fixed literal: the
+# scanner skips exactly these characters and nothing else, so no part of a
+# declaration is ever interpreted; any other `<!doctype ...` stays refused.
+DOCTYPE_XHTML_TRANSITIONAL = (
+    '<!doctype html public "-//w3c//dtd xhtml 1.0 transitional//en" '
+    '"http://www.w3.org/tr/xhtml1/dtd/xhtml1-transitional.dtd">'
+)
+ACCEPTED_DOCTYPES = (DOCTYPE_HTML, DOCTYPE_XHTML_TRANSITIONAL)
 _SPACE = " \t\n\r\f"
 _LETTERS = frozenset(ascii_letters)
 
@@ -199,13 +208,11 @@ class _Scanner:
             return i + 1
         nxt = text[i + 1]
         if nxt == "!":
-            if (
-                not self.doctype_seen
-                and not was_started
-                and text[i : i + len(_DOCTYPE)].lower() == _DOCTYPE
-            ):
-                self.doctype_seen = True
-                return i + len(_DOCTYPE)
+            if not self.doctype_seen and not was_started:
+                for literal in ACCEPTED_DOCTYPES:
+                    if text[i : i + len(literal)].lower() == literal:
+                        self.doctype_seen = True
+                        return i + len(literal)
             self._problem(
                 "HTML comments, CDATA and declarations (`<!`) are not allowed "
                 "(only a single leading <!doctype html>)"
@@ -309,6 +316,9 @@ def html_placeholder_problems(
 
 
 __all__ = [
+    "ACCEPTED_DOCTYPES",
+    "DOCTYPE_HTML",
+    "DOCTYPE_XHTML_TRANSITIONAL",
     "FORBIDDEN_ELEMENTS",
     "MAX_NAME_CHARS",
     "URL_ATTRIBUTES",

@@ -21,6 +21,9 @@ class RenderedEmailPart:
     order: int
     subject: str | None
     body: str
+    # Optional already-rendered html for this part. The text `body` is always
+    # required; html is an alternative rendering, never a replacement.
+    html: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -39,6 +42,10 @@ class RenderedEmailPart:
             raise ValueError("subject must be a string or None")
         if not isinstance(self.body, str) or not self.body.strip():
             raise ValueError("body must be a nonblank string")
+        if self.html is not None and (
+            not isinstance(self.html, str) or not self.html.strip()
+        ):
+            raise ValueError("html must be a nonblank string or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +56,8 @@ class ComposedEmail:
     subject: str
     body: str
     parts: tuple[RenderedEmailPart, ...]
+    # Composed html, or None when no part carried one (text-only composition).
+    html: str | None = None
 
 
 def compose_email(
@@ -57,7 +66,9 @@ def compose_email(
     """Join full rendered bodies in declared order with one blank line.
 
     The primary part supplies the subject unchanged. The function does not
-    inspect, substitute, trim, or rewrite any rendered content.
+    inspect, substitute, trim, or rewrite any rendered content. When the parts
+    carry html it is composed SEPARATELY, in the same order with the same
+    separator; the text composition is byte-identical to the text-only case.
     """
     if isinstance(parts, str | bytes) or not isinstance(parts, Sequence) or not parts:
         raise ValueError("parts must be a nonempty sequence")
@@ -84,11 +95,24 @@ def compose_email(
         raise ValueError("the primary part must have a nonblank subject")
 
     ordered = tuple(sorted(snapshot, key=lambda part: part.order))
+    html: str | None = None
+    with_html = [part for part in ordered if part.html is not None]
+    if with_html:
+        if len(with_html) != len(ordered):
+            raise ValueError(
+                "either every part carries html or none does; a text-only part "
+                "cannot be silently dropped from the html alternative"
+            )
+        for part in ordered[1:]:
+            if (part.html or "").lstrip().lower().startswith("<!doctype"):
+                raise ValueError("only the first part's html may begin with a doctype")
+        html = "\n\n".join(part.html or "" for part in ordered)
     return ComposedEmail(
         primary_part_id=primary_part_id,
         subject=primary.subject,
         body="\n\n".join(part.body for part in ordered),
         parts=ordered,
+        html=html,
     )
 
 

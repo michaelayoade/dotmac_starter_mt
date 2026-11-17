@@ -27,7 +27,9 @@ Rules, in addition to the flat-placeholder rules of § 5b:
    whole value of a quoted `href`/`src` when declared `url` (`htmlctx`).
 6. A subject may contain no line break or control character; every part is
    bounded by `MAX_TEMPLATE_CHARS`.
-7. Every `required` variable must appear as a top-level placeholder in each body
+7. The html part must survive the nh3 allowlist sanitizer unchanged
+   (`htmlsanitize`); a part that would be altered is refused, never stripped.
+8. Every `required` variable must appear as a top-level placeholder in each body
    part present (text, and html when given). A subject is exempt. Occurrences
    inside sections do not count: a section may render zero times.
 """
@@ -40,6 +42,7 @@ from typing import Any
 from dotmac_kernel.exceptions import BadRequestError
 
 from dotmac_template_studio.htmlctx import html_placeholder_problems
+from dotmac_template_studio.htmlsanitize import html_sanitizer_problems
 from dotmac_template_studio.rendering import MAX_TEMPLATE_CHARS, subject_problem
 from dotmac_template_studio.sections import (
     DOUBLE_BRACE_SECTION,
@@ -165,6 +168,9 @@ def validate_revision(
     problems += _validate_part("text", text or "", context, is_subject=False)
     if html is not None:
         problems += _validate_part("html", html, context, is_subject=False)
+        # The allowlist gate (§ 5h): the html must survive the sanitizer
+        # UNCHANGED. Runs on the same source, so every problem is reported at once.
+        problems += [f"html: {p}" for p in html_sanitizer_problems(html)]
     return problems
 
 
