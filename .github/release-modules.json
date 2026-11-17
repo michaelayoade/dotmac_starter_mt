@@ -1699,7 +1699,9 @@
           "dotmac_template_studio/service.py",
           "dotmac_template_studio/templates/admin/template_studio/index.html",
           "dotmac_template_studio/web.py",
-          "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py"
+          "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py",
+          "dotmac_template_studio/migrations/versions/ts_0004_html_body.py",
+          "dotmac_template_studio/htmlsanitize.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -1710,6 +1712,7 @@
         "allowed_requires": [
           "dotmac-kernel",
           "fastapi",
+          "nh3",
           "pydantic",
           "sqlalchemy",
           "python"

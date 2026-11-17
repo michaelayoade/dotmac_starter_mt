@@ -62,6 +62,10 @@ class TemplateSeed:
     body: str
     subject: str | None = None
     description: str | None = None
+    # Optional html part, validated and sanitized like any authored revision. A
+    # template that already exists is skipped whole (rule 2), so adding html to a
+    # seed never reaches a tenant's existing, possibly edited, text-only row.
+    html_body: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +126,7 @@ def seed_templates(
             template.id,
             body=seed.body,
             subject=seed.subject,
+            html_body=seed.html_body,
             author_party_id=author_party_id,
         )
         # Published, or no caller could render it — see the module docstring.
