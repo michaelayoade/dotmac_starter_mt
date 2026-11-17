@@ -60,10 +60,12 @@ class DeployCheckReport:
     failures: list[RevisionFailure] = field(default_factory=list)
     # Tenants that could not be checked at all: (tenant_id, exception type name).
     errors: list[tuple[UUID, str]] = field(default_factory=list)
+    # Set when the tenant list itself could not be read (exception type only).
+    listing_error: str | None = None
 
     @property
     def ok(self) -> bool:
-        return not self.failures and not self.errors
+        return not self.failures and not self.errors and self.listing_error is None
 
     def lines(self) -> list[str]:
         out = [
@@ -71,6 +73,8 @@ class DeployCheckReport:
             f"{self.revisions_checked} published revision(s), "
             f"{len(self.failures)} failing, {len(self.errors)} tenant(s) not checked"
         ]
+        if self.listing_error:
+            out.append(f"ERROR tenants could not be listed ({self.listing_error})")
         for tenant_id, kind in self.errors:
             out.append(f"ERROR tenant={tenant_id} could not be checked ({kind})")
         for f in self.failures:
@@ -130,7 +134,12 @@ def check_published_revisions(
     default that would reach for an unscoped session here.
     """
     report = DeployCheckReport()
-    for tenant_id in list(list_tenant_ids()):
+    try:
+        tenant_ids = list(list_tenant_ids())
+    except Exception as exc:  # cannot even enumerate tenants: report, never pass
+        report.listing_error = type(exc).__name__
+        return report
+    for tenant_id in tenant_ids:
         try:
             with tenant_session(tenant_id) as db:
                 checked, failures = check_tenant(db, tenant_id)
@@ -186,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         list_tenant_ids=list_tenant_ids, tenant_session=tenant_session
     )
     print("\n".join(report.lines()))
-    if report.errors:
+    if report.errors or report.listing_error:
         return 2
     return 0 if report.ok else 1
 

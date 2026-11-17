@@ -974,3 +974,29 @@ def test_tenant_a_cannot_preview_or_restore_tenant_b_version(
     assert "Restored" not in done.text
     db.refresh(tb)
     assert tb.published_version == vb2.version
+
+
+def test_subject_refuses_lone_surrogates_at_save_and_render(db, tenant_row, template):
+    assert subject_problem("a\ud800b") is not None
+    with pytest.raises(BadRequestError):
+        _draft(db, tenant_row, template, subject="a\udc00b")
+    with pytest.raises(RenderRefusedError):
+        render_part(
+            "{customer_name}",
+            {"customer_name": "a\ud800b"},
+            "subject",
+            context=CTX,
+        )
+
+
+def test_deploy_check_listing_failure_exits_2(monkeypatch):
+    def boom():
+        raise RuntimeError("db down: secret")
+
+    report = deploycheck.check_published_revisions(
+        list_tenant_ids=boom, tenant_session=lambda _t: _same_session(None)
+    )
+    assert report.listing_error == "RuntimeError" and not report.ok
+    assert "secret" not in "\n".join(report.lines())
+    monkeypatch.setattr(deploycheck, "_runtime_seams", lambda: (boom, None))
+    assert deploycheck.main([]) == 2

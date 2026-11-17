@@ -153,7 +153,7 @@ def subject_problem(text: str) -> str | None:
             ord(ch) < 0x20
             or ch in _SUBJECT_BREAKS
             or ch in _BIDI_CONTROLS
-            or unicodedata.category(ch) == "Cc"
+            or unicodedata.category(ch) in ("Cc", "Cs")
             or (unicodedata.category(ch) == "Cf" and ch not in SUBJECT_ALLOWED_FORMAT)
         ):
             return f"contains the control or line-break character U+{ord(ch):04X}"
