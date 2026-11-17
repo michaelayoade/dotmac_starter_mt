@@ -49,6 +49,7 @@ START: dict[str, Any] = {
     "window_seconds": 300,
     "evidence_seconds": 60,
     "proceed_seconds": 30,
+    "store_time": "2026-11-17T05:00:00+00:00",
 }
 
 
@@ -94,6 +95,9 @@ def test_a_complete_start_parses() -> None:
         ("timeout", "120"),
         ("window_seconds", 100000),
         ("evidence_seconds", 0),
+        ("store_time", "not-a-time"),
+        ("store_time", "2026-11-17T05:00:00"),
+        ("store_time", ""),
         ("proceed_seconds", 0),
         ("proceed_seconds", 601),
         ("expected_machine_id", ""),
@@ -371,3 +375,32 @@ def test_the_lease_is_checked_before_the_dispatch_is_consumed() -> None:
 def test_the_lease_is_held_in_the_terminal_context_only_after_the_grant() -> None:
     source = SOURCE.read_text(encoding="utf-8")
     assert source.index("establish_authorization(") < source.index("ctx.lease = lease")
+
+
+# ── U5: lease liveness is judged on store time, never this host's wall clock ──
+
+
+def test_every_covers_call_reads_the_store_anchored_clock() -> None:
+    calls = [
+        node
+        for node in ast.walk(_tree())
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "covers"
+    ]
+    assert len(calls) == 2
+    for call in calls:
+        now = {kw.arg: ast.unparse(kw.value) for kw in call.keywords}["now"]
+        assert now in {"clock.now()", "self.clock.now()"}, now
+
+
+def test_the_session_does_not_read_the_wall_clock_for_a_liveness_decision() -> None:
+    lines = SOURCE.read_text(encoding="utf-8").splitlines()
+    liveness = [ln for ln in lines if "covers(" in ln or "now=datetime" in ln]
+    assert not any("datetime.now" in ln for ln in liveness)
+
+
+def test_the_start_frames_store_time_is_parsed_as_an_aware_instant() -> None:
+    start = session.parse_start(copy.deepcopy(START))
+    assert start.store_time.tzinfo is not None
+    assert start.store_time.isoformat() == "2026-11-17T05:00:00+00:00"
