@@ -538,6 +538,16 @@ def sanitize_html(source: str) -> SanitizedHtml:
             (f"the bidirectional control character {bidi} is not allowed",),
         )
     source_events = _events(rest)
+    decoded_bidi = _decoded_bidi(source_events)
+    if decoded_bidi:
+        # `&#x202e;` etc. decode to the control after the raw scan above.
+        return SanitizedHtml(
+            "",
+            (
+                f"a character reference decodes to the bidirectional control "
+                f"character {decoded_bidi}, which is not allowed",
+            ),
+        )
     if _decoded_braces(source_events) != (rest.count("{"), rest.count("}")):
         # A character reference (`&#123;`, `&lbrace;`, ...) that decodes to a
         # brace would become a LIVE placeholder or section tag in the stored
@@ -585,6 +595,33 @@ def sanitize_html(source: str) -> SanitizedHtml:
         )
     problems = _differences(source_events, out_events)
     return SanitizedHtml(prefix + restored, tuple(problems))
+
+
+def _decoded_bidi(events: list[tuple[Any, ...]]) -> str | None:
+    """First bidirectional control in decoded text or attribute values.
+
+    LRM, RLM and ALM (U+200E, U+200F, U+061C) are deliberately NOT refused: they
+    are non-overriding marks that legitimate right-to-left text needs.
+    """
+    for event in events:
+        if event[0] == "t":
+            found = bidi_control(event[1])
+        elif event[0] == "s":
+            found = next(
+                (
+                    hit
+                    for _, value in event[2]
+                    if isinstance(value, str)
+                    for hit in [bidi_control(value)]
+                    if hit
+                ),
+                None,
+            )
+        else:
+            continue
+        if found:
+            return found
+    return None
 
 
 def _decoded_braces(events: list[tuple[Any, ...]]) -> tuple[int, int]:

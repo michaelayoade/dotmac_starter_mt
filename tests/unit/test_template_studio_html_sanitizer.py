@@ -384,6 +384,13 @@ HOSTILE: dict[str, str] = {
     "bidi-isolate-in-text": "<p>a\u2066b\u2069</p>",
     "bidi-rli-in-text": "<p>a\u2067b</p>",
     "bidi-fsi-in-text": "<p>a\u2068b</p>",
+    "bidi-charref-hex": "<p>&#x202e;abc</p>",
+    "bidi-charref-hex-upper": "<p>&#X202E;abc</p>",
+    "bidi-charref-decimal": "<p>&#8238;abc</p>",
+    "bidi-charref-leading-zeros": "<p>&#x0000202e;abc</p>",
+    "bidi-charref-isolate": "<p>a&#x2066;b&#8297;</p>",
+    "bidi-charref-embedding": "<p>a&#x202A;b&#x202c;</p>",
+    "bidi-charref-in-attr": '<p title="a&#x202e;b">x</p>',
     "bidi-in-attr": '<p title="a\u202eb">x</p>',
     "bidi-in-doctype-prefix": "\u202e<!DOCTYPE html><p>x</p>",
     # unicode / encoding games
@@ -734,3 +741,16 @@ def test_the_schema_bounds_html_body_to_the_template_cap() -> None:
             model.model_validate(
                 {"body": "x", "html_body": "a" * (MAX_TEMPLATE_CHARS + 1)}
             )
+
+
+@pytest.mark.parametrize(
+    "mark", ["\u200e", "\u200f", "\u061c", "&lrm;", "&rlm;", "&#x200F;"]
+)
+def test_non_overriding_directional_marks_stay_accepted(mark: str) -> None:
+    # LRM, RLM and ALM do not override or reorder runs; right-to-left text needs
+    # them, so they are accepted (unlike the embeddings, overrides and isolates).
+    src = f"<p>a{mark}b {{name}}</p>"
+    assert _full(src) == [], src
+    assert require_clean_html(src)
+    skeleton = require_clean_html("<p>{name}</p>")
+    assert render_part(skeleton, {"name": "x\u200fy"}, "html", context=CTX)
