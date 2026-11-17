@@ -1978,9 +1978,10 @@ def _terms_checks(table: str, *, nullable: bool) -> tuple[object, ...]:
             member("postpaid_billing_timing", "'period_start', 'period_end'"),
             name=f"ck_{table}_timing",
         ),
-        CheckConstraint(grace, name=f"ck_{table}_grace"),
+        # `interval '0'` is PostgreSQL syntax; SQLite metadata builds skip it.
+        CheckConstraint(grace, name=f"ck_{table}_grace").ddl_if(dialect="postgresql"),
         CheckConstraint(
-            "length(btrim(actor_ref)) > 0 AND length(btrim(reason)) > 0",
+            "length(trim(actor_ref)) > 0 AND length(trim(reason)) > 0",
             name=f"ck_{table}_attribution",
         ),
     )

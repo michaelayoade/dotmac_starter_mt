@@ -75,7 +75,7 @@ def _terms_checks(table: str, *, nullable: bool) -> tuple[SchemaItem, ...]:
         ),
         sa.CheckConstraint(grace, name=f"ck_{table}_grace"),
         sa.CheckConstraint(
-            "length(btrim(actor_ref)) > 0 AND length(btrim(reason)) > 0",
+            "length(trim(actor_ref)) > 0 AND length(trim(reason)) > 0",
             name=f"ck_{table}_attribution",
         ),
     )
