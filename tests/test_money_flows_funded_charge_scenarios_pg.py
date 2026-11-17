@@ -619,3 +619,100 @@ def test_both_lists_page_by_keyset_on_created_at_and_id(scratch):
         assert pages == 3
         assert len(seen) == 5 and len({row.id for row in seen}) == 5
         assert [row.id for row in seen] == sorted(row.id for row in seen)
+
+
+# --------------------------------------------------------------------------
+# Decisions that need no funds come before the funds check
+# --------------------------------------------------------------------------
+def _switch_to_postpaid(scratch, scope, account):
+    # Terms cannot be back-dated: record a future version, then reach it with
+    # cash observed after it.
+    with session(scratch, scope) as db:
+        seed_customer_terms(
+            db,
+            scope,
+            account,
+            contract_type="postpaid",
+            effective_from=BASE + timedelta(days=1),
+        )
+        db.commit()
+
+
+def test_a_switch_to_postpaid_withdraws_even_when_the_deposit_does_not_fit(scratch):
+    scope, (account,) = _world(scratch)
+    source = FakeChargeSource()
+    ports = make_funded_ports(source)
+    key = source.add(scope, account, "renewal-1")
+    assembly_start(scratch, scope, key, ports)
+    _switch_to_postpaid(scratch, scope, account)
+
+    cash = deposit(scratch, scope, account, "50.00", observed_at=LATE)
+    assembly_settled(scratch, scope, _settled(account, cash), ports)
+
+    (row,) = _rows(scratch, scope)
+    assert (row.state, row.reason_code) == ("withdrawn", "contract_type_changed")
+    assert _documents(scratch, scope) == 0
+    assert unrestricted(scratch, scope, account) == Decimal("50.00")
+    assert [event["active"] for event in _access(scratch, scope)] == [True, False]
+
+
+def test_an_unfunded_retry_after_a_switch_to_postpaid_withdraws(scratch):
+    scope, (account,) = _world(scratch)
+    source = FakeChargeSource()
+    ports = make_funded_ports(source)
+    key = source.add(scope, account, "renewal-1")
+    first = assembly_start(scratch, scope, key, ports)
+    cash = deposit(scratch, scope, account, "50.00", observed_at=LATE)
+    with session(scratch, scope) as db:
+        recorded = record_funded_charge_attention(
+            db,
+            scope=scope,
+            instance_id=first.instance_id,
+            code="owner_refused",
+            funding_settlement_id=cash.settlement_id,
+            ports=ports,
+        )
+        db.commit()
+    _switch_to_postpaid(scratch, scope, account)
+
+    with session(scratch, scope) as db:
+        outcome = retry_funded_charge(
+            db,
+            scope=scope,
+            instance_id=first.instance_id,
+            expected_version=recorded.version,
+            actor_ref="staff:1",
+            ports=ports,
+        )
+        db.commit()
+
+    assert outcome.state is FundedChargeState.WITHDRAWN
+    assert outcome.reason_code == "contract_type_changed"
+    assert _documents(scratch, scope) == 0
+    assert unrestricted(scratch, scope, account) == Decimal("50.00")
+    assert [event["active"] for event in _access(scratch, scope)] == [True, False]
+
+
+def test_a_charge_the_port_reports_under_another_account_is_attention_no_write(
+    scratch,
+):
+    scope, (account, other) = _world(scratch, 2)
+    source = FakeChargeSource()
+    ports = make_funded_ports(source)
+    key = source.add(scope, account, "renewal-1")
+    assembly_start(scratch, scope, key, ports)
+    deposit(scratch, scope, other, "300.00")
+    source.charges[key] = replace(source.charges[key], billing_account_id=other)
+    cash = deposit(scratch, scope, account, "200.00")
+
+    assembly_settled(scratch, scope, _settled(account, cash), ports)
+
+    (row,) = _rows(scratch, scope)
+    assert row.state == "attention_required"
+    assert row.reason_code == "charge_command_mismatch"
+    assert row.billing_account_id == account
+    assert source.issues == []
+    assert _documents(scratch, scope) == 0
+    assert _draws(scratch, scope) == 0
+    assert unrestricted(scratch, scope, other) == Decimal("300.00")
+    assert unrestricted(scratch, scope, account) == Decimal("200.00")

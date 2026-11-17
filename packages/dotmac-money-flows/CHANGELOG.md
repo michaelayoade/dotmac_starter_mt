@@ -76,7 +76,7 @@ Source only; not published, not composed into any assembly.
   `withdrawn` (`contract_type_changed`) with nothing posted. A charge the source
   no longer holds is `withdrawn` (`charge_withdrawn`).
 - The prepaid period starts when it is paid. The instant is the due date at
-  start, `max(due_at, settlement.occurred_at)` on re-evaluation and the same
+  start, `max(due_at, settlement.observed_at)` on re-evaluation and the same
   rule over the recorded funding settlement on retry. The charge source builds
   the `IssueRatedInvoiceV3` for that instant; F2 refuses a command that is not
   the charge's own identity, account and total with a verified period starting at
@@ -99,6 +99,15 @@ Source only; not published, not composed into any assembly.
   and `.reevaluate.v1`, all in the manifest.
 - Depends on `dotmac-billing >=0.1.0a13` (account terms) and
   `dotmac-service-access-policy >=0.1.0a2` (contract classes only).
+
+- Contract type and identity are decided before funds: a pending or retried row
+  whose account is no longer prepaid at the period start is withdrawn whatever
+  the deposit, and a charge the port reports under another key or account is
+  `attention_required` (`charge_command_mismatch`) with no owner write; the funds
+  check always uses the row's own account. A charge-source failure on one row is
+  a `FundedChargeStepFailed` for that row (`charge_source_error`).
+- `funded_charge_instances` rows are never pruned: the access `source_version`
+  is a sum over a service's rows, so deleting or archiving rows would lower it.
 
 ### Release gates (F2)
 

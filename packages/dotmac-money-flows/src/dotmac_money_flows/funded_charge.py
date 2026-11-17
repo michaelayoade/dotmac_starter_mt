@@ -19,7 +19,7 @@ Prepaid is pay as you go (whole charges only, oldest first):
   ``retry_funded_charge`` is the one human path out of it.
 
 The prepaid period starts when it is paid. F2 owns the instant: ``issue_at`` is
-the charge's ``due_at`` at start, ``max(due_at, settlement.occurred_at)`` on
+the charge's ``due_at`` at start, ``max(due_at, settlement.observed_at)`` on
 re-evaluation, and ``max(due_at, settlement.observed_at)`` (or ``due_at``) on
 retry; every posting instant comes from an owner fact. The charge source builds
 the invoice command for that instant; F2 refuses it unless it carries the charge's
@@ -43,8 +43,12 @@ Assembly contract:
   normally so the event is not poisoned.
 * ``retry_funded_charge`` is human-triggered: gate it with a permission and pass
   the actor as ``actor_ref``.
-* Lock order everywhere: the Billing account (via the funding availability or
-  settlement read), then the service advisory lock, then the instance rows.
+* Lock order, always within one account: the Billing account first (via the
+  funding availability or settlement read). ``start_funded_charge`` then takes
+  the service advisory lock before it writes its row; re-evaluation, attention
+  and retry lock the instance rows first and the service advisory lock after.
+  Only one account is ever locked per call, and the funds check always uses the
+  row's own account.
 * F2 is the only writer of the PREPAID_DEPLETED access signal. The signal is an
   outbox event shaped like the Service Access Policy ``RecordAccessInputV2``;
   its ``source_version`` is the sum of ``version + 1`` over the service's rows,
@@ -122,6 +126,7 @@ _CHARGE_REF_MAX_BYTES = 1024
 _INSTANCE_NAMESPACE = uuid5(NAMESPACE_URL, "urn:dotmac:money-flows:funded-charge:v1")
 _PREPAID = "prepaid"
 _MISMATCH = "charge_command_mismatch"
+_SOURCE_ERROR = "charge_source_error"
 _VERIFIED = "verified"
 _CODE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 
@@ -499,15 +504,16 @@ def _is_prepaid(
     return terms.contract_type.value == _PREPAID
 
 
-def _fits(ctx: _Ctx, charge: RatedChargeV1) -> bool:
+def _fits(ctx: _Ctx, charge: RatedChargeV1, account_id: UUID) -> bool:
     """Whether the account's spendable credit covers the whole charge now.
 
-    Reading the availability also takes the Billing account lock.
+    ``account_id`` is the instance's own account, never the port's. Reading the
+    availability also takes the Billing account lock.
     """
     availability = get_funding_availability(
         ctx.db,
         scope=ctx.scope,
-        request=GetFundingAvailabilityV1(ctx.scope, charge.billing_account_id),
+        request=GetFundingAvailabilityV1(ctx.scope, account_id),
     )
     return bool(availability.unrestricted >= charge.total)
 
@@ -542,6 +548,46 @@ def _command_matches(
     )
 
 
+def _gate(
+    ctx: _Ctx,
+    row: FundedChargeInstance,
+    charge: RatedChargeV1,
+    *,
+    charge_ref: str,
+    issue_at: datetime,
+    funding_settlement_id: UUID | None,
+) -> FundedChargeInstance | None:
+    """Decide what needs no funds before the funds are looked at (lock held).
+
+    A charge the port reports under another key or account is not this
+    instance's charge: attention, no owner write, and no second account is
+    locked. An account that is no longer prepaid at the period start withdraws
+    the row whatever the balance. None means: go on to the funds check.
+    """
+    if charge.key != key_for_charge_ref(charge_ref) or (
+        charge.billing_account_id != row.billing_account_id
+    ):
+        return _write(
+            ctx,
+            row,
+            charge_ref=charge_ref,
+            charge=charge,
+            state=FundedChargeState.ATTENTION_REQUIRED,
+            reason_code=_MISMATCH,
+            funding_settlement_id=funding_settlement_id,
+        )
+    if not _is_prepaid(ctx.db, ctx.scope, row.billing_account_id, issue_at):
+        return _write(
+            ctx,
+            row,
+            charge_ref=charge_ref,
+            charge=charge,
+            state=FundedChargeState.WITHDRAWN,
+            reason_code="contract_type_changed",
+        )
+    return None
+
+
 def _discharge(
     ctx: _Ctx,
     row: FundedChargeInstance | None,
@@ -565,9 +611,14 @@ def _discharge(
             state=FundedChargeState.WITHDRAWN,
             reason_code="contract_type_changed",
         )
-    command: IssueRatedInvoiceV3 = ctx.ports.charges.issue_command(
-        ctx.db, scope=ctx.scope, key=key, issue_at=issue_at
-    )
+    try:
+        command: IssueRatedInvoiceV3 = ctx.ports.charges.issue_command(
+            ctx.db, scope=ctx.scope, key=key, issue_at=issue_at
+        )
+    except Exception as exc:
+        if row is None:
+            raise
+        raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
     if not _command_matches(command, key, account_id, charge, issue_at):
         return _write(
             ctx,
@@ -647,7 +698,7 @@ def start_funded_charge(
     if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
         raise FundedChargeRefused("not_prepaid")
     ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope).version)
-    funded = _fits(ctx, charge)  # takes the account lock
+    funded = _fits(ctx, charge, charge.billing_account_id)  # takes the lock
     winner = _find(db, tenant_id, charge_ref=charge_ref)
     if winner is not None:
         # A duplicate that won the race has committed: its row is the answer.
@@ -680,9 +731,12 @@ def _reevaluate(
 ) -> FundedChargeInstance | None:
     """Re-examine one pending row against new funds; None if it stays pending."""
     key = key_for_charge_ref(row.charge_ref)
-    charge = ctx.ports.charges.read(ctx.db, scope=ctx.scope, key=key)
+    try:
+        charge = ctx.ports.charges.read(ctx.db, scope=ctx.scope, key=key)
+    except Exception as exc:
+        raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
+    was_active = _begin_service(ctx, row.service_ref)
     if charge is None:
-        was_active = _begin_service(ctx, row.service_ref)
         _write(
             ctx,
             row,
@@ -693,10 +747,20 @@ def _reevaluate(
         )
         _signal(ctx, row, was_active, None)
         return row
-    issue_at = max(charge.due_at, settlement.occurred_at)
-    if not _fits(ctx, charge):
+    issue_at = max(charge.due_at, settlement.observed_at)
+    decided = _gate(
+        ctx,
+        row,
+        charge,
+        charge_ref=row.charge_ref,
+        issue_at=issue_at,
+        funding_settlement_id=settlement.settlement_id,
+    )
+    if decided is None and not _fits(ctx, charge, row.billing_account_id):
         return None
-    was_active = _begin_service(ctx, row.service_ref)
+    if decided is not None:
+        _signal(ctx, row, was_active, _observed(row, charge, issue_at))
+        return row
     _discharge(
         ctx,
         row,
@@ -900,7 +964,12 @@ def retry_funded_charge(
         ports.policy.read(db, scope=scope).version,
         actor_ref,
     )
-    charge = ports.charges.read(db, scope=scope, key=key_for_charge_ref(row.charge_ref))
+    try:
+        charge = ports.charges.read(
+            db, scope=scope, key=key_for_charge_ref(row.charge_ref)
+        )
+    except Exception as exc:
+        raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
     was_active = _begin_service(ctx, row.service_ref)
     if charge is None:
         _write(
@@ -923,7 +992,17 @@ def retry_funded_charge(
             ),
         )
         issue_at = max(charge.due_at, settlement.observed_at)
-    if _fits(ctx, charge):
+    decided = _gate(
+        ctx,
+        row,
+        charge,
+        charge_ref=row.charge_ref,
+        issue_at=issue_at,
+        funding_settlement_id=None,
+    )
+    if decided is not None:
+        pass
+    elif _fits(ctx, charge, row.billing_account_id):
         _discharge(
             ctx,
             row,

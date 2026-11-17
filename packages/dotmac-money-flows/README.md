@@ -22,3 +22,6 @@ service access signal (PREPAID_DEPLETED) leaves as a refs-only outbox event.
 
 Only an assembly imports this package. The Starter reference app does not
 compose it; the intended consumer is the Sub thin-client deployment.
+
+FundedCharge rows are never pruned: the access signal's `source_version` is a sum
+over a service's rows.

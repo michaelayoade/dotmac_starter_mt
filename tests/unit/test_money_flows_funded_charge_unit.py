@@ -248,6 +248,7 @@ def _spy_discharge(monkeypatch):
     monkeypatch.setattr(flows, "_discharge", discharge)
     monkeypatch.setattr(flows, "_signal", lambda *a, **k: None)
     monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
     return seen
 
 
@@ -280,7 +281,7 @@ def test_a_re_evaluated_charge_is_issued_at_the_later_of_due_and_the_cash(
     seen = _spy_discharge(monkeypatch)
     monkeypatch.setattr(flows, "_fits", lambda *a, **k: True)
     settlement = SimpleNamespace(
-        occurred_at=DUE + timedelta(days=cash_at), settlement_id=uuid4()
+        observed_at=DUE + timedelta(days=cash_at), settlement_id=uuid4()
     )
     row = SimpleNamespace(
         charge_ref=flows.charge_ref_for(KEY),
@@ -525,7 +526,7 @@ def _evaluate(monkeypatch, rows, balance, cap):
     remaining = [Money.of(balance, NGN)]
     order, funded, events = [], [], []
 
-    def fits(ctx, charge):
+    def fits(ctx, charge, account_id):
         order.append(charge.key.source_fact_id)
         return remaining[0] >= charge.total
 
@@ -540,10 +541,11 @@ def _evaluate(monkeypatch, rows, balance, cap):
     monkeypatch.setattr(flows, "_discharge", discharge)
     monkeypatch.setattr(flows, "_signal", lambda *a, **k: None)
     monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
     monkeypatch.setattr(
         flows,
         "get_confirmed_settlement",
-        lambda *a, **k: SimpleNamespace(occurred_at=DUE, settlement_id=uuid4()),
+        lambda *a, **k: SimpleNamespace(observed_at=DUE, settlement_id=uuid4()),
     )
     monkeypatch.setattr(flows, "_enqueue_reevaluate", lambda *args: events.append(args))
     outcomes = flows.on_settlement_settled(
@@ -603,7 +605,7 @@ def test_an_owner_refusal_names_the_failed_row_and_keeps_the_code(monkeypatch):
     monkeypatch.setattr(
         flows,
         "get_confirmed_settlement",
-        lambda *a, **k: SimpleNamespace(occurred_at=DUE),
+        lambda *a, **k: SimpleNamespace(observed_at=DUE),
     )
     with pytest.raises(FundedChargeStepFailed) as failed:
         flows.on_settlement_settled(
@@ -631,7 +633,7 @@ def test_a_withdrawn_charge_is_recorded_and_the_loop_moves_on(monkeypatch):
     )
     ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges()), "p1")
 
-    assert flows._reevaluate(ctx, row, SimpleNamespace(occurred_at=DUE)) is row
+    assert flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE)) is row
 
     assert [(w["state"], w["reason_code"]) for w in written] == [
         (FundedChargeState.WITHDRAWN, "charge_withdrawn")
@@ -771,3 +773,87 @@ def test_listing_pages_by_keyset_and_clamps_the_limit(db):
         flows.list_pending_funded_charges(db, scope=SCOPE, billing_account_id=uuid4())
         == ()
     )
+
+
+# --------------------------------------------------------------------------
+# Decisions that need no funds come before the funds check
+# --------------------------------------------------------------------------
+def _pending_row(**overrides):
+    values = {
+        "id": uuid4(),
+        "charge_ref": flows.charge_ref_for(KEY),
+        "service_ref": "service:one",
+        "billing_account_id": ACCOUNT,
+        "state": "pending",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _written(monkeypatch):
+    written = []
+    monkeypatch.setattr(
+        flows, "_write", lambda ctx, row, **kw: written.append(kw) or row
+    )
+    monkeypatch.setattr(flows, "_signal", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    monkeypatch.setattr(flows, "_fits", _boom)
+    monkeypatch.setattr(flows, "get_funding_availability", _boom)
+    return written
+
+
+def test_a_re_evaluated_row_that_became_postpaid_is_withdrawn_before_funds(
+    monkeypatch,
+):
+    written = _written(monkeypatch)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: False)
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges(_charge())), "p1")
+
+    flows._reevaluate(
+        ctx, _pending_row(), SimpleNamespace(observed_at=DUE, settlement_id=uuid4())
+    )
+
+    assert [(w["state"], w["reason_code"]) for w in written] == [
+        (FundedChargeState.WITHDRAWN, "contract_type_changed")
+    ]
+
+
+@pytest.mark.parametrize("other", ["account", "key"])
+def test_a_charge_the_port_reports_under_another_account_or_key_is_attention(
+    monkeypatch, other
+):
+    written = _written(monkeypatch)
+    monkeypatch.setattr(flows, "_is_prepaid", _boom)
+    if other == "account":
+        charge = RatedChargeV1(KEY, uuid4(), "service:one", _money("10.00"), DUE)
+    else:
+        charge = _charge()
+        row_key = RatedChargeKeyV1("src", "kind", "fact-2", "1")
+    row = _pending_row()
+    charges = _Charges(charge)
+    if other == "key":
+        row = _pending_row(charge_ref=flows.charge_ref_for(row_key))
+        charges.charges[row_key] = charge  # the port answers with a different key
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(charges), "p1")
+
+    flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE, settlement_id=uuid4()))
+
+    assert [(w["state"], w["reason_code"]) for w in written] == [
+        (FundedChargeState.ATTENTION_REQUIRED, "charge_command_mismatch")
+    ]
+    assert charges.issues == []
+
+
+def test_a_charge_source_failure_on_one_row_is_a_step_failure_for_that_row(
+    monkeypatch,
+):
+    class Broken(_Charges):
+        def read(self, db, *, scope, key):
+            raise RuntimeError("source down")
+
+    row = _pending_row()
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(Broken()), "p1")
+    with pytest.raises(FundedChargeStepFailed) as failed:
+        flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE))
+    assert failed.value.instance_id == row.id
+    assert failed.value.code == "charge_source_error"
