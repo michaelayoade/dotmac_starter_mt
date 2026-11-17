@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import json
 import pathlib
 import sys
 from collections.abc import Callable
@@ -52,6 +53,7 @@ MAX_EVIDENCE_ITEMS: Final = 16
 MAX_EVIDENCE_TEXT: Final = 500
 
 __all__ = [
+    "ExternalMeasurement",
     "Measurers",
     "ProbeInputs",
     "default_measurers",
@@ -124,6 +126,33 @@ def default_measurers() -> Measurers:
     )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class ExternalMeasurement:
+    """The six rows, and the raw window-phase document they were judged from.
+
+    `document` is the qualify-phase document with the probes measured NOW merged
+    in, plus the inside-vantage probe and the far-end observation. It is what the
+    launcher encrypts: the offline verifier must be able to re-derive rows 11-16
+    from bytes the target never held, so the window-phase measurements have to be
+    in the bundle and not only in the rows.
+    """
+
+    rows: list[dict]
+    document: dict[str, Any]
+
+    def document_bytes(self) -> bytes:
+        """The document as bytes, in insertion order, never NaN or infinity."""
+        return (
+            json.dumps(
+                self.document,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+
+
 def _row(code: str, status: RequirementStatus, detail: str, *evidence: str) -> dict:
     return {
         "code": code,
@@ -140,13 +169,12 @@ def measure_external_rows(
     qualified_evidence: dict[str, Any],
     *,
     measurers: Measurers | None = None,
-) -> list[dict]:
+) -> ExternalMeasurement:
     """The six closed rows for items 11-16, measured now, with the stack up.
 
     `qualified_evidence` is the qualify-phase document, already qualified before
-    the target was touched. It is copied, never mutated: the plaintext bytes the
-    launcher later encrypts are the qualify-phase bytes, as in the
-    controller-side runner.
+    the target was touched. It is copied, never mutated; the returned
+    `document` is that copy with the window-phase measurements merged in.
     """
     measure = measurers if measurers is not None else default_measurers()
     args = inputs.namespace()
@@ -171,7 +199,14 @@ def measure_external_rows(
     for code, key, want_reachable, note in external:
         probe = controller_half._probe(evidence, key)
         reachable = bool(probe.get("reachable"))
-        control = bool(probe.get("positive_control_fired", True))
+        # ABSENCE FAILS here too: defaulting the control to "fired" would read an
+        # unmeasured control as a satisfied one.
+        if "positive_control_fired" not in probe:
+            raise controller_half.EvidenceIncomplete(
+                f"the {key!r} probe carries no `positive_control_fired`. An "
+                "unmeasured control must never read as a fired one"
+            )
+        control = bool(probe["positive_control_fired"])
         # ABSENCE FAILS: a negative probe against a port where nothing listens
         # measures an absent service, not an enforced exposure.
         if "service_running" not in probe:
@@ -203,6 +238,8 @@ def measure_external_rows(
 
     inside_probe = measure.inside_probe(inputs)
     inside_observed = measure.far_end(args, inputs.inside_jump_key)
+    evidence["inside_probe"] = dict(inside_probe)
+    evidence["inside_observed"] = dict(inside_observed)
     seen = inside_vantage.vantages(inside_probe, inside_observed)
     control_ok = inside_vantage.control_is_meaningful(inside_probe)
 
@@ -256,4 +293,4 @@ def measure_external_rows(
             f"accepted_source_set:{inputs.accepted_source_set}",
         )
     )
-    return rows
+    return ExternalMeasurement(rows=rows, document=evidence)

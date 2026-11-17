@@ -42,6 +42,7 @@ candidate wheel is installed.
 from __future__ import annotations
 
 import json
+import math
 import os
 import select
 import struct
@@ -109,10 +110,12 @@ _SPEC: Final[dict[str, tuple[str, frozenset[str], int]]] = {
                 "expected_host_incarnation",
                 "window_seconds",
                 "evidence_seconds",
+                "proceed_seconds",
             }
         ),
         DEFAULT_FRAME_LIMIT,
     ),
+    "proceed": ("launcher", frozenset({"plan_digest"}), DEFAULT_FRAME_LIMIT),
     "external_results": ("launcher", frozenset({"rows"}), DEFAULT_FRAME_LIMIT),
     "evidence_ciphertext": (
         "launcher",
@@ -176,6 +179,14 @@ def _refuse_constant(_: str) -> Any:
     raise ChannelRefused("frame-non-finite-number")
 
 
+def _parse_float(text: str) -> float:
+    """Refuse `1e999`: it is not a NaN/Infinity literal, but it parses to inf."""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ChannelRefused("frame-non-finite-number")
+    return value
+
+
 class Channel:
     """One end of the framed channel. Not thread-safe; one reader, one writer."""
 
@@ -189,6 +200,8 @@ class Channel:
         self._recv_seq = 0
         self._buffer = b""
         self._closed = False
+        self._dead = False
+        self._mid_frame = False
 
     @classmethod
     def from_stdio(cls) -> Channel:
@@ -274,6 +287,27 @@ class Channel:
         return taken
 
     def receive(self, *expected: str, timeout: float) -> tuple[str, dict[str, Any]]:
+        """The next frame, or a refusal that KILLS the channel unless it was clean.
+
+        A timeout with nothing consumed is the only recoverable refusal. Any
+        refusal after a byte of a frame was taken leaves the stream out of step
+        with the framing, so every later call refuses with `channel-dead`.
+        """
+        if self._dead:
+            raise ChannelRefused("channel-dead")
+        clean_start = not self._buffer
+        self._mid_frame = False
+        try:
+            return self._receive(*expected, timeout=timeout)
+        except ChannelTimeout:
+            if not clean_start or self._buffer or self._mid_frame:
+                self._dead = True
+            raise
+        except ChannelRefused:
+            self._dead = True
+            raise
+
+    def _receive(self, *expected: str, timeout: float) -> tuple[str, dict[str, Any]]:
         """The next frame, which must be one of `expected`, within `timeout` seconds.
 
         An unexpected kind refuses: a launcher that sends `abort` while the
@@ -286,6 +320,7 @@ class Channel:
             raise ChannelRefused("frame-kind-not-receivable")
         deadline = time.monotonic() + timeout
         (length,) = _HEADER.unpack(self._read_exactly(_HEADER.size, deadline))
+        self._mid_frame = True
         ceiling = max(_SPEC[kind][2] for kind in expected)
         if length < 2 or length > ceiling:
             raise ChannelRefused("frame-length")
@@ -295,6 +330,7 @@ class Channel:
                 raw.decode("utf-8"),
                 object_pairs_hook=_no_duplicates,
                 parse_constant=_refuse_constant,
+                parse_float=_parse_float,
             )
         except (UnicodeDecodeError, ValueError, RecursionError):
             raise ChannelRefused("frame-not-json") from None

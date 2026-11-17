@@ -27,7 +27,8 @@ import base64
 import binascii
 import pathlib
 import sys
-from typing import Final
+from collections.abc import Mapping, Sequence
+from typing import Any, Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -94,6 +95,32 @@ def finalize(
     )
 
 
+def _require_rows_exactly(
+    receipt: RehearsalReceiptV2, sent_rows: Sequence[Mapping[str, Any]]
+) -> None:
+    """The six launcher-measured rows in the receipt are EXACTLY the rows sent.
+
+    The target assembles the receipt, so it could change a status or a detail
+    between receiving a row and writing it. Items 11-16 are the ones only the
+    launcher can measure, so equality is checked row by row on code, status,
+    detail and evidence, and the receipt may carry each sent code exactly once.
+    """
+    if not sent_rows:
+        raise EvidenceHandBackRefused("external-rows-not-supplied")
+    sent: dict[str, tuple[str, str, tuple[str, ...]]] = {}
+    for row in sent_rows:
+        code = row["code"]
+        if code in sent:
+            raise EvidenceHandBackRefused("external-rows-duplicate")
+        sent[code] = (row["status"], row["detail"], tuple(row["evidence"]))
+    received = [r for r in receipt.results if r.code in sent]
+    if len(received) != len(sent):
+        raise EvidenceHandBackRefused("external-rows-mismatch")
+    for result in received:
+        if (result.status.value, result.detail, result.evidence) != sent[result.code]:
+            raise EvidenceHandBackRefused("external-rows-mismatch")
+
+
 def verify_receipt(
     *,
     receipt_b64: object,
@@ -103,12 +130,21 @@ def verify_receipt(
     controller_identity: str,
     lease_id: str,
     host_id: str,
+    sent_rows: Sequence[Mapping[str, Any]],
+    foundation_revision: str,
+    foundation_artifact: str,
+    fixture_digest: str,
+    probe_vantage_ref: str,
+    plan_digest: str,
 ) -> RehearsalReceiptV2:
     """The receipt the target returned, or a refusal naming the first mismatch.
 
     Every comparison is against a value the launcher holds independently of the
     target: its own ciphertext, its own run coordinates, its own launch-key
-    fingerprint, its own lease and the host it dispatched.
+    fingerprint, its own lease, the host it dispatched, the rows it measured, the
+    revisions and artifact it passed, the fixture it hashed, the vantage
+    reference it bound and the plan digest the target reported before it was
+    allowed to proceed. Any mismatch is a refusal; there is no partial pass.
     """
     raw = _decode(receipt_b64, limit=MAX_RECEIPT_BYTES, code="receipt-invalid")
     try:
@@ -133,7 +169,13 @@ def verify_receipt(
         ("controller_identity", controller_identity),
         ("lease_id", lease_id),
         ("host_id", host_id),
+        ("foundation_revision", foundation_revision),
+        ("foundation_artifact_digest", foundation_artifact),
+        ("fixture_digest", fixture_digest),
+        ("probe_vantage_ref", probe_vantage_ref),
+        ("execution_plan_digest", plan_digest),
     ):
         if not expected or receipt.content.get(key) != expected:
             raise EvidenceHandBackRefused(f"{key}-mismatch")
+    _require_rows_exactly(receipt, sent_rows)
     return receipt

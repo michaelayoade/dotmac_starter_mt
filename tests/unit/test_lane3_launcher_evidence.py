@@ -108,6 +108,32 @@ def test_finalize_refuses_calls_that_are_not_the_canonical_bytes(
 # ── verify_receipt ──────────────────────────────────────────────────────────
 
 
+CODES = (
+    "external_positive_v6",
+    "external_negative_v6",
+    "external_v4",
+    "closed_port_behaviour",
+    "private_from_source",
+    "privileged_vantage_refused",
+)
+SENT_ROWS = [
+    {
+        "code": code,
+        "status": "executed_passed",
+        "detail": f"measured {code}",
+        "evidence": [f"probe:{code}"],
+    }
+    for code in CODES
+]
+BINDINGS: dict[str, str] = {
+    "foundation_revision": "a" * 40,
+    "foundation_artifact_digest": "sha256:" + "c" * 64,
+    "fixture_digest": "sha256:" + "f" * 64,
+    "probe_vantage_ref": "vantage@1",
+    "execution_plan_digest": "sha256:" + "d" * 64,
+}
+
+
 def _receipt(**overrides: Any) -> RehearsalReceiptV2:
     content: dict[str, Any] = {
         "schema": "stub",
@@ -116,6 +142,8 @@ def _receipt(**overrides: Any) -> RehearsalReceiptV2:
         "controller_identity": FINGERPRINT,
         "lease_id": "run-1",
         "host_id": "host-a",
+        "results": [dict(row) for row in SENT_ROWS],
+        **BINDINGS,
     }
     content.update(overrides)
     return RehearsalReceiptV2(content=content)
@@ -138,6 +166,12 @@ def _verify(
         "controller_identity": FINGERPRINT,
         "lease_id": "run-1",
         "host_id": "host-a",
+        "sent_rows": SENT_ROWS,
+        "foundation_revision": BINDINGS["foundation_revision"],
+        "foundation_artifact": BINDINGS["foundation_artifact_digest"],
+        "fixture_digest": BINDINGS["fixture_digest"],
+        "probe_vantage_ref": BINDINGS["probe_vantage_ref"],
+        "plan_digest": BINDINGS["execution_plan_digest"],
     }
     arguments.update(overrides)
     return launcher_evidence.verify_receipt(**arguments)
@@ -193,6 +227,12 @@ def test_bytes_that_are_not_the_receipts_canonical_form_refuse(monkeypatch) -> N
             controller_identity=FINGERPRINT,
             lease_id="run-1",
             host_id="host-a",
+            sent_rows=SENT_ROWS,
+            foundation_revision=BINDINGS["foundation_revision"],
+            foundation_artifact=BINDINGS["foundation_artifact_digest"],
+            fixture_digest=BINDINGS["fixture_digest"],
+            probe_vantage_ref=BINDINGS["probe_vantage_ref"],
+            plan_digest=BINDINGS["execution_plan_digest"],
         )
     assert refusal.value.code == "receipt-not-canonical"
 
@@ -221,5 +261,96 @@ def test_undecodable_receipt_refuses() -> None:
             controller_identity=FINGERPRINT,
             lease_id="run-1",
             host_id="host-a",
+            sent_rows=SENT_ROWS,
+            foundation_revision="x",
+            foundation_artifact="x",
+            fixture_digest="x",
+            probe_vantage_ref="x",
+            plan_digest="x",
         )
     assert refusal.value.code == "receipt-invalid"
+
+
+# ── H3: what the target assembled must equal what the launcher sent and holds ──
+
+
+@pytest.mark.parametrize(
+    ("field", "code"),
+    [
+        ("foundation_revision", "foundation_revision-mismatch"),
+        ("foundation_artifact_digest", "foundation_artifact_digest-mismatch"),
+        ("fixture_digest", "fixture_digest-mismatch"),
+        ("probe_vantage_ref", "probe_vantage_ref-mismatch"),
+        ("execution_plan_digest", "execution_plan_digest-mismatch"),
+    ],
+)
+def test_each_independently_held_binding_must_match_exactly(
+    monkeypatch, field: str, code: str
+) -> None:
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        _verify(monkeypatch, _receipt(**{field: "tampered"}))
+    assert refusal.value.code == code
+
+
+def _rows_with(index: int, **changes: Any) -> list[dict[str, Any]]:
+    rows = [dict(row) for row in SENT_ROWS]
+    rows[index] = {**rows[index], **changes}
+    return rows
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"status": "executed_failed"},
+        {"status": "blocked"},
+        {"detail": "a better story than the one measured"},
+        {"evidence": ["probe:other"]},
+        {"evidence": []},
+    ],
+)
+def test_a_changed_launcher_row_is_refused_not_passed(
+    monkeypatch, changes: dict[str, Any]
+) -> None:
+    receipt = _receipt(results=_rows_with(2, **changes))
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        _verify(monkeypatch, receipt)
+    assert refusal.value.code == "external-rows-mismatch"
+
+
+def test_a_failed_row_the_target_upgraded_to_passed_is_refused(monkeypatch) -> None:
+    sent = _rows_with(0, status="executed_failed")
+    receipt = _receipt()  # the target assembled all six as passed
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        _verify(monkeypatch, receipt, sent_rows=sent)
+    assert refusal.value.code == "external-rows-mismatch"
+
+
+def test_a_missing_launcher_row_is_refused(monkeypatch) -> None:
+    receipt = _receipt(results=[dict(row) for row in SENT_ROWS[:-1]])
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        _verify(monkeypatch, receipt)
+    assert refusal.value.code == "external-rows-mismatch"
+
+
+def test_a_duplicated_launcher_row_is_refused(monkeypatch) -> None:
+    receipt = _receipt(results=[*SENT_ROWS, dict(SENT_ROWS[0])])
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        _verify(monkeypatch, receipt)
+    assert refusal.value.code == "external-rows-mismatch"
+
+
+def test_rows_the_target_owns_are_not_this_checks_business(monkeypatch) -> None:
+    own = {
+        "code": "digest_equality",
+        "status": "executed_passed",
+        "detail": "target measured",
+        "evidence": [],
+    }
+    receipt = _receipt(results=[*SENT_ROWS, own])
+    assert _verify(monkeypatch, receipt) is receipt
+
+
+def test_an_empty_sent_set_refuses_rather_than_matching_nothing(monkeypatch) -> None:
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        _verify(monkeypatch, _receipt(), sent_rows=[])
+    assert refusal.value.code == "external-rows-not-supplied"

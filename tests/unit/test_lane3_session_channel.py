@@ -56,9 +56,13 @@ def _abort_body(seq: int = 0, extra: str = "") -> bytes:
 def test_the_vocabulary_is_partitioned_by_sender() -> None:
     assert LAUNCHER_TO_TARGET | TARGET_TO_LAUNCHER == KINDS
     assert not LAUNCHER_TO_TARGET & TARGET_TO_LAUNCHER
-    assert {"start", "external_results", "evidence_ciphertext", "abort"} == (
-        LAUNCHER_TO_TARGET
-    )
+    assert {
+        "start",
+        "proceed",
+        "external_results",
+        "evidence_ciphertext",
+        "abort",
+    } == LAUNCHER_TO_TARGET
 
 
 def test_a_frame_round_trips_in_both_directions(pair) -> None:
@@ -229,3 +233,43 @@ def test_foundation_style_annotations_cannot_reach_the_protocol() -> None:
     }
     assert b"::notice::" not in completed.stdout
     assert b"::notice::an annotation" in completed.stderr
+
+
+def test_a_number_that_parses_to_infinity_refuses(pair) -> None:
+    """`1e999` is not a NaN/Infinity literal, so `parse_constant` never sees it."""
+    _, target, to_target_write, _ = pair
+    body = b'{"kind":"abort","seq":0,"data":{"reason":1e999}}'
+    os.write(to_target_write, _frame(body))
+    with pytest.raises(ChannelRefused) as refusal:
+        target.receive("abort", timeout=2)
+    assert refusal.value.code == "frame-non-finite-number"
+
+
+def test_a_timeout_in_the_middle_of_a_frame_kills_the_channel(pair) -> None:
+    launcher, target, to_target_write, _ = pair
+    os.write(to_target_write, struct.pack(">I", 100) + b"0123456789")
+    with pytest.raises(ChannelTimeout):
+        target.receive("abort", timeout=0.1)
+    # The stream is now out of step with the framing: nothing may be read again,
+    # not even a perfectly good frame that follows.
+    launcher.send("abort", {"reason": "late"})
+    with pytest.raises(ChannelRefused) as refusal:
+        target.receive("abort", timeout=1)
+    assert refusal.value.code == "channel-dead"
+
+
+def test_a_timeout_with_nothing_consumed_leaves_the_channel_usable(pair) -> None:
+    launcher, target, _, _ = pair
+    with pytest.raises(ChannelTimeout):
+        target.receive("abort", timeout=0.05)
+    launcher.send("abort", {"reason": "after"})
+    assert target.receive("abort", timeout=2)[1]["reason"] == "after"
+
+
+def test_the_proceed_frame_carries_exactly_the_plan_digest(pair) -> None:
+    launcher, target, _, _ = pair
+    with pytest.raises(ChannelRefused) as refusal:
+        launcher.send("proceed", {})
+    assert refusal.value.code == "frame-data-keys"
+    launcher.send("proceed", {"plan_digest": "sha256:x"})
+    assert target.receive("proceed", timeout=2)[1] == {"plan_digest": "sha256:x"}

@@ -81,16 +81,16 @@ def _measurers(
 
 
 def _rows(**kwargs: Any) -> dict[str, dict[str, Any]]:
-    rows = launcher_probe.measure_external_rows(
+    measurement = launcher_probe.measure_external_rows(
         INPUTS, {"vantage": {}}, measurers=_measurers(**kwargs)
     )
-    return {row["code"]: row for row in rows}
+    return {row["code"]: row for row in measurement.rows}
 
 
 def test_the_rows_are_exactly_the_closed_set_the_target_accepts() -> None:
     rows = launcher_probe.measure_external_rows(
         INPUTS, {"vantage": {}}, measurers=_measurers()
-    )
+    ).rows
     assert {row["code"] for row in rows} == session.EXTERNAL_CODES
     parsed = session.parse_external_rows({"rows": rows})
     assert len(parsed) == 6
@@ -179,3 +179,41 @@ def test_the_namespace_carries_only_what_the_collectors_read() -> None:
         "observer_key",
         "timeout",
     }
+
+
+def test_a_probe_without_positive_control_fired_raises_not_defaults() -> None:
+    probes = copy.deepcopy(PROBE_OK)
+    del probes["v4_pair"]["positive_control_fired"]
+    with pytest.raises(launcher_probe.controller_half.EvidenceIncomplete):
+        _rows(probes=probes)
+
+
+def test_the_window_phase_measurements_are_in_the_document_to_encrypt() -> None:
+    measurement = launcher_probe.measure_external_rows(
+        INPUTS, {"vantage": {"kept": True}}, measurers=_measurers()
+    )
+    document = measurement.document
+    assert document["vantage"] == {"kept": True}
+    assert document["probes"] == PROBE_OK
+    assert document["closed_port_behaviour"] == "reset"
+    assert document["inside_probe"] == INSIDE_OK
+    assert document["inside_observed"] == OBSERVED
+
+
+def test_the_encrypted_bytes_are_the_window_document_not_the_qualify_bytes() -> None:
+    import json
+
+    measurement = launcher_probe.measure_external_rows(
+        INPUTS, {"vantage": {}}, measurers=_measurers()
+    )
+    decoded = json.loads(measurement.document_bytes())
+    assert decoded["probes"]["positive_v6"]["reachable"] is True
+    assert measurement.document_bytes().endswith(b"\n")
+
+
+def test_a_non_finite_measurement_cannot_be_serialized() -> None:
+    measurement = launcher_probe.ExternalMeasurement(
+        rows=[], document={"probes": {"x": float("inf")}}
+    )
+    with pytest.raises(ValueError, match="Out of range"):
+        measurement.document_bytes()
