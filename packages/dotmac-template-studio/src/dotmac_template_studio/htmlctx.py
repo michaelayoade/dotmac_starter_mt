@@ -97,6 +97,9 @@ class _Scanner:
         self.value_chars = 0
         self.var_in_value = False
         self.problems: list[str] = []
+        # `id()` of each Var node accepted as the whole value of an `<img src>`.
+        # Only http(s) may be rendered there; see `html_scan`.
+        self.src_nodes: set[int] = set()
         self.started = False  # any non-space content or placeholder seen yet
         self.doctype_seen = False
 
@@ -252,7 +255,7 @@ class _Scanner:
         self.state = DATA
         self.attr = ""
 
-    def place(self, name: str, is_url: bool) -> None:
+    def place(self, name: str, is_url: bool, node_id: int = 0) -> None:
         self.started = True
         state = self.state
         if state == DATA:
@@ -264,6 +267,8 @@ class _Scanner:
         ):
             if self.value_chars == 0 and not self.var_in_value:
                 self.var_in_value = True
+                if (self.tag, self.attr) == ("img", "src"):
+                    self.src_nodes.add(node_id)
                 return
             self._problem(
                 f"{{{name}}} must be the whole value of the {self.attr!r} attribute"
@@ -281,10 +286,15 @@ class _Scanner:
         )
 
 
-def html_placeholder_problems(
+def html_scan(
     nodes: list[Node], url_names: Collection[str]
-) -> list[str]:
-    """Every unsafe construct in a parsed html part; empty means safe."""
+) -> tuple[list[str], frozenset[int]]:
+    """`(problems, src_node_ids)` for a parsed html part.
+
+    `src_node_ids` are the `id()`s of the `Var` nodes that are the whole value of
+    an `<img src>`: a renderer must allow only http(s) for those (a mailto image
+    is meaningless), matching what a literal `src` may carry.
+    """
     scanner = _Scanner()
 
     def walk(items: list[Node]) -> None:
@@ -292,7 +302,7 @@ def html_placeholder_problems(
             if isinstance(node, Text):
                 scanner.feed(node.value)
             elif isinstance(node, Var):
-                scanner.place(node.name, node.name in url_names)
+                scanner.place(node.name, node.name in url_names, id(node))
             elif isinstance(node, Section):
                 before = scanner.signature()
                 if scanner.state != DATA:
@@ -312,7 +322,14 @@ def html_placeholder_problems(
     walk(nodes)
     if scanner.state != DATA:
         scanner._problem("the html part ends inside an unterminated tag")
-    return list(dict.fromkeys(scanner.problems))
+    return list(dict.fromkeys(scanner.problems)), frozenset(scanner.src_nodes)
+
+
+def html_placeholder_problems(
+    nodes: list[Node], url_names: Collection[str]
+) -> list[str]:
+    """Every unsafe construct in a parsed html part; empty means safe."""
+    return html_scan(nodes, url_names)[0]
 
 
 __all__ = [
@@ -323,4 +340,5 @@ __all__ = [
     "MAX_NAME_CHARS",
     "URL_ATTRIBUTES",
     "html_placeholder_problems",
+    "html_scan",
 ]

@@ -11,6 +11,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dotmac_template_studio.rendering import MAX_TEMPLATE_CHARS
+
 _SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{0,98}[a-z0-9]$"
 _CHANNEL_PATTERN = r"^[a-z][a-z0-9_]{0,19}$"
 
@@ -62,6 +64,7 @@ class VersionCreate(BaseModel):
     html_body: str | None = Field(
         default=None,
         min_length=1,
+        max_length=MAX_TEMPLATE_CHARS,
         description=(
             "Optional html part. Refused (not stripped) if it holds markup "
             "outside the allowed email subset; stored sanitized."
@@ -73,7 +76,9 @@ class VersionCreate(BaseModel):
 class VersionUpdate(BaseModel):
     body: str | None = Field(default=None, min_length=1)
     # Omitted leaves the html part alone; an explicit null removes it.
-    html_body: str | None = Field(default=None, min_length=1)
+    html_body: str | None = Field(
+        default=None, min_length=1, max_length=MAX_TEMPLATE_CHARS
+    )
     subject: str | None = Field(default=None, max_length=300)
 
 

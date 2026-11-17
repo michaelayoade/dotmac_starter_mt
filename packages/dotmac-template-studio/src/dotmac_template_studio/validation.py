@@ -167,10 +167,17 @@ def validate_revision(
     # required variable cannot be satisfied by an absent body.
     problems += _validate_part("text", text or "", context, is_subject=False)
     if html is not None:
+        if not html.strip():
+            problems.append(
+                "html: the html part is blank — omit it instead of saving whitespace"
+            )
         problems += _validate_part("html", html, context, is_subject=False)
         # The allowlist gate (§ 5h): the html must survive the sanitizer
-        # UNCHANGED. Runs on the same source, so every problem is reported at once.
-        problems += [f"html: {p}" for p in html_sanitizer_problems(html)]
+        # UNCHANGED. Runs on the same source, so every problem is reported at
+        # once. Skipped for an oversized part: it is already refused, and the
+        # sanitizer must not spend time on input the size bound rejected.
+        if len(html) <= MAX_TEMPLATE_CHARS:
+            problems += [f"html: {p}" for p in html_sanitizer_problems(html)]
     return problems
 
 

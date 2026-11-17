@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from bisect import bisect_left
 from collections.abc import Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -76,7 +77,11 @@ from typing import Any
 import nh3
 
 from dotmac_template_studio.htmlctx import ACCEPTED_DOCTYPES
-from dotmac_template_studio.rendering import RenderRefusedError, check_url
+from dotmac_template_studio.rendering import (
+    RenderRefusedError,
+    bidi_control,
+    check_url,
+)
 from dotmac_template_studio.sections import _TOKEN
 
 HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
@@ -213,6 +218,7 @@ _ENUMS: Mapping[str, frozenset[str]] = {
 _NUMERIC = frozenset(
     {"width", "height", "border", "cellpadding", "cellspacing", "colspan", "rowspan"}
 )
+_MAX_PROBLEMS = 20
 _MAX_TEXT_ATTR = 500
 _MAX_STYLE = 2000
 
@@ -443,18 +449,23 @@ def _differences(
             )
             allowed = "" if tag in ALLOWED_TAGS else " (not an allowed tag)"
             problems.append(f"<{tag}> {kind}{allowed}")
-    # Attributes and style properties, matched positionally on kept elements.
+    # Attributes and style properties, matched positionally on kept elements: each
+    # source element pairs with the next kept element of the same tag at or after
+    # the previous match. Per-tag index lists with a binary search keep this
+    # linear in the document (a nested scan is quadratic on a large part).
     out_elements = [e for e in clean if e[0] == "s"]
+    by_tag: dict[str, list[int]] = {}
+    for index, element in enumerate(out_elements):
+        by_tag.setdefault(str(element[1]), []).append(index)
     cursor = 0
     for event in (e for e in source if e[0] == "s"):
         tag = str(event[1])
-        match = None
-        for index in range(cursor, len(out_elements)):
-            if out_elements[index][1] == tag:
-                match, cursor = out_elements[index], index + 1
-                break
-        if match is None:
+        positions = by_tag.get(tag, [])
+        spot = bisect_left(positions, cursor)
+        if spot == len(positions):
             continue
+        match = out_elements[positions[spot]]
+        cursor = positions[spot] + 1
         kept = dict(match[2])
         for name, value in event[2]:
             if name.endswith("#duplicate"):
@@ -481,7 +492,11 @@ def _differences(
                 break
         else:
             problems.append("markup structure differs from what a browser would build")
-    return list(dict.fromkeys(problems))
+    unique = list(dict.fromkeys(problems))
+    if len(unique) > _MAX_PROBLEMS:
+        extra = len(unique) - _MAX_PROBLEMS
+        unique = [*unique[:_MAX_PROBLEMS], f"... and {extra} more"]
+    return unique
 
 
 # ── Entry points ────────────────────────────────────────────────────────────
@@ -516,6 +531,26 @@ def sanitize_html(source: str) -> SanitizedHtml:
         )
     if _has_nul(rest):
         return SanitizedHtml("", ("a NUL character is not allowed",))
+    bidi = bidi_control(source)
+    if bidi:
+        return SanitizedHtml(
+            "",
+            (f"the bidirectional control character {bidi} is not allowed",),
+        )
+    source_events = _events(rest)
+    if _decoded_braces(source_events) != (rest.count("{"), rest.count("}")):
+        # A character reference (`&#123;`, `&lbrace;`, ...) that decodes to a
+        # brace would become a LIVE placeholder or section tag in the stored
+        # html, after every placeholder rule has already run on the source.
+        return SanitizedHtml(
+            "",
+            (
+                "braces do not match the decoded text: a character reference "
+                "that decodes to `{` or `}` (`&#123;`, `&lbrace;`, ...) is not "
+                "allowed — write a brace literally, as part of a placeholder — "
+                "and a brace may not sit in markup that is not kept",
+            ),
+        )
 
     tokens: list[str] = []
 
@@ -540,8 +575,37 @@ def sanitize_html(source: str) -> SanitizedHtml:
             "",
             ("the parser rearranged or dropped a section tag; simplify the markup",),
         )
-    problems = _differences(_events(rest), _events(restored))
+    out_events = _events(restored)
+    if _decoded_braces(out_events) != _decoded_braces(source_events) or [
+        m.group(0) for m in _TOKEN.finditer(restored)
+    ] != [m.group(0) for m in _TOKEN.finditer(rest)]:
+        return SanitizedHtml(
+            "",
+            ("the placeholders or section tags would change; refusing the markup",),
+        )
+    problems = _differences(source_events, out_events)
     return SanitizedHtml(prefix + restored, tuple(problems))
+
+
+def _decoded_braces(events: list[tuple[Any, ...]]) -> tuple[int, int]:
+    """`{` and `}` counts across decoded text and attribute values."""
+    opens = closes = 0
+    for event in events:
+        if event[0] == "t":
+            texts: list[str] = [event[1]]
+        elif event[0] == "s":
+            texts = []
+            for _, value in event[2]:
+                if isinstance(value, str):
+                    texts.append(value)
+                elif isinstance(value, tuple):
+                    texts.extend(f"{prop}:{val}" for prop, val in value)
+        else:
+            continue
+        for text in texts:
+            opens += text.count("{")
+            closes += text.count("}")
+    return opens, closes
 
 
 def _has_nul(text: str) -> bool:

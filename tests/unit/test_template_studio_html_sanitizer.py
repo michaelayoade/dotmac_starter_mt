@@ -354,6 +354,38 @@ HOSTILE: dict[str, str] = {
     "placeholder-in-script": "<script>{name}</script>",
     "section-in-attr": '<p title="{#items}x{/items}">x</p>',
     "section-split-tag": "<p {#items}title=x{/items}>x</p>",
+    # character references that decode to braces would become LIVE placeholders
+    # or section tags in the stored html, after the placeholder rules ran
+    "charref-brace-decimal": "<p>&#123;reset_token&#125;</p>",
+    "charref-brace-hex": "<p>&#x7B;reset_token&#x7D;</p>",
+    "charref-brace-hex-upper": "<p>&#X7b;reset_token&#X7d;</p>",
+    "charref-brace-named": "<p>&lbrace;reset_token&rbrace;</p>",
+    "charref-brace-named-alt": "<p>&lcub;reset_token&rcub;</p>",
+    "charref-brace-allowed-name": "<p>&#123;name&#125;</p>",
+    "charref-brace-no-semicolon": "<p>&#123name&#125</p>",
+    "charref-brace-open-only": "<p>&#123;name}</p>",
+    "charref-brace-close-only": "<p>{name&#125;</p>",
+    "charref-brace-mixed-literal": "<p>{name} and &#123;reset_token&#125;</p>",
+    "charref-brace-double": "<p>&#123;&#123;name&#125;&#125;</p>",
+    "charref-brace-double-mixed": "<p>&#123;{name}&#125;</p>",
+    "charref-brace-section-open": "<p>&#123;#items&#125;x{/items}</p>",
+    "charref-brace-section-close": "<p>{#items}x&#123;/items&#125;</p>",
+    "charref-brace-section-inverted": "<p>&#123;^items&#125;x&#123;/items&#125;</p>",
+    "charref-brace-double-section": "<p>&#x7B;&#x7B;#items&#x7D;&#x7D;</p>",
+    "charref-brace-in-title": '<p title="&#123;name&#125;">x</p>',
+    "charref-brace-in-alt": '<img src="https://e.example/a.png" alt="&lbrace;name&rbrace;">',
+    "charref-brace-in-href": '<a href="&#123;link&#125;">x</a>',
+    "charref-brace-in-table": "<table><tr><td>a</td></tr>&#123;#items&#125;<tr><td>b</td></tr>&#123;/items&#125;</table>",
+    "charref-brace-leading-zeros": "<p>&#0000123;name&#0000125;</p>",
+    # bidirectional controls reorder displayed text
+    "bidi-rlo-in-text": "<p>pay \u202eelif.exe</p>",
+    "bidi-lre-in-text": "<p>a\u202ab</p>",
+    "bidi-pdf-in-text": "<p>a\u202cb</p>",
+    "bidi-isolate-in-text": "<p>a\u2066b\u2069</p>",
+    "bidi-rli-in-text": "<p>a\u2067b</p>",
+    "bidi-fsi-in-text": "<p>a\u2068b</p>",
+    "bidi-in-attr": '<p title="a\u202eb">x</p>',
+    "bidi-in-doctype-prefix": "\u202e<!DOCTYPE html><p>x</p>",
     # unicode / encoding games
     "fullwidth-script": "<ｓｃｒｉｐｔ>alert(1)</ｓｃｒｉｐｔ>",
     "rtl-override-href": '<a href="‮javascript:alert(1)">x</a>',
@@ -546,7 +578,6 @@ HOSTILE_VALUES = [
     "' onmouseover='alert(1)",
     "</a><script>alert(1)</script>",
     "&lt;script&gt;",
-    "‮<b>",
     'https://e.example/?a=1&b=2"><script>',
     "{#items}{/items}{name}",
 ]
@@ -577,3 +608,129 @@ def test_a_hostile_url_value_is_refused_at_render(link: str) -> None:
     skeleton = require_clean_html('<a href="{link}">x</a>')
     with pytest.raises(RenderRefusedError):
         render_part(skeleton, {"link": link}, "html", context=CTX)
+
+
+# ── Review round 1: vocabulary, lookup, img src, bidi, blank, scale ─────────
+
+
+def test_charref_braces_cannot_smuggle_an_undeclared_placeholder() -> None:
+    src = "<p>{name} &#123;reset_token&#125;</p>"
+    problems = validate_revision(CTX, text="{link}", html=src)
+    assert any("character reference" in p for p in problems), problems
+    with pytest.raises(HtmlSanitizationRefused):
+        require_clean_html(src)
+
+
+def test_literal_braces_in_a_placeholder_still_work() -> None:
+    stored = require_clean_html("<p>{name}</p>{#items}<p>{title}</p>{/items}")
+    assert "{name}" in stored and "{#items}" in stored and "{/items}" in stored
+
+
+def test_the_renderer_never_reads_a_key_the_context_does_not_declare() -> None:
+    # A legacy/hand-written skeleton naming an undeclared key is a missing value,
+    # never filled from an extra caller key.
+    values = {"name": "Ann", "reset_token": "SECRET-123"}
+    with pytest.raises(Exception, match="reset_token"):
+        render_part("<p>{reset_token}</p>", values, "html", context=CTX)
+    out = render_part("<p>{reset_token}</p>", values, "html", context=CTX, strict=False)
+    assert "SECRET-123" not in out and out == "<p>{reset_token}</p>"
+    # With no context there is no declaration to enforce (legacy behaviour).
+    assert render_part("{reset_token}", values, "text") == "SECRET-123"
+
+
+def test_the_stored_html_is_validated_again_before_saving(monkeypatch) -> None:
+    from dotmac_kernel.exceptions import BadRequestError
+    from dotmac_template_studio import service
+
+    monkeypatch.setattr(
+        service,
+        "sanitize_html",
+        lambda html: htmlsanitize.SanitizedHtml("<p>{name} {reset_token}</p>", ()),
+    )
+    with pytest.raises(BadRequestError, match="reset_token"):
+        service._stored_html("<p>{name}</p>", CTX, subject=None, body="{link}")
+
+
+@pytest.mark.parametrize(
+    "link", ["mailto:a@b.example", "javascript:alert(1)", "data:image/png;base64,AA=="]
+)
+def test_img_src_placeholder_allows_only_http_and_https_at_render(link: str) -> None:
+    skeleton = require_clean_html('<img src="{link}" alt="x">')
+    with pytest.raises(RenderRefusedError):
+        render_part(skeleton, {"link": link}, "html", context=CTX)
+    ok = render_part(skeleton, {"link": "https://e.example/a.png"}, "html", context=CTX)
+    assert 'src="https://e.example/a.png"' in ok
+    # An href keeps mailto.
+    href = require_clean_html('<a href="{link}">x</a>')
+    assert "mailto:a@b.example" in render_part(
+        href, {"link": "mailto:a@b.example"}, "html", context=CTX
+    )
+
+
+@pytest.mark.parametrize("char", ["\u202a", "\u202e", "\u2066", "\u2069"])
+def test_bidi_controls_in_a_substituted_value_are_refused(char: str) -> None:
+    skeleton = require_clean_html("<p>{name}</p>")
+    with pytest.raises(RenderRefusedError, match="bidirectional"):
+        render_part(skeleton, {"name": f"a{char}b"}, "html", context=CTX)
+    # Not a html-part concern for the text part.
+    assert render_part("{name}", {"name": f"a{char}b"}, "text", context=CTX)
+
+
+@pytest.mark.parametrize("blank", ["   ", "\n\t ", "\u00a0"])
+def test_a_blank_html_part_is_refused(blank: str) -> None:
+    problems = validate_revision(CTX, text="{link}", html=blank)
+    assert any("blank" in p for p in problems), problems
+
+
+def _timed(fn, *args) -> float:
+    import time
+
+    started = time.perf_counter()
+    fn(*args)
+    return time.perf_counter() - started
+
+
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "<p>hello {name}</p>",
+        '<p onclick="x()" style="color:red;position:fixed">a</p>',
+        "<script>x</script><b>b</b>",
+        '<a href="javascript:1">x</a>',
+    ],
+)
+def test_save_time_scales_linearly_with_the_size_of_the_part(unit: str) -> None:
+    """Hostile inputs that produce MANY removals must not be quadratic."""
+    small, large = unit * 2_000, unit * 16_000  # 8x the input
+    # Best of three on each size absorbs a noisy shared runner.
+    t_small = min(_timed(sanitize_html, small) for _ in range(3))
+    t_large = min(_timed(sanitize_html, large) for _ in range(3))
+    # Linear is ~8x; quadratic would be ~64x. Generous bound for CI noise.
+    assert t_large < max(t_small, 0.005) * 24, (t_small, t_large)
+    assert len(sanitize_html(large).problems) <= 21  # reports are capped
+
+
+def test_an_oversized_part_never_reaches_the_sanitizer(monkeypatch) -> None:
+    from dotmac_template_studio import validation
+    from dotmac_template_studio.rendering import MAX_TEMPLATE_CHARS
+
+    def _boom(_: str) -> list[str]:
+        raise AssertionError("the sanitizer ran on an oversized part")
+
+    monkeypatch.setattr(validation, "html_sanitizer_problems", _boom)
+    problems = validate_revision(
+        CTX, text="{link}", html="<p>" + "a" * MAX_TEMPLATE_CHARS
+    )
+    assert any("longer than" in p for p in problems), problems
+
+
+def test_the_schema_bounds_html_body_to_the_template_cap() -> None:
+    from dotmac_template_studio.rendering import MAX_TEMPLATE_CHARS
+    from dotmac_template_studio.schemas import VersionCreate, VersionUpdate
+
+    VersionCreate.model_validate({"body": "x", "html_body": "a" * MAX_TEMPLATE_CHARS})
+    for model in (VersionCreate, VersionUpdate):
+        with pytest.raises(ValueError, match="at most"):
+            model.model_validate(
+                {"body": "x", "html_body": "a" * (MAX_TEMPLATE_CHARS + 1)}
+            )

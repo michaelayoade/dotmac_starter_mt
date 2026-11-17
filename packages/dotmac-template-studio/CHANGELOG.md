@@ -58,6 +58,14 @@ Source change only: the declared version stays at the `0.2.0a6+dev` development 
   refused. Text-only composition is byte-identical.
 - html doctype: the exact XHTML 1.0 Transitional doctype string is accepted in
   addition to `<!doctype html>`; any other declaration is still refused.
+- Html hardening (review): a character reference that decodes to `{` or `}`
+  (`&#123;`, `&lbrace;`, ...) is refused, and the stored html is validated again
+  against every revision rule before saving; with a context, the renderer reads
+  only the context's declared scalars from `values`; an `<img src>` placeholder
+  renders http(s) only; bidirectional controls are refused in html source and
+  substituted values; a blank html part is refused; save-time sanitizing is
+  linear in the part's size, skipped for an oversized part, and `html_body` is
+  bounded by the schema to the template size cap.
 - New dependency `nh3` (`>=0.3.7,<0.4`, MIT, abi3 wheels).
 - **Upgrade note.** The html part is a body fragment: `<html>`, `<head>`, `<body>`,
   `class`/`id` attributes, `<style>`, comments and conditional comments are

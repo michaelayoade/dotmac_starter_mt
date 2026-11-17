@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit
 
-from dotmac_template_studio.htmlctx import html_placeholder_problems
+from dotmac_template_studio.htmlctx import html_scan
 from dotmac_template_studio.sections import (
     Section,
     TemplateSyntaxError,
@@ -72,6 +72,24 @@ MAX_RENDERED_CHARS = 1_000_000
 MAX_TEMPLATE_CHARS = MAX_RENDERED_CHARS
 # The only URL schemes a `url` value may carry in the html part.
 ALLOWED_URL_SCHEMES = frozenset({"http", "https", "mailto"})
+# An image `src` is narrower: a mailto image is meaningless.
+_SRC_SCHEMES = frozenset({"http", "https"})
+
+_BIDI_CONTROLS = frozenset(
+    {chr(c) for c in range(0x202A, 0x202F)} | {chr(c) for c in range(0x2066, 0x206A)}
+)
+
+
+def bidi_control(text: str) -> str | None:
+    """The first bidirectional control in `text` as `U+XXXX`, or None.
+
+    These reorder displayed text (a spoofing vector) and are refused in an html
+    part's source and in substituted values.
+    """
+    for ch in text:
+        if ch in _BIDI_CONTROLS:
+            return f"U+{ord(ch):04X}"
+    return None
 
 
 class RenderRefusedError(ValueError):
@@ -144,7 +162,18 @@ class _Renderer:
         values: Mapping[str, Any],
         context: Any,
         strict: bool,
+        src_nodes: frozenset[int] = frozenset(),
     ) -> None:
+        self.src_nodes = src_nodes
+        # With a context, only its declared scalars may be read from `values`:
+        # a placeholder the context does not declare is missing, never filled
+        # from an extra key the caller happened to pass. Without a context there
+        # is no declaration to enforce (legacy callers), so nothing is restricted.
+        self.declared: frozenset[str] | None = (
+            frozenset(getattr(context, "variables", ()))
+            if context is not None
+            else None
+        )
         self.part = part
         self.values = values
         self.context = context
@@ -179,9 +208,16 @@ class _Renderer:
             )
         self.out.append(text)
 
-    def encode(self, name: str, value: str) -> str:
+    def encode(self, name: str, value: str, *, http_only: bool = False) -> str:
         if not isinstance(value, str):
             raise RenderRefusedError(f"value for {name!r} must be a string")
+        if self.part == "html" and name not in self.url_names:
+            bidi = bidi_control(value)
+            if bidi:
+                raise RenderRefusedError(
+                    f"value for {name!r} contains the bidirectional control "
+                    f"character {bidi}, which an html part may not carry"
+                )
         if self.part == "text":
             return value
         if self.part == "subject":
@@ -193,7 +229,12 @@ class _Renderer:
             return value
         if name in self.url_names:
             try:
-                return _html.escape(check_url(value), quote=True)
+                checked = check_url(value)
+                if http_only and urlsplit(checked).scheme.lower() not in _SRC_SCHEMES:
+                    raise RenderRefusedError(
+                        "an image src may only be an http or https url"
+                    )
+                return _html.escape(checked, quote=True)
             except RenderRefusedError as exc:
                 raise RenderRefusedError(f"value for {name!r}: {exc}") from exc
         return _html.escape(value, quote=True)
@@ -206,6 +247,8 @@ class _Renderer:
                 return item.get(name)
         if name in self.item_names:
             return None  # an item variable outside any list scope
+        if self.declared is not None and name not in self.declared:
+            return None  # undeclared by the context: never read from `values`
         return self.values.get(name)
 
     def run(self, nodes: list[Any], scopes: list[_Scope]) -> None:
@@ -218,7 +261,9 @@ class _Renderer:
                     self.missing.append(node.name)
                     self.emit(node.raw)
                     continue
-                self.emit(self.encode(node.name, value))
+                self.emit(
+                    self.encode(node.name, value, http_only=id(node) in self.src_nodes)
+                )
             else:
                 self.section(node, scopes)
 
@@ -290,12 +335,13 @@ def render_part(
     nodes = parse(source)
     if part == "subject" and any(isinstance(n, Section) for n in nodes):
         raise TemplateSyntaxError("a subject may not contain sections")
+    src_nodes: frozenset[int] = frozenset()
     if part == "html":
         url_names = getattr(context, "url", ()) if context is not None else ()
-        problems = html_placeholder_problems(nodes, url_names)
+        problems, src_nodes = html_scan(nodes, url_names)
         if problems:
             raise RenderRefusedError("unsafe html placeholder: " + "; ".join(problems))
-    renderer = _Renderer(part, values, context, strict)
+    renderer = _Renderer(part, values, context, strict, src_nodes)
     renderer.run(nodes, [])
     if part == "subject":
         problem = subject_problem("".join(renderer.out))
@@ -311,6 +357,7 @@ def render_part(
 
 __all__ = [
     "ALLOWED_URL_SCHEMES",
+    "bidi_control",
     "HARD_MAX_LIST_ITEMS",
     "MAX_LIST_ITEMS",
     "MAX_RENDERED_CHARS",

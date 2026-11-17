@@ -291,18 +291,30 @@ class _Unset:
 _UNSET = _Unset()
 
 
-def _stored_html(html: str | None) -> str | None:
+def _stored_html(
+    html: str | None,
+    context: RenderContext,
+    *,
+    subject: str | None,
+    body: str,
+) -> str | None:
     """The sanitized html to store. Call only after `check_revision` passed it.
 
     `check_revision` already refuses any html the sanitizer would change, so the
     output equals the source up to re-serialisation; storing the OUTPUT (never
-    the source) is what keeps unsanitized markup out of the table.
+    the source) is what keeps unsanitized markup out of the table. The stored
+    text is then validated AGAIN against the full revision rules, because what is
+    stored is what renders: any difference between source and output that the
+    source-side rules could not see is caught here, before anything is saved.
     """
     if html is None:
         return None
     result = sanitize_html(html)
     if result.problems:  # unreachable after check_revision; fail closed anyway
         raise BadRequestError("html part refused: " + "; ".join(result.problems))
+    check_revision(
+        context, subject=subject, text=body, html=result.html, kind_hint="stored html"
+    )
     return result.html
 
 
@@ -372,7 +384,9 @@ def create_version(
         html=html_body,
         kind_hint="version",
     )
-    stored_html = _stored_html(html_body)
+    stored_html = _stored_html(
+        html_body, get_context(template.context), subject=subject, body=body
+    )
     highest = db.execute(
         select(func.max(TemplateVersion.version)).where(
             TemplateVersion.tenant_id == tenant_id,
@@ -429,7 +443,9 @@ def update_version(
         html=new_html,
         kind_hint="version",
     )
-    stored_html = _stored_html(new_html)
+    stored_html = _stored_html(
+        new_html, get_context(template.context), subject=new_subject, body=new_body
+    )
     revision.body = new_body
     revision.subject = new_subject
     revision.html_body = stored_html
