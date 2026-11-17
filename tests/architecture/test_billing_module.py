@@ -506,6 +506,12 @@ _INTERNAL_RELATIONS = (
         "document_lines",
         ("document_id", "obligation_id"),
     ),
+    (
+        "billing_account_terms_versions",
+        ("billing_account_id",),
+        "billing_accounts",
+        ("id",),
+    ),
     ("accounting_facts", ("posting_group_id",), "posting_groups", ("id",)),
     ("accounting_facts", ("reverses_fact_id",), "accounting_facts", ("id",)),
     (

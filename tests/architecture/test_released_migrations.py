@@ -8778,9 +8778,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "su_0006_pending_validity.py",
         }
     ),
-    # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
-    # frozen. `bi_0015` to `bi_0017` are a12's, still editable until a12 is tagged.
-    "dotmac-billing": frozenset(),
+    # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
+    # frozen. `bi_0018` (account terms) is a13's, editable until a13 is tagged.
+    "dotmac-billing": frozenset({"bi_0018_account_terms.py"}),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
