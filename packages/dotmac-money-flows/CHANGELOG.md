@@ -14,10 +14,25 @@ Source only; not published, not composed into any assembly.
   columns and an accepted `settlement_id` never change. A resolved row keeps its
   settlement and reason code.
 
+- F1 Settle: `settle_confirmation`, `record_settle_refusal`, `retry_settle`,
+  `get_settle_instance` and `list_settle_attention`, with the typed contracts, the
+  `SettlementTargetResolver` and `SettlePolicyReader` ports and the
+  `SettleRefused` error. Everything runs in the caller's transaction; no commit,
+  rollback, savepoint, clock or timer. The row is written once at its outcome and
+  a replay returns it with no owner call. The target comes only from the payment
+  intent. Manual entry and transfer proof are off by policy default.
+- Posting instant: Billing's claim and postings use the Payments cash
+  observation's `observed_at`; the settle command carries no caller instant.
+- `list_settle_attention` pages by a `(created_at, id)` keyset cursor.
+- Depends on `dotmac-billing >=0.1.0a12` and `dotmac-payments >=0.1.0a4`.
+- A database test applies the schema vocabulary rule to the live `mod_mflows`
+  catalog.
+
 ### Before release
 
-- Add an `information_schema` column-vocabulary test over the migrated database
-  (no amount, balance, lease, timer ... column, only common columns and
-  `_id`/`_ref` refs), alongside the first flow behaviour.
+- Measure the oldest-due-first page walk of `list_open_receivable_documents`
+  under the account lock on an ST-4-scale account (many open invoices). No such
+  fixture exists in the repository yet (the opening scale fixture is a census,
+  not an account's open documents), so none was built here.
 - Raise the kernel floor to the kernel release that carries the `money_flows`
   migration-namespace reservation.

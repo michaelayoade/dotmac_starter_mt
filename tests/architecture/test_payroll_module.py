@@ -23,7 +23,7 @@ MIGRATION = SOURCE / "migrations/versions/py_0001_payroll.py"
 
 def test_manifest_allocates_one_tenant_only_payroll_lineage() -> None:
     assert module.code == "payroll"
-    assert module.version == "0.1.0a4"
+    assert module.version == "0.1.0a5"
     assert module.short_code == "payroll"
     assert module.migration_prefix == "py"
     assert module.migration_branch == "payroll"
@@ -132,7 +132,8 @@ def test_payroll_migration_forces_rls_and_protects_calculation_evidence() -> Non
     source = MIGRATION.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", " ", source)
     assert "protect_payroll_evidence" in source
-    for table in module.tables:
+    # The a5 reversal table is created by py_0003 (checked separately below).
+    for table in (x for x in module.tables if x != "payroll_settlement_reversals"):
         assert (
             f"ALTER TABLE {module.db_schema}.{table} ENABLE ROW LEVEL SECURITY"
             in compact
@@ -163,3 +164,16 @@ def test_payroll_a4_migration_revision_fits_alembic_version_column() -> None:
     ):
         assert name in source
         assert len(name) <= 63
+
+
+def test_payroll_a5_migration_chain_revision_and_append_only_reversal() -> None:
+    migration = SOURCE / "migrations/versions/py_0003_settlement_reversal.py"
+    source = migration.read_text(encoding="utf-8")
+    assert 'revision = "py_0003_settlement_reversal"' in source
+    assert 'down_revision = "py_0002_mode_and_run_cancel"' in source
+    assert len("py_0003_settlement_reversal") <= 32
+    assert "protect_payroll_evidence" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "GRANT SELECT, INSERT ON" in source
+    assert "downgrade refused" in source
+    assert models.PayrollSettlementReversal.__tablename__ in module.tables
