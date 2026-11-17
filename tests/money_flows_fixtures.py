@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -182,13 +183,38 @@ def seed_account(db, scope, *, currency: str = "NGN"):
     )
 
 
-def seed_invoice(db, scope, account, *, service_ref: str = "service:example"):
+def seed_invoice(
+    db,
+    scope,
+    account,
+    *,
+    service_ref: str = "service:example",
+    net: str | None = None,
+    due_at=None,
+):
+    """An issued invoice; ``net`` (VAT 20% on top) and ``due_at`` are optional.
+
+    The default is a 120.00 invoice due on the fixture date.
+    """
     command = replace(
         b._obligation_command(
             account.id, scope=scope, source_fact_id=f"occurrence-{uuid4()}"
         ),
         service_ref=service_ref,
     )
+    if net is not None:
+        cent = Decimal("0.01")
+        pre = b._money(net)
+        tax = b._money(str((Decimal(net) * Decimal("0.20")).quantize(cent)))
+        total = b._money(str((Decimal(net) * Decimal("1.20")).quantize(cent)))
+        (snapshot,) = command.tax_snapshots
+        command = replace(
+            command,
+            pre_tax_amount=pre,
+            tax_amount=tax,
+            total_amount=total,
+            tax_snapshots=(replace(snapshot, taxable_basis=pre, tax_amount=tax),),
+        )
     obligation = accept_rated_obligation(
         db,
         scope=scope,
@@ -198,9 +224,10 @@ def seed_invoice(db, scope, account, *, service_ref: str = "service:example"):
     draft = create_draft_document(
         db, scope=scope, command=b._draft_command(obligation.id)
     )
-    return issue_document(
-        db, scope=scope, command=b._issue_command(draft.id), numbering=b.NUMBERING
-    )
+    issue = b._issue_command(draft.id)
+    if due_at is not None:
+        issue = replace(issue, due_at=due_at)
+    return issue_document(db, scope=scope, command=issue, numbering=b.NUMBERING)
 
 
 @dataclass(frozen=True)
