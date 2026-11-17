@@ -9,6 +9,7 @@ and reads its terminal report, and silence returns no terminal at all.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import pathlib
@@ -28,8 +29,9 @@ import lane3_session_channel as channel_module  # noqa: E402
 from dotmac_deployment_foundation.rehearsal import ExecutionRunBindingV1  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
 
+from tests.unit import lane3_e10_support as e10_support  # noqa: E402
 from tests.unit import test_lane3_launcher_stage as stage_tests  # noqa: E402
-from tests.unit.lane3_store_support import FakeStore  # noqa: E402
+from tests.unit.lane3_store_support import EPOCH, FakeStore  # noqa: E402
 from tests.unit.test_lane3_launcher_lease import MACHINE, terminal_data  # noqa: E402
 from tests.unit.test_lane3_launcher_probe import INPUTS, _measurers  # noqa: E402
 
@@ -82,6 +84,12 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
     )
     values: dict[str, Any] = {
         "pin": stage_tests._pin(tmp_path),
+        "expected_host_incarnation": e10_support.INCARNATION_FINGERPRINT,
+        "e10": e10_support.make_receipt(
+            ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+            vm_alias=stage_tests.ALIAS,
+            machine_id=MACHINE,
+        ),
         "store": store,
         "held": held,
         "plan": _plan(),
@@ -131,7 +139,7 @@ def _ready(
         "host_id": host,
         "machine_id": machine,
         "host_incarnation": (
-            stage_tests.CONTROL_FINGERPRINT if incarnation is None else incarnation
+            e10_support.INCARNATION_FINGERPRINT if incarnation is None else incarnation
         ),
         "plan_digest": "sha256:" + "d" * 64,
     }
@@ -570,7 +578,6 @@ def test_drive_inputs_have_no_free_start_dict_or_identity_fields() -> None:
     for derived in (
         "start",
         "expected_host_id",
-        "expected_host_incarnation",
         "controller_identity",
         "lease_id",
         "lease_dir",
@@ -579,6 +586,8 @@ def test_drive_inputs_have_no_free_start_dict_or_identity_fields() -> None:
     ):
         assert derived not in names, derived
     assert {"pin", "held", "store", "plan"} <= names
+    # ...except the incarnation, which is its own required typed input.
+    assert {"expected_host_incarnation", "e10"} <= names
 
 
 def test_the_start_frame_is_derived_from_the_lease_the_pin_and_the_plan(
@@ -606,9 +615,9 @@ def test_the_start_frame_is_derived_from_the_lease_the_pin_and_the_plan(
         "run_id": 2,
         "run_attempt": 1,
     }
-    # Control's form of the pinned key, not the OpenSSH spelling the pin was
-    # given in: the plan's host_incarnation is `sha256:<hex>` of the raw key.
-    assert start["expected_host_incarnation"] == stage_tests.CONTROL_FINGERPRINT
+    # The incarnation is its OWN input (CP's `sha256:<hex>` of the incarnation
+    # key); it is not the SSH pin's fingerprint and is not derived from it.
+    assert start["expected_host_incarnation"] == e10_support.INCARNATION_FINGERPRINT
     assert start["expected_host_incarnation"] != stage_tests.FINGERPRINT
     assert start["store_time"] == store.database_time().isoformat()
 
@@ -617,7 +626,7 @@ def test_the_start_frame_is_derived_from_the_lease_the_pin_and_the_plan(
     "incarnation",
     [
         "sha256:" + "0" * 64,  # another key
-        stage_tests.FINGERPRINT,  # the right key in the WRONG (OpenSSH) spelling
+        stage_tests.FINGERPRINT,  # the SSH host key's fingerprint, NOT the incarnation
         "",
     ],
 )
@@ -859,3 +868,200 @@ def test_the_evidence_carries_no_secret_or_address_fields(tmp_path) -> None:
         "cleanup",
         "target_exit_status",
     }
+
+
+# ── U3 (option B): the E10 receipt links the SSH pin and the incarnation ────
+
+
+@pytest.mark.parametrize(
+    ("override", "code"),
+    [
+        (
+            {"ssh_host_key_fingerprint": "SHA256:" + "C" * 43},
+            "receipt-ssh-fingerprint-mismatch",
+        ),
+        ({"vm_alias": "vm-beta"}, "receipt-alias-mismatch"),
+        (
+            {
+                "incarnation_public_key_b64url": "A" * 43,
+                "incarnation_fingerprint": "sha256:"
+                + hashlib.sha256(bytes(32)).hexdigest(),
+            },
+            "receipt-incarnation-mismatch",
+        ),
+        ({"host_id": "host-b"}, "receipt-host-id-mismatch"),
+    ],
+)
+def test_a_receipt_that_disagrees_with_an_input_sends_nothing(
+    ends, tmp_path, override: dict[str, Any], code: str
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    receipt = e10_support.make_receipt(
+        **{
+            "ssh_host_key_fingerprint": stage_tests.FINGERPRINT,
+            "vm_alias": stage_tests.ALIAS,
+            "machine_id": MACHINE,
+            **override,
+        }
+    )
+    result = _run(ends, _inputs(tmp_path, e10=receipt), script)
+    assert seen["no_start"] is True
+    assert result.refusal_code == code
+    assert result.ready_seen is False
+
+
+def test_a_key_destroyed_after_the_store_time_sends_nothing(ends, tmp_path) -> None:
+    from datetime import timedelta
+
+    store = FakeStore()
+    receipt = e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+        incarnation_key_destroyed_at=store.database_time() + timedelta(minutes=5),
+    )
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    result = _run(ends, _inputs(tmp_path, store=store, e10=receipt), script)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "incarnation-key-not-destroyed-before-launch"
+
+
+@pytest.mark.parametrize("value", ["", "SHA256:" + "A" * 43, "sha256:short"])
+def test_a_malformed_expected_incarnation_sends_nothing(
+    ends, tmp_path, value: str
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    result = _run(ends, _inputs(tmp_path, expected_host_incarnation=value), script)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "host-incarnation-required"
+
+
+def test_ready_is_compared_with_the_incarnation_input_not_the_ssh_pin(
+    ends, tmp_path
+) -> None:
+    """A target presenting the SSH host key's fingerprint as its incarnation is
+    refused: the SSH key and the incarnation key are different keys."""
+    seen: dict[str, Any] = {}
+
+    def refusing(chan: Channel) -> None:
+        assert not front(chan, seen, _ready(incarnation=stage_tests.FINGERPRINT))
+
+    result = _run(ends, _inputs(tmp_path), refusing)
+    assert "lock_taken" not in seen
+    assert result.refusal_code == "placement-mismatch"
+
+
+# ── third check: released_at in the uploaded copy is the STORE's ────────────
+
+
+def test_the_uploaded_release_copy_carries_store_time_not_the_runners(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    store = FakeStore()
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()),
+        receipt=_Receipt(),
+        ready_seen=True,
+        plan_digest=PLAN,
+    )
+    # The runner's own stamp (what build_release wrote) is within the skew bound
+    # but is not the store's.
+    conclusion = _conclude(tmp_path, result, store)
+    document = json.loads((tmp_path / "out" / "lane3-lease-release.json").read_text())
+    assert document["released_at"] == store.released_at("host-a").isoformat()
+    evidence = _evidence(tmp_path)
+    assert evidence["store_released_at"] == store.released_at("host-a").isoformat()
+    assert evidence["runner_released_at"] != ""
+    assert conclusion.outcome == "released"
+
+
+def test_a_runner_clock_stamp_never_reaches_the_uploaded_copy(
+    tmp_path, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from lane3_launcher_lease import parse_terminal
+
+    from tests.unit.lane3_store_support import release_for
+
+    def skewed(ctx, args, outcome):
+        lease = ctx.lease
+        runner_stamp = (EPOCH + timedelta(seconds=30)).isoformat()
+        return release_for(
+            FakeStore(),
+            types.SimpleNamespace(lease=lease),
+            released_at=runner_stamp,
+        )
+
+    monkeypatch.setattr(
+        launcher.launcher_lease.controller_half, "build_release", skewed
+    )
+    store = FakeStore()
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()), receipt=_Receipt(), ready_seen=True
+    )
+    _conclude(tmp_path, result, store)
+    document = json.loads((tmp_path / "out" / "lane3-lease-release.json").read_text())
+    assert document["released_at"] == store.database_time().isoformat()
+    assert document["released_at"] != _evidence(tmp_path)["runner_released_at"]
+
+
+# ── third check: a write failure never hides the original error ─────────────
+
+
+def test_a_record_write_failure_keeps_the_original_error_and_notes_both(
+    tmp_path, monkeypatch
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    def boom(*_: Any) -> Any:
+        raise RuntimeError("builder exploded")
+
+    def disk_full(*_: Any, **__: Any) -> Any:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(launcher.launcher_lease.controller_half, "build_release", boom)
+    monkeypatch.setattr(launcher.launcher_lease, "write_terminal_records", disk_full)
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()), receipt=_Receipt(), ready_seen=True
+    )
+    with pytest.raises(RuntimeError) as failure:
+        _conclude(tmp_path, result)
+    assert "builder exploded" in str(failure.value)
+    notes = "\n".join(failure.value.__notes__)
+    assert "terminal records also failed" in notes
+    assert "no space left on device" in notes
+
+
+def test_a_record_write_failure_alone_propagates_as_itself(
+    tmp_path, monkeypatch
+) -> None:
+    def disk_full(*_: Any, **__: Any) -> Any:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(launcher.launcher_lease, "write_terminal_records", disk_full)
+    with pytest.raises(OSError):
+        _conclude(tmp_path, launcher.DriveResult(terminal=None))

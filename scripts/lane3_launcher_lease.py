@@ -340,20 +340,24 @@ def write_terminal_records(
     *,
     evidence: dict[str, Any],
     release_record: Any | None,
+    released_at: str | None = None,
 ) -> list[pathlib.Path]:
     """Create-only terminal records for EVERY outcome. Never overwrites.
 
     The evidence file is always written, so a refusal, a release and a no-release
     each leave a record and absence is never silent. The release file is a copy of
     the release document and exists only when a release was written to the store.
+    When `released_at` is given (the STORE's stamp) the copy carries it in place of
+    the runner's own `released_at`; the runner's value is kept in the evidence.
     """
     directory.mkdir(parents=True, exist_ok=True)
     written: list[pathlib.Path] = []
     if release_record is not None:
         path = directory / RELEASE_FILE
-        _create_only(
-            path, json.dumps(release_record.as_document(), indent=2, allow_nan=False)
-        )
+        document = dict(release_record.as_document())
+        if released_at is not None:
+            document["released_at"] = released_at
+        _create_only(path, json.dumps(document, indent=2, allow_nan=False))
         written.append(path)
     path = directory / EVIDENCE_FILE
     _create_only(path, json.dumps(evidence, indent=2, allow_nan=False) + "\n")

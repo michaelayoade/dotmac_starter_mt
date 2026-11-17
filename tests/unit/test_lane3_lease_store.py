@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import threading
 
 import pytest
 
@@ -13,7 +14,8 @@ sys.path.insert(0, str(SCRIPTS))
 
 import lane3_lease_store as contract  # noqa: E402
 
-from tests.unit.lane3_store_support import CASES, FakeStore  # noqa: E402
+from tests.unit.lane3_e10_support import make_receipt  # noqa: E402
+from tests.unit.lane3_store_support import CASES, FakeStore, factory  # noqa: E402
 
 
 def test_a_store_with_database_time_is_accepted() -> None:
@@ -68,7 +70,7 @@ def test_the_contract_names_exactly_the_standings_the_destroy_gate_reads() -> No
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_the_reference_fake_passes_each_conformance_case(name: str) -> None:
     """One test per rule, so a store that breaks one rule fails by its name."""
-    CASES[name](FakeStore, lambda store, seconds: store.advance(seconds))
+    CASES[name](factory(), lambda store, seconds: store.advance(seconds))
 
 
 def test_the_conformance_cases_cover_every_rule_in_the_contract() -> None:
@@ -119,14 +121,72 @@ class _NoLock(FakeStore):
         return FakeStore.acquire_exclusive(self, **kwargs)
 
 
+class _PythonLockOnly(FakeStore):
+    """Serialises its OWN calls with a Python lock and shares nothing: each handle
+    has private state, so there is no exclusivity between handles at all."""
+
+    def __init__(self, **kwargs):
+        kwargs.pop("backing", None)
+        super().__init__(**kwargs)
+        self._own = threading.Lock()
+
+    def acquire_exclusive(self, **kwargs):
+        with self._own:
+            return super().acquire_exclusive(**kwargs)
+
+
 @pytest.mark.parametrize(
     ("broken", "case"),
     [
         (_WipesHistory, "no_reacquire_after_expiry"),
         (_WipesHistory, "no_reacquire_after_a_mutated_release"),
         (_NoLock, "exclusive_under_concurrent_acquires"),
+        (_PythonLockOnly, "exclusive_under_concurrent_acquires"),
     ],
 )
 def test_a_store_that_breaks_a_rule_fails_that_case(broken, case: str) -> None:
     with pytest.raises(AssertionError):
-        CASES[case](broken, lambda store, seconds: store.advance(seconds))
+        CASES[case](factory(broken), lambda store, seconds: store.advance(seconds))
+
+
+def test_handles_onto_one_backing_share_exclusivity_and_the_clock() -> None:
+    first = FakeStore()
+    second = FakeStore(backing=first.backing)
+    held = first.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="fp",
+        ttl_seconds=60,
+    )
+    with pytest.raises(contract.StoreRefused):
+        second.acquire_exclusive(
+            host_id="host-a",
+            authorization_run="run-2",
+            controller_identity="fp",
+            ttl_seconds=60,
+        )
+    first.advance(61)
+    assert second.database_time() == first.database_time()
+    assert second.standing("host-a") is contract.LeaseStanding.EXPIRED_MUTATED
+    assert held.expires_at <= second.database_time()
+
+
+# ── the reprovision marker cites a typed E10 receipt, never a free string ───
+
+
+def test_a_marker_with_a_free_string_instead_of_a_receipt_is_refused() -> None:
+    for citation in ("e10-receipt-1", None, {"receipt_ref": "x"}):
+        with pytest.raises(contract.StoreRefused) as refusal:
+            contract.ReprovisionMarker("host-a", citation)  # type: ignore[arg-type]
+        assert refusal.value.code == "reprovision-receipt-required"
+
+
+def test_a_marker_citing_another_hosts_receipt_is_refused() -> None:
+    with pytest.raises(contract.StoreRefused) as refusal:
+        contract.ReprovisionMarker("host-a", make_receipt(host_id="host-b"))
+    assert refusal.value.code == "reprovision-receipt-for-another-host"
+
+
+def test_a_marker_citing_the_hosts_own_receipt_is_accepted() -> None:
+    marker = contract.ReprovisionMarker("host-a", make_receipt())
+    assert marker.e10_receipt.receipt_ref == "e10-receipt-0001"

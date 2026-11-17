@@ -26,8 +26,9 @@ separate image-budget ruling, and nothing here touches the CP repository.
 6. **Mutation history is never wiped.** A host whose standing is
    `EXPIRED_MUTATED`, or that was released with `host_mutated=True`, is NEVER
    re-acquired. The only exception is an explicit :class:`ReprovisionMarker`
-   naming the host and the provisioning receipt that replaced it. The marker is
-   defined here; nothing but the reference fake implements it.
+   naming the host and citing the typed E10 receipt for the new incarnation. The
+   marker is defined here; nothing but the reference fake implements it, and CP
+   verifies the citation against a real receipt.
 7. **One release.** A lease is released at most once; a second `release` refuses.
 8. **A release must be this lease's.** `release` refuses unless the record's
    `lease_digest` is the digest of the held lease, its `released_by.subject` is
@@ -60,14 +61,19 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import pathlib
+import sys
 from datetime import datetime
 from typing import Final, Protocol, runtime_checkable
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
 from dotmac_deployment_foundation.lease import HostLease
 from dotmac_deployment_foundation.lease_release import HostLeaseReleaseV1
+from lane3_e10_receipt import E10ReceiptRef
 
 __all__ = [
     "DATABASE_TIME",
@@ -94,12 +100,22 @@ MAX_RELEASE_SKEW_SECONDS: Final = 60
 class ReprovisionMarker:
     """The one explicit exception to "mutation history is never wiped".
 
-    Names the host and the provisioning receipt (E10) that replaced the machine.
-    Without it a mutated or expired host is never re-acquired.
+    Names the host and cites the per-VM E10 receipt (a typed
+    :class:`~lane3_e10_receipt.E10ReceiptRef`, never a free string) for the NEW
+    incarnation of the machine. Without it a mutated or expired host is never
+    re-acquired. This module only requires the citation to be well-formed and for
+    the receipt to name this host; CP verifies the reference against a real
+    receipt, and nothing here does.
     """
 
     host_id: str
-    provisioning_receipt_ref: str
+    e10_receipt: E10ReceiptRef
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.e10_receipt, E10ReceiptRef):
+            raise StoreRefused("reprovision-receipt-required")
+        if self.e10_receipt.host_id != self.host_id:
+            raise StoreRefused("reprovision-receipt-for-another-host")
 
 
 class StoreRefused(Exception):

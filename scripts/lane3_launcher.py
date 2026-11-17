@@ -38,6 +38,7 @@ from typing import Any
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import exposure_rehearsal_runner as controller_half
+import lane3_e10_receipt
 import lane3_evidence_finalization as evidence_finalization
 import lane3_launcher_evidence as launcher_evidence
 import lane3_launcher_lease as launcher_lease
@@ -94,6 +95,11 @@ class DriveInputs:
     """Everything one drive needs. Every field is required; nothing defaults."""
 
     pin: lane3_stage.PinnedHostKey
+    #: `sha256:<hex>` of the raw incarnation public key (CP's
+    #: `installed_signer_fingerprint` form). Its own required input: it is NOT the
+    #: SSH pin, and the E10 receipt is what links the two.
+    expected_host_incarnation: str
+    e10: lane3_e10_receipt.E10ReceiptRef
     store: lane3_lease_store.LeaseStore
     held: lane3_lease_store.HeldLease
     plan: SessionPlan
@@ -127,10 +133,8 @@ def build_start(inputs: DriveInputs, store_time: datetime) -> dict[str, Any]:
         "timeout": plan.timeout,
         "probe_vantage_ref": plan.probe_vantage_ref,
         "execution_run": plan.execution_run.as_document(),
-        # The plan's `host_incarnation` is Control's `sha256:<hex>` of the raw
-        # key; the pinned key is normalised into that form explicitly.
         "expected_machine_id": plan.expected_machine_id,
-        "expected_host_incarnation": inputs.pin.control_fingerprint,
+        "expected_host_incarnation": inputs.expected_host_incarnation,
         "window_seconds": plan.window_seconds,
         "evidence_seconds": plan.evidence_seconds,
         "proceed_seconds": plan.proceed_seconds,
@@ -189,6 +193,20 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         if not held.acquired_at <= store_time < held.expires_at:
             result.refusal_code = "store-time-outside-lease-window"
             return result
+        # The E10 receipt must agree with every independent input BEFORE anything
+        # is sent to the target: the pinned SSH key and alias, the incarnation
+        # input and the lease's host.
+        try:
+            inputs.e10.require_matches(
+                ssh_fingerprint=inputs.pin.fingerprint,
+                alias=inputs.pin.alias,
+                expected_host_incarnation=inputs.expected_host_incarnation,
+                host_id=held.lease.target,
+                store_time=store_time,
+            )
+        except lane3_e10_receipt.ReceiptRefused as exc:
+            result.refusal_code = exc.code
+            return result
         channel.send("start", build_start(inputs, store_time))
         kind, data = channel.receive("ready", "terminal", timeout=inputs.ready_seconds)
         if kind == "terminal":
@@ -198,7 +216,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         if (
             data["host_id"] != inputs.held.lease.target
             or data["machine_id"] != inputs.plan.expected_machine_id
-            or data["host_incarnation"] != inputs.pin.control_fingerprint
+            or data["host_incarnation"] != inputs.expected_host_incarnation
             or not data["plan_digest"]
         ):
             _abort(channel, "placement-mismatch")
@@ -372,9 +390,26 @@ def conclude(
         "cleanup": terminal.cleanup.value if terminal is not None else "",
         "target_exit_status": terminal.exit_status if terminal is not None else None,
     }
-    paths = launcher_lease.write_terminal_records(
-        output_dir, evidence=evidence, release_record=record if digest else None
-    )
+    stamp: str | None = None
+    if digest:
+        stored = store.released_at(held.lease.target)
+        stamp = stored.isoformat() if stored is not None else None
+        evidence["runner_released_at"] = str(getattr(record, "released_at", ""))
+        evidence["store_released_at"] = stamp or ""
+    try:
+        paths = launcher_lease.write_terminal_records(
+            output_dir,
+            evidence=evidence,
+            release_record=record if digest else None,
+            released_at=stamp,
+        )
+    except Exception as write_error:
+        if error is not None:
+            # The ORIGINAL failure stays the exception; the write failure is
+            # recorded on it rather than replacing it.
+            error.add_note(f"terminal records also failed: {write_error!r}")
+            raise error from None
+        raise
     if error is not None:
         raise error
     return Conclusion(

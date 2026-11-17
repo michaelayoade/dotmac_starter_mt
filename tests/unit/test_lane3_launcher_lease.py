@@ -410,3 +410,28 @@ def test_release_with_record_returns_the_record_it_wrote(written) -> None:
     )
     assert digest == "release-digest"
     assert record is store.releases[0][0]
+
+
+def test_the_release_copy_carries_the_stores_stamp_when_one_is_given(
+    tmp_path: pathlib.Path,
+) -> None:
+    record = types.SimpleNamespace(
+        as_document=lambda: {"released_at": "runner-clock", "other": 1}
+    )
+    custody.write_terminal_records(
+        tmp_path,
+        evidence={"outcome": "released"},
+        release_record=record,
+        released_at="2026-11-17T05:00:00+00:00",
+    )
+    document = json.loads((tmp_path / custody.RELEASE_FILE).read_text())
+    assert document == {"released_at": "2026-11-17T05:00:00+00:00", "other": 1}
+
+
+def test_the_record_itself_is_not_mutated_by_the_stamp(tmp_path: pathlib.Path) -> None:
+    original = {"released_at": "runner-clock"}
+    record = types.SimpleNamespace(as_document=lambda: original)
+    custody.write_terminal_records(
+        tmp_path, evidence={}, release_record=record, released_at="store"
+    )
+    assert original == {"released_at": "runner-clock"}

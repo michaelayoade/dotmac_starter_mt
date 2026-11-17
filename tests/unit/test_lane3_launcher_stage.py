@@ -22,7 +22,6 @@ import lane3_launcher_stage as stage  # noqa: E402
 RAW_KEY = bytes(range(32))
 # An OpenSSH wire-format ed25519 blob: string "ssh-ed25519", string <32 raw bytes>.
 BLOB = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + RAW_KEY
-CONTROL_FINGERPRINT = "sha256:" + hashlib.sha256(RAW_KEY).hexdigest()
 RUN_DIR = "/run/lane3.ABCDEFGH12"
 KEY_B64 = base64.b64encode(BLOB).decode("ascii")
 FINGERPRINT = "SHA256:" + base64.b64encode(
@@ -45,12 +44,20 @@ ALIAS = "vm-alpha"
 OTHER_FINGERPRINT = "SHA256:" + "B" * 43
 
 
+def _identity(tmp_path: pathlib.Path, fingerprint: str = FINGERPRINT):
+    """A launch identity whose public half has `fingerprint` (idempotent per dir)."""
+    key = tmp_path / "id_launch"
+    key.write_text("-----BEGIN PRIVATE KEY-----\n", encoding="ascii")
+    pub = tmp_path / "id_launch.pub"
+    pub.write_text(f"ssh-ed25519 {KEY_B64} launch-key\n", encoding="ascii")
+    return stage.LaunchIdentity.from_files(key, fingerprint)
+
+
 def _from_file(
     tmp_path: pathlib.Path,
     text: str | None = None,
     *,
     fingerprint: object = FINGERPRINT,
-    incarnation: object = FINGERPRINT,
     alias: object = ALIAS,
     private_dir: pathlib.Path | None = None,
 ) -> stage.PinnedHostKey:
@@ -60,7 +67,6 @@ def _from_file(
     return stage.PinnedHostKey.from_file(
         source,
         fingerprint,  # type: ignore[arg-type]
-        expected_host_incarnation=incarnation,  # type: ignore[arg-type]
         alias=alias,  # type: ignore[arg-type]
         private_dir=tmp_path / "pin" if private_dir is None else private_dir,
     )
@@ -79,7 +85,6 @@ def test_a_matching_single_key_is_pinned_into_a_private_copy(
     pin = _pin(tmp_path, "# comment\n" + _line())
     assert pin.fingerprint == FINGERPRINT
     assert pin.alias == ALIAS
-    assert pin.host_incarnation == FINGERPRINT
     copy = pin.known_hosts
     assert copy.read_text() == f"{ALIAS} ssh-ed25519 {KEY_B64}\n"
     assert "target.example.invalid" not in copy.read_text()
@@ -152,7 +157,7 @@ def test_a_swapped_private_copy_is_caught_at_use_not_just_at_check(
     with pytest.raises(stage.StageRefused) as refusal:
         stage.ssh_argv(
             destination=DESTINATION,
-            identity="/run/key",
+            identity=_identity(tmp_path),
             pin=pin,
             connect_timeout=20,
             remote="true",
@@ -177,7 +182,7 @@ def test_the_full_ssh_argv_is_exactly_this(tmp_path: pathlib.Path) -> None:
     pin = _pin(tmp_path)
     assert stage.ssh_argv(
         destination=DESTINATION,
-        identity="/run/key",
+        identity=_identity(tmp_path),
         pin=pin,
         connect_timeout=20,
         remote="true",
@@ -223,7 +228,7 @@ def test_the_full_ssh_argv_is_exactly_this(tmp_path: pathlib.Path) -> None:
         "-o",
         f"UserKnownHostsFile={pin.known_hosts}",
         "-i",
-        "/run/key",
+        str(_identity(tmp_path).private_key),
         "--",
         DESTINATION,
         "true",
@@ -339,7 +344,7 @@ def _stage(target: FakeTarget, tmp_path: pathlib.Path, **overrides):
     arguments = {
         "run": target,
         "destination": DESTINATION,
-        "identity": "/run/key",
+        "identity": _identity(tmp_path),
         "pin": _pin(tmp_path),
         "connect_timeout": 20,
         "host_id": "host-a",
@@ -488,7 +493,7 @@ def _common(tmp_path: pathlib.Path) -> dict:
     return {
         "run_dir": RUN_DIR,
         "destination": DESTINATION,
-        "identity": "/run/key",
+        "identity": _identity(tmp_path),
         "pin": _pin(tmp_path),
         "connect_timeout": 20,
     }
@@ -503,7 +508,7 @@ def _launch(tmp_path: pathlib.Path, **overrides):
     arguments = {
         "run_dir": RUN_DIR,
         "destination": DESTINATION,
-        "identity": "/run/key",
+        "identity": _identity(tmp_path),
         "connect_timeout": 20,
         "extra_env": {},
         "run_id": "run-1",
@@ -605,25 +610,7 @@ def test_a_run_directory_outside_run_lane3_is_refused_everywhere(
         stage.teardown_argv(**bad)
 
 
-# ── U3: host_incarnation IS the Ed25519 host-key fingerprint ────────────────
-
-
-def test_an_incarnation_that_is_not_the_keys_fingerprint_refuses(
-    tmp_path: pathlib.Path,
-) -> None:
-    with pytest.raises(stage.StageRefused) as refusal:
-        _from_file(tmp_path, incarnation=OTHER_FINGERPRINT)
-    assert refusal.value.code == "host-incarnation-mismatch"
-    assert not (tmp_path / "pin" / "known_hosts").exists()
-
-
-@pytest.mark.parametrize("incarnation", ["", None, "SHA256:short", 5, "plain-text"])
-def test_the_incarnation_is_a_required_typed_input(
-    tmp_path: pathlib.Path, incarnation: object
-) -> None:
-    with pytest.raises(stage.StageRefused) as refusal:
-        _from_file(tmp_path, incarnation=incarnation)
-    assert refusal.value.code == "host-incarnation-required"
+# ── U3 (option B): the SSH host key is pinned on its own ────────────────────
 
 
 @pytest.mark.parametrize(
@@ -655,7 +642,7 @@ def test_the_vm_alias_is_the_host_key_alias_and_the_copys_host_token(
     pin = _from_file(tmp_path, alias="vm-0042.lane3")
     argv = stage.ssh_argv(
         destination=DESTINATION,
-        identity="/run/key",
+        identity=_identity(tmp_path),
         pin=pin,
         connect_timeout=20,
         remote="true",
@@ -671,7 +658,7 @@ def test_pinning_runs_no_ssh_at_all(tmp_path: pathlib.Path) -> None:
 
     assert "run" not in inspect.signature(stage.PinnedHostKey.from_file).parameters
     with pytest.raises(stage.StageRefused):
-        _from_file(tmp_path, incarnation=OTHER_FINGERPRINT)
+        _from_file(tmp_path, fingerprint=OTHER_FINGERPRINT)
 
 
 # ── the clock: CP's skew check gates the launch ─────────────────────────────
@@ -761,25 +748,7 @@ def test_the_skew_check_requires_its_bindings(
     assert refusal.value.code == "clock-skew-binding-required"
 
 
-# ── U3: the plan's host_incarnation is Control's form, derived explicitly ───
-
-
-def test_the_pins_control_fingerprint_is_sha256_hex_of_the_raw_key(
-    tmp_path: pathlib.Path,
-) -> None:
-    pin = _pin(tmp_path)
-    assert pin.control_fingerprint == CONTROL_FINGERPRINT
-    assert pin.control_fingerprint != pin.host_incarnation
-    assert pin.host_incarnation == FINGERPRINT
-
-
-def test_the_two_fingerprint_spellings_are_different_digests_of_one_key() -> None:
-    """OpenSSH hashes the wire blob; Control hashes the raw key. Not the same."""
-    assert FINGERPRINT.startswith("SHA256:")
-    assert CONTROL_FINGERPRINT.startswith("sha256:")
-    openssh_hex = base64.b64decode(FINGERPRINT[7:] + "=").hex()
-    assert openssh_hex != CONTROL_FINGERPRINT[7:]
-    assert stage.control_fingerprint_of(KEY_B64) == CONTROL_FINGERPRINT
+# ── the pinned blob must be a canonical Ed25519 key ─────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -788,11 +757,152 @@ def test_the_two_fingerprint_spellings_are_different_digests_of_one_key() -> Non
         struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 31) + RAW_KEY[:31],
         struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + RAW_KEY + b"x",
         struct.pack(">I", 7) + b"ssh-rsa" + struct.pack(">I", 32) + RAW_KEY,
-        b"",
         b"\x00\x00",
     ],
 )
-def test_a_blob_that_is_not_a_canonical_ed25519_key_is_refused(blob: bytes) -> None:
+def test_a_pinned_blob_that_is_not_a_canonical_ed25519_key_is_refused(
+    tmp_path: pathlib.Path, blob: bytes
+) -> None:
+    key = base64.b64encode(blob).decode("ascii")
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.control_fingerprint_of(base64.b64encode(blob).decode("ascii"))
+        _from_file(tmp_path, f"host ssh-ed25519 {key}\n")
     assert refusal.value.code == "known-hosts-key-invalid"
+
+
+# ── the SSH identity must be the lease's controller key ─────────────────────
+
+
+def test_the_launch_identity_matching_the_leases_controller_key_is_accepted(
+    tmp_path: pathlib.Path,
+) -> None:
+    identity = _identity(tmp_path)
+    assert identity.controller_fingerprint == FINGERPRINT
+    assert identity.private_key.endswith("id_launch")
+
+
+def test_an_identity_that_is_not_the_leases_controller_key_is_refused(
+    tmp_path: pathlib.Path,
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _identity(tmp_path, fingerprint="SHA256:" + "C" * 43)
+    assert refusal.value.code == "identity-key-not-the-leases-controller"
+
+
+@pytest.mark.parametrize(
+    "fingerprint", ["", None, "sha256:" + "0" * 64, "SHA256:short"]
+)
+def test_the_controller_fingerprint_is_a_required_input(
+    tmp_path: pathlib.Path, fingerprint: object
+) -> None:
+    key = tmp_path / "id_launch"
+    key.write_text("k")
+    (tmp_path / "id_launch.pub").write_text(f"ssh-ed25519 {KEY_B64}\n")
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.LaunchIdentity.from_files(key, fingerprint)  # type: ignore[arg-type]
+    assert refusal.value.code == "identity-controller-fingerprint-required"
+
+
+def test_a_missing_or_unsafe_identity_is_refused(tmp_path: pathlib.Path) -> None:
+    for path in (tmp_path / "absent", "-oProxyCommand=x", "has space", ""):
+        with pytest.raises(stage.StageRefused) as refusal:
+            stage.LaunchIdentity.from_files(path, FINGERPRINT)
+        assert refusal.value.code == "identity-key-unusable"
+
+
+def test_a_missing_public_half_is_refused(tmp_path: pathlib.Path) -> None:
+    key = tmp_path / "id_nopub"
+    key.write_text("k")
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.LaunchIdentity.from_files(key, FINGERPRINT)
+    assert refusal.value.code == "identity-public-key-unreadable"
+
+
+def test_ssh_refuses_a_bare_path_for_the_identity(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.ssh_argv(
+            destination=DESTINATION,
+            identity="/run/key",  # type: ignore[arg-type]
+            pin=_pin(tmp_path),
+            connect_timeout=20,
+            remote="true",
+        )
+    assert refusal.value.code == "ssh-identity-required"
+
+
+def test_a_public_key_swapped_after_construction_is_caught_at_use(
+    tmp_path: pathlib.Path,
+) -> None:
+    identity = _identity(tmp_path)
+    (tmp_path / "id_launch.pub").write_text(
+        "ssh-ed25519 " + base64.b64encode(b"another blob").decode() + "\n"
+    )
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.ssh_argv(
+            destination=DESTINATION,
+            identity=identity,
+            pin=_pin(tmp_path),
+            connect_timeout=20,
+            remote="true",
+        )
+    assert refusal.value.code == "identity-key-not-the-leases-controller"
+
+
+# ── the skew proof cannot be re-bound ───────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("run_dir", "/run/lane3.OTHERRUN12"), ("run_id", "run-2"), ("host_id", "host-b")],
+)
+def test_a_genuine_proof_cannot_be_rebound_with_dataclasses_replace(
+    tmp_path: pathlib.Path, field: str, value: str
+) -> None:
+    import dataclasses
+
+    proof = _proof(tmp_path)
+    with pytest.raises(stage.StageRefused) as refusal:
+        dataclasses.replace(proof, **{field: value})
+    assert refusal.value.code == "clock-skew-proof-forged"
+
+
+def test_a_proof_mutated_in_place_is_caught_at_every_use(
+    tmp_path: pathlib.Path,
+) -> None:
+    proof = _proof(tmp_path)
+    object.__setattr__(proof, "run_id", "run-2")
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(stage.StageRefused) as refusal:
+        # The binding now MATCHES the launch arguments; only the token objects.
+        _launch(other, skew=proof, run_id="run-2")
+    assert refusal.value.code == "clock-skew-proof-forged"
+
+
+def test_a_guessed_token_is_refused() -> None:
+    for token in ("", "00", "a" * 64):
+        with pytest.raises(stage.StageRefused) as refusal:
+            stage.ClockSkewPassed(
+                run_dir=RUN_DIR, run_id="run-1", host_id="host-a", _token=token
+            )
+        assert refusal.value.code == "clock-skew-proof-forged"
+
+
+def test_an_identity_is_built_for_the_lease_it_must_match(
+    tmp_path: pathlib.Path,
+) -> None:
+    import types
+
+    key = tmp_path / "id_launch"
+    key.write_text("k")
+    (tmp_path / "id_launch.pub").write_text(f"ssh-ed25519 {KEY_B64}\n")
+    matching = types.SimpleNamespace(controller_identity_fingerprint=FINGERPRINT)
+    assert stage.LaunchIdentity.for_lease(key, matching).controller_fingerprint == (
+        FINGERPRINT
+    )
+    other = types.SimpleNamespace(controller_identity_fingerprint="SHA256:" + "C" * 43)
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.LaunchIdentity.for_lease(key, other)
+    assert refusal.value.code == "identity-key-not-the-leases-controller"
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.LaunchIdentity.for_lease(key, types.SimpleNamespace())
+    assert refusal.value.code == "identity-controller-fingerprint-required"

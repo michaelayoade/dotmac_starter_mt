@@ -35,26 +35,58 @@ from lane3_lease_store import (  # noqa: E402
     StoreRefused,
 )
 
+from tests.unit.lane3_e10_support import make_receipt  # noqa: E402
+
 EPOCH = datetime(2026, 11, 17, 5, 0, 0, tzinfo=UTC)
 PRINCIPAL = "repo:dotmac-tech/lane3-exposure-execution:ref:refs/heads/main"
 
 
-class FakeStore:
-    """Exclusive by a lock standing in for the row lock, on its own clock."""
+class Backing:
+    """The shared state behind a store: the rows, the clock and the row lock.
 
-    def __init__(self, *, authority: str = "database", now: datetime = EPOCH) -> None:
+    Several `FakeStore` HANDLES may be opened onto one `Backing`, as several
+    connections open onto one database. Exclusivity lives here, in the shared
+    lock, never in any one handle.
+    """
+
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+        self.rows: dict[str, dict[str, Any]] = {}
+        self.lock = threading.Lock()
+
+
+class FakeStore:
+    """One handle onto a `Backing`: exclusive by the backing's lock, on its clock."""
+
+    def __init__(
+        self,
+        *,
+        authority: str = "database",
+        now: datetime = EPOCH,
+        backing: Backing | None = None,
+    ) -> None:
         self.time_authority = authority
-        self._now = now
-        self._rows: dict[str, dict[str, Any]] = {}
-        self._lock = threading.Lock()
+        self.backing = backing if backing is not None else Backing(now)
         self.covers_calls: list[tuple[str, datetime]] = []
         self.releases: list[tuple[Any, bool]] = []
 
+    @property
+    def _now(self) -> datetime:
+        return self.backing.now
+
+    @property
+    def _rows(self) -> dict[str, dict[str, Any]]:
+        return self.backing.rows
+
+    @property
+    def _lock(self) -> threading.Lock:
+        return self.backing.lock
+
     def database_time(self) -> datetime:
-        return self._now
+        return self.backing.now
 
     def advance(self, seconds: float) -> None:
-        self._now += timedelta(seconds=seconds)
+        self.backing.now += timedelta(seconds=seconds)
 
     def acquire_exclusive(
         self,
@@ -165,6 +197,17 @@ def release_for(store: Any, held: HeldLease, **overrides: Any) -> types.SimpleNa
     return record
 
 
+def factory(cls: Callable[..., Any] = FakeStore) -> Callable[..., Any]:
+    """`make(handle=None)`: a store, or a NEW handle onto `handle`'s backing."""
+
+    def make(handle: Any = None) -> Any:
+        if handle is None:
+            return cls()
+        return cls(backing=handle.backing)
+
+    return make
+
+
 def _acquire(store: Any, host: str = "host-a", run: str = "run-1", ttl: int = 60):
     return store.acquire_exclusive(
         host_id=host,
@@ -187,14 +230,21 @@ def _raises(code: str, call: Callable[[], Any]) -> None:
 
 
 def case_exclusive_under_concurrent_acquires(make_store: Any, advance: Any) -> None:
-    store = make_store()
+    """One handle PER THREAD onto one shared store.
+
+    A store that only serialises the calls of one handle (a Python lock inside the
+    object) admits one holder per handle and fails here; only exclusivity held in
+    the shared store, as a row lock is, admits exactly one.
+    """
+    base = make_store()
+    handles = [make_store(base) for _ in range(8)]
     outcomes: list[str] = []
-    barrier = threading.Barrier(8)
+    barrier = threading.Barrier(len(handles))
 
     def attempt(index: int) -> None:
         barrier.wait()
         try:
-            _acquire(store, run=f"run-{index}")
+            _acquire(handles[index], run=f"run-{index}")
             outcomes.append("held")
         except StoreRefused:
             outcomes.append("refused")
@@ -262,7 +312,7 @@ def case_only_an_explicit_reprovision_marker_reopens_a_mutated_host(
     store = make_store()
     _acquire(store)
     advance(store, 61)
-    other = ReprovisionMarker("host-other", "e10-receipt-1")
+    other = ReprovisionMarker("host-other", make_receipt(host_id="host-other"))
     _raises(
         "lease-host-mutated",
         lambda: store.acquire_exclusive(
@@ -273,7 +323,7 @@ def case_only_an_explicit_reprovision_marker_reopens_a_mutated_host(
             reprovision=other,
         ),
     )
-    marker = ReprovisionMarker("host-a", "e10-receipt-2")
+    marker = ReprovisionMarker("host-a", make_receipt(receipt_ref="e10-receipt-2"))
     held = store.acquire_exclusive(
         host_id="host-a",
         authorization_run="run-2",

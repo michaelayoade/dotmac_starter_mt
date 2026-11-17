@@ -7,17 +7,21 @@ can check on this side; it never decides anything about the host.
 
 ## What is pinned, and what is a required input
 
-* **The host key (U3, ruled).** `host_incarnation` IS the target's Ed25519 SSH
-  host-key fingerprint, recorded per VM in the E10 provisioning receipt. A
-  :class:`PinnedHostKey` is built from a `known_hosts` file the launcher is GIVEN,
-  with three required typed inputs and no defaults: the fingerprint pin, the
-  expected `host_incarnation` and the VM alias. It refuses unless the file holds
-  exactly one plain Ed25519 key line (any other key type is refused) whose
-  fingerprint equals BOTH the pin and `host_incarnation`, then writes its OWN
-  private copy keyed by the alias, which is the `HostKeyAlias`. All of that
-  happens before any SSH connection is made. The same object is what `ssh_argv`
-  uses, and `ssh_argv` re-reads the private copy on every call, so the key that
-  was checked is the key that is used.
+* **The host key (U3, amended: option B).** The target's SSH Ed25519 host key is
+  pinned on its own. A :class:`PinnedHostKey` is built from a `known_hosts` file
+  the launcher is GIVEN, with required typed inputs and no defaults: the
+  fingerprint pin and the VM alias. It refuses unless the file holds exactly one
+  plain Ed25519 key line (any other key type is refused) whose OpenSSH
+  fingerprint equals the pin, then writes its OWN private copy keyed by the alias,
+  which is the `HostKeyAlias`. All of that happens before any SSH connection is
+  made. `ssh_argv` re-reads the private copy on every call, so the key that was
+  checked is the key that is used. `host_incarnation` is NOT this key: it is a
+  separate incarnation key linked to it only by the per-VM E10 receipt
+  (`lane3_e10_receipt`).
+* **The launch identity.** The SSH key the launcher authenticates with must be the
+  held lease's controller key. A :class:`LaunchIdentity` is built from the key's
+  public half and refuses unless its fingerprint equals the lease's controller
+  fingerprint; `ssh_argv` takes that object and re-verifies it on every call.
 * **The clock.** Freshness is judged on the lease store's database time (U5).
   The session still must not start on a host whose own clock has drifted, so CP's
   skew command runs on the target and :func:`require_clock_skew` turns its exit
@@ -43,6 +47,7 @@ import base64
 import binascii
 import dataclasses
 import hashlib
+import hmac
 import os
 import pathlib
 import re
@@ -61,12 +66,12 @@ __all__ = [
     "ARTIFACT_NAMES",
     "ENVIRONMENT_ALLOWLIST",
     "ClockSkewPassed",
+    "LaunchIdentity",
     "PinnedHostKey",
     "RunResult",
     "StageRefused",
     "StagedFile",
     "clock_skew_argv",
-    "control_fingerprint_of",
     "launch_argv",
     "load_staged_file",
     "require_clock_skew",
@@ -185,19 +190,6 @@ def _ed25519_raw_key(blob_b64: str) -> bytes:
     return raw
 
 
-def control_fingerprint_of(blob_b64: str) -> str:
-    """The key's fingerprint in the form Control and the CP plan use.
-
-    OpenSSH fingerprints (`SHA256:` + base64) hash the SSH WIRE blob. Control's
-    `PublicKeyFingerprintV1` (read at CP db095a02 / Control `digests.py`) hashes
-    the RAW 32-byte public key and spells it `sha256:` + 64 lower-case hex, which
-    is also the only form Foundation accepts for `installed_signer_fingerprint`
-    and so for the plan's `host_incarnation`. They are two digests of the same
-    key; this is the explicit normalisation between them.
-    """
-    return "sha256:" + hashlib.sha256(_ed25519_raw_key(blob_b64)).hexdigest()
-
-
 @dataclasses.dataclass(frozen=True, slots=True)
 class PinnedHostKey:
     """A host key checked once and used from a private copy, by one object."""
@@ -209,17 +201,6 @@ class PinnedHostKey:
     known_hosts: pathlib.Path
 
     @property
-    def host_incarnation(self) -> str:
-        """The ruled `host_incarnation` in its OpenSSH `SHA256:` form (E10 receipt)."""
-        return self.fingerprint
-
-    @property
-    def control_fingerprint(self) -> str:
-        """The same key in Control's `sha256:<hex>` form: what the CP plan's
-        `host_incarnation` and the session's placement check compare."""
-        return control_fingerprint_of(self.key_b64)
-
-    @property
     def line(self) -> str:
         return f"{self.alias} {self.key_type} {self.key_b64}\n"
 
@@ -229,23 +210,20 @@ class PinnedHostKey:
         source: pathlib.Path,
         expected_fingerprint: str,
         *,
-        expected_host_incarnation: str,
         alias: str,
         private_dir: pathlib.Path,
     ) -> PinnedHostKey:
-        """Check `source` against both pins; write the private copy. No SSH.
+        """Check `source` against the pin; write the private copy. No SSH.
 
         Exactly one plain Ed25519 key line: no marker, no wildcard or negated
         pattern, no comma-separated host list, no hashed host, no other key type.
         The copy is keyed by `alias` (the VM alias from the provisioning receipt),
         never by the address in the source file.
         """
-        for value, code in (
-            (expected_fingerprint, "host-key-fingerprint-required"),
-            (expected_host_incarnation, "host-incarnation-required"),
+        if not isinstance(expected_fingerprint, str) or not _FINGERPRINT.fullmatch(
+            expected_fingerprint
         ):
-            if not isinstance(value, str) or not _FINGERPRINT.fullmatch(value):
-                raise StageRefused(code)
+            raise StageRefused("host-key-fingerprint-required")
         if not isinstance(alias, str) or not _ALIAS.fullmatch(alias):
             raise StageRefused("host-key-alias-required")
         try:
@@ -267,8 +245,6 @@ class PinnedHostKey:
         actual = _fingerprint_of(fields[2])
         if actual != expected_fingerprint:
             raise StageRefused("host-key-fingerprint-mismatch")
-        if actual != expected_host_incarnation:
-            raise StageRefused("host-incarnation-mismatch")
         path = _write_private(private_dir, "known_hosts", None)
         pin = cls(
             alias=alias,
@@ -320,28 +296,101 @@ def _write_private(
     return path
 
 
+# ── the launch identity ─────────────────────────────────────────────────────
+
+
+def _public_key_fingerprint(public_key: pathlib.Path) -> str:
+    try:
+        text = public_key.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError):
+        raise StageRefused("identity-public-key-unreadable") from None
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) != 1:
+        raise StageRefused("identity-public-key-not-exactly-one-key")
+    fields = lines[0].split()
+    if len(fields) < 2:
+        raise StageRefused("identity-public-key-shape")
+    return _fingerprint_of(fields[1])
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LaunchIdentity:
+    """The SSH key the launcher authenticates with, proven to be the lease's.
+
+    `from_files` reads the key's public half (`<private>.pub`) and refuses unless
+    its OpenSSH fingerprint equals the held lease's controller fingerprint, so the
+    session that mutates the host is opened with the key the lease names.
+    """
+
+    private_key: str
+    controller_fingerprint: str
+
+    @classmethod
+    def from_files(
+        cls, private_key: pathlib.Path | str, controller_fingerprint: str
+    ) -> LaunchIdentity:
+        path = str(private_key)
+        if (
+            not path
+            or path.startswith("-")
+            or any(c.isspace() for c in path)
+            or not pathlib.Path(path).is_file()
+        ):
+            raise StageRefused("identity-key-unusable")
+        if not isinstance(controller_fingerprint, str) or not _FINGERPRINT.fullmatch(
+            controller_fingerprint
+        ):
+            raise StageRefused("identity-controller-fingerprint-required")
+        identity = cls(private_key=path, controller_fingerprint=controller_fingerprint)
+        identity.reverify()
+        return identity
+
+    @classmethod
+    def for_lease(
+        cls, private_key: pathlib.Path | str, lease: object
+    ) -> LaunchIdentity:
+        """The identity for THIS lease: its controller key, nothing else."""
+        return cls.from_files(
+            private_key, str(getattr(lease, "controller_identity_fingerprint", ""))
+        )
+
+    def reverify(self) -> None:
+        if (
+            _public_key_fingerprint(pathlib.Path(self.private_key + ".pub"))
+            != self.controller_fingerprint
+        ):
+            raise StageRefused("identity-key-not-the-leases-controller")
+
+
 # ── ssh ─────────────────────────────────────────────────────────────────────
 
 
 def ssh_argv(
     *,
     destination: str,
-    identity: str,
+    identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
     remote: str,
 ) -> list[str]:
     """The one SSH invocation shape. Every option is fixed; the inputs are four.
 
-    The pin is re-verified HERE, on every call, so the key that was checked is
-    the key SSH will be handed.
+    The pin and the launch identity are re-verified HERE, on every call, so the
+    host key that was checked is the key SSH will trust and the key that
+    authenticates is the lease's controller key.
     """
-    for value in (destination, identity):
-        if not value or value.startswith("-") or any(c.isspace() for c in value):
-            raise StageRefused("ssh-input-unusable")
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    if (
+        not destination
+        or destination.startswith("-")
+        or any(c.isspace() for c in destination)
+    ):
+        raise StageRefused("ssh-input-unusable")
     if type(connect_timeout) is not int or not 1 <= connect_timeout <= 120:
         raise StageRefused("ssh-connect-timeout")
     pin.reverify()
+    identity.reverify()
     argv = ["ssh", "-T", "-F", "/dev/null"]
     for option in _FIXED_OPTIONS:
         argv += ["-o", option]
@@ -349,7 +398,7 @@ def ssh_argv(
     for option in _KEEPALIVE_OPTIONS:
         argv += ["-o", option]
     argv += ["-o", f"HostKeyAlias={pin.alias}"]
-    argv += ["-o", f"UserKnownHostsFile={pin.known_hosts}", "-i", identity]
+    argv += ["-o", f"UserKnownHostsFile={pin.known_hosts}", "-i", identity.private_key]
     argv += ["--", destination, remote]
     return argv
 
@@ -415,7 +464,7 @@ def stage_artifacts(
     *,
     run: Runner,
     destination: str,
-    identity: str,
+    identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
     host_id: str,
@@ -543,7 +592,7 @@ def clock_skew_argv(
     *,
     run_dir: str,
     destination: str,
-    identity: str,
+    identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
     extra_env: Mapping[str, str],
@@ -559,24 +608,36 @@ def clock_skew_argv(
     )
 
 
-_ISSUE: Final = object()
+_PROOF_KEY: Final = os.urandom(32)
+
+
+def _proof_token(run_dir: str, run_id: str, host_id: str) -> str:
+    return hmac.new(
+        _PROOF_KEY, "\x00".join((run_dir, run_id, host_id)).encode(), "sha256"
+    ).hexdigest()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ClockSkewPassed:
     """Proof that CP's skew check passed for THIS run, on THIS host.
 
-    Constructible only through :func:`require_clock_skew`: a caller cannot mint
-    one, because the private issue token is not exported.
+    Carries a private token over (run directory, run id, host). It is checked when
+    the object is built AND at every use, so `dataclasses.replace` to re-bind a
+    genuine proof to another run, directory or host fails: the copied token no
+    longer covers the new values.
     """
 
     run_dir: str
     run_id: str
     host_id: str
-    _token: object = dataclasses.field(default=None, repr=False, compare=False)
+    _token: str = dataclasses.field(default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self._token is not _ISSUE:
+        self.verify()
+
+    def verify(self) -> None:
+        expected = _proof_token(self.run_dir, self.run_id, self.host_id)
+        if not hmac.compare_digest(str(self._token), expected):
             raise StageRefused("clock-skew-proof-forged")
 
 
@@ -587,7 +648,7 @@ def require_clock_skew(
     run_id: str,
     host_id: str,
     destination: str,
-    identity: str,
+    identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
     extra_env: Mapping[str, str],
@@ -613,7 +674,10 @@ def require_clock_skew(
     )
     if result.exit_code == 0:
         return ClockSkewPassed(
-            run_dir=run_dir, run_id=run_id, host_id=host_id, _token=_ISSUE
+            run_dir=run_dir,
+            run_id=run_id,
+            host_id=host_id,
+            _token=_proof_token(run_dir, run_id, host_id),
         )
     if result.exit_code == 2:
         raise StageRefused("clock-skew-exceeded")
@@ -624,7 +688,7 @@ def launch_argv(
     *,
     run_dir: str,
     destination: str,
-    identity: str,
+    identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
     extra_env: Mapping[str, str],
@@ -657,7 +721,7 @@ def teardown_argv(
     *,
     run_dir: str,
     destination: str,
-    identity: str,
+    identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
 ) -> list[str]:
