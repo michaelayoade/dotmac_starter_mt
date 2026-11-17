@@ -4,6 +4,25 @@ Every command runs in the caller's transaction. Nothing here commits, rolls back
 opens a savepoint, reads a clock, or holds an amount. The money facts stay with
 Billing and Payments; the instance row carries references and a state only.
 
+Application rule (no partial payments): all confirmed cash lands as available
+credit. The balance then pays WHOLE invoices only, through Billing's
+``apply_available_credit``; a document that does not fit is left untouched.
+
+* The balance is the whole pooled available credit of the account, not only
+  this payment's cash: it includes credit held by earlier ``unapplied``
+  instances, opening lots and credit-note excess. F1 may spend all of it.
+* The fit test relies on Billing refusing atomically inside its idempotency
+  savepoint: a refused draw leaves no posting group and no idempotency record,
+  so flows needs no savepoint of its own.
+* Bound payment: accepted deductions first, then the bound invoice is paid in
+  full if the balance covers what remains, else nothing is applied. The
+  instance is ``settled`` either way (cash accepted, remainder as balance);
+  ``unapplied`` is only for a bound document that is not collectible.
+* Excess after a paid bound invoice, and every deposit: other open documents,
+  oldest due first, whole only, skipping any that does not fit. Gated by the
+  ``deposit_application`` policy. No contract-type branching here: prepaid
+  customers have no open receivables, so the cash simply stays as balance.
+
 Assembly contract for ``settle_confirmation``:
 
 * The caller owns the transaction and calls this synchronously inside the
@@ -47,13 +66,13 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from dotmac_billing import (
     AcceptSettlementV1,
     AcceptWithholdingDischarge,
-    AllocationCommand,
+    ApplyAvailableCreditCommand,
     BillingRuleViolation,
     OpenReceivableDocumentV1,
     SettlementFundingLane,
     accept_settlement,
     accept_withholding_discharge,
-    allocate_settlement,
+    apply_available_credit,
     get_document_exposure,
     list_open_receivable_documents,
 )
@@ -113,6 +132,12 @@ _EVIDENCE = {
 }
 _BOUND_PURPOSES = frozenset({"INVOICE_SETTLEMENT", "SERVICE_FEE"})
 _DEPOSIT_PURPOSE = "ACCOUNT_CREDIT_DEPOSIT"
+#: Billing refusals that mean "this document does not fit the balance": not
+#: enough cash-backed credit, or frozen expected withholding still undischarged.
+_SHORT_BALANCE = "billing.credit_insufficient_backing"
+_DOES_NOT_FIT = frozenset(
+    {_SHORT_BALANCE, "billing.credit_exceeds_non_withholding_room"}
+)
 _CODE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 
 
@@ -413,57 +438,12 @@ def _execute(
         if winner is not None:
             return winner
 
-    remaining: Money = cash.confirmed
     applied: list[UUID] = []
     state = SettleState.SETTLED
     reason: str | None = None
 
-    def allocate(document_id: UUID, amount: Money) -> None:
-        allocate_settlement(
-            db,
-            scope=scope,
-            command=AllocationCommand(
-                settlement_id=settlement.id,
-                document_id=document_id,
-                amount=amount,
-                occurred_at=cash.observed_at,
-                source_ref=f"money-flows:settle:{instance_id}:{document_id}",
-            ),
-        )
-        applied.append(document_id)
-
-    if plan.target.bound_document_id is not None:
-        bound_id = plan.target.bound_document_id
-        try:
-            exposure = get_document_exposure(db, scope=scope, document_id=bound_id)
-        except BillingRuleViolation:
-            exposure = None
-        if exposure is None:
-            state, reason = SettleState.UNAPPLIED, "bound_document_unreadable"
-        elif (
-            exposure.billing_account_id != account_id
-            or exposure.collectible_receivable.currency != remaining.currency
-            or not exposure.collectible_receivable.is_positive
-        ):
-            state, reason = SettleState.UNAPPLIED, "bound_document_not_collectible"
-        else:
-            collectible = exposure.collectible_receivable
-            allocate(bound_id, remaining if remaining <= collectible else collectible)
-    elif plan.deposit and (
-        plan.policy.deposit_application is DepositApplication.OLDEST_DUE_FIRST
-    ):
-        documents = _walk_open_documents(db, scope, account_id, remaining.currency)
-        if documents is None:
-            state, reason = SettleState.UNAPPLIED, "open_documents_unreadable"
-        else:
-            for document in order_open_documents(documents):
-                if not remaining.is_positive:
-                    break
-                collectible = document.collectible_receivable
-                amount = remaining if remaining <= collectible else collectible
-                allocate(document.document_id, amount)
-                remaining = remaining - amount
-
+    # Accepted deductions first: the whole-invoice test is made against what
+    # remains owing after cash-equivalents (cash + accepted deductions).
     discharge_ref: str | None = None
     wht = command.withholding
     if wht is not None:
@@ -489,6 +469,79 @@ def _execute(
             ),
         )
         discharge_ref = str(discharge.id)
+
+    def pay_whole(document_id: UUID, outstanding: Money) -> str | None:
+        """Pay ``document_id`` whole from the balance, or leave it untouched.
+
+        Returns None when paid, or the Billing code when the document does not
+        fit. Billing runs the draw atomically (its idempotency wrapper owns a
+        savepoint), so a refusal leaves no effect. Any other refusal propagates.
+        """
+        try:
+            apply_available_credit(
+                db,
+                scope=scope,
+                command=ApplyAvailableCreditCommand(
+                    billing_account_id=account_id,
+                    document_id=document_id,
+                    amount=outstanding,
+                    occurred_at=cash.observed_at,
+                    source_ref=f"money-flows:settle:{instance_id}:{document_id}",
+                ),
+            )
+        except BillingRuleViolation as exc:
+            if exc.code not in _DOES_NOT_FIT:
+                raise
+            return exc.code
+        applied.append(document_id)
+        return None
+
+    pay_others = plan.policy.deposit_application is DepositApplication.OLDEST_DUE_FIRST
+    bound_id = plan.target.bound_document_id
+    if bound_id is not None:
+        try:
+            exposure = get_document_exposure(db, scope=scope, document_id=bound_id)
+        except BillingRuleViolation:
+            exposure = None
+        if exposure is None:
+            state, reason = SettleState.UNAPPLIED, "bound_document_unreadable"
+            pay_others = False
+        elif (
+            exposure.billing_account_id != account_id
+            or exposure.collectible_receivable.currency != cash.confirmed.currency
+            or not exposure.collectible_receivable.is_positive
+        ):
+            state, reason = SettleState.UNAPPLIED, "bound_document_not_collectible"
+            pay_others = False
+        else:
+            # Whole or nothing. A short payment stays as balance and the
+            # invoice stays open: the instance is SETTLED (cash accepted, the
+            # remainder sits as available credit) with nothing applied.
+            if pay_whole(bound_id, exposure.collectible_receivable) is not None:
+                pay_others = False  # nothing is "excess" if the invoice is unpaid
+    if pay_others:
+        documents = _walk_open_documents(db, scope, account_id, cash.confirmed.currency)
+        if documents is None:
+            state, reason = SettleState.UNAPPLIED, "open_documents_unreadable"
+        else:
+            # Oldest due first, whole only, skipping any that does not fit. A
+            # refusal for lack of balance (the balance only shrinks here) bounds
+            # every amount at or above it, so those are skipped without another
+            # owner call. A withholding-room refusal is per document: no bound.
+            ceiling: Money | None = None
+            for document in order_open_documents(documents):
+                if document.document_id == bound_id:
+                    continue
+                outstanding = document.collectible_receivable
+                if not outstanding.is_positive:
+                    continue
+                if ceiling is not None and outstanding >= ceiling:
+                    continue
+                code = pay_whole(document.document_id, outstanding)
+                if code == _SHORT_BALANCE and (
+                    ceiling is None or outstanding < ceiling
+                ):
+                    ceiling = outstanding
     return _Result(state, reason, settlement.id, discharge_ref, tuple(applied))
 
 

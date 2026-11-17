@@ -295,7 +295,7 @@ def test_a_replay_calls_no_owner(monkeypatch):
         "get_confirmed_cash_v1",
         "get_payment_intent_v1",
         "accept_settlement",
-        "allocate_settlement",
+        "apply_available_credit",
         "accept_withholding_discharge",
         "get_document_exposure",
         "list_open_receivable_documents",
