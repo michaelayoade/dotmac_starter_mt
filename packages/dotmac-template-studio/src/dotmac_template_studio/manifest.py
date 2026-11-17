@@ -48,7 +48,7 @@ from dotmac_template_studio.web import template_dir
 
 module = ModuleManifest(
     code="template_studio",
-    version="0.2.0a6",
+    version="0.2.0a6+dev",
     api_routers=[api_router],
     web_surfaces=(
         WebSurfaceContribution(
