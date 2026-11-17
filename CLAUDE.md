@@ -252,9 +252,10 @@ they are not claims that the current runtime already enforces them:
   modules/providers/brand/policies, and a deployment profile. Do not copy,
   monkey-patch, or fork kernel files for product behavior; add or improve a
   declared extension point and propagate fixes through tested release updates.
-- Existing products adopt through assemblies, adapters, contract/shadow tests,
+- Existing products adopt through assemblies, adapters, contract tests,
   expand/contract migrations, reconciliation, and one-writer cutovers—never a
-  big-bang rewrite. ERP and ISP remain separate data planes; an ISP operator is a
+  big-bang rewrite. No shadow, side-by-side or N-day parallel gates; verify with
+  backtests, saved tests, real-record preview and guarded rollout on Starter rails. ERP and ISP remain separate data planes; an ISP operator is a
   tenant, while its subscribers remain product-domain parties/customers.
 - Keep business rules in services. JSON routers, Jinja/HTMX web routes, workers,
   CLI, and external frontends are adapters. API-first does not mean deleting the
