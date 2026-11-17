@@ -15,6 +15,58 @@ here.
   reservation installs no module, moves no data and transfers no writer
   authority; the published a109 release remains unchanged.
 
+- `dotmac_kernel.delivery_providers.OutboundMessage` gains optional `text` and
+  `html` parts (each at most `MAX_PART_BYTES`, 1 MiB, UTF-8), an allowlisted
+  `headers` mapping and `attachments`, a sequence of the new
+  `AttachmentRef(kind, ref, filename, content_type)` (a reference, never bytes;
+  resolved at delivery time by a later work package, see the "K-8 resolver
+  contract" in the module docstring).
+  - Headers: `Reply-To` (exactly one mailbox), `In-Reply-To` (one msg-id),
+    `References` (msg-ids), `List-Unsubscribe` (comma list of bracketed https or
+    mailto items) and `List-Unsubscribe-Post` (exactly `List-Unsubscribe=One-Click`,
+    which also requires an https item). `mailto:` items allow only a `subject=`
+    field and no escaped control characters; https hosts must be DNS names, not
+    IP literals. `Reply-To` is validated as the exact string sent: a bare
+    addr-spec or `phrase <addr-spec>`, with no comments, encoded words, routes or
+    trailing text. Anything else, and any control,
+    non-ASCII or oversized value, is refused. `Message-ID` is not caller-settable.
+  - Attachments: at most 10; filenames are NFC-normalised, must be portable
+    bare names (reserved names and forbidden characters are also checked on the
+    NFKC form) and must end in an extension that matches the content type; `content_type` must be in `ALLOWED_ATTACHMENT_CONTENT_TYPES`
+    (pdf, png, jpeg, gif, plain, csv, calendar).
+  - `html` and `headers` are email-only.
+- `request_fingerprint` v2: a legacy-shaped message (text part only) hashes the
+  exact v1 payload, so existing receipts still replay; a message using html,
+  headers or attachments hashes a canonical-JSON payload carrying `"v": 2`.
+  Receipts store only the digest, so no migration is needed.
+- `send` refuses (`DeliveryError`, no consent check, no provider call, no
+  receipt) a message needing html or attachments from a provider that has not
+  declared `FEATURE_HTML` / `FEATURE_ATTACHMENTS` in `message_features`, or
+  carrying a header whose name the provider has not declared in
+  `message_headers`, so a single-body adapter cannot silently drop them. A
+  malformed declaration (`None`, a string, non-strings) is a `DeliveryError`. A
+  replay of an existing receipt is unaffected. New public names:
+  `AttachmentRef`, `ALLOWED_HEADERS`, `ALLOWED_ATTACHMENT_CONTENT_TYPES`,
+  `MAX_PART_BYTES`, `FEATURE_HTML`, `FEATURE_ATTACHMENTS`. No migration; no
+  version is allocated.
+
+### Changed
+
+- `OutboundMessage.body` is now `str | None` (adapters annotating it as `str`
+  are affected). `body` and the new `text` are normalised to one value; an
+  html-only message has both `None`. `body=None` without `text`/`html`, a
+  non-string `body`, and differing `body`/`text` are refused at construction.
+  `dataclasses.replace(m, body=...)` alone now raises when `text` is set (see
+  `COMPATIBILITY.md`).
+- `subject` is refused at construction if it contains a control character
+  (Cc: CR, LF, NUL, VT, FF, FS, NEL, tab), a line/paragraph separator, a lone
+  surrogate or a bidi embedding/override/isolate control (U+202A-202E,
+  U+2066-2069). Format characters (ZWJ, ZWNJ, soft hyphen, RLM) and unassigned
+  code points (newer emoji) stay allowed. Subjects with CR/LF were previously
+  accepted.
+- `body` (and `text`/`html`) over 1 MiB of UTF-8, and any part containing a lone
+  surrogate, are refused at construction; both were previously accepted.
+
 ### Fixed
 
 - `dotmac_kernel.delivery_providers.send` no longer replays a `failed` receipt
