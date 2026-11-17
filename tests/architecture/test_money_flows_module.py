@@ -119,6 +119,9 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "allocate_settlement": ANY_MODULE,
     "AllocationCommand": ANY_MODULE,
     "accept_withholding_discharge": ANY_MODULE,
+    "AcceptWithholdingDischarge": ANY_MODULE,
+    "SettlementFundingLane": ANY_MODULE,
+    "BillingRuleViolation": ANY_MODULE,
 }
 # Owner commands only specific flows may touch. Nothing exists yet, so each set
 # is empty. PR E adds the F3 module(s) to the first group and the F5 module to
@@ -136,7 +139,32 @@ RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "reverse_non_cash_credit_application": F5_REVERSAL_CALLERS,
     "reverse_withholding_discharge": F5_REVERSAL_CALLERS,
 }
-FORBIDDEN_BUILTINS = frozenset({"__import__", "eval", "exec", "globals", "vars"})
+FORBIDDEN_BUILTINS = frozenset(
+    {
+        "__import__",
+        "eval",
+        "exec",
+        "globals",
+        "vars",
+        "locals",
+        "compile",
+        "breakpoint",
+    }
+)
+# Dunder names and attributes are how introspection walks around every other
+# guard (``x.__class__.__subclasses__()``, ``__builtins__``, ``__dict__``). Only
+# these module-plumbing names are allowed.
+ALLOWED_DUNDERS = frozenset({"__all__", "__version__", "__future__"})
+# The one structural allowance: SQLAlchemy's declarative mapping needs these two
+# assigned in an ORM class body. Assignment only, in ``models.py`` only; never a
+# read, never anywhere else.
+DECLARATIVE_DUNDERS = frozenset({"__tablename__", "__table_args__"})
+DECLARATIVE_MODULE = "models.py"
+# The other one: the Alembic lineage locator resolves its own directory from
+# ``__file__``. That file, and only that name in it, is exempt.
+LOCATOR_MODULE = "migrations/__init__.py"
+LOCATOR_DUNDERS = frozenset({"__file__"})
+_DUNDER = re.compile(r"^__\w+__$")
 # Standard-library modules the package may import. ``importlib`` and ``sys`` are
 # deliberately absent: they are how a guard is walked around.
 STDLIB_ALLOWED = frozenset(
@@ -476,6 +504,68 @@ def transaction_and_clock_violations(
     return problems
 
 
+def dunder_violations(source: str, relative_path: str = "") -> list[str]:
+    """Refuse every dunder name, attribute, definition, keyword or string.
+
+    Docstrings are exempt. ``__all__``, ``__version__`` and ``__future__`` are
+    allowed; the two declarative table names are allowed only as class-body
+    assignment targets in ``models.py``.
+    """
+    tree = ast.parse(source)
+    docstrings = _docstring_nodes(tree)
+    declarative: set[int] = set()
+    if relative_path == DECLARATIVE_MODULE:
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for statement in cls.body:
+                if isinstance(statement, ast.Assign):
+                    targets = list(statement.targets)
+                elif isinstance(statement, ast.AnnAssign):
+                    targets = [statement.target]
+                else:
+                    continue
+                declarative.update(
+                    id(target)
+                    for target in targets
+                    if isinstance(target, ast.Name) and target.id in DECLARATIVE_DUNDERS
+                )
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.append(node.name)
+        elif isinstance(node, ast.arg):
+            names.append(node.arg)
+        elif isinstance(node, ast.keyword) and node.arg:
+            names.append(node.arg)
+        elif isinstance(node, ast.alias):
+            names.extend(part for part in node.name.split("."))
+            if node.asname:
+                names.append(node.asname)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.extend(node.module.split("."))
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+        ):
+            names.append(node.value)
+        for name in names:
+            if (
+                _DUNDER.match(name)
+                and name not in ALLOWED_DUNDERS
+                and id(node) not in declarative
+                and not (relative_path == LOCATOR_MODULE and name in LOCATOR_DUNDERS)
+            ):
+                problems.append(f"dunder {name!r} is a way around the guards")
+    return problems
+
+
 # --- Rule 6: forbidden and restricted owner calls ---------------------------
 def referenced_names(source: str) -> set[str]:
     names: set[str] = set()
@@ -576,14 +666,34 @@ def test_package_version_surfaces_agree() -> None:
     assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a1"
 
 
-def test_public_surface_is_module_plumbing_only() -> None:
+def test_public_surface_is_the_settle_contract() -> None:
     import dotmac_money_flows
 
     assert set(dotmac_money_flows.__all__) == {
+        "DEFAULT_ACCEPTED_SOURCES",
         "SETTLE_ATTENTION_EVENT_TYPE",
         "SETTLE_SETTLED_EVENT_TYPE",
+        "DepositApplication",
+        "SettleAttentionCursorV1",
+        "SettleConfirmationV1",
+        "SettleInstanceV1",
+        "SettleOutcomeV1",
+        "SettlePolicyReader",
+        "SettlePolicyV1",
+        "SettlePorts",
+        "SettleRefused",
+        "SettleState",
+        "SettleWithholdingV1",
+        "SettlementTargetResolver",
+        "SettlementTargetV1",
         "__version__",
+        "get_settle_instance",
+        "is_settle_replay_conflict",
+        "list_settle_attention",
         "module",
+        "record_settle_refusal",
+        "retry_settle",
+        "settle_confirmation",
         "versions_dir",
     }
     assert [p.name for p in dotmac_money_flows.versions_dir().glob("mf_*.py")] == [
@@ -633,6 +743,11 @@ def test_real_package_never_controls_transactions_or_reads_a_clock() -> None:
             path.read_text("utf-8"), in_migration="migrations" in path.parts
         )
         assert found == [], path
+
+
+def test_real_package_uses_no_dunder_name_or_attribute() -> None:
+    for path in _source_files():
+        assert dunder_violations(path.read_text("utf-8"), _relative(path)) == [], path
 
 
 def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None:
@@ -853,6 +968,65 @@ def test_planted_transaction_control_and_clock_reads_are_refused(source: str) ->
 )
 def test_planted_dynamic_escapes_are_refused(source: str) -> None:
     assert transaction_and_clock_violations(source), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "locals()",
+        "compile('1', 'f', 'eval')",
+        "breakpoint()",
+        "x = locals",
+    ],
+)
+def test_planted_locals_compile_and_breakpoint_are_refused(source: str) -> None:
+    assert transaction_and_clock_violations(source), source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x.__class__",
+        "x.__dict__",
+        "type(x).__mro__",
+        "().__class__.__bases__[0].__subclasses__()",
+        "__builtins__",
+        "__file__",
+        "__name__",
+        "x.__globals__",
+        "f.__code__",
+        "x.__getattribute__('y')",
+        "def __getattr__(self, name): return 1",
+        "class __Hidden__: pass",
+        "f(__x__=1)",
+        "def f(__x__): return 1",
+        "getattr(x, '__class__')",
+        "import foo.__init__",
+        "from __main__ import x",
+        "from . import __init__",
+        "__tablename__ = 'rogue'",  # outside models.py
+        "def f():\n    __tablename__ = 'x'",  # not a class body
+        "class A:\n    __tablename__ = 'x'\n    y = __tablename__",  # a read
+        "class A:\n    __slots__ = ()",
+    ],
+)
+def test_planted_dunders_are_refused(source: str) -> None:
+    assert dunder_violations(source, "settle.py"), source
+
+
+def test_the_dunder_rule_allows_only_module_plumbing_and_declarative_tables() -> None:
+    assert dunder_violations("__all__ = ['x']\n__version__ = '1'") == []
+    assert dunder_violations("from __future__ import annotations") == []
+    assert dunder_violations('"""Mentions __class__ in a docstring."""\nx = 1') == []
+    declared = "class A:\n    __tablename__ = 'x'\n    __table_args__ = ()"
+    assert dunder_violations(declared, "models.py") == []
+    assert dunder_violations(declared, "settle.py")
+    read = "class A:\n    __tablename__ = 'x'\n    y = __tablename__"
+    assert dunder_violations(read, "models.py")
+    locator = "from pathlib import Path\nx = Path(__file__)"
+    assert dunder_violations(locator, "migrations/__init__.py") == []
+    assert dunder_violations(locator, "settle.py")
+    assert dunder_violations("x = __class__", "migrations/__init__.py")
 
 
 def test_a_literal_attribute_name_is_not_a_dynamic_escape() -> None:
