@@ -5,6 +5,83 @@ follows [Semantic Versioning](https://semver.org). Pre-1.0 (`0.x`, incl. this
 alpha) the surface is still settling — a `0.MINOR` bump may carry breaking
 changes, each called out here.
 
+## Unreleased
+
+Source change only: the declared version stays at the `0.2.0a6+dev` development marker (not a release) (ADR-0006 § 5h, § 5i).
+
+- `RenderContext` gains additive v2 declarations: `required`, `optional`, `url`,
+  `lists` (name to item variables), `sample` and `max_list_items`. A context that
+  declares only `variables` is unchanged.
+- New `rendering.render_part` renders one part: `text` raw, `html` escaped with
+  `url` values scheme-checked (http, https, mailto) and attribute-escaped,
+  `subject` refusing CR/LF. Adds logic-less sections `{#name}…{/name}` and
+  `{^name}…{/name}` (depth at most 2, bounded list length and output). The
+  existing `render()` and flat placeholder pattern are untouched.
+- New `validation.validate_revision` / `check_revision`. `create_version` and
+  `update_version` now refuse unknown variables, missing `required` variables,
+  mis-nested or unbalanced sections, undeclared section names and item variables
+  used outside their list. A saved `{#x}` in a legacy context that declares no
+  lists is now refused (it previously saved and rendered literally).
+- `render_published` renders through `render_part`; flat templates are
+  byte-identical.
+- Html part: a placeholder is allowed only in element text, or as the whole
+  value of a quoted `href`/`src` when the variable is declared `url`; any other
+  in-tag, comment or script/style position is refused at save and at render.
+  `url` values also refuse control and invisible format characters.
+- A list's item variables are never filled from outer values; a context may not
+  declare one name as both a scalar and an item variable.
+- A subject refuses every line break and control character (NUL, tab, C0, DEL,
+  NEL, U+2028/2029), in its source at save and in its rendered result. Each part
+  is bounded to 1,000,000 characters at save.
+
+- **Optional html part (TS-3, ADR-0006 § 5h).** Migration `ts_0004_html_body`
+  adds a nullable `template_versions.html_body`; `body` stays the text part, an
+  existing row keeps `NULL` (no html part, no backfill), and the table's FORCEd
+  RLS policy and grants cover the new column unchanged. The downgrade drops it.
+  `VersionCreate`/`VersionUpdate`/`VersionRead` gain an optional `html_body`
+  (omitted on PATCH keeps it, explicit `null` removes it); `RenderResult` gains
+  an optional `html`. `TemplateSeed` gains `html_body`; seeding still skips an
+  existing template whole, so it never adds html to or edits an operator's row.
+  Clients that send no html behave exactly as before.
+- **Save-time html pipeline.** The S1 placeholder rules run first, then the html
+  must survive an `nh3` allowlist sanitizer UNCHANGED (`htmlsanitize`): a part the
+  sanitizer would alter is REFUSED with the list of what would be removed, never
+  silently stripped; the sanitized html is what is stored. The allowlist (tags,
+  per-tag attributes, inline-style properties, `http`/`https`/`mailto` URL
+  schemes, no `position`, `url(`, `expression`, `behavior`) is documented in the
+  module and frozen by a test. Rendered output is not re-sanitized at send time
+  (see the module docstring). `service.render_published_parts` returns subject,
+  text and html; `render_published` is unchanged and renders no html.
+- `compose_email`: `RenderedEmailPart` and `ComposedEmail` gain an optional
+  `html`. When parts carry html it is composed separately in the same order; mixed
+  parts (some with html, some without) and a doctype outside the first part are
+  refused. Text-only composition is byte-identical.
+- html doctype: the exact XHTML 1.0 Transitional doctype string is accepted in
+  addition to `<!doctype html>`; any other declaration is still refused.
+- Html hardening (review): a character reference that decodes to `{` or `}`
+  (`&#123;`, `&lbrace;`, ...) is refused, and the stored html is validated again
+  against every revision rule before saving; with a context, the renderer reads
+  only the context's declared scalars from `values`; an `<img src>` placeholder
+  renders http(s) only; bidirectional controls are refused in html source and
+  substituted values; a blank html part is refused; save-time sanitizing is
+  linear in the part's size, skipped for an oversized part, and `html_body` is
+  bounded by the schema to the template size cap.
+- New dependency `nh3` (`>=0.3.7,<0.4`, MIT, abi3 wheels).
+- **Upgrade note.** The html part is a body fragment: `<html>`, `<head>`, `<body>`,
+  `class`/`id` attributes, `<style>`, comments and conditional comments are
+  refused. A text-only integration needs no change.
+
+### Render-time behaviour change (upgrade note)
+
+Rows already published before this change are not re-validated on upgrade, but
+`render_published` now parses every body and subject at send time. A published
+row containing a section-like token (`{#a}`, `{^a}`, `{/x}`) that does not form
+a valid declared section, or a subject containing a line break or control
+character, now raises `BadRequestError` when rendered instead of sending the
+text literally. A consumer MUST run `validation.validate_revision` over every
+one of its published revisions (the TS-6 sweep) and repair or republish any that
+report problems BEFORE bumping its pin to a release containing this change.
+
 ## 0.2.0a5 — 2026-09-30
 
 - Add `service.compose_email` for lossless, ordered composition of already

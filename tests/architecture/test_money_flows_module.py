@@ -40,7 +40,7 @@ FULL_SURFACE_OWNERS = frozenset(
     }
 )
 # Contracts only: top-level ``__all__`` names, and none of them may be a function.
-CONTRACT_ONLY_OWNERS = frozenset({"dotmac_collections", "dotmac_sap"})
+CONTRACT_ONLY_OWNERS = frozenset({"dotmac_collections", "dotmac_service_access_policy"})
 OWNERS = FULL_SURFACE_OWNERS | CONTRACT_ONLY_OWNERS
 SELF = "dotmac_money_flows"
 KERNEL = "dotmac_kernel"
@@ -101,7 +101,12 @@ ALWAYS_FORBIDDEN = frozenset({"seal_opening_lane", "issue_document", "IssueDocum
 # adds it deliberately. Values are the flows modules (paths relative to the
 # package source root) permitted to use the name; ``"*"`` means any flows module.
 DEFAULT_DENY_OWNERS = frozenset(
-    {"dotmac_billing", "dotmac_approvals", "dotmac_payments"}
+    {
+        "dotmac_billing",
+        "dotmac_approvals",
+        "dotmac_payments",
+        "dotmac_service_access_policy",
+    }
 )
 ANY_MODULE = frozenset({"*"})
 # The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
@@ -116,12 +121,15 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "OpenReceivableDocumentV1": ANY_MODULE,
     "accept_settlement": ANY_MODULE,
     "AcceptSettlementV1": ANY_MODULE,
-    "allocate_settlement": ANY_MODULE,
-    "AllocationCommand": ANY_MODULE,
     "accept_withholding_discharge": ANY_MODULE,
     "AcceptWithholdingDischarge": ANY_MODULE,
     "SettlementFundingLane": ANY_MODULE,
     "BillingRuleViolation": ANY_MODULE,
+    # F2 emits a refs-only access event shaped like these two contract classes.
+    # The owner is contracts-only and default-deny: the record_access_input_v2 /
+    # decide_access_input functions and the ORM classes stay unreachable.
+    "RecordAccessInputV2": ANY_MODULE,
+    "AccessSignal": ANY_MODULE,
 }
 # Owner commands only specific flows may touch. Nothing exists yet, so each set
 # is empty. PR E adds the F3 module(s) to the first group and the F5 module to
@@ -130,7 +138,13 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
 # the F5 behaviour tests.
 F3_ONLY_CALLERS: frozenset[str] = frozenset()
 F5_REVERSAL_CALLERS: frozenset[str] = frozenset()
+# C2a: F1 pays whole invoices from the balance, so Settle (and only Settle) may
+# draw available credit. F2-DESIGN restricts the same call to funded_charge.py;
+# that module joins this set when it lands. Nothing else may draw credit.
+CREDIT_DRAW_CALLERS: frozenset[str] = frozenset({"settle.py"})
 RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
+    "apply_available_credit": CREDIT_DRAW_CALLERS,
+    "ApplyAvailableCreditCommand": CREDIT_DRAW_CALLERS,
     "void_document": F3_ONLY_CALLERS,
     "grant_non_cash_credit": F3_ONLY_CALLERS,
     "issue_credit_note": F3_ONLY_CALLERS,
@@ -696,8 +710,11 @@ def test_public_surface_is_the_settle_contract() -> None:
         "settle_confirmation",
         "versions_dir",
     }
-    assert [p.name for p in dotmac_money_flows.versions_dir().glob("mf_*.py")] == [
-        "mf_0001_settle_instances.py"
+    assert sorted(
+        p.name for p in dotmac_money_flows.versions_dir().glob("mf_*.py")
+    ) == [
+        "mf_0001_settle_instances.py",
+        "mf_0002_funded_charge_instances.py",
     ]
 
 
@@ -714,11 +731,13 @@ def test_real_tables_are_allowlisted_instance_tables() -> None:
         assert schema_violations(created) == [], path
         assert foreign_key_violations(path.read_text("utf-8")) == [], path
         assert migration_security_violations(path.read_text("utf-8")) == [], path
-    assert set(_orm_schema()["settle_instances"]) == set(
-        migration_schema(
-            (MIGRATIONS / "mf_0001_settle_instances.py").read_text("utf-8")
-        )["settle_instances"]
-    )
+    for table, migration in (
+        ("settle_instances", "mf_0001_settle_instances.py"),
+        ("funded_charge_instances", "mf_0002_funded_charge_instances.py"),
+    ):
+        assert set(_orm_schema()[table]) == set(
+            migration_schema((MIGRATIONS / migration).read_text("utf-8"))[table]
+        )
 
 
 def test_orm_foreign_keys_target_only_tenants_or_own_schema() -> None:
@@ -753,8 +772,14 @@ def test_real_package_uses_no_dunder_name_or_attribute() -> None:
 def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None:
     for path in _source_files():
         assert forbidden_call_violations(path.read_text("utf-8"), _relative(path)) == []
-    # Nothing may be allowlisted yet: PR E adds the F3/F5 modules deliberately.
-    assert all(not callers for callers in RESTRICTED_CALLERS.values())
+    # Only the credit draw is allowlisted (C2a: settle.py). PR E adds the F3/F5
+    # modules deliberately.
+    assert {n for n, callers in RESTRICTED_CALLERS.items() if callers} == {
+        "apply_available_credit",
+        "ApplyAvailableCreditCommand",
+    }
+    assert RESTRICTED_CALLERS["apply_available_credit"] == frozenset({"settle.py"})
+    assert RESTRICTED_CALLERS["ApplyAvailableCreditCommand"] == frozenset({"settle.py"})
     for callers in RESTRICTED_CALLERS.values():
         for relative in callers:
             assert (MODULE_ROOT / relative).is_file(), relative
@@ -797,7 +822,16 @@ def test_the_money_flows_contract_forbids_every_other_root_package() -> None:
             "not in dotmac_billing.__all__",
         ),
         ("from dotmac_collections import evaluate_grace", "contracts only"),
-        ("from dotmac_sap import anything", "no resolvable"),
+        ("from dotmac_sap import anything", "not the kernel"),
+        (
+            "from dotmac_service_access_policy import record_access_input_v2",
+            "contracts only",
+        ),
+        (
+            "from dotmac_service_access_policy import not_a_public_name_xyz",
+            "not in dotmac_service_access_policy.__all__",
+        ),
+        ("from dotmac_service_access_policy.service import x", "top-level"),
         ("from dotmac_kernel._internal import thing", "private kernel module"),
         ("from dotmac_sub.app import thing", "not the kernel"),
         ("import httpx", "not the kernel"),
@@ -1081,7 +1115,8 @@ def test_planted_always_forbidden_calls_are_refused(source: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(RESTRICTED_CALLERS))
 def test_restricted_commands_are_refused_outside_their_allowlist(name: str) -> None:
-    assert forbidden_call_violations(f"billing.{name}(db)", "settle.py"), name
+    if "settle.py" not in RESTRICTED_CALLERS[name]:
+        assert forbidden_call_violations(f"billing.{name}(db)", "settle.py"), name
     assert forbidden_call_violations(f"billing.{name}(db)", "adjust.py"), name
     imported = f"from dotmac_billing import {name}\n{name}(db)"
     assert forbidden_call_violations(imported, "adjust.py"), name
@@ -1096,18 +1131,49 @@ def test_restricted_commands_are_refused_outside_their_allowlist(name: str) -> N
         "from dotmac_payments import record_confirmation",
         "from dotmac_approvals import request_tenant_approval",
         "from dotmac_billing import *",
+        "from dotmac_service_access_policy import record_access_input_v2",
+        "from dotmac_service_access_policy import ServiceAccessInput",
+        "from dotmac_service_access_policy import decide_access_input",
+        "from dotmac_service_access_policy import *",
     ],
 )
 def test_an_unlisted_owner_name_is_denied_by_default(source: str) -> None:
     assert forbidden_call_violations(source, "settle.py"), source
 
 
+def test_the_credit_draw_is_accepted_in_settle_and_nowhere_else() -> None:
+    source = (
+        "from dotmac_billing import apply_available_credit, "
+        "ApplyAvailableCreditCommand\n"
+        "apply_available_credit(db)\n"
+    )
+    assert forbidden_call_violations(source, "settle.py") == []
+    assert forbidden_call_violations(source, "adjust.py")
+
+
 def test_the_listed_owner_calls_are_accepted() -> None:
     source = (
-        "from dotmac_billing import accept_settlement, AllocationCommand\n"
+        "from dotmac_billing import accept_settlement, AcceptSettlementV1\n"
         "from dotmac_payments import get_confirmed_cash_v1\n"
     )
     assert forbidden_call_violations(source, "settle.py") == []
+
+
+def test_service_access_policy_is_contracts_only_and_default_deny() -> None:
+    assert "dotmac_service_access_policy" in CONTRACT_ONLY_OWNERS
+    assert "dotmac_service_access_policy" in DEFAULT_DENY_OWNERS
+    assert "dotmac_sap" not in OWNERS
+    allowed = sorted(
+        name
+        for name in OWNER_NAME_ALLOWLIST
+        if name in (_owner_all("dotmac_service_access_policy") or frozenset())
+    )
+    assert allowed == ["AccessSignal", "RecordAccessInputV2"]
+    accepted = (
+        "from dotmac_service_access_policy import RecordAccessInputV2, AccessSignal\n"
+    )
+    assert import_violations(accepted) == []
+    assert forbidden_call_violations(accepted, "funded_charge.py") == []
 
 
 def test_a_restricted_command_is_accepted_only_in_an_allowlisted_module(

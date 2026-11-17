@@ -190,7 +190,7 @@ def test_a_real_race_both_pass_the_replay_check_then_one_effect(scratch):
         seed_invoice(db, scope, account)
         seed_invoice(db, scope, account)
         payment = seed_payment(
-            db, scope, purpose=DEPOSIT, amount="200.00", target_reference="acct:a"
+            db, scope, purpose=DEPOSIT, amount="240.00", target_reference="acct:a"
         )
         db.commit()
         account_id = account.id

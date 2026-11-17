@@ -23,6 +23,12 @@ Source only; not published, not composed into any assembly.
   intent. Manual entry and transfer proof are off by policy default.
 - Posting instant: Billing's claim and postings use the Payments cash
   observation's `observed_at`; the settle command carries no caller instant.
+- No partial payments (C2a): cash always lands as available credit and the
+  balance pays whole invoices only, via Billing `apply_available_credit`
+  (Settle is its only allowed flows caller). A short bound payment stays as
+  balance with the invoice open (`settled`, nothing applied); excess and
+  deposits pay other open documents oldest due first, skipping any that does
+  not fit. Accepted withholding is posted before the whole-invoice test.
 - `list_settle_attention` pages by a `(created_at, id)` keyset cursor.
 - Depends on `dotmac-billing >=0.1.0a12` and `dotmac-payments >=0.1.0a4`.
 - A database test applies the schema vocabulary rule to the live `mod_mflows`
@@ -36,3 +42,13 @@ Source only; not published, not composed into any assembly.
   not an account's open documents), so none was built here.
 - Raise the kernel floor to the kernel release that carries the `money_flows`
   migration-namespace reservation.
+
+- Migration `mf_0002` creates `funded_charge_instances` (F2 FundedCharge) with
+  forced row-level security, no DELETE grant and a guard trigger: insert only as
+  pending, discharged or attention_required at version 0; pending to discharged,
+  attention_required or withdrawn; attention_required to attention_required,
+  pending, discharged or withdrawn; discharged and withdrawn terminal; version
+  advances by exactly one; identity columns and recorded discharge references
+  never change. There is no deadline, timer or cancellation: `deadline_at` and
+  `resolution_ref` exist only as common columns and CHECKs pin them NULL.
+  `mf_0001` is unchanged. No flow behaviour yet.

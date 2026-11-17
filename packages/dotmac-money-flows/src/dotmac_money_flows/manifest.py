@@ -14,7 +14,7 @@ from dotmac_money_flows.models import TENANT_TABLES
 #: Every table this package may own. One table per flow; additive migrations
 #: only. A table holds the common instance columns plus declared opaque
 #: references matching ``^[a-z_]+_(id|ref)$`` and nothing else.
-INSTANCE_TABLE_ALLOWLIST = frozenset({"settle_instances"})
+INSTANCE_TABLE_ALLOWLIST = frozenset({"settle_instances", "funded_charge_instances"})
 
 module = ModuleManifest(
     code="money_flows",

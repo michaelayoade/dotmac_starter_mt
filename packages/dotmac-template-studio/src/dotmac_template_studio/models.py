@@ -157,7 +157,12 @@ class TemplateVersion(Base, TimestampMixin):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     # Notification subject line. NULL for a document.
     subject: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # The TEXT part. Always present; an html part, when there is one, is
+    # `html_body` below.
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    # The optional html part (§ 5h), stored AFTER sanitizing. NULL means "no html
+    # part" — every row that predates `ts_0004` is exactly that.
+    html_body: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The placeholder names this revision declares, e.g. `["customer_name"]`.
     # Stored as data so the renderer can report an unknown or missing variable
     # without parsing the body twice.
