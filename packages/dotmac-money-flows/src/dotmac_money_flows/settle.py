@@ -8,6 +8,12 @@ Application rule (no partial payments): all confirmed cash lands as available
 credit. The balance then pays WHOLE invoices only, through Billing's
 ``apply_available_credit``; a document that does not fit is left untouched.
 
+* The balance is the whole pooled available credit of the account, not only
+  this payment's cash: it includes credit held by earlier ``unapplied``
+  instances, opening lots and credit-note excess. F1 may spend all of it.
+* The fit test relies on Billing refusing atomically inside its idempotency
+  savepoint: a refused draw leaves no posting group and no idempotency record,
+  so flows needs no savepoint of its own.
 * Bound payment: accepted deductions first, then the bound invoice is paid in
   full if the balance covers what remains, else nothing is applied. The
   instance is ``settled`` either way (cash accepted, remainder as balance);

@@ -219,6 +219,109 @@ def test_a_short_bound_payment_pays_no_other_invoice(scratch):
         assert _credit(db, scope, account_id) == 70
 
 
+def test_a_misfit_refusal_leaves_no_posting_group_and_no_idempotency_record(
+    scratch,
+):
+    from dotmac_kernel.idempotency_models import IdempotencyRecord
+
+    scope, account_id, (doc,), payment, targets = _bound(scratch, amount="50.00")
+    outcome = assembly_settle(scratch, scope, payment.command(), make_ports(targets))
+    assert outcome.applied_document_ids == ()
+    with session(scratch, scope) as db:
+        # The draw was attempted and refused; nothing of it survives.
+        assert _count(db, billing_models.AllocationEffect) == 0
+        assert (
+            _count(
+                db,
+                billing_models.PostingGroup,
+                billing_models.PostingGroup.source_ref.like("money-flows:settle:%"),
+            )
+            == 0
+        )
+        assert (
+            _count(
+                db,
+                IdempotencyRecord,
+                IdempotencyRecord.scope == "billing.credit.apply",
+            )
+            == 0
+        )
+
+
+def test_any_other_billing_refusal_at_the_draw_propagates(scratch, monkeypatch):
+    from dotmac_billing import BillingRuleViolation
+    from dotmac_money_flows import settle as settle_module
+
+    def refuse(*args, **kwargs):
+        raise BillingRuleViolation("account_held", "account is held")
+
+    monkeypatch.setattr(settle_module, "apply_available_credit", refuse)
+    scope, account_id, (doc,), payment, targets = _bound(scratch, amount="120.00")
+    outcome = assembly_settle(scratch, scope, payment.command(), make_ports(targets))
+    # Not swallowed as a misfit: the whole transaction rolled back and the
+    # refusal was recorded, so no cash is in the ledger.
+    assert outcome.state is SettleState.REFUSED
+    assert outcome.reason_code == "billing.account_held"
+    with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 0
+        assert _collectible(db, scope, doc)[1] == 120
+
+
+def test_a_withholding_room_misfit_does_not_cap_later_invoices(scratch):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        older = seed_invoice(
+            db, scope, account, due_at=datetime(2026, 9, 1, 10, tzinfo=UTC)
+        )
+        newer = seed_invoice(
+            db, scope, account, due_at=datetime(2026, 10, 1, 10, tzinfo=UTC)
+        )
+        # Expected withholding frozen on the older invoice, never evidenced:
+        # the balance may not pay it whole (Q-F), whatever the balance is.
+        withholding_command(
+            db, account.id, older.id, scope=scope, claimed="30.00", accepted="30.00"
+        )
+        payment = seed_payment(
+            db, scope, purpose=DEPOSIT, amount="240.00", target_reference="target:1"
+        )
+        db.commit()
+        account_id, old_id, new_id = account.id, older.id, newer.id
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id)})
+    outcome = assembly_settle(scratch, scope, payment.command(), make_ports(targets))
+    assert outcome.state is SettleState.SETTLED
+    assert outcome.applied_document_ids == (new_id,)
+    with session(scratch, scope) as db:
+        assert _collectible(db, scope, old_id)[1] == 120
+        assert _collectible(db, scope, new_id) == ("resolved", 0)
+        assert _credit(db, scope, account_id) == 120
+
+
+def test_a_payment_net_of_withholding_without_a_certificate_stays_as_balance(
+    scratch,
+):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        invoice = seed_invoice(db, scope, account)
+        withholding_command(
+            db, account.id, invoice.id, scope=scope, claimed="30.00", accepted="30.00"
+        )
+        payment = seed_payment(
+            db, scope, purpose=INVOICE, amount="90.00", target_reference="target:1"
+        )
+        db.commit()
+        account_id, doc = account.id, invoice.id
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id, doc)})
+    outcome = assembly_settle(scratch, scope, payment.command(), make_ports(targets))
+    assert outcome.state is SettleState.SETTLED
+    assert outcome.applied_document_ids == ()
+    with session(scratch, scope) as db:
+        assert _collectible(db, scope, doc)[1] == 120
+        assert _credit(db, scope, account_id) == 90
+        assert _count(db, billing_models.WithholdingDischarge) == 0
+
+
 def test_the_balance_and_a_later_payment_together_pay_a_whole_invoice(scratch):
     scope, account_id, (doc,), first, targets = _bound(scratch, amount="50.00")
     with session(scratch, scope) as db:
