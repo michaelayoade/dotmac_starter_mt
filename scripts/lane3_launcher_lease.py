@@ -246,6 +246,7 @@ def release_for(
     controller_identity: ControllerSshFingerprintV1,
     expected_machine_id: str,
     verified_receipt_digest: str,
+    ready_seen: bool,
     release_args: argparse.Namespace,
 ) -> str:
     """Write the release for this terminal report, or none. Returns its digest.
@@ -271,7 +272,10 @@ def release_for(
     ctx = controller_half.TerminalContext()
     ctx.lease = lease if terminal.lease_in_hand else None
     ctx.controller_identity = controller_identity
-    ctx.host_mutated = terminal.host_mutated
+    # Once the target reported `ready` it was on the host with a plan in hand, so
+    # the launcher can no longer vouch that the host is untouched: whatever the
+    # target reports about its own mutation, it is recorded as attempted.
+    ctx.host_mutated = terminal.host_mutated or ready_seen
     ctx.vm_installation_id = terminal.machine_id
     ctx.acts.extend(terminal.acts)
     ctx.notes.extend(terminal.notes)

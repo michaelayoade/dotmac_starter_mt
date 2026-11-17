@@ -165,6 +165,7 @@ def _release(data: dict[str, Any], **overrides: Any) -> str:
         "controller_identity": object(),
         "expected_machine_id": MACHINE,
         "verified_receipt_digest": DIGEST,
+        "ready_seen": False,
         "release_args": object(),
     }
     arguments.update(overrides)
@@ -204,3 +205,20 @@ def test_an_unnameable_refusal_passes_no_outcome(recorded) -> None:
     ctx, _, outcome = recorded[0]
     assert outcome is None
     assert ctx.lease is None
+
+
+def test_a_target_that_reports_no_mutation_is_not_believed_after_ready(
+    recorded,
+) -> None:
+    """Once `ready` was seen the host is not provably untouched, whatever the
+    target says about itself."""
+    data = terminal_data(host_mutated=False)
+    _release(data, ready_seen=True)
+    assert recorded[0][0].host_mutated is True
+
+
+def test_without_ready_the_targets_own_report_stands(recorded) -> None:
+    _release(terminal_data(host_mutated=False), ready_seen=False)
+    assert recorded[0][0].host_mutated is False
+    _release(terminal_data(host_mutated=True), ready_seen=False)
+    assert recorded[1][0].host_mutated is True

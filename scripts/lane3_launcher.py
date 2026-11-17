@@ -31,6 +31,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
 from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -46,7 +47,13 @@ from dotmac_deployment_foundation.rehearsal import (
 )
 from lane3_session_channel import Channel, ChannelRefused
 
-__all__ = ["DriveInputs", "DriveResult", "drive", "open_ssh_channel"]
+__all__ = [
+    "DriveInputs",
+    "DriveResult",
+    "StderrSink",
+    "drive",
+    "open_ssh_channel",
+]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -61,7 +68,10 @@ class DriveInputs:
     lease_id: str
     probe_inputs: launcher_probe.ProbeInputs
     qualified_evidence: dict[str, Any]
-    probe_bytes: bytes
+    fixture_digest: str
+    foundation_revision: str
+    foundation_artifact: str
+    probe_vantage_ref: str
     encryption: evidence_finalization.EncryptionContext
     evidence_output: pathlib.Path
     ready_seconds: float
@@ -80,6 +90,9 @@ class DriveResult:
     ciphertext: bytes | None = None
     #: The first reason the launcher stopped trusting the run, or "".
     refusal_code: str = ""
+    #: The target reported `ready`: it was on a host with a plan in hand.
+    ready_seen: bool = False
+    plan_digest: str = ""
 
 
 def _abort(channel: Channel, reason: str) -> None:
@@ -111,6 +124,8 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         kind, data = channel.receive("ready", "terminal", timeout=inputs.ready_seconds)
         if kind == "terminal":
             return _finish_terminal(result, data)
+        result.ready_seen = True
+        result.plan_digest = data["plan_digest"]
         if (
             data["host_id"] != inputs.expected_host_id
             or data["machine_id"] != inputs.expected_machine_id
@@ -120,6 +135,8 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             return _terminal(
                 channel, inputs.terminal_seconds, result, "placement-mismatch"
             )
+        # The gate: the target takes no grant and no lock until it reads this.
+        channel.send("proceed", {"plan_digest": data["plan_digest"]})
 
         kind, data = channel.receive(
             "window_open", "terminal", timeout=inputs.window_seconds
@@ -127,7 +144,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         if kind == "terminal":
             return _finish_terminal(result, data)
         try:
-            rows = launcher_probe.measure_external_rows(
+            measurement = launcher_probe.measure_external_rows(
                 inputs.probe_inputs,
                 inputs.qualified_evidence,
                 measurers=inputs.measurers,
@@ -141,6 +158,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             return _terminal(
                 channel, inputs.terminal_seconds, result, "probe-measurement-refused"
             )
+        rows = measurement.rows
         channel.send("external_results", {"rows": rows})
 
         kind, data = channel.receive(
@@ -150,7 +168,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             return _finish_terminal(result, data)
         try:
             result.ciphertext = launcher_evidence.finalize(
-                probe_bytes=inputs.probe_bytes,
+                probe_bytes=measurement.document_bytes(),
                 exposure_calls_b64=data["exposure_calls_b64"],
                 encryption=inputs.encryption,
                 output=inputs.evidence_output,
@@ -183,6 +201,12 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
                 controller_identity=inputs.controller_identity,
                 lease_id=inputs.lease_id,
                 host_id=inputs.expected_host_id,
+                sent_rows=rows,
+                foundation_revision=inputs.foundation_revision,
+                foundation_artifact=inputs.foundation_artifact,
+                fixture_digest=inputs.fixture_digest,
+                probe_vantage_ref=inputs.probe_vantage_ref,
+                plan_digest=result.plan_digest,
             )
         except launcher_evidence.EvidenceHandBackRefused as exc:
             code = exc.code
@@ -204,20 +228,78 @@ def _b64(raw: bytes) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
-def open_ssh_channel(argv: list[str]) -> tuple[subprocess.Popen[bytes], Channel]:
+class StderrSink:
+    """Target stderr, drained into a bounded private file and nowhere else.
+
+    The session's stderr carries Foundation's annotations and its refusal text.
+    None of it is echoed to the launcher's own output, so it can never become
+    workflow log output; it is kept, bounded, for an operator to read from the
+    private file. Bytes beyond the bound are read and discarded so the target can
+    never block on a full pipe.
+    """
+
+    def __init__(self, path: pathlib.Path, limit: int) -> None:
+        """Create the file FIRST (create-only, `0600`), before anything spawns."""
+        self.path = path
+        self.limit = limit
+        self.truncated = False
+        self._stream: Any = None
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        self._file = os.fdopen(descriptor, "wb")
+        self._thread: threading.Thread | None = None
+
+    def attach(self, stream: Any) -> None:
+        self._stream = stream
+        self._thread = threading.Thread(target=self._drain, daemon=True)
+        self._thread.start()
+
+    def _drain(self) -> None:
+        written = 0
+        try:
+            while True:
+                chunk = self._stream.read(65536)
+                if not chunk:
+                    break
+                room = self.limit - written
+                if room > 0:
+                    self._file.write(chunk[:room])
+                    written += min(room, len(chunk))
+                if len(chunk) > room:
+                    self.truncated = True
+        finally:
+            self._file.close()
+
+    def join(self, timeout: float = 10.0) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout)
+
+
+def open_ssh_channel(
+    argv: list[str], *, stderr_path: pathlib.Path, stderr_limit: int
+) -> tuple[subprocess.Popen[bytes], Channel, StderrSink]:
     """Start the session over SSH and wrap its stdio as the launcher's channel.
 
-    stderr is inherited: Foundation's annotations (and the session's refusal
-    text, which names fields and never values) reach the launcher's own log.
+    stderr goes to a bounded private file, never to this process's own output.
     """
+    if type(stderr_limit) is not int or stderr_limit < 1:
+        raise ValueError("stderr_limit must be a positive integer")
+    # The file exists before the child does: a name that is taken refuses here.
+    sink = StderrSink(stderr_path, stderr_limit)
     process = subprocess.Popen(  # nosec B603 - fixed argv, no shell
-        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=False
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=False,
     )
-    assert process.stdin is not None and process.stdout is not None
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    sink.attach(process.stderr)
     # Duplicated, so closing the channel never double-closes the Popen's files.
     channel = Channel(
         os.dup(process.stdout.fileno()),
         os.dup(process.stdin.fileno()),
         role="launcher",
     )
-    return process, channel
+    return process, channel, sink
