@@ -91,11 +91,23 @@ def _reader_corpus(root: pathlib.Path) -> str:
     return "\n".join(chunks)
 
 
+# A module-owned spec is read through the typed `resolve(db, SPEC)` path, which
+# has no quoted key literal for the scan below to find (`resolve_value` by key is
+# a frozen facility, see test_facility_prerequisites). For those, the reader is
+# the spec's constant referenced in the module's own source outside its
+# declaring `settings.py` (excluded from the corpus above).
+_MODULE_SPEC_CONSTANTS = {"require_separate_publisher": "REQUIRE_SEPARATE_PUBLISHER"}
+
+
 def _find_orphans() -> set[str]:
     corpus = _reader_corpus(_repo_root())
     keys = {spec.key for spec in all_specs()}
     return {
-        key for key in keys if f'"{key}"' not in corpus and f"'{key}'" not in corpus
+        key
+        for key in keys
+        if f'"{key}"' not in corpus
+        and f"'{key}'" not in corpus
+        and _MODULE_SPEC_CONSTANTS.get(key, "\0") not in corpus
     }
 
 

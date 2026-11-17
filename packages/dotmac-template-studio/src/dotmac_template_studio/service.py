@@ -59,7 +59,7 @@ from uuid import UUID
 
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.flag_models import resolve_flag
-from dotmac_kernel.settings_resolver import resolve_value
+from dotmac_kernel.settings_resolver import resolve as resolve_setting
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -85,7 +85,7 @@ from dotmac_template_studio.rendering import (
     render as _render,
 )
 from dotmac_template_studio.sections import TemplateSyntaxError
-from dotmac_template_studio.settings import TEMPLATE_STUDIO_DOMAIN
+from dotmac_template_studio.settings import REQUIRE_SEPARATE_PUBLISHER
 from dotmac_template_studio.validation import check_revision
 
 # Double-brace tokens, for save-time REJECTION only. Never rendered.
@@ -486,17 +486,7 @@ class PublishRefusedError(ConflictError):
 
 def maker_checker_enabled(db: Session, tenant_id: UUID) -> bool:
     """Whether this tenant requires a publisher other than the author."""
-    # By key, the dynamic path every settings reader uses; coercion to the spec's
-    # boolean type happens in the resolver and a bad stored value degrades to the
-    # default (off).
-    value = resolve_value(
-        db,
-        TEMPLATE_STUDIO_DOMAIN,
-        "require_separate_publisher",
-        tenant_id=tenant_id,
-        default=False,
-    )
-    return value is True
+    return resolve_setting(db, REQUIRE_SEPARATE_PUBLISHER, tenant_id=tenant_id) is True
 
 
 def publish_version(
