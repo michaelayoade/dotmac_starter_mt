@@ -663,3 +663,26 @@ def test_downgrade_refuses_while_rows_exist_and_reupgrades_when_empty(migrated) 
         )
     command.upgrade(cfg, "money_flows@head")
     engine.dispose()
+
+
+def test_charge_ref_is_bounded_in_bytes_not_characters(migrated) -> None:
+    admin_url, app_url = migrated
+    tenant = _tenant(admin_url)
+    app = create_engine(app_url)
+    try:
+        # 512 two-byte characters = exactly 1024 bytes (and 512 < 700 characters).
+        at_limit = "\u00e9" * 512
+        assert len(at_limit.encode()) == 1024
+        with app.begin() as connection:
+            _as_tenant(connection, tenant)
+            _insert(connection, tenant, "pending", charge=at_limit)
+        over = at_limit + "x"
+        assert len(over.encode()) == 1025
+        with pytest.raises(
+            IntegrityError, match="ck_funded_charge_instances_charge_ref_bytes"
+        ):
+            with app.begin() as connection:
+                _as_tenant(connection, tenant)
+                _insert(connection, tenant, "pending", charge=over)
+    finally:
+        app.dispose()

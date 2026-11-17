@@ -102,6 +102,10 @@ def upgrade() -> None:
             "AND document_id IS NULL AND credit_draw_id IS NULL)",
             name="ck_funded_charge_instances_discharge_refs",
         ),
+        sa.CheckConstraint(
+            "octet_length(charge_ref) <= 1024",
+            name="ck_funded_charge_instances_charge_ref_bytes",
+        ),
         sa.CheckConstraint("version >= 0", name="ck_funded_charge_instances_version"),
         schema=_SCHEMA,
     )
@@ -160,6 +164,9 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'funded charge instance identity is immutable'
                     USING ERRCODE = 'restrict_violation';
             END IF;
+            -- Defensive: discharge refs exist only on terminal rows (the CHECK
+            -- ties them to state = 'discharged'), so this is unreachable today
+            -- and keeps the refs fixed if the terminal rule is ever relaxed.
             IF (OLD.obligation_id IS NOT NULL
                     AND NEW.obligation_id IS DISTINCT FROM OLD.obligation_id)
                OR (OLD.document_id IS NOT NULL

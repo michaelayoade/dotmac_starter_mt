@@ -149,6 +149,10 @@ class FundedChargeInstance(Base):
             "AND document_id IS NULL AND credit_draw_id IS NULL)",
             name="ck_funded_charge_instances_discharge_refs",
         ),
+        CheckConstraint(
+            "octet_length(charge_ref) <= 1024",
+            name="ck_funded_charge_instances_charge_ref_bytes",
+        ),
         CheckConstraint("version >= 0", name="ck_funded_charge_instances_version"),
         Index(
             "ix_funded_charge_instances_account_order",
