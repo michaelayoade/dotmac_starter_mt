@@ -49,6 +49,7 @@ here calls `db.rollback()` (hard rule 9).
 
 from __future__ import annotations
 
+import difflib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -58,6 +59,7 @@ from uuid import UUID
 
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.flag_models import resolve_flag
+from dotmac_kernel.settings_resolver import resolve as resolve_setting
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -83,6 +85,7 @@ from dotmac_template_studio.rendering import (
     render as _render,
 )
 from dotmac_template_studio.sections import TemplateSyntaxError
+from dotmac_template_studio.settings import REQUIRE_SEPARATE_PUBLISHER
 from dotmac_template_studio.validation import check_revision
 
 # Double-brace tokens, for save-time REJECTION only. Never rendered.
@@ -357,6 +360,28 @@ def get_published(
     return get_version(db, tenant_id, template_id, template.published_version)
 
 
+def list_published_revisions(
+    db: Session, tenant_id: UUID
+) -> list[tuple[Template, TemplateVersion]]:
+    """Every template of this tenant that has a published revision, with it.
+
+    For the deploy-time check (`deploycheck`). Inactive templates are included:
+    reactivating one must not publish something that no longer validates.
+    """
+    stmt = (
+        select(Template, TemplateVersion)
+        .join(
+            TemplateVersion,
+            (TemplateVersion.tenant_id == Template.tenant_id)
+            & (TemplateVersion.template_id == Template.id)
+            & (TemplateVersion.version == Template.published_version),
+        )
+        .where(Template.tenant_id == tenant_id)
+        .order_by(Template.slug, Template.channel)
+    )
+    return [tuple(row) for row in db.execute(stmt).all()]
+
+
 def create_version(
     db: Session,
     tenant_id: UUID,
@@ -434,7 +459,8 @@ def update_version(
             "version instead"
         )
     new_body = revision.body if body is None else body
-    new_subject = revision.subject if subject is None else subject
+    # An explicit empty subject clears it (stored as NULL); omitted keeps it.
+    new_subject = revision.subject if subject is None else (subject or None)
     new_html = revision.html_body if isinstance(html_body, _Unset) else html_body
     check_revision(
         get_context(template.context),
@@ -454,17 +480,160 @@ def update_version(
     return revision
 
 
+class PublishRefusedError(ConflictError):
+    """Publishing was refused by the tenant's maker-checker setting."""
+
+
+def maker_checker_enabled(db: Session, tenant_id: UUID) -> bool:
+    """Whether this tenant requires a publisher other than the author."""
+    return bool(resolve_setting(db, REQUIRE_SEPARATE_PUBLISHER, tenant_id=tenant_id))
+
+
 def publish_version(
-    db: Session, tenant_id: UUID, template_id: UUID, version: int
+    db: Session,
+    tenant_id: UUID,
+    template_id: UUID,
+    version: int,
+    *,
+    actor_party_id: UUID | None = None,
 ) -> TemplateVersion:
-    """Make one revision the published one. Idempotent."""
+    """Make one revision the published one. Idempotent.
+
+    Maker-checker: when the tenant's `require_separate_publisher` setting is on,
+    the party who authored a revision may not be the one who FIRST publishes it
+    (`PublishRefusedError`). Re-publishing a revision that was published before
+    is a rollback and is not blocked: it was already approved once, and an
+    incident rollback must not wait for a second person. `actor_party_id=None`
+    is an in-process system caller with no author to match (seeding).
+    """
     template = get_template(db, tenant_id, template_id)
     revision = get_version(db, tenant_id, template_id, version)
+    if (
+        revision.published_at is None
+        and actor_party_id is not None
+        and revision.author_party_id == actor_party_id
+        and maker_checker_enabled(db, tenant_id)
+    ):
+        raise PublishRefusedError(
+            f"version {version} was authored by you and this workspace requires a "
+            "different person to publish it"
+        )
     if revision.published_at is None:
         revision.published_at = datetime.now(UTC)
     template.published_version = version
     db.flush()
     return revision
+
+
+def restore_version(
+    db: Session, tenant_id: UUID, template_id: UUID, version: int
+) -> tuple[TemplateVersion, int | None]:
+    """Make an EARLIER published revision the published one again (rollback).
+
+    Returns `(revision, previously_published_version)`. Refuses a revision that
+    was never published (that is a first publish, with its own checks) and the
+    one already live.
+    """
+    template = get_template(db, tenant_id, template_id)
+    revision = get_version(db, tenant_id, template_id, version)
+    if revision.published_at is None:
+        raise ConflictError(
+            f"version {version} was never published; publish it instead of "
+            "restoring it"
+        )
+    previous = template.published_version
+    if previous == version:
+        raise ConflictError(f"version {version} is already the published version")
+    template.published_version = version
+    db.flush()
+    return revision, previous
+
+
+# ── Preview and diff (editor) ───────────────────────────────────────────────
+
+
+def render_preview(
+    db: Session, tenant_id: UUID, template_id: UUID, version: int
+) -> RenderedTemplate:
+    """Render ANY revision (draft or published) with its context's `sample`.
+
+    The API render is published-only; this is the editor's draft path. Lenient
+    (`strict=False`): a sample need not cover every variable, and an unfilled
+    placeholder is visible in the preview rather than a refusal. Everything else
+    — an unsafe value, a size bound, bad sections — still refuses.
+    """
+    template = get_template(db, tenant_id, template_id)
+    revision = get_version(db, tenant_id, template_id, version)
+    context = get_context(template.context)
+    values = context.sample
+    try:
+        subject = (
+            render_part(
+                revision.subject, values, "subject", context=context, strict=False
+            )
+            if revision.subject
+            else None
+        )
+        text = render_part(revision.body, values, "text", context=context, strict=False)
+        html = (
+            render_part(
+                revision.html_body, values, "html", context=context, strict=False
+            )
+            if revision.html_body
+            else None
+        )
+    except (MissingTemplateValueError, RenderRefusedError, TemplateSyntaxError) as exc:
+        raise BadRequestError(str(exc)) from exc
+    return RenderedTemplate(subject=subject, text=text, html=html)
+
+
+@dataclass(frozen=True, slots=True)
+class PartDiff:
+    """A plain-text diff of one part. `lines` are `(tag, text)`; tag is one of
+    `"+"`, `"-"`, `" "` or `"@"` (a hunk header). Text, never markup."""
+
+    part: str
+    lines: tuple[tuple[str, str], ...]
+    changed: bool
+
+
+def _diff_part(part: str, old: str | None, new: str | None) -> PartDiff | None:
+    if old is None and new is None:
+        return None
+    old_lines = (old or "").splitlines()
+    new_lines = (new or "").splitlines()
+    out: list[tuple[str, str]] = []
+    for line in difflib.unified_diff(old_lines, new_lines, lineterm="", n=2):
+        if line.startswith(("---", "+++")):
+            continue
+        tag = line[:1]
+        out.append((tag if tag in "+-@" else " ", line[1:] if tag in "+- " else line))
+    return PartDiff(part=part, lines=tuple(out), changed=old != new)
+
+
+def diff_against_published(
+    db: Session, tenant_id: UUID, template_id: UUID, version: int
+) -> tuple[int | None, list[PartDiff]]:
+    """Per-part diff of `version` against the published revision.
+
+    Returns `(published_version, diffs)`; with nothing published the baseline is
+    empty, so every line reads as added.
+    """
+    revision = get_version(db, tenant_id, template_id, version)
+    published = get_published(db, tenant_id, template_id)
+    base_subject = published.subject if published else None
+    base_body = published.body if published else None
+    base_html = published.html_body if published else None
+    diffs = [
+        d
+        for d in (
+            _diff_part("subject", base_subject, revision.subject),
+            _diff_part("text", base_body, revision.body),
+            _diff_part("html", base_html, revision.html_body),
+        )
+        if d is not None
+    ]
+    return (published.version if published else None), diffs
 
 
 # The flag this module declares and reads — see `manifest.py` for why it exists.

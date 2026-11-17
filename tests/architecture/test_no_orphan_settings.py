@@ -42,6 +42,7 @@ _EXCLUDED_DIR_PREFIX = "app/features/settings/"
 # kernel-boundary split; kernel modules (display, branding) are legitimate
 # spec CONSUMERS, so the corpus scans the kernel too (see `_reader_corpus`).
 _EXCLUDED_FILE = "dotmac_kernel/settings_resolver.py"
+_EXCLUDED_FILES = {_EXCLUDED_FILE, "dotmac_template_studio/settings.py"}
 
 # Burn-down allowlist — do NOT add to this without a task/plan reference in
 # the comment; a new orphan should get a real consumer instead. EMPTY as of
@@ -57,7 +58,7 @@ def _repo_root() -> pathlib.Path:
 
 
 def _is_excluded(rel_path: str) -> bool:
-    return rel_path == _EXCLUDED_FILE or rel_path.startswith(_EXCLUDED_DIR_PREFIX)
+    return rel_path in _EXCLUDED_FILES or rel_path.startswith(_EXCLUDED_DIR_PREFIX)
 
 
 def _reader_corpus(root: pathlib.Path) -> str:
@@ -67,6 +68,13 @@ def _reader_corpus(root: pathlib.Path) -> str:
     trees = (
         (root / "app", "app"),
         (root / "packages/dotmac-kernel/src/dotmac_kernel", "dotmac_kernel"),
+        # An installed module's own readers (template-studio declares a setting
+        # and reads it in its service/web). Its `settings.py` is the declaration
+        # site, excluded below exactly as the settings feature is.
+        (
+            root / "packages/dotmac-template-studio/src/dotmac_template_studio",
+            "dotmac_template_studio",
+        ),
     )
     chunks: list[str] = []
     for scan_dir, prefix in trees:

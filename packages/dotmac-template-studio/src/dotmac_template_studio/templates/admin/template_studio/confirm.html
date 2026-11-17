@@ -1,0 +1,35 @@
+{#
+  Explicit confirmation before a publish or a restore. Context: `template`,
+  `version`, `action`, `diffs`, `published_version`, `error`.
+  The confirmation is by the same person: no second approver is involved.
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<h1 style="font-size:var(--dmui-font-size-xl); color:var(--dmui-text-primary);">
+  {% if action == 'restore' %}Restore{% else %}Publish{% endif %} version {{ version }} of {{ template.name }}?
+</h1>
+<p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+  Every caller will render this version from now on
+  {% if published_version %}(replacing v{{ published_version }}){% endif %}.
+</p>
+{% if error %}<p role="alert" style="color:var(--dmui-status-negative-foreground);">{{ error }}</p>{% endif %}
+{% for d in diffs %}
+  <h3 style="font-size:var(--dmui-font-size-sm);">{{ d.part }}{% if not d.changed %} (unchanged){% endif %}</h3>
+  {% if d.changed %}
+  <pre style="white-space:pre-wrap; word-break:break-word; font-family:var(--dmui-font-family-mono);">{% for tag, text in d.lines %}{{ tag }} {{ text }}
+{% endfor %}</pre>
+  {% endif %}
+{% endfor %}
+{% if is_current %}
+<p>This version is already the published one.</p>
+{% else %}
+<form method="post"
+      action="{{ surface_url('restore_version' if action == 'restore' else 'publish_version', template_id=template.id, version=version) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="confirm" value="yes">
+  <button type="submit">Confirm {{ action }}</button>
+</form>
+{% endif %}
+<p><a href="{{ surface_url('detail', template_id=template.id) }}">Cancel</a></p>
+{% endblock %}
