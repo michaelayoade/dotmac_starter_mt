@@ -1,21 +1,26 @@
 """PostgreSQL proof of the money-flows ``mf_0001`` Settle instance table."""
 
+# ``migrated`` is the shared fixture from tests.money_flows_fixtures, imported by
+# name so pytest registers it here; test arguments then shadow the import.
+# ruff: noqa: F401, F811
+
 from __future__ import annotations
 
-import os
 import uuid
-from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
-ROOT = Path(__file__).resolve().parent.parent
-KERNEL = ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
-VERSIONS = (
-    ROOT / "packages/dotmac-money-flows/src/dotmac_money_flows/migrations/versions"
+from tests.money_flows_fixtures import (
+    KERNEL,
+    ROOT,
+    VERSIONS,
+    _as_tenant,
+    _tenant,
+    migrated,
 )
+
 TABLE = "mod_mflows.settle_instances"
 
 _INSERT = text(
@@ -25,68 +30,6 @@ _INSERT = text(
     "VALUES (:id, :tenant, :state, :reason, 'p1', 'd1', :confirmation, :intent, "
     ":settlement, :resolution, :version)"
 )
-
-
-def _url(base: str, database: str, user: str | None = None) -> str:
-    prefix, _, _ = base.rpartition("/")
-    if user:
-        scheme, _, host = prefix.partition("://")
-        prefix = f"{scheme}://{user}@{host.rpartition('@')[2]}"
-    return f"{prefix}/{database}"
-
-
-@pytest.fixture
-def migrated() -> Iterator[tuple[str, str]]:
-    superuser = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv(
-        "TEST_DATABASE_URL"
-    )
-    if not superuser:
-        pytest.skip("PostgreSQL URL required")
-    name = f"mflows_{uuid.uuid4().hex[:12]}"
-    server = create_engine(superuser, isolation_level="AUTOCOMMIT")
-    with server.connect() as connection:
-        connection.execute(text(f'CREATE DATABASE "{name}"'))
-    setup = create_engine(_url(superuser, name), isolation_level="AUTOCOMMIT")
-    with setup.connect() as connection:
-        connection.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
-        connection.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
-        connection.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO app_user'))
-        connection.execute(text("GRANT USAGE ON SCHEMA public TO app_user"))
-    setup.dispose()
-    admin = _url(superuser, name, "app_admin")
-    try:
-        from alembic import command
-        from alembic.config import Config
-
-        cfg = Config(str(ROOT / "alembic.ini"))
-        cfg.set_main_option("script_location", str(ROOT / "alembic"))
-        cfg.set_main_option("version_locations", f"{KERNEL} {VERSIONS}")
-        os.environ["MIGRATION_DATABASE_URL"] = admin
-        command.upgrade(cfg, "heads")
-        yield admin, _url(superuser, name, "app_user")
-    finally:
-        with server.connect() as connection:
-            connection.execute(
-                text(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    "WHERE datname = :name AND pid <> pg_backend_pid()"
-                ),
-                {"name": name},
-            )
-            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
-        server.dispose()
-
-
-def _tenant(admin_url: str) -> uuid.UUID:
-    tenant = uuid.uuid4()
-    engine = create_engine(admin_url)
-    with engine.begin() as connection:
-        connection.execute(
-            text("INSERT INTO public.tenants (id, slug, name) VALUES (:id, :s, :s)"),
-            {"id": tenant, "s": f"mf-{tenant}"},
-        )
-    engine.dispose()
-    return tenant
 
 
 def _insert(connection, tenant, state, **overrides) -> uuid.UUID:
@@ -105,12 +48,6 @@ def _insert(connection, tenant, state, **overrides) -> uuid.UUID:
     values.update(overrides)
     connection.execute(_INSERT, values)
     return row_id
-
-
-def _as_tenant(connection, tenant) -> None:
-    connection.execute(
-        text("SELECT set_config('app.current_tenant', :t, true)"), {"t": str(tenant)}
-    )
 
 
 def test_table_has_forced_rls_and_no_delete_grant(migrated) -> None:

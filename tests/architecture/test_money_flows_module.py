@@ -109,6 +109,9 @@ DEFAULT_DENY_OWNERS = frozenset(
     }
 )
 ANY_MODULE = frozenset({"*"})
+# D2: the one module that funds a prepaid charge from account credit. It alone
+# reads the account terms and the funding availability, and issues the invoice.
+FUNDED_CHARGE_ONLY = frozenset({"funded_charge.py"})
 # The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
 # narrow this to modules; PR E adds the F3/F5 modules to the restricted names.
 OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
@@ -128,8 +131,22 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     # F2 emits a refs-only access event shaped like these two contract classes.
     # The owner is contracts-only and default-deny: the record_access_input_v2 /
     # decide_access_input functions and the ORM classes stay unreachable.
-    "RecordAccessInputV2": ANY_MODULE,
-    "AccessSignal": ANY_MODULE,
+    "RecordAccessInputV2": FUNDED_CHARGE_ONLY,
+    "AccessSignal": FUNDED_CHARGE_ONLY,
+    # F2 FundedCharge (D2) reads these and nothing else beyond the restricted
+    # commands below. Each is a deliberate, single-module entry.
+    "get_effective_account_terms": FUNDED_CHARGE_ONLY,
+    "AccountTermsV1": FUNDED_CHARGE_ONLY,
+    "get_funding_availability": FUNDED_CHARGE_ONLY,
+    "GetFundingAvailabilityV1": FUNDED_CHARGE_ONLY,
+    "get_confirmed_settlement": FUNDED_CHARGE_ONLY,
+    "GetConfirmedSettlementV1": FUNDED_CHARGE_ONLY,
+    "IssueRatedInvoiceV3": FUNDED_CHARGE_ONLY,
+    "IssuedRatedInvoiceV1": FUNDED_CHARGE_ONLY,
+    "ObligationSourceRegistry": FUNDED_CHARGE_ONLY,
+    "NumberingProvider": FUNDED_CHARGE_ONLY,
+    # Owner refusals are caught here to record attention (one module).
+    "BillingError": FUNDED_CHARGE_ONLY,
 }
 # Owner commands only specific flows may touch. Nothing exists yet, so each set
 # is empty. PR E adds the F3 module(s) to the first group and the F5 module to
@@ -138,13 +155,16 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
 # the F5 behaviour tests.
 F3_ONLY_CALLERS: frozenset[str] = frozenset()
 F5_REVERSAL_CALLERS: frozenset[str] = frozenset()
-# C2a: F1 pays whole invoices from the balance, so Settle (and only Settle) may
-# draw available credit. F2-DESIGN restricts the same call to funded_charge.py;
-# that module joins this set when it lands. Nothing else may draw credit.
-CREDIT_DRAW_CALLERS: frozenset[str] = frozenset({"settle.py"})
+# C2a: F1 pays whole invoices from the balance, so Settle may draw available
+# credit; D2 adds FundedCharge, which pays its own charge the same way. Nothing
+# else may draw credit.
+CREDIT_DRAW_CALLERS: frozenset[str] = frozenset({"settle.py", "funded_charge.py"})
+# D2: only FundedCharge issues a rated invoice (the prepaid charge it funds).
+ISSUE_CALLERS: frozenset[str] = frozenset({"funded_charge.py"})
 RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "apply_available_credit": CREDIT_DRAW_CALLERS,
     "ApplyAvailableCreditCommand": CREDIT_DRAW_CALLERS,
+    "issue_rated_invoice": ISSUE_CALLERS,
     "void_document": F3_ONLY_CALLERS,
     "grant_non_cash_credit": F3_ONLY_CALLERS,
     "issue_credit_note": F3_ONLY_CALLERS,
@@ -653,6 +673,10 @@ def test_manifest_declares_a_tenant_only_money_flows_lineage() -> None:
     assert set(module.outbox_event_types) == {
         "money_flows.settle.settled.v1",
         "money_flows.settle.attention.v1",
+        "money_flows.funded_charge.discharged.v1",
+        "money_flows.funded_charge.attention.v1",
+        "money_flows.funded_charge.access.v1",
+        "money_flows.funded_charge.reevaluate.v1",
     }
     assert set(module.requires) == {"module_database_roles.v1", "outbox_relay.v1"}
     assert module.tenant_requires == ("tenant_scope_catalog.v1",)
@@ -680,14 +704,33 @@ def test_package_version_surfaces_agree() -> None:
     assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a1"
 
 
-def test_public_surface_is_the_settle_contract() -> None:
+def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
     import dotmac_money_flows
 
     assert set(dotmac_money_flows.__all__) == {
         "DEFAULT_ACCEPTED_SOURCES",
+        "FUNDED_CHARGE_ACCESS_EVENT_TYPE",
+        "FUNDED_CHARGE_ATTENTION_EVENT_TYPE",
+        "FUNDED_CHARGE_DEFINITION_VERSION",
+        "FUNDED_CHARGE_DISCHARGED_EVENT_TYPE",
+        "FUNDED_CHARGE_REEVALUATE_EVENT_TYPE",
+        "FUNDED_CHARGE_TRANSITIONS",
         "SETTLE_ATTENTION_EVENT_TYPE",
         "SETTLE_SETTLED_EVENT_TYPE",
         "DepositApplication",
+        "FundedChargeCursorV1",
+        "FundedChargeInstanceV1",
+        "FundedChargeOutcomeV1",
+        "FundedChargePolicyReader",
+        "FundedChargePolicyV1",
+        "FundedChargePorts",
+        "FundedChargeRefused",
+        "FundedChargeState",
+        "FundedChargeStepFailed",
+        "RatedChargeKeyV1",
+        "RatedChargeSource",
+        "RatedChargeV1",
+        "SettledFundsV1",
         "SettleAttentionCursorV1",
         "SettleConfirmationV1",
         "SettleInstanceV1",
@@ -700,14 +743,25 @@ def test_public_surface_is_the_settle_contract() -> None:
         "SettleWithholdingV1",
         "SettlementTargetResolver",
         "SettlementTargetV1",
+        "StartFundedChargeV1",
         "__version__",
+        "charge_ref_for",
+        "get_funded_charge_instance",
         "get_settle_instance",
+        "is_funded_charge_replay_conflict",
         "is_settle_replay_conflict",
+        "key_for_charge_ref",
+        "list_funded_charge_attention",
+        "list_pending_funded_charges",
         "list_settle_attention",
         "module",
+        "on_settlement_settled",
+        "record_funded_charge_attention",
         "record_settle_refusal",
+        "retry_funded_charge",
         "retry_settle",
         "settle_confirmation",
+        "start_funded_charge",
         "versions_dir",
     }
     assert sorted(
@@ -772,14 +826,18 @@ def test_real_package_uses_no_dunder_name_or_attribute() -> None:
 def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None:
     for path in _source_files():
         assert forbidden_call_violations(path.read_text("utf-8"), _relative(path)) == []
-    # Only the credit draw is allowlisted (C2a: settle.py). PR E adds the F3/F5
-    # modules deliberately.
+    # Only the credit draw (settle.py, funded_charge.py) and the rated invoice
+    # issue (funded_charge.py) are allowlisted. PR E adds the F3/F5 modules
+    # deliberately.
     assert {n for n, callers in RESTRICTED_CALLERS.items() if callers} == {
         "apply_available_credit",
         "ApplyAvailableCreditCommand",
+        "issue_rated_invoice",
     }
-    assert RESTRICTED_CALLERS["apply_available_credit"] == frozenset({"settle.py"})
-    assert RESTRICTED_CALLERS["ApplyAvailableCreditCommand"] == frozenset({"settle.py"})
+    both = frozenset({"settle.py", "funded_charge.py"})
+    assert RESTRICTED_CALLERS["apply_available_credit"] == both
+    assert RESTRICTED_CALLERS["ApplyAvailableCreditCommand"] == both
+    assert RESTRICTED_CALLERS["issue_rated_invoice"] == frozenset({"funded_charge.py"})
     for callers in RESTRICTED_CALLERS.values():
         for relative in callers:
             assert (MODULE_ROOT / relative).is_file(), relative
@@ -1141,14 +1199,44 @@ def test_an_unlisted_owner_name_is_denied_by_default(source: str) -> None:
     assert forbidden_call_violations(source, "settle.py"), source
 
 
-def test_the_credit_draw_is_accepted_in_settle_and_nowhere_else() -> None:
+def test_the_credit_draw_is_accepted_in_settle_and_funded_charge_only() -> None:
     source = (
         "from dotmac_billing import apply_available_credit, "
         "ApplyAvailableCreditCommand\n"
         "apply_available_credit(db)\n"
     )
     assert forbidden_call_violations(source, "settle.py") == []
+    assert forbidden_call_violations(source, "funded_charge.py") == []
     assert forbidden_call_violations(source, "adjust.py")
+
+
+def test_the_rated_invoice_issue_is_accepted_in_funded_charge_only() -> None:
+    source = "from dotmac_billing import issue_rated_invoice\nissue_rated_invoice(db)\n"
+    assert forbidden_call_violations(source, "funded_charge.py") == []
+    assert forbidden_call_violations(source, "settle.py")
+    assert forbidden_call_violations(source, "adjust.py")
+    assert forbidden_call_violations("billing.issue_rated_invoice(db)", "settle.py")
+
+
+@pytest.mark.parametrize(
+    "source, relative",
+    [
+        ("from dotmac_billing import issue_rated_invoice", "settle.py"),
+        ("from dotmac_billing import apply_available_credit", "adjust.py"),
+        ("from dotmac_billing import get_effective_account_terms", "settle.py"),
+        ("from dotmac_billing import get_funding_availability", "settle.py"),
+        ("from dotmac_billing import get_confirmed_settlement", "settle.py"),
+        ("from dotmac_billing import IssueRatedInvoiceV3", "settle.py"),
+        ("from dotmac_service_access_policy import AccessSignal", "settle.py"),
+        ("from dotmac_service_access_policy import RecordAccessInputV2", "settle.py"),
+    ],
+)
+def test_funded_charge_only_names_are_refused_in_other_modules(
+    source: str, relative: str
+) -> None:
+    assert forbidden_call_violations(source, relative), source
+    if relative != "funded_charge.py" and "apply_available_credit" not in source:
+        assert forbidden_call_violations(source, "funded_charge.py") == [], source
 
 
 def test_the_listed_owner_calls_are_accepted() -> None:

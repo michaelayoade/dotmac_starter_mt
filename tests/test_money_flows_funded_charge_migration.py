@@ -1,6 +1,6 @@
 """PostgreSQL proof of the money-flows ``mf_0002`` FundedCharge instance table."""
 
-# ``migrated`` is the shared fixture from test_money_flows_migration, imported by
+# ``migrated`` is the shared fixture from tests.money_flows_fixtures, imported by
 # name so pytest registers it here; test arguments then shadow the import.
 # ruff: noqa: F401, F811
 
@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
-from tests.test_money_flows_migration import (
+from tests.money_flows_fixtures import (
     KERNEL,
     ROOT,
     VERSIONS,
