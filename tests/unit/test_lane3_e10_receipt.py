@@ -216,21 +216,29 @@ def test_an_unreadable_or_incomplete_context_refuses(context: Any, code: str) ->
 
 
 def test_one_key_encoded_both_ways_is_accepted_in_controls_form_only() -> None:
-    raw = support.INCARNATION_RAW
+    # 0xFB 0xEF... use the characters that differ between the two alphabets
+    raw = bytes([0xFB, 0xEF, 0xBE] * 10 + [0xFF, 0xFE])
+    assert len(raw) == 32
     unpadded_url = base64.urlsafe_b64encode(raw).decode().rstrip("=")
     padded_url = base64.urlsafe_b64encode(raw).decode()
     padded_standard = base64.b64encode(raw).decode()
-    # the SAME 32 bytes, three spellings
+    # the SAME 32 bytes, three different strings
     assert base64.urlsafe_b64decode(unpadded_url + "=") == raw
     assert base64.b64decode(padded_standard) == raw
     assert len({unpadded_url, padded_url, padded_standard}) == 3
+    fingerprint = "sha256:" + hashlib.sha256(raw).hexdigest()
 
-    assert support.make_receipt(
-        incarnation_public_key_b64url=unpadded_url
-    ).incarnation_fingerprint == (support.INCARNATION_FINGERPRINT)
+    accepted = support.make_receipt(
+        incarnation_public_key_b64url=unpadded_url,
+        incarnation_fingerprint=fingerprint,
+    )
+    assert accepted.incarnation_fingerprint == fingerprint
     for spelling in (padded_url, padded_standard):
         with pytest.raises(e10.ReceiptRefused) as refusal:
-            support.make_receipt(incarnation_public_key_b64url=spelling)
+            support.make_receipt(
+                incarnation_public_key_b64url=spelling,
+                incarnation_fingerprint=fingerprint,
+            )
         assert refusal.value.code == "incarnation-public-key-invalid"
 
 

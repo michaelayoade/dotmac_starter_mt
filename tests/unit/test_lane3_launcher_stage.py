@@ -1007,14 +1007,20 @@ def test_launch_refuses_an_identity_built_for_another_host_or_run(
 
 
 def test_launch_refuses_a_bare_identity(tmp_path: pathlib.Path) -> None:
+    proof = _proof(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
     with pytest.raises(stage.StageRefused) as refusal:
-        _launch(tmp_path, identity="/run/key", skew=_proof(tmp_path))
+        _launch(other, identity="/run/key", skew=proof)
     assert refusal.value.code == "ssh-identity-required"
 
 
 def test_an_identity_changed_in_place_is_caught_at_use(tmp_path: pathlib.Path) -> None:
     identity = _identity(tmp_path)
+    proof = _proof(tmp_path)
     object.__setattr__(identity, "host_id", "host-b")
+    other = tmp_path / "other"
+    other.mkdir()
     with pytest.raises(stage.StageRefused) as refusal:
-        _launch(tmp_path, identity=identity, host_id="host-b", skew=_proof(tmp_path))
+        _launch(other, identity=identity, host_id="host-b", skew=proof)
     assert refusal.value.code == "identity-not-built-for-the-lease"
