@@ -41,6 +41,9 @@ this module is where the map is honoured rather than described.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 from uuid import UUID
@@ -57,10 +60,218 @@ from dotmac_kernel.delivery_models import (
 )
 from dotmac_kernel.idempotency import fingerprint_of
 
+#: Headers a caller may set. Everything else is refused, not dropped.
+#:
+#: - `Reply-To`, `In-Reply-To`, `References`: conversational routing that a
+#:   rendered message legitimately needs (support replies, threading).
+#: - `List-Unsubscribe`, `List-Unsubscribe-Post`: RFC 2369 / RFC 8058 one-click
+#:   unsubscribe, which mailbox providers require for bulk mail.
+#:
+#: Deliberately absent: `From`/`Sender`/`To`/`Cc`/`Bcc` (addressing and consent
+#: are the kernel's, not the caller's), `Subject` (a field), `Message-ID` (the
+#: provider derives it from `dispatch_id`), `Date`, `MIME-Version`, `Content-*`
+#: (the provider builds MIME) and any `X-` header (an open-ended escape hatch).
+ALLOWED_HEADERS: tuple[str, ...] = (
+    "In-Reply-To",
+    "List-Unsubscribe",
+    "List-Unsubscribe-Post",
+    "References",
+    "Reply-To",
+)
+_ALLOWED_HEADERS_BY_LOWER = {name.lower(): name for name in ALLOWED_HEADERS}
+
+MAX_HEADER_VALUE_LENGTH = 998  # RFC 5322 § 2.1.1 line limit
+MAX_HEADERS_TOTAL_LENGTH = 3072
+MAX_ATTACHMENTS = 10
+MAX_ATTACHMENT_KIND_LENGTH = 64
+MAX_ATTACHMENT_REF_LENGTH = 512
+MAX_ATTACHMENT_FILENAME_LENGTH = 255
+
+#: RFC 8058: the only value `List-Unsubscribe-Post` may carry.
+_ONE_CLICK = "List-Unsubscribe=One-Click"
+
+_KIND_RE = re.compile(r"[a-z][a-z0-9_.-]*")
+_MIME_NAME = r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}"
+_CONTENT_TYPE_RE = re.compile(rf"{_MIME_NAME}/{_MIME_NAME}")
+
+#: Features a provider must declare in `message_features` before it is handed a
+#: message that uses them. A legacy single-body adapter declares nothing, so it
+#: is refused a message it would silently truncate to its text part.
+FEATURE_HTML = "html"
+FEATURE_HEADERS = "headers"
+FEATURE_ATTACHMENTS = "attachments"
+
+
+def _has_control(value: str) -> bool:
+    """Any C0/C1 control, format, surrogate, private-use or line/paragraph
+    separator. CR, LF and NUL are the injection characters; the rest are never
+    legitimate in a header value, filename or reference."""
+    return any(
+        unicodedata.category(ch).startswith("C")
+        or unicodedata.category(ch) in ("Zl", "Zp")
+        for ch in value
+    )
+
+
+def _is_printable_ascii(value: str) -> bool:
+    return all(0x20 <= ord(ch) <= 0x7E for ch in value)
+
+
+class _FrozenHeaders(Mapping[str, str]):
+    """Immutable, hashable, canonically ordered header mapping."""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, items: tuple[tuple[str, str], ...]) -> None:
+        self._items = items
+
+    def __getitem__(self, key: str) -> str:
+        for name, value in self._items:
+            if name == key:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (name for name, _ in self._items)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __hash__(self) -> int:
+        return hash(self._items)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Mapping):
+            return dict(self._items) == dict(other.items())
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f"headers({dict(self._items)!r})"
+
+
+def _normalise_headers(raw: Mapping[str, str] | None) -> _FrozenHeaders:
+    if raw is None:
+        return _FrozenHeaders(())
+    if not isinstance(raw, Mapping):
+        raise ValueError("headers must be a mapping of name to value")
+    found: dict[str, str] = {}
+    total = 0
+    for name, value in raw.items():
+        if not isinstance(name, str) or not isinstance(value, str):
+            raise ValueError("header names and values must be strings")
+        canonical = _ALLOWED_HEADERS_BY_LOWER.get(name.lower())
+        # The name is checked against the allowlist by exact lowercase match, so
+        # a name carrying CR/LF/NUL/whitespace/colon can never match.
+        if canonical is None or name != name.strip():
+            raise ValueError(
+                f"header {name[:40]!r} is not allowed — expected one of "
+                f"{', '.join(ALLOWED_HEADERS)}"
+            )
+        if canonical in found:
+            raise ValueError(f"header {canonical} is given more than once")
+        if not value.strip() or value != value.strip():
+            raise ValueError(f"header {canonical} has an empty or padded value")
+        if _has_control(value) or not _is_printable_ascii(value):
+            raise ValueError(
+                f"header {canonical} must be printable ASCII with no control "
+                "characters (CR, LF and NUL are header injection)"
+            )
+        if len(value) > MAX_HEADER_VALUE_LENGTH:
+            raise ValueError(
+                f"header {canonical} exceeds {MAX_HEADER_VALUE_LENGTH} characters"
+            )
+        total += len(canonical) + len(value)
+        found[canonical] = value
+    if total > MAX_HEADERS_TOTAL_LENGTH:
+        raise ValueError(f"headers exceed {MAX_HEADERS_TOTAL_LENGTH} characters")
+    if "List-Unsubscribe-Post" in found:
+        if found["List-Unsubscribe-Post"] != _ONE_CLICK:
+            raise ValueError(f"List-Unsubscribe-Post must be {_ONE_CLICK!r}")
+        if "List-Unsubscribe" not in found:
+            raise ValueError("List-Unsubscribe-Post requires List-Unsubscribe")
+    return _FrozenHeaders(tuple(sorted(found.items())))
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentRef:
+    """A REFERENCE to an attachment — never its bytes.
+
+    Bytes are resolved at delivery time, by whatever resolver the product
+    registers for `kind`, so a message stays small, a retry re-reads the same
+    stored object, and the fingerprint covers identity rather than content.
+    `kind` names the resolver (`document`, `storage`, …); `ref` is its key.
+    """
+
+    kind: str
+    ref: str
+    filename: str
+    content_type: str
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("kind", self.kind),
+            ("ref", self.ref),
+            ("filename", self.filename),
+            ("content_type", self.content_type),
+        ):
+            if not isinstance(value, str):
+                raise ValueError(f"attachment {label} must be a string")
+        if (
+            not _KIND_RE.fullmatch(self.kind)
+            or len(self.kind) > MAX_ATTACHMENT_KIND_LENGTH
+        ):
+            raise ValueError("attachment kind must be a lowercase identifier")
+        if (
+            not self.ref
+            or self.ref != self.ref.strip()
+            or len(self.ref) > MAX_ATTACHMENT_REF_LENGTH
+            or _has_control(self.ref)
+        ):
+            raise ValueError(
+                "attachment ref is empty, padded, too long or has controls"
+            )
+        name = self.filename
+        if (
+            not name
+            or name != name.strip()
+            or name in (".", "..")
+            or len(name) > MAX_ATTACHMENT_FILENAME_LENGTH
+            or "/" in name
+            or "\\" in name
+            or _has_control(name)
+        ):
+            raise ValueError(
+                "attachment filename must be a bare name: no path separators, "
+                "control characters, padding or dot-segments"
+            )
+        # Normalised lowercase, no parameters: a `;charset=` or a boundary
+        # smuggled in here would be provider-side MIME injection.
+        if (
+            self.content_type != self.content_type.lower()
+            or not _CONTENT_TYPE_RE.fullmatch(self.content_type)
+        ):
+            raise ValueError(
+                "attachment content_type must be a lowercase type/subtype with no "
+                "parameters"
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class OutboundMessage:
-    """What a provider is asked to send. Already rendered, already addressed."""
+    """What a provider is asked to send. Already rendered, already addressed.
+
+    **Parts.** `text` and `html` are the two bodies; at least one is required
+    (an empty string counts as given, which keeps the legacy `body=""` valid).
+    `body` is the legacy name for the text part: `body="x"` means `text="x"`,
+    and construction normalises both to the same value so an adapter that reads
+    only `message.body` keeps working. Giving `body` and `text` with different
+    values is refused. For an html-only message `body` and `text` are `None`.
+    `body` has no default (it sits before the required `category`), so a caller
+    using only `text`/`html` passes `body=None`.
+
+    **Headers** are limited to `ALLOWED_HEADERS`; anything else is refused.
+    **Attachments** are `AttachmentRef`s. `html`, `headers` are email-only.
+    """
 
     #: Product/outbox identity created before the first provider call and reused
     #: on every relay attempt. Provider adapters use `idempotency_key` where the
@@ -68,13 +279,17 @@ class OutboundMessage:
     dispatch_id: UUID
     channel: str
     address: str
-    body: str
+    body: str | None
     #: Why this is being sent — `billing`, `marketing`, … The consent decision
     #: turns on it, so it is required rather than defaulted: a caller that has to
     #: name the category cannot accidentally get the marketing rule applied to an
     #: invoice, or the reverse.
     category: str
     subject: str | None = None
+    text: str | None = None
+    html: str | None = None
+    headers: Mapping[str, str] | None = None
+    attachments: Sequence[AttachmentRef] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.dispatch_id, UUID):
@@ -85,6 +300,43 @@ class OutboundMessage:
             raise ValueError("address is required")
         if not (self.category or "").strip():
             raise ValueError("category is required")
+        if self.subject is not None and (
+            not isinstance(self.subject, str)
+            or any(ch in self.subject for ch in "\r\n\x00")
+        ):
+            raise ValueError("subject must be a string without CR, LF or NUL")
+        for label, part in (
+            ("body", self.body),
+            ("text", self.text),
+            ("html", self.html),
+        ):
+            if part is not None and not isinstance(part, str):
+                raise ValueError(f"{label} must be a string")
+        if self.body is not None and self.text is not None and self.body != self.text:
+            raise ValueError(
+                "body is the legacy name for text; they were given different values"
+            )
+        text = self.text if self.text is not None else self.body
+        if text is None and self.html is None:
+            raise ValueError("at least one of text/body or html is required")
+        object.__setattr__(self, "text", text)
+        object.__setattr__(self, "body", text)
+
+        channel = consent.normalize_channel(self.channel)
+        headers = _normalise_headers(self.headers)
+        if isinstance(self.attachments, str | bytes) or not isinstance(
+            self.attachments, Sequence
+        ):
+            raise ValueError("attachments must be a sequence of AttachmentRef")
+        attachments = tuple(self.attachments)
+        if len(attachments) > MAX_ATTACHMENTS:
+            raise ValueError(f"at most {MAX_ATTACHMENTS} attachments")
+        if not all(isinstance(a, AttachmentRef) for a in attachments):
+            raise ValueError("attachments must be AttachmentRef instances")
+        if channel != "email" and (self.html is not None or headers):
+            raise ValueError("html and headers are only valid on the email channel")
+        object.__setattr__(self, "headers", headers)
+        object.__setattr__(self, "attachments", attachments)
 
     @property
     def idempotency_key(self) -> str:
@@ -92,18 +344,57 @@ class OutboundMessage:
         return str(self.dispatch_id)
 
     @property
+    def required_features(self) -> frozenset[str]:
+        """Provider features this message needs beyond a single text body."""
+        needed = set()
+        if self.html is not None:
+            needed.add(FEATURE_HTML)
+        if self.headers:
+            needed.add(FEATURE_HEADERS)
+        if self.attachments:
+            needed.add(FEATURE_ATTACHMENTS)
+        return frozenset(needed)
+
+    @property
     def request_fingerprint(self) -> str:
-        """Bind the stable dispatch id to exactly one rendered request."""
+        """Bind the stable dispatch id to exactly one rendered request.
+
+        Receipts store only the digest, no version, so there is no migration
+        and the two shapes are told apart by the payload itself:
+
+        - **v1** — a message with only legacy fields (a text part, no html, no
+          headers, no attachments) hashes the exact payload the kernel always
+          did, so every existing receipt still matches on replay.
+        - **v2** — anything richer hashes a canonical-JSON payload carrying
+          `"v": 2`. Parts, headers and attachments are separate JSON keys and
+          strings are JSON-quoted, so bytes moved between parts, header values
+          or attachment fields cannot collide; `None` and `""` differ; header
+          names are canonical-cased and sorted; attachment order is kept. The
+          `v` key cannot appear in a v1 payload, so v1 and v2 never collide.
+        """
         channel = consent.normalize_channel(self.channel)
-        return fingerprint_of(
-            {
-                "channel": channel,
-                "address": consent.normalize_address(channel, self.address),
-                "category": self.category.strip().lower(),
-                "subject": self.subject,
-                "body": self.body,
-            }
-        )
+        payload: dict[str, object] = {
+            "channel": channel,
+            "address": consent.normalize_address(channel, self.address),
+            "category": self.category.strip().lower(),
+            "subject": self.subject,
+        }
+        if self.html is None and not self.headers and not self.attachments:
+            payload["body"] = self.text
+        else:
+            payload.update(
+                {
+                    "v": 2,
+                    "text": self.text,
+                    "html": self.html,
+                    "headers": [[k, v] for k, v in (self.headers or {}).items()],
+                    "attachments": [
+                        [a.kind, a.ref, a.filename, a.content_type]
+                        for a in self.attachments
+                    ],
+                }
+            )
+        return fingerprint_of(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +428,11 @@ class DeliveryProvider(Protocol):
         """Stable provider id, recorded on every receipt (`ses`, `twilio`, …)."""
 
     def send(self, message: OutboundMessage) -> ProviderResult: ...
+
+    # Optional, read with `getattr(provider, "message_features", frozenset())`:
+    # a `frozenset` of `FEATURE_HTML` / `FEATURE_HEADERS` / `FEATURE_ATTACHMENTS`
+    # the adapter honours. `send` refuses to hand a message needing a feature
+    # the provider did not declare, rather than let it be silently dropped.
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +525,15 @@ def send(
         if final is not None:
             return Sent(receipt=final)
 
+    missing = message.required_features - frozenset(
+        getattr(provider, "message_features", frozenset())
+    )
+    if missing:
+        raise delivery.DeliveryError(
+            f"provider {provider.name!r} does not declare support for "
+            f"{', '.join(sorted(missing))}; the message was not sent"
+        )
+
     reason = consent.suppression_reason(
         db,
         tenant_id,
@@ -257,6 +562,11 @@ def send(
 
 
 __all__ = [
+    "ALLOWED_HEADERS",
+    "FEATURE_ATTACHMENTS",
+    "FEATURE_HEADERS",
+    "FEATURE_HTML",
+    "AttachmentRef",
     "DeliveryProvider",
     "OutboundMessage",
     "ProviderResult",

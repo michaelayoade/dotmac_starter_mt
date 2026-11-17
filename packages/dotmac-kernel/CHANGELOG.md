@@ -15,6 +15,29 @@ here.
   reservation installs no module, moves no data and transfers no writer
   authority; the published a109 release remains unchanged.
 
+- `dotmac_kernel.delivery_providers.OutboundMessage` gains optional `text` and
+  `html` parts, an allowlisted `headers` mapping (`Reply-To`, `In-Reply-To`,
+  `References`, `List-Unsubscribe`, `List-Unsubscribe-Post`; anything else, and
+  any CR/LF/NUL/control or non-ASCII value, is refused) and `attachments`, a
+  sequence of the new `AttachmentRef(kind, ref, filename, content_type)` (a
+  reference, never bytes; resolved at delivery time by a later work package).
+  `body` is the legacy name for `text`: both normalise to one value, differing
+  values are refused, and at least one of text/body or html is required.
+  `body` keeps its position and has no default, so a caller using only
+  `text`/`html` passes `body=None`. `html` and `headers` are email-only.
+  `subject` now refuses CR, LF and NUL. `Message-ID` is not caller-settable.
+- `request_fingerprint` v2: a legacy-shaped message (text part only) hashes the
+  exact v1 payload, so existing receipts still replay; a message using html,
+  headers or attachments hashes a canonical-JSON payload carrying `"v": 2`.
+  Receipts store only the digest, so no migration is needed.
+- `send` refuses (`DeliveryError`, no consent check, no provider call, no
+  receipt) a message that needs html, headers or attachments when the provider
+  has not declared the matching `message_features` entry (`FEATURE_HTML`,
+  `FEATURE_HEADERS`, `FEATURE_ATTACHMENTS`), so a single-body adapter cannot
+  silently drop them. A replay of an existing receipt is unaffected. New public
+  names: `AttachmentRef`, `ALLOWED_HEADERS`, `FEATURE_*`. No migration; no
+  version is allocated.
+
 ### Fixed
 
 - `dotmac_kernel.delivery_providers.send` no longer replays a `failed` receipt
