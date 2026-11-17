@@ -313,22 +313,53 @@ def _public_key_fingerprint(public_key: pathlib.Path) -> str:
     return _fingerprint_of(fields[1])
 
 
+_IDENTITY_KEY: Final = os.urandom(32)
+
+
+def _identity_token(
+    private_key: str, controller_fingerprint: str, host_id: str, run_id: str
+) -> str:
+    return hmac.new(
+        _IDENTITY_KEY,
+        "\x00".join((private_key, controller_fingerprint, host_id, run_id)).encode(),
+        "sha256",
+    ).hexdigest()
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class LaunchIdentity:
-    """The SSH key the launcher authenticates with, proven to be the lease's.
+    """The SSH key the launcher authenticates with, proven to be THE lease's.
 
-    `from_files` reads the key's public half (`<private>.pub`) and refuses unless
-    its OpenSSH fingerprint equals the held lease's controller fingerprint, so the
-    session that mutates the host is opened with the key the lease names.
+    Built ONLY by :meth:`for_lease`, for one held lease: it reads the key's public
+    half (`<private>.pub`), refuses unless its OpenSSH fingerprint equals the
+    lease's controller fingerprint, and carries a private token over the key, that
+    fingerprint, the lease's host and the lease's authorization run. A hand-built
+    instance, or `dataclasses.replace` onto another host or run, fails the token at
+    construction and at every use. `stage_artifacts` and `launch_argv` check the
+    host (and, for launch, the run) the identity was built for.
     """
 
     private_key: str
     controller_fingerprint: str
+    host_id: str
+    run_id: str
+    _token: str = dataclasses.field(default="", repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.verify()
+
+    def verify(self) -> None:
+        expected = _identity_token(
+            self.private_key, self.controller_fingerprint, self.host_id, self.run_id
+        )
+        if not hmac.compare_digest(str(self._token), expected):
+            raise StageRefused("identity-not-built-for-the-lease")
 
     @classmethod
-    def from_files(
-        cls, private_key: pathlib.Path | str, controller_fingerprint: str
+    def for_lease(
+        cls, private_key: pathlib.Path | str, lease: object
     ) -> LaunchIdentity:
+        """The identity for THIS held lease: its controller key, nothing else."""
         path = str(private_key)
         if (
             not path
@@ -337,29 +368,36 @@ class LaunchIdentity:
             or not pathlib.Path(path).is_file()
         ):
             raise StageRefused("identity-key-unusable")
-        if not isinstance(controller_fingerprint, str) or not _FINGERPRINT.fullmatch(
-            controller_fingerprint
-        ):
+        fingerprint = str(getattr(lease, "controller_identity_fingerprint", ""))
+        host_id = str(getattr(lease, "target", ""))
+        run_id = str(getattr(lease, "authorization_run_id", ""))
+        if not _FINGERPRINT.fullmatch(fingerprint):
             raise StageRefused("identity-controller-fingerprint-required")
-        identity = cls(private_key=path, controller_fingerprint=controller_fingerprint)
-        identity.reverify()
-        return identity
-
-    @classmethod
-    def for_lease(
-        cls, private_key: pathlib.Path | str, lease: object
-    ) -> LaunchIdentity:
-        """The identity for THIS lease: its controller key, nothing else."""
-        return cls.from_files(
-            private_key, str(getattr(lease, "controller_identity_fingerprint", ""))
+        if not host_id or not run_id:
+            raise StageRefused("identity-lease-binding-required")
+        if _public_key_fingerprint(pathlib.Path(path + ".pub")) != fingerprint:
+            raise StageRefused("identity-key-not-the-leases-controller")
+        return cls(
+            private_key=path,
+            controller_fingerprint=fingerprint,
+            host_id=host_id,
+            run_id=run_id,
+            _token=_identity_token(path, fingerprint, host_id, run_id),
         )
 
     def reverify(self) -> None:
+        self.verify()
         if (
             _public_key_fingerprint(pathlib.Path(self.private_key + ".pub"))
             != self.controller_fingerprint
         ):
             raise StageRefused("identity-key-not-the-leases-controller")
+
+    def require_for(self, *, host_id: str, run_id: str | None = None) -> None:
+        """Refuse unless built for this host (and, when given, this run)."""
+        self.verify()
+        if self.host_id != host_id or (run_id is not None and self.run_id != run_id):
+            raise StageRefused("identity-built-for-another-lease")
 
 
 # ── ssh ─────────────────────────────────────────────────────────────────────
@@ -478,6 +516,9 @@ def stage_artifacts(
     Each file lands, is hashed again ON THE TARGET, and must equal the digest the
     launcher computed from the very bytes it sent. Returns the run directory.
     """
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    identity.require_for(host_id=host_id)
     if set(artifacts) != set(ARTIFACT_NAMES):
         raise StageRefused("artifact-set-not-the-closed-set")
     if lease_filename != expected_lease_filename(host_id) or not _LEASE_NAME.fullmatch(
@@ -699,8 +740,13 @@ def launch_argv(
     """The session, in the candidate venv, `-E -P`, with the channel on stdio.
 
     Refused unless `skew` is the proof for this very run directory, run id and
-    host: a session cannot be launched on a target whose clock was not checked.
+    host: a session cannot be launched on a target whose clock was not checked. The
+    identity must also be one built by `LaunchIdentity.for_lease` for this host and
+    run.
     """
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    identity.require_for(host_id=host_id, run_id=run_id)
     if not isinstance(skew, ClockSkewPassed) or (
         skew.run_dir,
         skew.run_id,

@@ -6,6 +6,7 @@ Input validation only: nothing here produces a receipt or verifies a signature.
 from __future__ import annotations
 
 import base64
+import hashlib
 import pathlib
 import sys
 from datetime import UTC, datetime, timedelta
@@ -29,6 +30,7 @@ def _match(receipt: Any, **overrides: Any) -> None:
         "alias": "vm-alpha",
         "expected_host_incarnation": support.INCARNATION_FINGERPRINT,
         "host_id": "host-a",
+        "machine_id": support.MACHINE_ID,
         "store_time": STORE_TIME,
     }
     arguments.update(overrides)
@@ -49,6 +51,7 @@ def test_a_well_formed_receipt_agreeing_with_every_input_passes() -> None:
             "receipt-incarnation-mismatch",
         ),
         ({"host_id": "host-b"}, "receipt-host-id-mismatch"),
+        ({"machine_id": "f" * 32}, "receipt-machine-id-mismatch"),
     ],
 )
 def test_each_disagreement_with_an_independent_input_refuses(
@@ -166,3 +169,84 @@ def test_a_key_destroyed_after_the_store_time_refuses() -> None:
 
 def test_a_key_destroyed_exactly_at_the_store_time_is_accepted() -> None:
     _match(support.make_receipt(incarnation_key_destroyed_at=STORE_TIME))
+
+
+# ── L2a: the receipt's enrolment must be the staged context's ───────────────
+
+
+def _context(**fields: Any) -> bytes:
+    import json
+
+    return json.dumps({"host_enrolment_ref": support.ENROLMENT_UUID, **fields}).encode()
+
+
+def test_a_context_naming_the_receipts_enrolment_passes() -> None:
+    e10.require_enrolment_matches(_context(), support.make_receipt())
+
+
+def test_a_context_naming_another_enrolment_refuses() -> None:
+    other = "11111111-2222-4333-8444-555555555555"
+    with pytest.raises(e10.ReceiptRefused) as refusal:
+        e10.require_enrolment_matches(
+            _context(host_enrolment_ref=other), support.make_receipt()
+        )
+    assert refusal.value.code == "receipt-enrolment-mismatch"
+
+
+@pytest.mark.parametrize(
+    ("context", "code"),
+    [
+        (b"", "execution-context-unreadable"),
+        (b"not json", "execution-context-unreadable"),
+        (b"[1, 2]", "execution-context-unreadable"),
+        (b"x" * (1024 * 1024 + 1), "execution-context-unreadable"),
+        ("{}", "execution-context-unreadable"),  # str, not bytes
+        (b"{}", "execution-context-enrolment-missing"),
+        (b'{"host_enrolment_ref": ""}', "execution-context-enrolment-missing"),
+        (b'{"host_enrolment_ref": 5}', "execution-context-enrolment-missing"),
+    ],
+)
+def test_an_unreadable_or_incomplete_context_refuses(context: Any, code: str) -> None:
+    with pytest.raises(e10.ReceiptRefused) as refusal:
+        e10.require_enrolment_matches(context, support.make_receipt())
+    assert refusal.value.code == code
+
+
+# ── L2c: Control's key encoding is unpadded base64url, and only that ────────
+
+
+def test_one_key_encoded_both_ways_is_accepted_in_controls_form_only() -> None:
+    raw = support.INCARNATION_RAW
+    unpadded_url = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    padded_url = base64.urlsafe_b64encode(raw).decode()
+    padded_standard = base64.b64encode(raw).decode()
+    # the SAME 32 bytes, three spellings
+    assert base64.urlsafe_b64decode(unpadded_url + "=") == raw
+    assert base64.b64decode(padded_standard) == raw
+    assert len({unpadded_url, padded_url, padded_standard}) == 3
+
+    assert support.make_receipt(
+        incarnation_public_key_b64url=unpadded_url
+    ).incarnation_fingerprint == (support.INCARNATION_FINGERPRINT)
+    for spelling in (padded_url, padded_standard):
+        with pytest.raises(e10.ReceiptRefused) as refusal:
+            support.make_receipt(incarnation_public_key_b64url=spelling)
+        assert refusal.value.code == "incarnation-public-key-invalid"
+
+
+def test_a_standard_alphabet_key_is_refused_even_without_padding() -> None:
+    """Bytes whose standard encoding uses `+` or `/` differ from the url-safe form."""
+    raw = bytes([0xFB] * 32)  # standard: '+' '/' characters; url-safe: '-' '_'
+    standard = base64.b64encode(raw).decode().rstrip("=")
+    url = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    assert standard != url and ("+" in standard or "/" in standard)
+    fingerprint = "sha256:" + hashlib.sha256(raw).hexdigest()
+    support.make_receipt(
+        incarnation_public_key_b64url=url, incarnation_fingerprint=fingerprint
+    )
+    with pytest.raises(e10.ReceiptRefused) as refusal:
+        support.make_receipt(
+            incarnation_public_key_b64url=standard,
+            incarnation_fingerprint=fingerprint,
+        )
+    assert refusal.value.code == "incarnation-public-key-invalid"

@@ -44,13 +44,29 @@ ALIAS = "vm-alpha"
 OTHER_FINGERPRINT = "SHA256:" + "B" * 43
 
 
-def _identity(tmp_path: pathlib.Path, fingerprint: str = FINGERPRINT):
-    """A launch identity whose public half has `fingerprint` (idempotent per dir)."""
+def _lease(fingerprint: str = FINGERPRINT, host: str = "host-a", run: str = "run-1"):
+    import types
+
+    return types.SimpleNamespace(
+        controller_identity_fingerprint=fingerprint,
+        target=host,
+        authorization_run_id=run,
+    )
+
+
+def _identity(
+    tmp_path: pathlib.Path,
+    fingerprint: str = FINGERPRINT,
+    *,
+    host: str = "host-a",
+    run: str = "run-1",
+):
+    """The identity `for_lease` builds for a held lease (idempotent per dir)."""
     key = tmp_path / "id_launch"
     key.write_text("-----BEGIN PRIVATE KEY-----\n", encoding="ascii")
     pub = tmp_path / "id_launch.pub"
     pub.write_text(f"ssh-ed25519 {KEY_B64} launch-key\n", encoding="ascii")
-    return stage.LaunchIdentity.from_files(key, fingerprint)
+    return stage.LaunchIdentity.for_lease(key, _lease(fingerprint, host, run))
 
 
 def _from_file(
@@ -508,13 +524,16 @@ def _launch(tmp_path: pathlib.Path, **overrides):
     arguments = {
         "run_dir": RUN_DIR,
         "destination": DESTINATION,
-        "identity": _identity(tmp_path),
         "connect_timeout": 20,
         "extra_env": {},
         "run_id": "run-1",
         "host_id": "host-a",
     }
     arguments.update(overrides)
+    if "identity" not in arguments:
+        arguments["identity"] = _identity(
+            tmp_path, host=arguments["host_id"], run=arguments["run_id"]
+        )
     if "pin" not in arguments:
         arguments["pin"] = _pin(tmp_path)
     if "skew" not in arguments:
@@ -798,14 +817,14 @@ def test_the_controller_fingerprint_is_a_required_input(
     key.write_text("k")
     (tmp_path / "id_launch.pub").write_text(f"ssh-ed25519 {KEY_B64}\n")
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.LaunchIdentity.from_files(key, fingerprint)  # type: ignore[arg-type]
+        stage.LaunchIdentity.for_lease(key, _lease(fingerprint))  # type: ignore[arg-type]
     assert refusal.value.code == "identity-controller-fingerprint-required"
 
 
 def test_a_missing_or_unsafe_identity_is_refused(tmp_path: pathlib.Path) -> None:
     for path in (tmp_path / "absent", "-oProxyCommand=x", "has space", ""):
         with pytest.raises(stage.StageRefused) as refusal:
-            stage.LaunchIdentity.from_files(path, FINGERPRINT)
+            stage.LaunchIdentity.for_lease(path, _lease())
         assert refusal.value.code == "identity-key-unusable"
 
 
@@ -813,7 +832,7 @@ def test_a_missing_public_half_is_refused(tmp_path: pathlib.Path) -> None:
     key = tmp_path / "id_nopub"
     key.write_text("k")
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.LaunchIdentity.from_files(key, FINGERPRINT)
+        stage.LaunchIdentity.for_lease(key, _lease())
     assert refusal.value.code == "identity-public-key-unreadable"
 
 
@@ -895,14 +914,107 @@ def test_an_identity_is_built_for_the_lease_it_must_match(
     key = tmp_path / "id_launch"
     key.write_text("k")
     (tmp_path / "id_launch.pub").write_text(f"ssh-ed25519 {KEY_B64}\n")
-    matching = types.SimpleNamespace(controller_identity_fingerprint=FINGERPRINT)
-    assert stage.LaunchIdentity.for_lease(key, matching).controller_fingerprint == (
-        FINGERPRINT
-    )
-    other = types.SimpleNamespace(controller_identity_fingerprint="SHA256:" + "C" * 43)
+    identity = stage.LaunchIdentity.for_lease(key, _lease())
+    assert identity.controller_fingerprint == FINGERPRINT
+    assert (identity.host_id, identity.run_id) == ("host-a", "run-1")
     with pytest.raises(stage.StageRefused) as refusal:
-        stage.LaunchIdentity.for_lease(key, other)
+        stage.LaunchIdentity.for_lease(key, _lease("SHA256:" + "C" * 43))
     assert refusal.value.code == "identity-key-not-the-leases-controller"
     with pytest.raises(stage.StageRefused) as refusal:
         stage.LaunchIdentity.for_lease(key, types.SimpleNamespace())
     assert refusal.value.code == "identity-controller-fingerprint-required"
+    partial = types.SimpleNamespace(controller_identity_fingerprint=FINGERPRINT)
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.LaunchIdentity.for_lease(key, partial)
+    assert refusal.value.code == "identity-lease-binding-required"
+
+
+# ── L2b: only for_lease builds an identity, and entry points check its lease ──
+
+
+def test_there_is_no_other_public_constructor_for_an_identity() -> None:
+    assert not hasattr(stage.LaunchIdentity, "from_files")
+
+
+def test_a_hand_built_identity_is_refused_at_construction(
+    tmp_path: pathlib.Path,
+) -> None:
+    key = _identity(tmp_path).private_key
+    for token in ("", "00", "a" * 64):
+        with pytest.raises(stage.StageRefused) as refusal:
+            stage.LaunchIdentity(
+                private_key=key,
+                controller_fingerprint=FINGERPRINT,
+                host_id="host-a",
+                run_id="run-1",
+                _token=token,
+            )
+        assert refusal.value.code == "identity-not-built-for-the-lease"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("host_id", "host-b"),
+        ("run_id", "run-2"),
+        ("controller_fingerprint", "SHA256:" + "C" * 43),
+        ("private_key", "/run/other-key"),
+    ],
+)
+def test_a_genuine_identity_cannot_be_rebound_with_dataclasses_replace(
+    tmp_path: pathlib.Path, field: str, value: str
+) -> None:
+    import dataclasses
+
+    identity = _identity(tmp_path)
+    with pytest.raises(stage.StageRefused) as refusal:
+        dataclasses.replace(identity, **{field: value})
+    assert refusal.value.code == "identity-not-built-for-the-lease"
+
+
+def test_staging_refuses_an_identity_built_for_another_host(
+    tmp_path: pathlib.Path,
+) -> None:
+    target = FakeTarget()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _stage(target, tmp_path, identity=_identity(tmp_path, host="host-b"))
+    assert refusal.value.code == "identity-built-for-another-lease"
+    assert not target.commands
+
+
+def test_staging_refuses_a_bare_identity(tmp_path: pathlib.Path) -> None:
+    target = FakeTarget()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _stage(target, tmp_path, identity="/run/key")
+    assert refusal.value.code == "ssh-identity-required"
+    assert not target.commands
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "code"),
+    [
+        ({"host": "host-b"}, "identity-built-for-another-lease"),
+        ({"run": "run-2"}, "identity-built-for-another-lease"),
+    ],
+)
+def test_launch_refuses_an_identity_built_for_another_host_or_run(
+    tmp_path: pathlib.Path, kwargs: dict, code: str
+) -> None:
+    identity = _identity(tmp_path, **kwargs)
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(tmp_path, identity=identity)  # launch is for host-a / run-1
+    assert refusal.value.code == code
+
+
+def test_launch_refuses_a_bare_identity(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(tmp_path, identity="/run/key", skew=_proof(tmp_path))
+    assert refusal.value.code == "ssh-identity-required"
+
+
+def test_an_identity_changed_in_place_is_caught_at_use(tmp_path: pathlib.Path) -> None:
+    identity = _identity(tmp_path)
+    object.__setattr__(identity, "host_id", "host-b")
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(tmp_path, identity=identity, host_id="host-b", skew=_proof(tmp_path))
+    assert refusal.value.code == "identity-not-built-for-the-lease"

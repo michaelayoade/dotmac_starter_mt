@@ -90,6 +90,9 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
             vm_alias=stage_tests.ALIAS,
             machine_id=MACHINE,
         ),
+        "execution_context": stage_tests._file(
+            json.dumps({"host_enrolment_ref": e10_support.ENROLMENT_UUID}).encode()
+        ),
         "store": store,
         "held": held,
         "plan": _plan(),
@@ -1065,3 +1068,60 @@ def test_a_record_write_failure_alone_propagates_as_itself(
     monkeypatch.setattr(launcher.launcher_lease, "write_terminal_records", disk_full)
     with pytest.raises(OSError):
         _conclude(tmp_path, launcher.DriveResult(terminal=None))
+
+
+# ── L1 / L2a: machine id and enrolment are checked before anything is sent ──
+
+
+def _sends_nothing(ends, inputs) -> launcher.DriveResult:
+    seen: dict[str, Any] = {}
+
+    def script(chan: Channel) -> None:
+        try:
+            chan.receive("start", timeout=0.3)
+        except channel_module.ChannelTimeout:
+            seen["no_start"] = True
+
+    result = _run(ends, inputs, script)
+    assert seen["no_start"] is True
+    assert result.ready_seen is False
+    return result
+
+
+def test_a_receipt_whose_machine_id_is_not_the_plans_sends_nothing(
+    ends, tmp_path
+) -> None:
+    result = _sends_nothing(
+        ends, _inputs(tmp_path, plan=_plan(expected_machine_id="f" * 32))
+    )
+    assert result.refusal_code == "receipt-machine-id-mismatch"
+
+
+def test_a_context_naming_another_enrolment_sends_nothing(ends, tmp_path) -> None:
+    other = json.dumps(
+        {"host_enrolment_ref": "11111111-2222-4333-8444-555555555555"}
+    ).encode()
+    result = _sends_nothing(
+        ends, _inputs(tmp_path, execution_context=stage_tests._file(other))
+    )
+    assert result.refusal_code == "receipt-enrolment-mismatch"
+
+
+@pytest.mark.parametrize(
+    ("content", "code"),
+    [
+        (b"{}", "execution-context-enrolment-missing"),
+        (b"not json", "execution-context-unreadable"),
+    ],
+)
+def test_an_unusable_staged_context_sends_nothing(
+    ends, tmp_path, content: bytes, code: str
+) -> None:
+    result = _sends_nothing(
+        ends, _inputs(tmp_path, execution_context=stage_tests._file(content))
+    )
+    assert result.refusal_code == code
+
+
+def test_the_enrolment_is_checked_against_the_context_that_is_staged() -> None:
+    assert "execution_context" in launcher.DriveInputs.__slots__

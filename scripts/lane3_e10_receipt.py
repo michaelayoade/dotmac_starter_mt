@@ -27,6 +27,7 @@ import base64
 import binascii
 import dataclasses
 import hashlib
+import json
 import re
 import uuid
 from datetime import datetime
@@ -35,6 +36,7 @@ from typing import Final
 __all__ = [
     "E10ReceiptRef",
     "ReceiptRefused",
+    "require_enrolment_matches",
     "validate_incarnation_fingerprint",
 ]
 
@@ -61,7 +63,14 @@ def validate_incarnation_fingerprint(value: object) -> str:
 
 
 def _raw_public_key(value: object) -> bytes:
-    """A canonical unpadded base64url 32-byte key, as Control reads one."""
+    """A canonical unpadded base64url 32-byte key, in the form Control reads.
+
+    Control's `PublicKeyFingerprintV1.from_public_key_b64` (Control `digests.py`,
+    the host-attester enrolment's `public_key_b64`) refuses a padded key and
+    requires the canonical unpadded base64url spelling, so that is the ONLY
+    spelling accepted here. The same 32 bytes in padded or standard base64 are a
+    different string and are refused.
+    """
     if not isinstance(value, str) or not value or "=" in value:
         raise ReceiptRefused("incarnation-public-key-invalid")
     try:
@@ -131,13 +140,15 @@ class E10ReceiptRef:
         alias: str,
         expected_host_incarnation: str,
         host_id: str,
+        machine_id: str,
         store_time: datetime,
     ) -> None:
         """Refuse unless the receipt agrees with every independent input.
 
         `ssh_fingerprint` and `alias` come from the pinned host key,
         `expected_host_incarnation` from its own typed input, `host_id` from the
-        held lease, and `store_time` from the lease store. The incarnation private
+        held lease, `machine_id` from the session plan (`expected_machine_id`) and
+        `store_time` from the lease store. The incarnation private
         key must have been destroyed no later than the store's time.
         """
         validate_incarnation_fingerprint(expected_host_incarnation)
@@ -149,5 +160,35 @@ class E10ReceiptRef:
             raise ReceiptRefused("receipt-incarnation-mismatch")
         if host_id != self.host_id:
             raise ReceiptRefused("receipt-host-id-mismatch")
+        if machine_id != self.machine_id:
+            raise ReceiptRefused("receipt-machine-id-mismatch")
         if self.incarnation_key_destroyed_at > store_time:
             raise ReceiptRefused("incarnation-key-not-destroyed-before-launch")
+
+
+MAX_CONTEXT_BYTES: Final = 1024 * 1024
+
+
+def require_enrolment_matches(execution_context: bytes, receipt: E10ReceiptRef) -> None:
+    """The receipt's enrolment UUID must be the staged context's `host_enrolment_ref`.
+
+    `execution_context` is the exact `execution-context.json` the launcher stages
+    (CP `materials_producer.CONTEXT_KEYS` carries `host_enrolment_ref`), so the
+    enrolment the receipt says the incarnation key was enrolled under is the one
+    the authorization is issued for.
+    """
+    if not isinstance(execution_context, bytes) or not (
+        0 < len(execution_context) <= MAX_CONTEXT_BYTES
+    ):
+        raise ReceiptRefused("execution-context-unreadable")
+    try:
+        document = json.loads(execution_context)
+    except ValueError:
+        raise ReceiptRefused("execution-context-unreadable") from None
+    if not isinstance(document, dict):
+        raise ReceiptRefused("execution-context-unreadable")
+    reference = document.get("host_enrolment_ref")
+    if not isinstance(reference, str) or not reference:
+        raise ReceiptRefused("execution-context-enrolment-missing")
+    if reference != receipt.enrolment_uuid:
+        raise ReceiptRefused("receipt-enrolment-mismatch")

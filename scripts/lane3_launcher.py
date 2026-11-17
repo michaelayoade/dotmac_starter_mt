@@ -100,6 +100,9 @@ class DriveInputs:
     #: SSH pin, and the E10 receipt is what links the two.
     expected_host_incarnation: str
     e10: lane3_e10_receipt.E10ReceiptRef
+    #: The exact `execution-context.json` that was staged: its
+    #: `host_enrolment_ref` must be the receipt's enrolment UUID.
+    execution_context: lane3_stage.StagedFile
     store: lane3_lease_store.LeaseStore
     held: lane3_lease_store.HeldLease
     plan: SessionPlan
@@ -202,7 +205,11 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
                 alias=inputs.pin.alias,
                 expected_host_incarnation=inputs.expected_host_incarnation,
                 host_id=held.lease.target,
+                machine_id=inputs.plan.expected_machine_id,
                 store_time=store_time,
+            )
+            lane3_e10_receipt.require_enrolment_matches(
+                inputs.execution_context.data, inputs.e10
             )
         except lane3_e10_receipt.ReceiptRefused as exc:
             result.refusal_code = exc.code
