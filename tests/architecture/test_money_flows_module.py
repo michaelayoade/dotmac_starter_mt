@@ -766,9 +766,7 @@ def test_real_package_references_no_forbidden_or_restricted_owner_call() -> None
         "ApplyAvailableCreditCommand",
     }
     assert RESTRICTED_CALLERS["apply_available_credit"] == frozenset({"settle.py"})
-    assert RESTRICTED_CALLERS["ApplyAvailableCreditCommand"] == frozenset(
-        {"settle.py"}
-    )
+    assert RESTRICTED_CALLERS["ApplyAvailableCreditCommand"] == frozenset({"settle.py"})
     for callers in RESTRICTED_CALLERS.values():
         for relative in callers:
             assert (MODULE_ROOT / relative).is_file(), relative
