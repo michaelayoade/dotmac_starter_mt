@@ -21,7 +21,8 @@ is cut before it is reported.
 `--import` names the consumer module that registers its render contexts (a
 context the process has not registered is itself reported as a failure, so an
 omitted import cannot pass silently). Exit status is 0 when every revision
-validates, 1 on any failure, 2 on a usage or setup error.
+validates, 1 when any revision fails, 2 when a tenant could not be checked or on a
+usage or setup error.
 """
 
 from __future__ import annotations
@@ -57,17 +58,21 @@ class DeployCheckReport:
     tenants_checked: int = 0
     revisions_checked: int = 0
     failures: list[RevisionFailure] = field(default_factory=list)
+    # Tenants that could not be checked at all: (tenant_id, exception type name).
+    errors: list[tuple[UUID, str]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return not self.failures
+        return not self.failures and not self.errors
 
     def lines(self) -> list[str]:
         out = [
             f"template-studio deploy check: {self.tenants_checked} tenant(s), "
             f"{self.revisions_checked} published revision(s), "
-            f"{len(self.failures)} failing"
+            f"{len(self.failures)} failing, {len(self.errors)} tenant(s) not checked"
         ]
+        for tenant_id, kind in self.errors:
+            out.append(f"ERROR tenant={tenant_id} could not be checked ({kind})")
         for f in self.failures:
             out.append(f"FAIL tenant={f.tenant_id} {f.slug}/{f.channel} v{f.version}")
             out.extend(f"  - {p}" for p in f.problems)
@@ -126,8 +131,12 @@ def check_published_revisions(
     """
     report = DeployCheckReport()
     for tenant_id in list(list_tenant_ids()):
-        with tenant_session(tenant_id) as db:
-            checked, failures = check_tenant(db, tenant_id)
+        try:
+            with tenant_session(tenant_id) as db:
+                checked, failures = check_tenant(db, tenant_id)
+        except Exception as exc:  # one tenant must not hide the others
+            report.errors.append((tenant_id, type(exc).__name__))
+            continue
         report.tenants_checked += 1
         report.revisions_checked += checked
         report.failures.extend(failures)
@@ -177,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
         list_tenant_ids=list_tenant_ids, tenant_session=tenant_session
     )
     print("\n".join(report.lines()))
+    if report.errors:
+        return 2
     return 0 if report.ok else 1
 
 

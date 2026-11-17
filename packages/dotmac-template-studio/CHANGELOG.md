@@ -42,10 +42,18 @@ Still source-only at the `0.2.0a6+dev` marker.
   resolver session and reading each inside its own `tenant_session`. Reports
   slug, channel, revision and problems, never content; exits 1 on any failure.
   Run it before bumping this package's pin.
-- A subject now refuses only control characters (Cc), line breaks and bidi
-  embedding/override/isolate controls (U+202A-202E, U+2066-2069), plus the
-  width-less ZWSP, word joiner and BOM. ZWNJ, ZWJ, the soft hyphen and
-  LRM/RLM/ALM are accepted, at save and at render.
+- A subject now refuses control characters (Cc), line breaks, bidi controls and
+  every format character (Cf) EXCEPT an explicit allowlist (`SUBJECT_ALLOWED_FORMAT`:
+  U+00AD, U+200C, U+200D, U+200E, U+200F, U+061C), at save and at render. This
+  admits ZWNJ, ZWJ and the soft hyphen in names while Unicode tag characters,
+  invisible operators and the width-less spaces stay refused.
+- `publish_version` and `restore_version` re-run `validate_revision` against the
+  CURRENT context and refuse a revision that no longer validates. While the
+  maker-checker setting is on, a revision with no recorded author cannot be
+  published; the rule compares the original author only (editing someone else's
+  draft does not change it).
+- Deploy check: a tenant that cannot be checked is reported (exception type only)
+  and the run continues; exit 2 if any tenant errored, 1 if any revision failed.
 
 Source change only: the declared version stays at the `0.2.0a6+dev` development marker (not a release) (ADR-0006 § 5h, § 5i).
 

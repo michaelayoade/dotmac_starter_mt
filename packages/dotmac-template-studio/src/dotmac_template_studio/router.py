@@ -277,7 +277,6 @@ def publish_version(
             details={
                 "template_id": str(template_id),
                 "version": version,
-                "setting": "require_separate_publisher",
             },
         )
         return JSONResponse(status_code=409, content={"detail": str(exc)})

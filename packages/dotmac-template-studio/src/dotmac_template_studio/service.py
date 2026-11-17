@@ -59,7 +59,7 @@ from uuid import UUID
 
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.flag_models import resolve_flag
-from dotmac_kernel.settings_resolver import resolve as resolve_setting
+from dotmac_kernel.settings_resolver import resolve_value
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -85,7 +85,7 @@ from dotmac_template_studio.rendering import (
     render as _render,
 )
 from dotmac_template_studio.sections import TemplateSyntaxError
-from dotmac_template_studio.settings import REQUIRE_SEPARATE_PUBLISHER
+from dotmac_template_studio.settings import TEMPLATE_STUDIO_DOMAIN
 from dotmac_template_studio.validation import check_revision
 
 # Double-brace tokens, for save-time REJECTION only. Never rendered.
@@ -486,7 +486,17 @@ class PublishRefusedError(ConflictError):
 
 def maker_checker_enabled(db: Session, tenant_id: UUID) -> bool:
     """Whether this tenant requires a publisher other than the author."""
-    return bool(resolve_setting(db, REQUIRE_SEPARATE_PUBLISHER, tenant_id=tenant_id))
+    # By key, the dynamic path every settings reader uses; coercion to the spec's
+    # boolean type happens in the resolver and a bad stored value degrades to the
+    # default (off).
+    value = resolve_value(
+        db,
+        TEMPLATE_STUDIO_DOMAIN,
+        "require_separate_publisher",
+        tenant_id=tenant_id,
+        default=False,
+    )
+    return value is True
 
 
 def publish_version(
@@ -503,7 +513,12 @@ def publish_version(
     the party who authored a revision may not be the one who FIRST publishes it
     (`PublishRefusedError`). Re-publishing a revision that was published before
     is a rollback and is not blocked: it was already approved once, and an
-    incident rollback must not wait for a second person. `actor_party_id=None`
+    incident rollback must not wait for a second person. While the setting is on,
+    a revision with no recorded author is refused too. Editing a draft does not
+    record the editor, so the rule compares the original author only.
+
+    A revision that fails `validate_revision` against the CURRENT context cannot
+    be published (or restored). `actor_party_id=None`
     is an in-process system caller with no author to match (seeding).
     """
     template = get_template(db, tenant_id, template_id)
@@ -511,18 +526,39 @@ def publish_version(
     if (
         revision.published_at is None
         and actor_party_id is not None
-        and revision.author_party_id == actor_party_id
         and maker_checker_enabled(db, tenant_id)
     ):
-        raise PublishRefusedError(
-            f"version {version} was authored by you and this workspace requires a "
-            "different person to publish it"
-        )
+        if revision.author_party_id is None:
+            raise PublishRefusedError(
+                f"version {version} has no recorded author, so this workspace "
+                "cannot confirm a different person is publishing it"
+            )
+        if revision.author_party_id == actor_party_id:
+            raise PublishRefusedError(
+                f"version {version} was authored by you and this workspace "
+                "requires a different person to publish it"
+            )
+    _require_valid_for_live(template, revision)
     if revision.published_at is None:
         revision.published_at = datetime.now(UTC)
     template.published_version = version
     db.flush()
     return revision
+
+
+def _require_valid_for_live(template: Template, revision: TemplateVersion) -> None:
+    """Refuse to make a revision live if it no longer validates.
+
+    A rule may have tightened, or the context changed, since it was saved or
+    last published; going live is the moment that must not be skipped.
+    """
+    check_revision(
+        get_context(template.context),
+        subject=revision.subject,
+        text=revision.body,
+        html=revision.html_body,
+        kind_hint="version cannot go live:",
+    )
 
 
 def restore_version(
@@ -544,6 +580,7 @@ def restore_version(
     previous = template.published_version
     if previous == version:
         raise ConflictError(f"version {version} is already the published version")
+    _require_valid_for_live(template, revision)
     template.published_version = version
     db.flush()
     return revision, previous

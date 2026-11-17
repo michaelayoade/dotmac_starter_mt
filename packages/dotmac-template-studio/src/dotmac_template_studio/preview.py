@@ -7,9 +7,10 @@ where Jinja's autoescape attribute-escapes it. The iframe itself is emitted with
 an empty `sandbox` attribute (every restriction on: no scripts, no same-origin,
 no forms, no popups, no top navigation).
 
-Layers, any one of which already stops script execution:
+Layers (2 and 3 each independently stop script execution):
 
-1. the html passed the nh3 allowlist at save and again at render;
+1. the html passed the nh3 allowlist at SAVE (the render step scans placeholder
+   positions but does not re-sanitize, so a legacy row is only caught by 2 and 3);
 2. the iframe is sandboxed without `allow-scripts` or `allow-same-origin`;
 3. this CSP: `default-src 'none'` (no script, frame, connect, font, media),
    images only over http(s)/data, inline styles only, no `<base>`, no forms.

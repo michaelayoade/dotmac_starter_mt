@@ -129,10 +129,11 @@ def check_url(value: str) -> str:
 
 
 _SUBJECT_BREAKS = frozenset("\x7f\x85\u2028\u2029")
-# Invisible, width-less characters a name never needs (unlike ZWNJ/ZWJ/soft
-# hyphen): zero-width space, word joiner, BOM/zero-width no-break space. Kept
-# refused so a subject cannot hide text; see `subject_problem`.
-_SUBJECT_INVISIBLE = frozenset("\u200b\u2060\ufeff")
+# The ONLY format characters (Cf) a subject may carry: soft hyphen, ZWNJ, ZWJ
+# (needed in real names) and LRM, RLM, ALM (a deliberate allowance, S2). Every
+# other Cf is refused: Unicode tag characters, invisible operators, interlinear
+# annotation controls and the width-less spaces can all hide text.
+SUBJECT_ALLOWED_FORMAT = frozenset("\u00ad\u200c\u200d\u200e\u200f\u061c")
 
 
 def subject_problem(text: str) -> str | None:
@@ -143,17 +144,17 @@ def subject_problem(text: str) -> str | None:
     header line or be interpreted as one by a downstream component. Bidi
     embedding/override/isolate controls are refused too (display spoofing).
 
-    Other format characters (Cf) are ACCEPTED: ZWNJ, ZWJ and the soft hyphen are
-    needed in real names, and LRM/RLM/ALM are a deliberate allowance (S2). Only
-    the width-less ZWSP, word joiner and BOM stay refused.
+    Format characters (Cf) are refused EXCEPT the explicit allowlist
+    `SUBJECT_ALLOWED_FORMAT`: ZWNJ, ZWJ and the soft hyphen are needed in real
+    names, and LRM/RLM/ALM are a deliberate allowance (S2).
     """
     for ch in text:
         if (
             ord(ch) < 0x20
             or ch in _SUBJECT_BREAKS
             or ch in _BIDI_CONTROLS
-            or ch in _SUBJECT_INVISIBLE
             or unicodedata.category(ch) == "Cc"
+            or (unicodedata.category(ch) == "Cf" and ch not in SUBJECT_ALLOWED_FORMAT)
         ):
             return f"contains the control or line-break character U+{ord(ch):04X}"
     return None

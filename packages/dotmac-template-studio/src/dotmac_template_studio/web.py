@@ -515,25 +515,31 @@ def version_test_send(
     elif not _test_send_allowed(tenant.id, party.id):
         outcome, error = "rate_limited", "Too many test sends; try again later."
     else:
+        # The product's sender runs inside a savepoint: if it fails at the
+        # database level the savepoint is rolled back, the session stays usable
+        # and the audit row below is still written.
+        message = None
+        savepoint = db.begin_nested()
         try:
             rendered = service.render_preview(db, tenant.id, template_id, version)
-            sender(
-                db,
-                delivery_seam.OwnAddressTestMessage(
-                    tenant_id=tenant.id,
-                    recipient_party_id=party.id,
-                    recipient_email=party.email,
-                    channel=template_record.channel,
-                    template_slug=template_record.slug,
-                    template_version=version,
-                    subject=rendered.subject,
-                    text=rendered.text,
-                    html=rendered.html,
-                ),
+            message = delivery_seam.OwnAddressTestMessage(
+                tenant_id=tenant.id,
+                recipient_party_id=party.id,
+                recipient_email=party.email,
+                channel=template_record.channel,
+                template_slug=template_record.slug,
+                template_version=version,
+                subject=rendered.subject,
+                text=rendered.text,
+                html=rendered.html,
             )
+            sender(db, message)
+            savepoint.commit()
         except BadRequestError as exc:
+            savepoint.rollback()
             outcome, error = "refused", str(exc)
         except Exception:  # the product's delivery owner failed; no detail leaks
+            savepoint.rollback()
             outcome, error = "failed", "The test message could not be sent."
         else:
             notice = "A test message was sent to your own address."
@@ -644,7 +650,6 @@ async def version_publish(
             {
                 "template_id": str(template_id),
                 "version": version,
-                "setting": "require_separate_publisher",
             },
         )
     except (NotFoundError, ConflictError) as exc:

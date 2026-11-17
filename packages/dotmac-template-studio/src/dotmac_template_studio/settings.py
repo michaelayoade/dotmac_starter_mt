@@ -26,8 +26,11 @@ REQUIRE_SEPARATE_PUBLISHER: SettingSpec[bool] = SettingSpec(
     label="Require a different person to publish a template",
     description=(
         "When on, the person who authored a template version cannot be the one "
-        "who first publishes it. Rolling back to a version that was already "
-        "published is not affected. Off by default."
+        "who first publishes it. Drafts with no recorded author cannot be "
+        "published while this is on. Only the original author is compared: "
+        "editing someone else's draft does not change who counts as its "
+        "author. Rolling back to a version that was already published is not "
+        "affected. Off by default."
     ),
 )
 

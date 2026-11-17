@@ -825,3 +825,152 @@ def test_public_surface_exposes_the_seam():
     import dotmac_template_studio as studio
 
     assert studio.configure_test_send is delivery_seam.configure_test_send
+
+
+# ── Review fixes ────────────────────────────────────────────────────────────
+
+
+def test_subject_accepts_exactly_six_format_characters():
+    import sys
+    import unicodedata
+
+    from dotmac_template_studio.rendering import SUBJECT_ALLOWED_FORMAT
+
+    expected = {"­", "‌", "‍", "‎", "‏", "؜"}
+    assert set(SUBJECT_ALLOWED_FORMAT) == expected
+    accepted = set()
+    for cp in range(sys.maxunicode + 1):
+        ch = chr(cp)
+        if unicodedata.category(ch) == "Cf" and subject_problem(f"a{ch}b") is None:
+            accepted.add(ch)
+    assert accepted == expected
+
+
+def test_subject_value_with_tag_characters_is_refused_at_render():
+    with pytest.raises(RenderRefusedError):
+        render_part(
+            "{customer_name}",
+            {"customer_name": "Invoice\U000e0041"},
+            "subject",
+            context=CTX,
+        )
+
+
+def test_publish_revalidates_against_current_rules(db, tenant_row, template):
+    v = _draft(db, tenant_row, template)
+    v.body = "{nope}"  # stands in for a rule tightened since save
+    db.flush()
+    with pytest.raises(BadRequestError, match="cannot go live"):
+        service.publish_version(db, tenant_row.id, template.id, v.version)
+    assert template.published_version is None
+
+
+def test_restore_revalidates_against_current_rules(db, tenant_row, template):
+    v1 = _draft(db, tenant_row, template)
+    service.publish_version(db, tenant_row.id, template.id, v1.version)
+    v2 = _draft(db, tenant_row, template)
+    service.publish_version(db, tenant_row.id, template.id, v2.version)
+    v1.body = "{nope} {{double}}"
+    db.flush()
+    with pytest.raises(BadRequestError, match="cannot go live"):
+        service.restore_version(db, tenant_row.id, template.id, v1.version)
+    assert template.published_version == v2.version
+
+
+def test_maker_checker_on_refuses_null_author_off_allows_it(
+    db, tenant_row, template, author
+):
+    v = _draft(db, tenant_row, template, None)
+    # Setting off (default): a sole operator can publish a draft with no author.
+    service.publish_version(
+        db, tenant_row.id, template.id, v.version, actor_party_id=author.id
+    )
+    assert template.published_version == v.version
+    v2 = _draft(db, tenant_row, template, None)
+    _turn_on(db, tenant_row)
+    with pytest.raises(service.PublishRefusedError, match="no recorded author"):
+        service.publish_version(
+            db, tenant_row.id, template.id, v2.version, actor_party_id=author.id
+        )
+
+
+def test_setting_description_states_the_edit_limitation():
+    assert "editing someone else" in REQUIRE_SEPARATE_PUBLISHER.description
+
+
+def test_deploy_check_continues_past_a_failing_tenant_and_exits_2(
+    db, tenant_row, template, monkeypatch
+):
+    v = _draft(db, tenant_row, template)
+    service.publish_version(db, tenant_row.id, template.id, v.version)
+    bad = uuid4()
+
+    @contextmanager
+    def tenant_session(tid):
+        if tid == bad:
+            raise RuntimeError("secret detail must not be printed")
+        yield db
+
+    report = deploycheck.check_published_revisions(
+        list_tenant_ids=lambda: [bad, tenant_row.id], tenant_session=tenant_session
+    )
+    assert report.errors == [(bad, "RuntimeError")]
+    assert report.tenants_checked == 1 and report.revisions_checked == 1
+    assert not report.ok
+    text = "\n".join(report.lines())
+    assert "RuntimeError" in text and "secret detail" not in text
+
+    monkeypatch.setattr(
+        deploycheck,
+        "_runtime_seams",
+        lambda: (lambda: [bad, tenant_row.id], tenant_session),
+    )
+    assert deploycheck.main([]) == 2
+
+
+def test_test_send_db_failure_in_sender_still_audited(
+    client, cookies, db, tenant_row, template
+):
+    from sqlalchemy import text
+
+    def broken(db_, message):
+        db_.execute(text("select * from table_that_does_not_exist"))
+
+    delivery_seam.configure_test_send(broken)
+    v = _draft(db, tenant_row, template)
+    resp = client.post(
+        _url(template, "versions", v.version, "test-send"), cookies=cookies
+    )
+    assert resp.status_code == 200 and "could not be sent" in resp.text
+    assert "template_studio.version.test_send" in _audit_actions(db)
+
+
+def test_tenant_a_cannot_preview_or_restore_tenant_b_version(
+    client, cookies, db, tenant_row
+):
+    from dotmac_kernel.exceptions import NotFoundError
+
+    b = Tenant(slug=f"b-{uuid4().hex[:6]}", name="B")
+    db.add(b)
+    db.flush()
+    tb = service.create_template(
+        db, b.id, slug="theirs", channel="email", context="ed", name="Theirs"
+    )
+    vb1 = service.create_version(db, b.id, tb.id, body=TEXT)
+    service.publish_version(db, b.id, tb.id, vb1.version)
+    vb2 = service.create_version(db, b.id, tb.id, body=TEXT + " v2")
+    service.publish_version(db, b.id, tb.id, vb2.version)
+    with pytest.raises(NotFoundError):
+        service.render_preview(db, tenant_row.id, tb.id, vb1.version)
+    with pytest.raises(NotFoundError):
+        service.restore_version(db, tenant_row.id, tb.id, vb1.version)
+    got = client.get(_url(tb, "versions", vb1.version), cookies=cookies)
+    assert got.status_code == 404
+    done = client.post(
+        _url(tb, "versions", vb1.version, "restore"),
+        cookies=cookies,
+        data={"confirm": "yes"},
+    )
+    assert "Restored" not in done.text
+    db.refresh(tb)
+    assert tb.published_version == vb2.version
