@@ -8,6 +8,7 @@ Needs ``TEST_DATABASE_URL`` (skips otherwise, like the other Billing plane proof
 
 from __future__ import annotations
 
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -273,7 +274,7 @@ def test_a_caller_supplied_recorded_at_is_overwritten_by_the_database(plane):
 
 
 @pytest.mark.parametrize("plane", PLANES)
-def test_effective_from_is_unique_per_account_and_per_tenant_default(plane):
+def test_exact_retry_at_the_same_effective_from_is_refused(plane):
     with _plane(plane) as (_admin, url, scope):
         base = _base()
         with _session(url, scope) as session:
@@ -292,11 +293,152 @@ def test_effective_from_is_unique_per_account_and_per_tenant_default(plane):
             assert dup_default.value.code == "billing.terms_version_exists"
             with pytest.raises(BillingConflict) as dup_account:
                 record_account_terms(
-                    session,
-                    command=_terms(scope, first.id, base, contract_type="prepaid"),
+                    session, command=_terms(scope, first.id, base, period="daily")
                 )
             assert dup_account.value.code == "billing.terms_version_exists"
             session.rollback()
+
+
+@pytest.mark.parametrize("plane", PLANES)
+def test_a_later_recorded_version_supersedes_a_future_one(plane):
+    with _plane(plane) as (_admin, url, scope):
+        prefix = _prefix(plane)
+        base = _base()
+        later = base + timedelta(days=10)
+        with _session(url, scope) as session:
+            account = _account(session, scope)
+            record_default_terms(session, command=_default(scope, base))
+            record_default_terms(
+                session, command=_default(scope, later, period="daily")
+            )
+            wrong = record_account_terms(
+                session,
+                command=_terms(
+                    scope,
+                    account.id,
+                    later,
+                    period="annually",
+                    postpaid_grace=timedelta(days=9),
+                ),
+            )
+            right = record_account_terms(
+                session,
+                command=_terms(scope, account.id, later, contract_type="prepaid"),
+            )
+            session.commit()
+            assert right.recorded_at > wrong.recorded_at
+            # both rows stay (append-only)
+            rows = session.execute(
+                text(
+                    f"SELECT count(*) FROM mod_billing.{prefix}"
+                    "billing_account_terms_versions"
+                )
+            ).scalar_one()
+            assert rows == 2
+            # the superseding version replaces the earlier one wholly: period and
+            # grace fall back to the default, not to the superseded row
+            at_later = get_effective_account_terms(
+                session, scope=scope, account_id=account.id, at=later
+            )
+            assert at_later.contract_type.source == "customer"
+            assert at_later.contract_type.version_id == right.id
+            assert at_later.period.value == "daily"
+            assert at_later.period.source == "default"
+            assert at_later.postpaid_grace.value == timedelta(days=3)
+            assert at_later.postpaid_grace.source == "default"
+            # an instant between the versions: no account version yet
+            between = get_effective_account_terms(
+                session,
+                scope=scope,
+                account_id=account.id,
+                at=later - timedelta(seconds=1),
+            )
+            assert between.contract_type.source == "default"
+            assert between.period.value == "monthly"
+            # a third supersede wins again; the id/recorded_at order is stable
+            third = record_account_terms(
+                session, command=_terms(scope, account.id, later, period="quarterly")
+            )
+            session.commit()
+            resolved = get_effective_account_terms(
+                session, scope=scope, account_id=account.id, at=later
+            )
+            assert resolved.period.version_id == third.id
+            assert resolved.contract_type.source == "default"
+
+
+@pytest.mark.parametrize("plane", PLANES)
+def test_the_default_can_be_superseded_before_it_takes_effect(plane):
+    with _plane(plane) as (_admin, url, scope):
+        base = _base()
+        with _session(url, scope) as session:
+            account = _account(session, scope)
+            record_default_terms(session, command=_default(scope, base))
+            fixed = record_default_terms(
+                session, command=_default(scope, base, period="quarterly")
+            )
+            session.commit()
+            resolved = get_effective_account_terms(
+                session, scope=scope, account_id=account.id, at=base
+            )
+            assert resolved.period.value == "quarterly"
+            assert resolved.period.version_id == fixed.id
+
+
+@pytest.mark.parametrize("plane", PLANES)
+def test_a_version_already_in_effect_cannot_be_superseded(plane):
+    with _plane(plane) as (_admin, url, scope):
+        soon = datetime.now(UTC) + timedelta(seconds=2)
+        with _session(url, scope) as session:
+            account = _account(session, scope)
+            record_default_terms(session, command=_default(scope, soon))
+            record_account_terms(
+                session, command=_terms(scope, account.id, soon, period="daily")
+            )
+            session.commit()
+            time.sleep(max((soon - datetime.now(UTC)).total_seconds(), 0) + 0.2)
+            with pytest.raises(BillingRuleViolation) as one:
+                record_default_terms(
+                    session, command=_default(scope, soon, period="annually")
+                )
+            assert one.value.code == "billing.terms_back_dated"
+            with pytest.raises(BillingRuleViolation) as two:
+                record_account_terms(
+                    session,
+                    command=_terms(scope, account.id, soon, period="annually"),
+                )
+            assert two.value.code == "billing.terms_back_dated"
+            resolved = get_effective_account_terms(
+                session, scope=scope, account_id=account.id, at=soon
+            )
+            assert resolved.period.value == "daily"
+
+
+@pytest.mark.parametrize("plane", PLANES)
+def test_uniqueness_is_effective_from_and_recorded_at_by_constraint_name(plane):
+    with _plane(plane) as (admin_url, _url, _scope):
+        prefix = _prefix(plane)
+        engine = create_engine(admin_url)
+        with engine.connect() as connection:
+            for table in (
+                "billing_account_terms_versions",
+                "billing_terms_defaults_versions",
+            ):
+                name = f"{prefix}{table}"
+                columns = connection.execute(
+                    text(
+                        "SELECT array_agg(a.attname::text ORDER BY a.attname) "
+                        "FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+                        "JOIN pg_namespace n ON n.oid = t.relnamespace "
+                        "JOIN pg_attribute a ON a.attrelid = t.oid "
+                        "AND a.attnum = ANY (c.conkey) "
+                        "WHERE n.nspname = 'mod_billing' AND t.relname = :t "
+                        "AND c.conname = :c"
+                    ),
+                    {"t": name, "c": f"uq_{name}_effective"},
+                ).scalar_one()
+                assert {"effective_from", "recorded_at"} <= set(columns)
+        engine.dispose()
 
 
 @pytest.mark.parametrize("plane", PLANES)

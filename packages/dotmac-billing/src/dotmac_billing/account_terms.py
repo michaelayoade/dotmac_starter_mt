@@ -11,6 +11,19 @@ change dated mid-period only affects periods that start after it. Back-dating is
 refused by the database (``effective_from`` may not precede the DB recording
 instant). Commands run in the caller's transaction and never commit.
 
+Correction: a version that has not yet taken effect may be corrected by recording a
+new version at the same ``effective_from``; at one ``effective_from`` only the latest
+recorded version counts (``recorded_at`` desc, then ``id`` desc) and it replaces the
+earlier one wholly. Both rows stay (append-only). A version already in effect cannot
+be superseded because the new row would be back-dated. Re-recording identical terms at
+the same ``effective_from`` is an exact retry and is refused
+(``terms_version_exists``).
+
+Cutover order: record the tenant default and each migrated account's terms BEFORE the
+flip, with ``effective_from`` = the flip instant; a caller that is already live always
+sends a future ``effective_from`` (e.g. the next period start). Terms cannot be
+back-dated.
+
 Resolution at instant ``at``: the account's latest version with
 ``effective_from <= at`` is that account's statement of overrides; each term it
 leaves NULL, and every term when the account has no such version, comes from the
@@ -28,6 +41,7 @@ from typing import Any, Generic, Literal, TypeVar, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
+from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -222,19 +236,46 @@ def _require_account(db: Session, scope: Scope, account_id: UUID) -> None:
         )
 
 
-def _append(db: Session, scope: Scope, row: Any) -> TermsVersionRefV1:
+_TERM_FIELDS = (
+    "contract_type",
+    "period",
+    "postpaid_billing_timing",
+    "postpaid_grace",
+)
+
+
+def _same_terms(latest: Any, row: Any) -> bool:
+    return all(getattr(latest, name) == getattr(row, name) for name in _TERM_FIELDS)
+
+
+def _unique_constraint(table: str) -> str:
+    return f"uq_{table}_effective"
+
+
+def _append(
+    db: Session, scope: Scope, row: Any, *, latest: Any = None
+) -> TermsVersionRefV1:
+    if latest is not None and _same_terms(latest, row):
+        # L2: an exact retry of the current latest version at this instant.
+        raise BillingConflict(
+            "terms_version_exists",
+            "identical terms are already recorded for that effective_from",
+        )
     try:
-        with db.begin_nested():
+        with conflict_savepoint(db):
             db.add(row)
             db.flush()
     except IntegrityError as exc:
-        code = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
-        if code == "23505":
+        orig = exc.orig
+        code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+        constraint = getattr(getattr(orig, "diag", None), "constraint_name", None)
+        if constraint == _unique_constraint(row.__tablename__):
             raise BillingConflict(
                 "terms_version_exists",
                 "terms are already recorded for that effective_from",
             ) from exc
-        if code == "23514" and "back-dated" in str(exc.orig):
+        # The admission trigger raises a bare check_violation (no constraint name).
+        if code == "23514" and "back-dated" in str(orig):
             raise BillingRuleViolation(
                 "terms_back_dated",
                 "terms cannot take effect before the instant they are recorded",
@@ -245,6 +286,24 @@ def _append(db: Session, scope: Scope, row: Any) -> TermsVersionRefV1:
     return TermsVersionRefV1(
         id=row.id, effective_from=row.effective_from, recorded_at=row.recorded_at
     )
+
+
+def _latest_at(db: Session, scope: Scope, model: Any, *where: Any) -> Any:
+    """The superseding version: latest recorded at the latest effective_from."""
+    return db.execute(
+        _scoped(
+            select(model)
+            .where(*where)
+            .order_by(
+                model.effective_from.desc(),
+                model.recorded_at.desc(),
+                model.id.desc(),
+            )
+            .limit(1),
+            scope,
+            model,
+        )
+    ).scalar_one_or_none()
 
 
 def record_account_terms(
@@ -271,7 +330,14 @@ def record_account_terms(
     }
     if isinstance(scope, TenantScope):
         values["tenant_id"] = scope.tenant_id
-    return _append(db, scope, version(**values))
+    latest = _latest_at(
+        db,
+        scope,
+        version,
+        version.billing_account_id == command.billing_account_id,
+        version.effective_from == command.effective_from,
+    )
+    return _append(db, scope, version(**values), latest=latest)
 
 
 def record_default_terms(
@@ -296,7 +362,10 @@ def record_default_terms(
     }
     if isinstance(scope, TenantScope):
         values["tenant_id"] = scope.tenant_id
-    return _append(db, scope, default(**values))
+    latest = _latest_at(
+        db, scope, default, default.effective_from == command.effective_from
+    )
+    return _append(db, scope, default(**values), latest=latest)
 
 
 def get_effective_account_terms(
@@ -315,27 +384,15 @@ def get_effective_account_terms(
     _aware(at, "at")
     _require_account(db, scope, account_id)
     _, version, default = _plane(scope)
-    customer = db.execute(
-        _scoped(
-            select(version)
-            .where(version.billing_account_id == account_id)
-            .where(version.effective_from <= at)
-            .order_by(version.effective_from.desc())
-            .limit(1),
-            scope,
-            version,
-        )
-    ).scalar_one_or_none()
-    base = db.execute(
-        _scoped(
-            select(default)
-            .where(default.effective_from <= at)
-            .order_by(default.effective_from.desc())
-            .limit(1),
-            scope,
-            default,
-        )
-    ).scalar_one_or_none()
+    # Supersede step: at one effective_from only the latest recorded version counts.
+    customer = _latest_at(
+        db,
+        scope,
+        version,
+        version.billing_account_id == account_id,
+        version.effective_from <= at,
+    )
+    base = _latest_at(db, scope, default, default.effective_from <= at)
     if base is None:
         raise BillingRuleViolation(
             "terms_default_missing",

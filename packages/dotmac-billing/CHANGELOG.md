@@ -15,7 +15,7 @@ Account terms (approved 2026-11-16; new owner work). a12 was published (tag
   daily|monthly|quarterly|annually, postpaid billing timing period_start|period_end,
   postpaid grace as an interval; each nullable, NULL = use the tenant default).
   `billing_terms_defaults_versions` holds the tenant default (all four NOT NULL).
-  Unique per (tenant, account, effective_from) and (tenant, effective_from).
+  Unique per (tenant, account, effective_from, recorded_at) and (tenant, effective_from, recorded_at).
   Back-dating is refused in the database: a BEFORE INSERT trigger stamps
   `recorded_at` from the database clock and refuses `effective_from < recorded_at`.
 - `record_account_terms(RecordAccountTermsV1)` and
@@ -29,6 +29,13 @@ Account terms (approved 2026-11-16; new owner work). a12 was published (tag
   (`customer`|`default`) and the version id. No default at `at` refuses
   (`billing.terms_default_missing`). Callers read the terms at the start of the
   period they charge, so Billing needs no period arithmetic.
+- Correction before effect: uniqueness is `(…, effective_from, recorded_at)` on both
+  planes and both tables, so a later-recorded version at the same `effective_from`
+  supersedes the earlier one (both rows stay; resolution takes the latest recorded,
+  then highest id). Identical content at that instant stays refused
+  (`billing.terms_version_exists`); a version already in effect still cannot be
+  superseded (back-dating refusal unchanged). Conflicts use `conflict_savepoint` and
+  map by constraint name. README documents the cutover order.
 - No behaviour change to any existing Billing command.
 
 ## 0.1.0a12 — published 2026-11-12

@@ -2002,7 +2002,11 @@ def _account_terms_args(*, tenant: bool) -> tuple[object, ...]:
             ondelete="RESTRICT",
         ),
         UniqueConstraint(
-            *scope, "billing_account_id", "effective_from", name=f"uq_{table}_effective"
+            *scope,
+            "billing_account_id",
+            "effective_from",
+            "recorded_at",
+            name=f"uq_{table}_effective",
         ),
         *_terms_checks(table, nullable=True),
         schema_table_args(SCHEMA),
@@ -2014,7 +2018,9 @@ def _default_terms_args(*, tenant: bool) -> tuple[object, ...]:
     table = f"{prefix}billing_terms_defaults_versions"
     scope = ["tenant_id"] if tenant else []
     return (
-        UniqueConstraint(*scope, "effective_from", name=f"uq_{table}_effective"),
+        UniqueConstraint(
+            *scope, "effective_from", "recorded_at", name=f"uq_{table}_effective"
+        ),
         *_terms_checks(table, nullable=False),
         schema_table_args(SCHEMA),
     )
