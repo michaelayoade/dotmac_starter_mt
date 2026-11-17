@@ -10,7 +10,10 @@ Two append-only tables, on both planes:
 * ``billing_terms_defaults_versions`` -- the tenant-wide default, one row per
   dated change, every term NOT NULL.
 
-``effective_from`` is unique per account (and per tenant for defaults). Back-dating
+``(effective_from, recorded_at)`` is unique per account (and per tenant for
+defaults): a version recorded later at the same ``effective_from`` supersedes the
+earlier one while both rows stay, so a wrong not-yet-effective version is
+correctable. Resolution (``account_terms.py``) takes the latest recorded. Back-dating
 is refused by the database: a BEFORE INSERT trigger stamps ``recorded_at`` from the
 database clock (a caller-supplied value is overwritten) and refuses a row whose
 ``effective_from`` is earlier than that instant. Rows are never updated or
@@ -127,6 +130,7 @@ def _create_account_terms(platform: bool) -> None:
             *scope,
             "billing_account_id",
             "effective_from",
+            "recorded_at",
             name=f"uq_{table}_effective",
         ),
         *_terms_checks(table, nullable=True),
@@ -154,7 +158,9 @@ def _create_default_terms(platform: bool) -> None:
         sa.Column("effective_from", sa.DateTime(timezone=True), nullable=False),
         *_term_columns(nullable=False),
         *_common_tail(),
-        sa.UniqueConstraint(*scope, "effective_from", name=f"uq_{table}_effective"),
+        sa.UniqueConstraint(
+            *scope, "effective_from", "recorded_at", name=f"uq_{table}_effective"
+        ),
         *_terms_checks(table, nullable=False),
     ]
     if not platform:

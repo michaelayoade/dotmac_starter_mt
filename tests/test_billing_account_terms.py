@@ -153,3 +153,63 @@ def test_read_refuses_naive_instants_and_bad_ids_before_touching_the_database():
             account_id="x",
             at=NOW,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "BillingAccountTermsVersion",
+        "PlatformBillingAccountTermsVersion",
+        "BillingTermsDefaultsVersion",
+        "PlatformBillingTermsDefaultsVersion",
+    ],
+)
+def test_uniqueness_is_by_effective_from_and_recorded_at_on_every_table(model):
+    from dotmac_billing import models
+    from sqlalchemy import UniqueConstraint
+
+    table = getattr(models, model).__table__
+    unique = [
+        c
+        for c in table.constraints
+        if isinstance(c, UniqueConstraint) and c.name == f"uq_{table.name}_effective"
+    ]
+    assert len(unique) == 1
+    assert {"effective_from", "recorded_at"} <= {c.name for c in unique[0].columns}
+
+
+def test_exact_retry_is_content_equality_ignoring_attribution():
+    from dotmac_billing import models
+
+    def row(**changes):
+        values = {"contract_type": None, "period": "daily"}
+        values.update(changes)
+        return models.PlatformBillingAccountTermsVersion(
+            postpaid_billing_timing=None,
+            postpaid_grace=None,
+            actor_ref="a",
+            reason="r",
+            **values,
+        )
+
+    assert terms._same_terms(row(), row())
+    assert not terms._same_terms(row(), row(period="monthly"))
+    assert not terms._same_terms(row(), row(contract_type="prepaid"))
+
+
+def test_append_refuses_an_identical_latest_before_touching_the_database():
+    from dotmac_billing import models
+
+    kwargs = {
+        "contract_type": "prepaid",
+        "period": "daily",
+        "postpaid_billing_timing": None,
+        "postpaid_grace": None,
+        "actor_ref": "a",
+        "reason": "r",
+    }
+    latest = models.PlatformBillingAccountTermsVersion(**kwargs)
+    again = models.PlatformBillingAccountTermsVersion(**kwargs)
+    with pytest.raises(terms.BillingConflict) as refused:
+        terms._append(None, PlatformScope(), again, latest=latest)  # type: ignore[arg-type]
+    assert refused.value.code == "billing.terms_version_exists"
