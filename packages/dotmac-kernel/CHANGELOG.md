@@ -16,27 +16,46 @@ here.
   authority; the published a109 release remains unchanged.
 
 - `dotmac_kernel.delivery_providers.OutboundMessage` gains optional `text` and
-  `html` parts, an allowlisted `headers` mapping (`Reply-To`, `In-Reply-To`,
-  `References`, `List-Unsubscribe`, `List-Unsubscribe-Post`; anything else, and
-  any CR/LF/NUL/control or non-ASCII value, is refused) and `attachments`, a
-  sequence of the new `AttachmentRef(kind, ref, filename, content_type)` (a
-  reference, never bytes; resolved at delivery time by a later work package).
-  `body` is the legacy name for `text`: both normalise to one value, differing
-  values are refused, and at least one of text/body or html is required.
-  `body` keeps its position and has no default, so a caller using only
-  `text`/`html` passes `body=None`. `html` and `headers` are email-only.
-  `subject` now refuses CR, LF and NUL. `Message-ID` is not caller-settable.
+  `html` parts (each at most `MAX_PART_BYTES`, 1 MiB, UTF-8), an allowlisted
+  `headers` mapping and `attachments`, a sequence of the new
+  `AttachmentRef(kind, ref, filename, content_type)` (a reference, never bytes;
+  resolved at delivery time by a later work package, see the "K-8 resolver
+  contract" in the module docstring).
+  - Headers: `Reply-To` (exactly one mailbox), `In-Reply-To` (one msg-id),
+    `References` (msg-ids), `List-Unsubscribe` (comma list of bracketed https or
+    mailto items) and `List-Unsubscribe-Post` (exactly `List-Unsubscribe=One-Click`,
+    which also requires an https item). Anything else, and any control,
+    non-ASCII or oversized value, is refused. `Message-ID` is not caller-settable.
+  - Attachments: at most 10; filenames are NFC-normalised and must be portable
+    bare names; `content_type` must be in `ALLOWED_ATTACHMENT_CONTENT_TYPES`
+    (pdf, png, jpeg, gif, plain, csv, calendar).
+  - `html` and `headers` are email-only.
 - `request_fingerprint` v2: a legacy-shaped message (text part only) hashes the
   exact v1 payload, so existing receipts still replay; a message using html,
   headers or attachments hashes a canonical-JSON payload carrying `"v": 2`.
   Receipts store only the digest, so no migration is needed.
 - `send` refuses (`DeliveryError`, no consent check, no provider call, no
-  receipt) a message that needs html, headers or attachments when the provider
-  has not declared the matching `message_features` entry (`FEATURE_HTML`,
-  `FEATURE_HEADERS`, `FEATURE_ATTACHMENTS`), so a single-body adapter cannot
-  silently drop them. A replay of an existing receipt is unaffected. New public
-  names: `AttachmentRef`, `ALLOWED_HEADERS`, `FEATURE_*`. No migration; no
+  receipt) a message needing html or attachments from a provider that has not
+  declared `FEATURE_HTML` / `FEATURE_ATTACHMENTS` in `message_features`, or
+  carrying a header whose name the provider has not declared in
+  `message_headers`, so a single-body adapter cannot silently drop them. A
+  malformed declaration (`None`, a string, non-strings) is a `DeliveryError`. A
+  replay of an existing receipt is unaffected. New public names:
+  `AttachmentRef`, `ALLOWED_HEADERS`, `ALLOWED_ATTACHMENT_CONTENT_TYPES`,
+  `MAX_PART_BYTES`, `FEATURE_HTML`, `FEATURE_ATTACHMENTS`. No migration; no
   version is allocated.
+
+### Changed
+
+- `OutboundMessage.body` is now `str | None` (adapters annotating it as `str`
+  are affected). `body` and the new `text` are normalised to one value; an
+  html-only message has both `None`. `body=None` without `text`/`html`, a
+  non-string `body`, and differing `body`/`text` are refused at construction.
+  `dataclasses.replace(m, body=...)` alone now raises when `text` is set (see
+  `COMPATIBILITY.md`).
+- `subject` is refused at construction if it contains any control character
+  (including CR, LF, NUL, VT, FF, FS, NEL) or a line/paragraph separator.
+  Subjects with CR/LF were previously accepted.
 
 ### Fixed
 

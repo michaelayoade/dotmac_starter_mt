@@ -35,6 +35,23 @@ through one function makes the check structural.
 - **It does not render.** `dotmac-template-studio` owns what the message says.
 - **It does not choose a channel.** `dotmac_kernel.channel_policy` does.
 
+## K-8 resolver contract (attachments)
+
+`AttachmentRef.ref` is an OPAQUE KEY, not bytes, a path or a URL. The resolver
+registry that turns refs into bytes at delivery time (a later work package) must:
+
+- look the ref up by tenant + `kind` inside the tenant-RLS session, never open a
+  path or fetch a URL taken from the ref;
+- fail closed on an unknown `kind`;
+- resolve refs that are immutable or versioned, because the fingerprint covers
+  refs, not bytes: a ref whose content changes under a stable dispatch would
+  send something the fingerprint never saw;
+- bound the resolved size and check the bytes against the declared
+  `content_type` before attaching;
+- treat a construction `ValueError` and a capability `DeliveryError` as
+  terminal, not retried;
+- never rebuild a message from a redacted snapshot.
+
 Four owners, one call site each. That separation is the § 5c capability map, and
 this module is where the map is honoured rather than described.
 """
@@ -45,7 +62,9 @@ import re
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from email.utils import getaddresses
+from typing import Any, Protocol, runtime_checkable
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from sqlalchemy import select
@@ -86,6 +105,42 @@ MAX_ATTACHMENTS = 10
 MAX_ATTACHMENT_KIND_LENGTH = 64
 MAX_ATTACHMENT_REF_LENGTH = 512
 MAX_ATTACHMENT_FILENAME_LENGTH = 255
+MAX_ATTACHMENT_EXTENSION_LENGTH = 16
+#: Per-part cap (UTF-8 bytes) on `text` / `html` / `body`.
+MAX_PART_BYTES = 1024 * 1024
+
+#: Attachment content types suitable for transactional mail. Everything else is
+#: refused (notably text/html, image/svg+xml and executables), so adding a type
+#: is a reviewed change to this constant.
+ALLOWED_ATTACHMENT_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "text/plain",
+        "text/csv",
+        "text/calendar",
+    }
+)
+
+_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+_FILENAME_FORBIDDEN = frozenset("\"';*?<>|:/\\")
+
+_ATOM = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+_LOCAL_RE = re.compile(rf"{_ATOM}(\.{_ATOM})*")
+_DOMAIN_RE = re.compile(
+    r"[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+"
+)
+_MSG_ID = rf"<{_ATOM}(\.{_ATOM})*@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?>"
+_MSG_ID_RE = re.compile(_MSG_ID)
+_MSG_IDS_RE = re.compile(rf"{_MSG_ID}( +{_MSG_ID})*")
+_UNSUB_LIST_RE = re.compile(r"<[^<>\s]+>( *, *<[^<>\s]+>)*")
+_UNSUB_ITEM_RE = re.compile(r"<([^<>\s]+)>")
 
 #: RFC 8058: the only value `List-Unsubscribe-Post` may carry.
 _ONE_CLICK = "List-Unsubscribe=One-Click"
@@ -96,9 +151,10 @@ _CONTENT_TYPE_RE = re.compile(rf"{_MIME_NAME}/{_MIME_NAME}")
 
 #: Features a provider must declare in `message_features` before it is handed a
 #: message that uses them. A legacy single-body adapter declares nothing, so it
-#: is refused a message it would silently truncate to its text part.
+#: is refused a message it would silently truncate to its text part. Headers are
+#: declared by NAME in `message_headers` instead, so an adapter that honours only
+#: Reply-To is never handed a List-Unsubscribe it would drop.
 FEATURE_HTML = "html"
-FEATURE_HEADERS = "headers"
 FEATURE_ATTACHMENTS = "attachments"
 
 
@@ -115,6 +171,81 @@ def _has_control(value: str) -> bool:
 
 def _is_printable_ascii(value: str) -> bool:
     return all(0x20 <= ord(ch) <= 0x7E for ch in value)
+
+
+def _valid_addr_spec(addr: str) -> bool:
+    local, sep, domain = addr.rpartition("@")
+    return bool(
+        sep
+        and len(local) <= 64
+        and len(domain) <= 255
+        and _LOCAL_RE.fullmatch(local)
+        and _DOMAIN_RE.fullmatch(domain)
+    )
+
+
+def _check_reply_to(value: str) -> None:
+    if ";" in value:
+        raise ValueError("Reply-To must be exactly one mailbox (no group syntax)")
+    parsed = getaddresses([value])
+    if len(parsed) != 1:
+        raise ValueError("Reply-To must be exactly one mailbox")
+    name, addr = parsed[0]
+    if "@" in name or not _valid_addr_spec(addr):
+        raise ValueError("Reply-To must be one valid mailbox")
+
+
+def _check_list_unsubscribe(value: str) -> bool:
+    """Validate the list; return True when it holds an https item."""
+    if not _UNSUB_LIST_RE.fullmatch(value):
+        raise ValueError(
+            "List-Unsubscribe must be a comma list of <https://...> or <mailto:...>"
+        )
+    https = False
+    for uri in _UNSUB_ITEM_RE.findall(value):
+        lowered = uri.lower()
+        if lowered.startswith("https:"):
+            try:
+                parts = urlsplit(uri)
+                host = parts.hostname
+            except ValueError as exc:
+                raise ValueError("List-Unsubscribe has an unparseable URL") from exc
+            if not host or "@" in parts.netloc:
+                raise ValueError("List-Unsubscribe https URL needs a host, no userinfo")
+            https = True
+        elif lowered.startswith("mailto:"):
+            addr = uri[len("mailto:") :].split("?", 1)[0]
+            if not _valid_addr_spec(addr):
+                raise ValueError("List-Unsubscribe mailto needs a valid address")
+        else:
+            raise ValueError("List-Unsubscribe items must be https: or mailto:")
+    return https
+
+
+def _check_header_syntax(canonical: str, value: str) -> None:
+    if canonical == "Reply-To":
+        _check_reply_to(value)
+    elif canonical == "In-Reply-To":
+        if not _MSG_ID_RE.fullmatch(value):
+            raise ValueError("In-Reply-To must be exactly one <msg-id>")
+    elif canonical == "References":
+        if not _MSG_IDS_RE.fullmatch(value):
+            raise ValueError("References must be space-separated <msg-id>s")
+    elif canonical == "List-Unsubscribe":
+        _check_list_unsubscribe(value)
+
+
+def _checked_part(label: str, part: str | None) -> None:
+    if part is None:
+        return
+    if not isinstance(part, str):
+        raise ValueError(f"{label} must be a string")
+    try:
+        size = len(part.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{label} is not encodable as UTF-8") from exc
+    if size > MAX_PART_BYTES:
+        raise ValueError(f"{label} exceeds {MAX_PART_BYTES} bytes")
 
 
 class _FrozenHeaders(Mapping[str, str]):
@@ -180,6 +311,10 @@ def _normalise_headers(raw: Mapping[str, str] | None) -> _FrozenHeaders:
             raise ValueError(
                 f"header {canonical} exceeds {MAX_HEADER_VALUE_LENGTH} characters"
             )
+        try:
+            _check_header_syntax(canonical, value)
+        except ValueError as exc:
+            raise ValueError(f"header {canonical}: {exc}") from None
         total += len(canonical) + len(value)
         found[canonical] = value
     if total > MAX_HEADERS_TOTAL_LENGTH:
@@ -189,6 +324,10 @@ def _normalise_headers(raw: Mapping[str, str] | None) -> _FrozenHeaders:
             raise ValueError(f"List-Unsubscribe-Post must be {_ONE_CLICK!r}")
         if "List-Unsubscribe" not in found:
             raise ValueError("List-Unsubscribe-Post requires List-Unsubscribe")
+        if not _check_list_unsubscribe(found["List-Unsubscribe"]):
+            raise ValueError(
+                "One-Click List-Unsubscribe-Post requires an https item (RFC 8058)"
+            )
     return _FrozenHeaders(tuple(sorted(found.items())))
 
 
@@ -230,29 +369,36 @@ class AttachmentRef:
             raise ValueError(
                 "attachment ref is empty, padded, too long or has controls"
             )
-        name = self.filename
+        name = unicodedata.normalize("NFC", self.filename)
+        object.__setattr__(self, "filename", name)
+        stem = name.split(".", 1)[0].rstrip(" ").upper()
+        extension = name.rsplit(".", 1)[1] if "." in name.strip(".") else ""
         if (
             not name
             or name != name.strip()
             or name in (".", "..")
             or len(name) > MAX_ATTACHMENT_FILENAME_LENGTH
-            or "/" in name
-            or "\\" in name
+            or name.endswith((".", " "))
+            or any(ch in _FILENAME_FORBIDDEN for ch in name)
+            or stem in _WINDOWS_RESERVED
+            or len(extension) > MAX_ATTACHMENT_EXTENSION_LENGTH
             or _has_control(name)
         ):
             raise ValueError(
-                "attachment filename must be a bare name: no path separators, "
-                "control characters, padding or dot-segments"
+                "attachment filename must be a bare, portable name: no path "
+                "separators, quotes, ; * ? < > | :, control characters, padding, "
+                "trailing dots, reserved Windows names or long extensions"
             )
         # Normalised lowercase, no parameters: a `;charset=` or a boundary
         # smuggled in here would be provider-side MIME injection.
         if (
             self.content_type != self.content_type.lower()
             or not _CONTENT_TYPE_RE.fullmatch(self.content_type)
+            or self.content_type not in ALLOWED_ATTACHMENT_CONTENT_TYPES
         ):
             raise ValueError(
-                "attachment content_type must be a lowercase type/subtype with no "
-                "parameters"
+                "attachment content_type must be one of "
+                f"{', '.join(sorted(ALLOWED_ATTACHMENT_CONTENT_TYPES))}"
             )
 
 
@@ -301,17 +447,18 @@ class OutboundMessage:
         if not (self.category or "").strip():
             raise ValueError("category is required")
         if self.subject is not None and (
-            not isinstance(self.subject, str)
-            or any(ch in self.subject for ch in "\r\n\x00")
+            not isinstance(self.subject, str) or _has_control(self.subject)
         ):
-            raise ValueError("subject must be a string without CR, LF or NUL")
+            raise ValueError(
+                "subject must be a string with no control characters or line "
+                "separators"
+            )
         for label, part in (
             ("body", self.body),
             ("text", self.text),
             ("html", self.html),
         ):
-            if part is not None and not isinstance(part, str):
-                raise ValueError(f"{label} must be a string")
+            _checked_part(label, part)
         if self.body is not None and self.text is not None and self.body != self.text:
             raise ValueError(
                 "body is the legacy name for text; they were given different values"
@@ -349,8 +496,6 @@ class OutboundMessage:
         needed = set()
         if self.html is not None:
             needed.add(FEATURE_HTML)
-        if self.headers:
-            needed.add(FEATURE_HEADERS)
         if self.attachments:
             needed.add(FEATURE_ATTACHMENTS)
         return frozenset(needed)
@@ -429,10 +574,12 @@ class DeliveryProvider(Protocol):
 
     def send(self, message: OutboundMessage) -> ProviderResult: ...
 
-    # Optional, read with `getattr(provider, "message_features", frozenset())`:
-    # a `frozenset` of `FEATURE_HTML` / `FEATURE_HEADERS` / `FEATURE_ATTACHMENTS`
-    # the adapter honours. `send` refuses to hand a message needing a feature
-    # the provider did not declare, rather than let it be silently dropped.
+    # Optional attributes, both `frozenset[str]`:
+    # - `message_features`: `FEATURE_HTML` / `FEATURE_ATTACHMENTS` the adapter
+    #   honours;
+    # - `message_headers`: the header names (from `ALLOWED_HEADERS`) it honours.
+    # `send` refuses to hand a message needing something the provider did not
+    # declare, rather than let it be silently dropped.
 
 
 @dataclass(frozen=True, slots=True)
@@ -474,6 +621,33 @@ def _receipts_for_dispatch(
             )
         ).scalars()
     )
+
+
+def _declared(provider: DeliveryProvider, attribute: str) -> frozenset[str]:
+    """A provider's declared `message_features` / `message_headers`.
+
+    Absent means "nothing declared". Anything that is not a collection of
+    strings is a misconfigured adapter and fails closed with `DeliveryError`.
+    """
+    value: Any = getattr(provider, attribute, frozenset())
+    if value is None or isinstance(value, str | bytes):
+        raise delivery.DeliveryError(
+            f"provider {getattr(provider, 'name', '?')!r}: {attribute} must be a "
+            "collection of names"
+        )
+    try:
+        names = frozenset(value)
+    except TypeError:
+        raise delivery.DeliveryError(
+            f"provider {getattr(provider, 'name', '?')!r}: {attribute} must be a "
+            "collection of names"
+        ) from None
+    if not all(isinstance(n, str) for n in names):
+        raise delivery.DeliveryError(
+            f"provider {getattr(provider, 'name', '?')!r}: {attribute} must hold "
+            "strings"
+        )
+    return names
 
 
 def send(
@@ -525,13 +699,17 @@ def send(
         if final is not None:
             return Sent(receipt=final)
 
-    missing = message.required_features - frozenset(
-        getattr(provider, "message_features", frozenset())
-    )
-    if missing:
+    features = _declared(provider, "message_features")
+    missing = message.required_features - features
+    header_names = {name.lower() for name in _declared(provider, "message_headers")}
+    missing_headers = {
+        name for name in (message.headers or {}) if name.lower() not in header_names
+    }
+    if missing or missing_headers:
         raise delivery.DeliveryError(
             f"provider {provider.name!r} does not declare support for "
-            f"{', '.join(sorted(missing))}; the message was not sent"
+            f"{', '.join(sorted(missing | {f'header {h}' for h in missing_headers}))}"
+            "; the message was not sent"
         )
 
     reason = consent.suppression_reason(
@@ -562,9 +740,10 @@ def send(
 
 
 __all__ = [
+    "ALLOWED_ATTACHMENT_CONTENT_TYPES",
     "ALLOWED_HEADERS",
+    "MAX_PART_BYTES",
     "FEATURE_ATTACHMENTS",
-    "FEATURE_HEADERS",
     "FEATURE_HTML",
     "AttachmentRef",
     "DeliveryProvider",

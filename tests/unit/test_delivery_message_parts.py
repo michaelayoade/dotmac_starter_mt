@@ -13,10 +13,11 @@ import pytest
 from dotmac_kernel import consent, delivery
 from dotmac_kernel.delivery_models import DELIVERY_ACCEPTED, DELIVERY_FAILED
 from dotmac_kernel.delivery_providers import (
+    ALLOWED_ATTACHMENT_CONTENT_TYPES,
     ALLOWED_HEADERS,
     FEATURE_ATTACHMENTS,
-    FEATURE_HEADERS,
     FEATURE_HTML,
+    MAX_PART_BYTES,
     AttachmentRef,
     OutboundMessage,
     ProviderResult,
@@ -166,7 +167,9 @@ def test_text_and_html_are_not_interchangeable() -> None:
 
 def test_moving_bytes_between_headers_and_parts_changes_the_fingerprint() -> None:
     a = _m(text="x", headers={"Reply-To": "a@example.com"})
-    b = _m(text="x", headers={"Reply-To": "a@example.co", "References": "m"})
+    b = _m(
+        text="x", headers={"Reply-To": "a@example.co", "References": "<m@example.com>"}
+    )
     c = _m(text="xReply-To", headers={"Reply-To": "a@example.com"})
     assert (
         len({a.request_fingerprint, b.request_fingerprint, c.request_fingerprint}) == 3
@@ -179,16 +182,27 @@ def test_header_value_delimiters_cannot_forge_another_header() -> None:
         headers={"Reply-To": "a@example.com", "In-Reply-To": "<1@example.com>"},
     )
     two = _m(
-        text="x", headers={"Reply-To": 'a@example.com","In-Reply-To":"<1@example.com>'}
+        text="x",
+        headers={
+            "Reply-To": "a@example.com",
+            "References": "<1@example.com>",
+        },
     )
     assert one.request_fingerprint != two.request_fingerprint
 
 
 def test_header_name_case_and_order_do_not_change_the_fingerprint() -> None:
-    a = _m(text="x", headers={"reply-to": "a@example.com", "REFERENCES": "<m>"})
-    b = _m(text="x", headers={"References": "<m>", "Reply-To": "a@example.com"})
+    a = _m(
+        text="x", headers={"reply-to": "a@example.com", "REFERENCES": "<m@example.com>"}
+    )
+    b = _m(
+        text="x", headers={"References": "<m@example.com>", "Reply-To": "a@example.com"}
+    )
     assert a.request_fingerprint == b.request_fingerprint
-    assert dict(a.headers) == {"Reply-To": "a@example.com", "References": "<m>"}
+    assert dict(a.headers) == {
+        "Reply-To": "a@example.com",
+        "References": "<m@example.com>",
+    }
 
 
 def test_attachment_fields_and_order_are_all_covered() -> None:
@@ -274,7 +288,21 @@ def test_html_and_headers_are_email_only() -> None:
         )
 
 
-@pytest.mark.parametrize("bad", ["a\nb", "a\rb", "a\x00b"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "a\nb",
+        "a\rb",
+        "a\x00b",
+        "a\x0bb",
+        "a\x0cb",
+        "a\x1cb",
+        "a\x85b",
+        "a" + chr(0x2028) + "b",
+        "a" + chr(0x2029) + "b",
+        "a" + chr(0x202E) + "b",
+    ],
+)
 def test_subject_injection_characters_are_refused(bad) -> None:
     with pytest.raises(ValueError, match="subject"):
         _m(text="x", subject=bad)
@@ -341,17 +369,21 @@ def test_header_values_with_controls_or_padding_are_refused(value) -> None:
 
 
 def test_header_sizes_are_bounded() -> None:
-    _m(text="x", headers={"References": "a" * 998})
+    ok = "<" + "a" * 60 + "@example.com> "
+    refs = (ok * 13).strip()
+    assert len(refs) <= 998
+    _m(text="x", headers={"References": refs})
     with pytest.raises(ValueError, match="998"):
-        _m(text="x", headers={"References": "a" * 999})
+        _m(text="x", headers={"References": (ok * 14).strip()})
+    big_name = "x" * 970
     with pytest.raises(ValueError, match="exceed"):
         _m(
             text="x",
             headers={
-                "References": "a" * 998,
-                "In-Reply-To": "b" * 998,
-                "Reply-To": "c" * 998,
-                "List-Unsubscribe": "d" * 998,
+                "References": refs,
+                "In-Reply-To": "<" + "b" * 60 + "@example.com>",
+                "Reply-To": f"{big_name} <a@example.com>",
+                "List-Unsubscribe": "<https://example.com/" + "d" * 960 + ">",
                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
             },
         )
@@ -413,11 +445,46 @@ def test_caller_mutation_after_construction_cannot_change_the_message() -> None:
         "a‮b.pdf",
         " a.pdf",
         "a" * 256,
+        'a.pdf"; name="b.exe',
+        "a'b.pdf",
+        "a;b.pdf",
+        "a:stream.pdf",
+        "a*.pdf",
+        "a?.pdf",
+        "a<b>.pdf",
+        "a|b.pdf",
+        "invoice.pdf.",
+        "invoice.pdf...",
+        "a.pdf ",
+        "CON",
+        "con.txt",
+        "Aux.pdf",
+        "NUL.pdf",
+        "COM1",
+        "lpt9.csv",
+        "CON.tar.gz",
+        "x." + "a" * 17,
+        "a\u200bb.pdf",
+        "a\u202eb.pdf",
+        "a\u2028b.pdf",
     ],
 )
 def test_bad_filenames_are_refused(filename) -> None:
     with pytest.raises(ValueError, match="filename"):
         _doc(filename=filename)
+
+
+def test_good_filenames_are_accepted_and_nfc_normalised() -> None:
+    assert _doc(filename="invoice-2026.pdf").filename == "invoice-2026.pdf"
+    assert _doc(filename="x." + "a" * 16).filename == "x." + "a" * 16
+    assert _doc(filename="COM10.pdf").filename == "COM10.pdf"
+    decomposed = "cafe\u0301.pdf"
+    composed = "caf\u00e9.pdf"
+    assert _doc(filename=decomposed).filename == composed
+    assert (
+        _m(text="x", attachments=[_doc(filename=decomposed)]).request_fingerprint
+        == _m(text="x", attachments=[_doc(filename=composed)]).request_fingerprint
+    )
 
 
 def test_filename_bound_is_inclusive() -> None:
@@ -444,11 +511,39 @@ def test_bad_content_types_are_refused(content_type) -> None:
         _doc(content_type=content_type)
 
 
-@pytest.mark.parametrize(
-    "content_type", ["application/pdf", "image/svg+xml", "text/csv"]
-)
+@pytest.mark.parametrize("content_type", sorted(ALLOWED_ATTACHMENT_CONTENT_TYPES))
 def test_good_content_types_are_accepted(content_type) -> None:
     assert _doc(content_type=content_type).content_type == content_type
+
+
+def test_the_content_type_allowlist_is_exactly_this() -> None:
+    assert ALLOWED_ATTACHMENT_CONTENT_TYPES == {
+        "application/pdf",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "text/plain",
+        "text/csv",
+        "text/calendar",
+    }
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "text/html",
+        "image/svg+xml",
+        "application/x-msdownload",
+        "application/javascript",
+        "application/x-sh",
+        "message/rfc822",
+        "multipart/mixed",
+        "application/octet-stream",
+    ],
+)
+def test_content_types_outside_the_allowlist_are_refused(content_type) -> None:
+    with pytest.raises(ValueError, match="content_type"):
+        _doc(content_type=content_type)
 
 
 @pytest.mark.parametrize("kind", ["", "Document", "1doc", "a b", "a\n", "k" * 65])
@@ -488,8 +583,14 @@ def test_an_attachment_ref_carries_no_bytes() -> None:
 class _Provider:
     name = "fake"
 
-    def __init__(self, features=frozenset(), status=DELIVERY_ACCEPTED) -> None:
+    def __init__(
+        self,
+        features=frozenset(),
+        status=DELIVERY_ACCEPTED,
+        headers=frozenset(ALLOWED_HEADERS),
+    ) -> None:
         self.message_features = features
+        self.message_headers = headers
         self.status = status
         self.calls: list[OutboundMessage] = []
 
@@ -538,7 +639,7 @@ def _rich(**kw) -> OutboundMessage:
 
 
 def test_every_part_reaches_the_provider(db, tenant) -> None:
-    provider = _Provider({FEATURE_HTML, FEATURE_HEADERS, FEATURE_ATTACHMENTS})
+    provider = _Provider({FEATURE_HTML, FEATURE_ATTACHMENTS})
     message = _rich()
     send(db, tenant.id, provider=provider, message=message)
     got = provider.calls[0]
@@ -561,7 +662,7 @@ def test_a_legacy_provider_keeps_working_for_a_body_message(db, tenant) -> None:
     ("kwargs", "feature"),
     [
         ({"html": "<p>x</p>"}, FEATURE_HTML),
-        ({"headers": {"Reply-To": "a@example.com"}}, FEATURE_HEADERS),
+        ({"headers": {"Reply-To": "a@example.com"}}, "header Reply-To"),
         ({"attachments": [_doc()]}, FEATURE_ATTACHMENTS),
     ],
 )
@@ -578,7 +679,7 @@ def test_a_provider_that_did_not_declare_a_feature_is_not_handed_it(
 def test_replay_matches_for_a_v2_message_and_conflicts_on_any_part_change(
     db, tenant
 ) -> None:
-    provider = _Provider({FEATURE_HTML, FEATURE_HEADERS, FEATURE_ATTACHMENTS})
+    provider = _Provider({FEATURE_HTML, FEATURE_ATTACHMENTS})
     message = _rich()
     first = send(db, tenant.id, provider=provider, message=message)
     db.expunge_all()
@@ -631,9 +732,219 @@ def test_a_legacy_receipt_still_replays_for_the_same_legacy_message(db, tenant) 
 
 def test_a_failed_v2_dispatch_can_retry(db, tenant) -> None:
     message = _rich()
-    features = {FEATURE_HTML, FEATURE_HEADERS, FEATURE_ATTACHMENTS}
+    features = {FEATURE_HTML, FEATURE_ATTACHMENTS}
     send(db, tenant.id, provider=_Provider(features, DELIVERY_FAILED), message=message)
     db.expunge_all()
     ok = _Provider(features)
     outcome = send(db, tenant.id, provider=ok, message=message)
     assert outcome.status == DELIVERY_ACCEPTED and ok.calls == [message]
+
+
+# ── Reviewer findings: stricter header syntax ───────────────────────────────
+
+_ONE = "List-Unsubscribe=One-Click"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "<https://example.com/u>",
+        "<mailto:u@example.com>",
+        "<https://example.com/u>, <mailto:u@example.com?subject=unsub>",
+        "<https://example.com/a,b>,<https://example.org/c>",
+    ],
+)
+def test_list_unsubscribe_accepts_bracketed_https_and_mailto(value) -> None:
+    assert (
+        _m(text="x", headers={"List-Unsubscribe": value}).headers["List-Unsubscribe"]
+        == value
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://example.com/u",
+        "<http://example.com/u>",
+        "<javascript:alert(1)>",
+        "<data:text/html,x>",
+        "<file:///etc/passwd>",
+        "<ftp://example.com/u>",
+        "<https:///path>",
+        "<https://user@example.com/u>",
+        "<mailto:>",
+        "<mailto:not-an-address>",
+        "<https://example.com/u> junk",
+        "<https://example.com/u>,",
+        "<>",
+        "<https://example.com/u><https://example.com/v>",
+        "<https://exa mple.com/u>",
+    ],
+)
+def test_list_unsubscribe_refuses_everything_else(value) -> None:
+    with pytest.raises(ValueError, match="List-Unsubscribe"):
+        _m(text="x", headers={"List-Unsubscribe": value})
+
+
+def test_one_click_requires_an_https_item() -> None:
+    with pytest.raises(ValueError, match="https"):
+        _m(
+            text="x",
+            headers={
+                "List-Unsubscribe": "<mailto:u@example.com>",
+                "List-Unsubscribe-Post": _ONE,
+            },
+        )
+    _m(
+        text="x",
+        headers={
+            "List-Unsubscribe": "<mailto:u@example.com>, <https://example.com/u>",
+            "List-Unsubscribe-Post": _ONE,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a@example.com",
+        "Support Team <support@example.com>",
+        '"Support, Team" <support@example.com>',
+    ],
+)
+def test_reply_to_accepts_one_mailbox(value) -> None:
+    assert _m(text="x", headers={"Reply-To": value}).headers["Reply-To"] == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a@example.com, b@example.org",
+        '"support@bank.example" <attacker@evil.example>',
+        "undisclosed-recipients:;",
+        "group: a@example.com, b@example.org;",
+        "not an address at all",
+        "a@localhost",
+        "a@@example.com",
+        ".a@example.com",
+        "a..b@example.com",
+        "<>",
+        "Name <>",
+        "a@-example.com",
+    ],
+)
+def test_reply_to_refuses_everything_but_one_mailbox(value) -> None:
+    with pytest.raises(ValueError, match="Reply-To"):
+        _m(text="x", headers={"Reply-To": value})
+
+
+@pytest.mark.parametrize("value", ["<1@example.com>", "<a.b+c@mail.example.com>"])
+def test_in_reply_to_accepts_one_msg_id(value) -> None:
+    _m(text="x", headers={"In-Reply-To": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "garbage no brackets",
+        "<1@example.com> <2@example.com>",
+        "<1@example.com>x",
+        "<a b@example.com>",
+        "<@example.com>",
+        "<a@>",
+        "1@example.com",
+    ],
+)
+def test_in_reply_to_refuses_anything_but_one_msg_id(value) -> None:
+    with pytest.raises(ValueError, match="In-Reply-To"):
+        _m(text="x", headers={"In-Reply-To": value})
+
+
+def test_references_takes_space_separated_msg_ids() -> None:
+    _m(text="x", headers={"References": "<1@example.com> <2@example.com>"})
+    _m(text="x", headers={"References": "<1@example.com>"})
+    for bad in (
+        "<1@example.com>,<2@example.com>",
+        "1@example.com",
+        "<a>",
+        "x <1@example.com>",
+    ):
+        with pytest.raises(ValueError, match="References"):
+            _m(text="x", headers={"References": bad})
+
+
+# ── Part size cap ───────────────────────────────────────────────────────────
+
+
+def test_parts_are_capped_at_one_mebibyte() -> None:
+    assert MAX_PART_BYTES == 1024 * 1024
+    _m(text="a" * MAX_PART_BYTES)
+    _m(html="a" * MAX_PART_BYTES)
+    for kwargs in (
+        {"text": "a" * (MAX_PART_BYTES + 1)},
+        {"body": "a" * (MAX_PART_BYTES + 1)},
+        {"text": "x", "html": "a" * (MAX_PART_BYTES + 1)},
+        {"html": "\u00e9" * (MAX_PART_BYTES // 2 + 1)},
+    ):
+        with pytest.raises(ValueError, match="exceeds"):
+            _m(**kwargs)
+
+
+def test_an_unencodable_part_is_refused() -> None:
+    with pytest.raises(ValueError, match="UTF-8"):
+        _m(text="a\ud800b")
+
+
+# ── Provider declarations ───────────────────────────────────────────────────
+
+
+class _Declares:
+    name = "declares"
+
+    def __init__(self, **attrs) -> None:
+        for key, value in attrs.items():
+            setattr(self, key, value)
+        self.calls: list[OutboundMessage] = []
+
+    def send(self, message: OutboundMessage) -> ProviderResult:
+        self.calls.append(message)
+        return ProviderResult()
+
+
+def test_headers_are_gated_by_name(db, tenant) -> None:
+    provider = _Declares(message_headers=frozenset({"reply-to"}))
+    ok = _m(dispatch_id=uuid4(), text="x", headers={"Reply-To": "a@example.com"})
+    assert isinstance(send(db, tenant.id, provider=provider, message=ok), Sent)
+    two = _m(
+        dispatch_id=uuid4(),
+        text="x",
+        headers={
+            "Reply-To": "a@example.com",
+            "List-Unsubscribe": "<https://example.com/u>",
+        },
+    )
+    with pytest.raises(delivery.DeliveryError, match="header List-Unsubscribe"):
+        send(db, tenant.id, provider=provider, message=two)
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.parametrize("attribute", ["message_features", "message_headers"])
+@pytest.mark.parametrize("bad", [None, "html", 5, [1]])
+def test_a_malformed_declaration_is_a_delivery_error(
+    db, tenant, attribute, bad
+) -> None:
+    provider = _Declares(**{attribute: bad})
+    with pytest.raises(delivery.DeliveryError, match=attribute):
+        send(
+            db, tenant.id, provider=provider, message=_m(dispatch_id=uuid4(), body="x")
+        )
+    assert provider.calls == []
+
+
+def test_replace_needs_body_and_text_together() -> None:
+    import dataclasses
+
+    message = _m(text="old")
+    with pytest.raises(ValueError, match="legacy name"):
+        dataclasses.replace(message, body="new")
+    assert dataclasses.replace(message, body="new", text="new").text == "new"

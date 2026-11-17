@@ -380,12 +380,13 @@
     "dotmac_kernel.delivery_providers": {
       "classification": "supported",
       "exports": [
+        "ALLOWED_ATTACHMENT_CONTENT_TYPES",
         "ALLOWED_HEADERS",
         "AttachmentRef",
         "DeliveryProvider",
         "FEATURE_ATTACHMENTS",
-        "FEATURE_HEADERS",
         "FEATURE_HTML",
+        "MAX_PART_BYTES",
         "OutboundMessage",
         "ProviderResult",
         "Sent",
