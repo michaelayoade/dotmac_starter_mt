@@ -50,7 +50,9 @@ here calls `db.rollback()` (hard rule 9).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
@@ -72,10 +74,14 @@ from dotmac_template_studio.models import Template, TemplateVersion
 from dotmac_template_studio.rendering import (
     _PLACEHOLDER,
     MissingTemplateValueError,
+    RenderRefusedError,
+    render_part,
 )
 from dotmac_template_studio.rendering import (
     render as _render,
 )
+from dotmac_template_studio.sections import TemplateSyntaxError
+from dotmac_template_studio.validation import check_revision
 
 # Double-brace tokens, for save-time REJECTION only. Never rendered.
 _DOUBLE_BRACE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
@@ -327,8 +333,8 @@ def create_version(
     be published by someone who did not author it.
     """
     template = get_template(db, tenant_id, template_id)
-    validate_template_text(
-        subject, body, context=get_context(template.context), kind_hint="version"
+    check_revision(
+        get_context(template.context), subject=subject, text=body, kind_hint="version"
     )
     highest = db.execute(
         select(func.max(TemplateVersion.version)).where(
@@ -374,10 +380,10 @@ def update_version(
         )
     new_body = revision.body if body is None else body
     new_subject = revision.subject if subject is None else subject
-    validate_template_text(
-        new_subject,
-        new_body,
-        context=get_context(template.context),
+    check_revision(
+        get_context(template.context),
+        subject=new_subject,
+        text=new_body,
         kind_hint="version",
     )
     revision.body = new_body
@@ -409,7 +415,7 @@ def render_published(
     tenant_id: UUID,
     slug: str,
     channel: str,
-    values: dict[str, str],
+    values: Mapping[str, Any],
     *,
     strict: bool | None = None,
 ) -> tuple[str | None, str]:
@@ -430,7 +436,20 @@ def render_published(
     revision = get_published(db, tenant_id, template.id)
     if revision is None:
         raise ConflictError(f"template {slug}/{channel} has no published version")
-    subject = (
-        render(revision.subject, values, strict=strict) if revision.subject else None
-    )
-    return subject, render(revision.body, values, strict=strict)
+    # Part-aware render so a saved section is never sent literally. For a
+    # flat-placeholder body the text part is byte-identical to `render()`. A
+    # subject now also refuses CR/LF in its result (header injection).
+    context = get_context(template.context)
+    try:
+        subject = (
+            render_part(
+                revision.subject, values, "subject", context=context, strict=strict
+            )
+            if revision.subject
+            else None
+        )
+        return subject, render_part(
+            revision.body, values, "text", context=context, strict=strict
+        )
+    except (MissingTemplateValueError, RenderRefusedError, TemplateSyntaxError) as exc:
+        raise BadRequestError(str(exc)) from exc
