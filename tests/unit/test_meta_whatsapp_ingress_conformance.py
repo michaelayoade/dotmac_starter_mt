@@ -373,9 +373,9 @@ def test_every_declared_locator_resolves_in_its_fixture(relative: str):
     document = _document(relative)
     for observation in BY_FILE[relative]["expected_observations"]:
         node = _resolve(document, observation["locator"])
-        assert isinstance(
-            node, dict
-        ), f"{relative}: {observation['locator']} does not point at an item"
+        assert isinstance(node, dict), (
+            f"{relative}: {observation['locator']} does not point at an item"
+        )
 
 
 @ALL_FILES
@@ -481,9 +481,9 @@ def test_a_malformed_entry_does_not_suppress_the_rest_of_the_batch():
         "redelivery of the same bad entry still deduplicates"
     )
     index = observations.index(malformed[0])
-    assert (
-        index > 0 and index < len(observations) - 1
-    ), "good observations must survive both before and after the bad item"
+    assert index > 0 and index < len(observations) - 1, (
+        "good observations must survive both before and after the bad item"
+    )
 
 
 def test_an_uninterpretable_message_type_is_observed_rather_than_dropped():
@@ -537,9 +537,9 @@ def test_a_request_digest_identity_cannot_deduplicate_a_regrouped_event():
     assert shared, "the corpus must actually contain a shared event"
     for identity, files in shared.items():
         digests = {hashlib.sha256(_read(relative)).hexdigest() for relative in files}
-        assert len(digests) == len(
-            files
-        ), f"{identity}: the two carriers must be genuinely different requests"
+        assert len(digests) == len(files), (
+            f"{identity}: the two carriers must be genuinely different requests"
+        )
         assert len({identity}) == 1
 
 

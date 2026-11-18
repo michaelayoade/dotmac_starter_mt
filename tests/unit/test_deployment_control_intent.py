@@ -486,9 +486,9 @@ class TestDispatchCarriesThePlanNotTheCurrentState:
         _desired(db, target.id, release_ref="dotmac_sub@9.0.0", spec={"replicas": 99})
 
         intent = dispatch_attempt(db, command_id=_cmd(), rollout_id=rollout.id)
-        assert (
-            intent.release_ref == "dotmac_sub@7.187.1"
-        ), "dispatch must carry the APPROVED plan, not the newest desired state"
+        assert intent.release_ref == "dotmac_sub@7.187.1", (
+            "dispatch must carry the APPROVED plan, not the newest desired state"
+        )
         assert intent.spec == {"replicas": 2}
         assert intent.plan_digest == plan.plan_digest
         assert intent.attempt_no == 1

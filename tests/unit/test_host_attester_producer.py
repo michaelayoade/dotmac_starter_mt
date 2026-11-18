@@ -441,9 +441,9 @@ def test_host_attester_carries_no_canonicalizer_of_its_own() -> None:
                 "json.dumps(..., sort_keys=...) — it must call "
                 "trusted_host_source.candidate_subject_digest instead"
             )
-    assert (
-        "candidate_subject_digest(" in source
-    ), "host_attester.py no longer calls the package's canonicalizer at all"
+    assert "candidate_subject_digest(" in source, (
+        "host_attester.py no longer calls the package's canonicalizer at all"
+    )
 
 
 def test_the_canonicalizer_plant_would_have_been_caught() -> None:

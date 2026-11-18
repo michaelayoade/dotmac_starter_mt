@@ -96,9 +96,9 @@ def _run_v2(bootstraps=(), standing=StepStanding.INSTALLED, raises=None):
     # bootstrap behaviour passing over a run that never reached it. The
     # assertions about ABSENCE are the ones that would never have complained.
     if bootstraps:
-        assert (
-            effects.bootstrapped or outcome.failed_step is not None
-        ), "the fixture never reached the bootstrap; it proves nothing"
+        assert effects.bootstrapped or outcome.failed_step is not None, (
+            "the fixture never reached the bootstrap; it proves nothing"
+        )
     return effects, outcome
 
 

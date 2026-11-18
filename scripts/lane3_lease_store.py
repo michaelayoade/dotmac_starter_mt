@@ -44,6 +44,19 @@ separate image-budget ruling, and nothing here touches the CP repository.
     than :data:`MAX_RELEASE_SKEW_SECONDS` from store time. The runner's clock
     never decides when a host was released.
 
+12. **A dropped connection fails closed and a write is never retried.** A store
+    reached over a connection that can die (the CP store, over the attended
+    tunnel) maps a connection that is gone BEFORE a write was sent to
+    `store-unreachable`, and one lost after the commit was sent, so the outcome is
+    unknown, to `store-commit-unknown`. Neither is retried: the store sends each
+    write at most once, and the launcher reads standing afterwards instead of
+    repeating a call.
+13. **A lease carries the receipt it was taken under.** `acquire_exclusive`
+    requires the typed E10 receipt for the host's current incarnation and the
+    returned :class:`HeldLease` carries it. A :class:`ReprovisionMarker` reopens a
+    mutated host only when its receipt is a DIFFERENT incarnation and NEWER than
+    that one.
+
 ## The target's role has no privileges on the lease tables
 
 The target runs under a per-run SCOPED consumption role to consume the Control
@@ -79,6 +92,8 @@ __all__ = [
     "DATABASE_TIME",
     "MAX_RELEASE_SKEW_SECONDS",
     "MAX_TTL_SECONDS",
+    "STORE_COMMIT_UNKNOWN",
+    "STORE_UNREACHABLE",
     "HeldLease",
     "LeaseStanding",
     "LeaseStore",
@@ -89,6 +104,9 @@ __all__ = [
 
 #: The only value `LeaseStore.time_authority` may carry.
 DATABASE_TIME: Final = "database"
+#: Refusal codes for a lost connection (rule 12). Never retried.
+STORE_UNREACHABLE: Final = "store-unreachable"
+STORE_COMMIT_UNKNOWN: Final = "store-commit-unknown"
 #: The longest lease a store grants. A lease that outlives a run by hours is a
 #: host nobody can take back.
 MAX_TTL_SECONDS: Final = 3600
@@ -145,6 +163,9 @@ class HeldLease:
     lease: HostLease
     #: Opaque to the launcher; names the row lock / row the store holds.
     handle: str
+    #: The E10 receipt the lease was taken under (rule 13). A real `HostLease`
+    #: does not carry it, so the held lease does.
+    e10_receipt: E10ReceiptRef
     #: Both are STORE time.
     acquired_at: datetime
     expires_at: datetime
@@ -168,13 +189,17 @@ class LeaseStore(Protocol):
         authorization_run: str,
         controller_identity: ControllerSshFingerprintV1,
         ttl_seconds: int,
+        e10_receipt: E10ReceiptRef,
         reprovision: ReprovisionMarker | None = None,
     ) -> HeldLease:
         """Take the host's lease under a row lock, or raise `StoreRefused`.
 
         Refuses a non-positive or over-cap TTL, a live lease, and (without a
         `reprovision` marker for this host) a host that is expired-mutated or was
-        released as mutated.
+        released as mutated. A marker whose receipt is the lease's own
+        incarnation refuses `reprovision-receipt-same-incarnation`; one that is
+        not newer refuses `reprovision-receipt-not-newer`. A lost connection
+        refuses `store-unreachable` or `store-commit-unknown` and is not retried.
         """
         ...
 

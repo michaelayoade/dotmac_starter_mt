@@ -5,7 +5,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import sys
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,37 @@ SSH_FINGERPRINT = "SHA256:" + "B" * 43
 MACHINE_ID = "0123456789abcdef0123456789abcdef"
 ENROLMENT_UUID = "6f1c2f4e-52a8-4d0e-9a1b-2f0c7e6d9b11"
 DESTROYED_AT = datetime(2026, 11, 17, 4, 0, 0, tzinfo=UTC)
+
+
+def incarnation_for(raw: bytes) -> tuple[str, str]:
+    """`(public key b64url, fingerprint)` for a 32-byte key, derived the CP way."""
+    encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    return encoded, "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def make_generation_receipt(
+    host_id: str, generation: int, **overrides: Any
+) -> E10ReceiptRef:
+    """The `generation`-th receipt for a host: each is a DIFFERENT incarnation.
+
+    Generation 1 is `make_receipt()`. Every later one has its own key, enrolment
+    and receipt ref and a later destruction time, as a rebuilt VM's receipt does,
+    so a marker can be told apart from the receipt a lease was taken under.
+    """
+    if generation == 1:
+        return make_receipt(host_id=host_id, **overrides)
+    raw = bytes((generation * 16 + i) % 256 for i in range(32))
+    key, fingerprint = incarnation_for(raw)
+    values: dict[str, Any] = {
+        "host_id": host_id,
+        "incarnation_public_key_b64url": key,
+        "incarnation_fingerprint": fingerprint,
+        "enrolment_uuid": str(uuid.UUID(int=generation)),
+        "incarnation_key_destroyed_at": DESTROYED_AT + timedelta(hours=generation),
+        "receipt_ref": f"e10-receipt-{generation:04d}",
+    }
+    values.update(overrides)
+    return make_receipt(**values)
 
 
 def make_receipt(**overrides: Any) -> E10ReceiptRef:

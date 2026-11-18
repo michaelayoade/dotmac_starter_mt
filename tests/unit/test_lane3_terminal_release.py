@@ -982,9 +982,9 @@ def test_the_mapping_is_derived_from_the_class_hierarchy_not_a_line_list() -> No
         and value is not DeploymentFoundationError
         and value.__module__ == runner.__name__
     }
-    assert (
-        defined and defined == mapped
-    ), f"unmapped refusal class(es): {sorted(c.__name__ for c in defined - mapped)}"
+    assert defined and defined == mapped, (
+        f"unmapped refusal class(es): {sorted(c.__name__ for c in defined - mapped)}"
+    )
 
 
 def test_that_obligation_would_notice_a_new_class(

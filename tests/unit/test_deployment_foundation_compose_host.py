@@ -915,9 +915,9 @@ def test_evidence_lands_content_addressed_and_immutable(tmp_path: Path) -> None:
     record_path = Path(effects.write_evidence({"operation": "deploy", "ok": True}))
     assert record_path.parent.name == "evidence-records"
     body = record_path.read_bytes()
-    assert (
-        record_path.stem == hashlib.sha256(body).hexdigest()
-    ), "the record is not named by its own content"
+    assert record_path.stem == hashlib.sha256(body).hexdigest(), (
+        "the record is not named by its own content"
+    )
     # the operator-facing pointer carries the same bytes
     assert (tmp_path / "deploy-evidence.json").read_bytes() == body
 

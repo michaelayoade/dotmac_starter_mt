@@ -95,7 +95,7 @@ class _PublishedStageTwo:
         )
         if already and (self.target, self.incumbent) != (target, checked):
             raise ValueError(
-                "these effects are already bound to a different authorized " "execution"
+                "these effects are already bound to a different authorized execution"
             )
         self.target, self.incumbent = target, checked
 

@@ -59,9 +59,9 @@ def test_every_text_role_is_held_to_the_text_threshold() -> None:
         if requirement.minimum >= dotmac_ui.TEXT_CONTRAST_MINIMUM
     }
     for design_token in dotmac_ui.tokens_in("text"):
-        assert (
-            design_token.name in checked
-        ), f"{design_token.name} is a text role with no contrast requirement"
+        assert design_token.name in checked, (
+            f"{design_token.name} is a text role with no contrast requirement"
+        )
 
 
 def test_every_action_intent_is_checked_in_all_three_fill_states() -> None:

@@ -364,9 +364,9 @@ def test_removing_a_role_fails() -> None:
         roles=tuple(role for role in _roles() if role.name != DISPATCHER),
     )
     findings = _verify(restored)
-    assert any(
-        DISPATCHER in finding and "absent" in finding for finding in findings
-    ), findings
+    assert any(DISPATCHER in finding and "absent" in finding for finding in findings), (
+        findings
+    )
 
 
 def test_a_bundle_whose_acls_name_a_role_it_does_not_define_is_refused_at_capture() -> (
@@ -395,9 +395,9 @@ def test_removing_a_membership_fails() -> None:
     assert any(
         "membership" in finding and DISPATCHER in finding for finding in findings
     )
-    assert DISPATCHER in {
-        role.name for role in restored.roles
-    }, "the point of this mutation is that the ROLE survives"
+    assert DISPATCHER in {role.name for role in restored.roles}, (
+        "the point of this mutation is that the ROLE survives"
+    )
 
 
 # ── REQUIRED MUTATION 3: remove an inheritance flag ──────────────────────────

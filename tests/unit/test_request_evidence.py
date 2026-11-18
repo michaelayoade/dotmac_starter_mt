@@ -760,9 +760,9 @@ def test_an_anonymous_request_after_an_authenticated_one_is_anonymous():
     which shows a concurrency proof would not have caught it.
     """
     creator = _creator(None, trusted_proxies=TRUSTING_NOBODY)
-    assert not _sequential_leak_observed(
-        creator
-    ), "an anonymous request inherited the previous request's actor"
+    assert not _sequential_leak_observed(creator), (
+        "an anonymous request inherited the previous request's actor"
+    )
 
 
 def test_the_context_is_restored_to_the_outer_value_after_the_request(
@@ -1006,17 +1006,17 @@ def test_the_sequential_proof_bites_the_shape_it_was_written_for():
     taken against the planted defect, must come out the OTHER way. If it did
     not, that test would be passing over a property it cannot see.
     """
-    assert _sequential_leak_observed(
-        _ErpShapedContextCreator(None)
-    ), "the sequential proof did not observe the leak in the shape that has it"
+    assert _sequential_leak_observed(_ErpShapedContextCreator(None)), (
+        "the sequential proof did not observe the leak in the shape that has it"
+    )
 
 
 def test_the_nested_overlap_proof_bites_the_shape_it_was_written_for():
     """SENSITIVITY. The overlap proof must fail against a creator that never
     tears its context down."""
-    assert not _nested_overlap_preserves_the_outer_actor(
-        _ErpShapedContextCreator
-    ), "the overlap proof did not observe the missing teardown"
+    assert not _nested_overlap_preserves_the_outer_actor(_ErpShapedContextCreator), (
+        "the overlap proof did not observe the missing teardown"
+    )
 
 
 def test_the_concurrency_proof_alone_would_pass_against_the_broken_shape():

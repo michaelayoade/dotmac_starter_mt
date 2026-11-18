@@ -93,9 +93,9 @@ def test_every_colour_token_resolves_to_a_literal_in_both_modes() -> None:
             continue
         for mode in dotmac_ui.MODES:
             resolved = dotmac_ui.resolve_color(design_token.name, mode)
-            assert re.fullmatch(
-                r"#[0-9a-f]{6}", resolved
-            ), f"{design_token.name} ({mode}) resolved to {resolved!r}"
+            assert re.fullmatch(r"#[0-9a-f]{6}", resolved), (
+                f"{design_token.name} ({mode}) resolved to {resolved!r}"
+            )
 
 
 def test_resolving_a_non_colour_token_fails_loudly() -> None:
@@ -112,9 +112,9 @@ def test_ramps_are_mode_independent() -> None:
     a ROLE points at. Restating ramps in the dark block would force a runtime
     brand override to be written twice."""
     for design_token in dotmac_ui.tokens_in("color"):
-        assert (
-            not design_token.is_mode_dependent
-        ), f"{design_token.name} declares a dark value; ramps must not"
+        assert not design_token.is_mode_dependent, (
+            f"{design_token.name} declares a dark value; ramps must not"
+        )
 
 
 # ── The compiled artifact (ADR-0006 D3) ─────────────────────────────────────
@@ -185,7 +185,7 @@ def test_stylesheet_needs_no_preprocessor() -> None:
     at-rule that a compiler must expand would make that false."""
     for directive in ("@tailwind", "@apply", "@theme", "@source", "@config", "@layer"):
         assert directive not in STYLESHEET_RULES, (
-            f"{directive} requires the consumer to run a compiler — see " "ADR-0006 D3"
+            f"{directive} requires the consumer to run a compiler — see ADR-0006 D3"
         )
 
 

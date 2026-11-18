@@ -152,9 +152,9 @@ def test_empty_state_icons_are_decorative_and_unfocusable() -> None:
 def test_empty_state_visual_meets_non_text_contrast() -> None:
     for mode in ("light", "dark"):
         ratio = token_contrast("text-muted", "surface-secondary", mode)
-        assert (
-            ratio >= NON_TEXT_CONTRAST_MINIMUM
-        ), f"empty-state visual contrast is {ratio:.2f}:1 in {mode} mode"
+        assert ratio >= NON_TEXT_CONTRAST_MINIMUM, (
+            f"empty-state visual contrast is {ratio:.2f}:1 in {mode} mode"
+        )
 
 
 def test_published_classes_are_exactly_the_contracts_union() -> None:
@@ -349,9 +349,9 @@ def test_map_frame_state_panel_meets_text_contrast(intent: str, state: str) -> N
             f"status-{intent}-surface",
             mode,
         )
-        assert (
-            ratio >= 4.5
-        ), f"map-frame {state} text contrast is {ratio:.2f}:1 in {mode} mode"
+        assert ratio >= 4.5, (
+            f"map-frame {state} text contrast is {ratio:.2f}:1 in {mode} mode"
+        )
 
 
 def test_metric_card_is_clickable_only_when_the_host_supplies_a_route() -> None:
@@ -447,9 +447,9 @@ def test_ticket_chart_has_distinct_status_colours_and_a_service_team_select() ->
 def test_chart_series_meet_non_text_contrast(intent: str) -> None:
     for mode in ("light", "dark"):
         ratio = token_contrast(f"status-{intent}-foreground", "surface-secondary", mode)
-        assert (
-            ratio >= NON_TEXT_CONTRAST_MINIMUM
-        ), f"chart {intent} series contrast is {ratio:.2f}:1 in {mode} mode"
+        assert ratio >= NON_TEXT_CONTRAST_MINIMUM, (
+            f"chart {intent} series contrast is {ratio:.2f}:1 in {mode} mode"
+        )
 
 
 def test_notification_toast_has_accessible_eight_second_hook() -> None:

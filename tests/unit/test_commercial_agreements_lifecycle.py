@@ -686,12 +686,12 @@ class TestCommandsAreIdempotent:
         first = approve(db, command)
         second = approve(db, command)
         assert first.status == second.status == AgreementStatus.APPROVED.value
-        assert (
-            first.record_version == second.record_version
-        ), "a replay must not advance the record version"
-        assert (
-            len(history(db, view.id)) == 2
-        ), "a replay must not append a second history row"
+        assert first.record_version == second.record_version, (
+            "a replay must not advance the record version"
+        )
+        assert len(history(db, view.id)) == 2, (
+            "a replay must not append a second history row"
+        )
 
 
 # ── Amendment ───────────────────────────────────────────────────────────────

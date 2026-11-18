@@ -64,8 +64,8 @@ def harness(monkeypatch, cmd, current=None):
     hasher = Mock(side_effect=lambda value: trace.append("hash") or HASH)
     monkeypatch.setattr(owner, "hash_password", hasher)
     audit = Mock()
-    audit.record_assignment.side_effect = (
-        lambda entry: trace.append("audit") or "audit-id"
+    audit.record_assignment.side_effect = lambda entry: (
+        trace.append("audit") or "audit-id"
     )
     old = [Mock() for _ in range(4)]
     engine = owner.CredentialLifecycle(

@@ -215,9 +215,9 @@ class TestApprovalBindsToTheFrozenDigest:
         # normalisation — a module that stamped its own `now()` would differ by
         # far more than a tzinfo.
         assert view.approved_at is not None
-        assert view.approved_at.replace(tzinfo=None) == _DECIDED.replace(
-            tzinfo=None
-        ), "the deciding owner's clock is recorded, not this module's"
+        assert view.approved_at.replace(tzinfo=None) == _DECIDED.replace(tzinfo=None), (
+            "the deciding owner's clock is recorded, not this module's"
+        )
 
     def test_a_mismatched_digest_is_refused(self, db, proposed) -> None:
         with pytest.raises(EvidenceRefusedError, match="terms changed"):

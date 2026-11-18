@@ -1054,7 +1054,7 @@ def test_the_rendered_collector_carries_no_uid_override(
     doc = yaml.safe_load(render_compose(own, image=_IMAGE))
     collector = doc["services"].get("otel-collector")
     assert collector is not None, (
-        "deploy/product.toml must declare a collector_image, or this proves " "nothing"
+        "deploy/product.toml must declare a collector_image, or this proves nothing"
     )
     assert "user" not in collector, (
         "the rendered collector must not pin a uid — that is the rehearsal "

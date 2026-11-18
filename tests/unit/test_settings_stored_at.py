@@ -53,9 +53,9 @@ def test_it_never_walks_the_chain(db, spec):
     sr.upsert_by_key(db, spec.domain, spec.key, "open", scope=SettingScope.platform())
     db.flush()
 
-    assert (
-        stored(db, spec, SettingScope.tenant(TENANT)) is None
-    ), "a platform row leaked into the tenant's stored view"
+    assert stored(db, spec, SettingScope.tenant(TENANT)) is None, (
+        "a platform row leaked into the tenant's stored view"
+    )
     at_platform = stored(db, spec, SettingScope.platform())
     assert at_platform is not None and at_platform.raw == "open"
 

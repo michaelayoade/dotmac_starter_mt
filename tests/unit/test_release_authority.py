@@ -115,7 +115,7 @@ def test_release_verifier_lock_is_mechanically_reached_from_workflow(ra, monkeyp
 def test_derive_surface_follows_a_local_composite_action_and_its_run_body(ra) -> None:
     files = _base_files(ra)
     files[ra.ROOT_WORKFLOWS[0]] = (
-        "jobs:\n  build:\n    steps:\n" "      - uses: ./.github/actions/setup-poetry\n"
+        "jobs:\n  build:\n    steps:\n      - uses: ./.github/actions/setup-poetry\n"
     )
     files[".github/actions/setup-poetry/action.yml"] = (
         "runs:\n  using: composite\n  steps:\n"
@@ -160,11 +160,10 @@ def test_derive_surface_follows_a_python_import(ra) -> None:
 def test_derive_surface_follows_a_python_string_literal_reference(ra) -> None:
     files = _base_files(ra)
     files[ra.ROOT_WORKFLOWS[0]] = (
-        "jobs:\n  build:\n    steps:\n"
-        "      - run: python scripts/release_module.py\n"
+        "jobs:\n  build:\n    steps:\n      - run: python scripts/release_module.py\n"
     )
     files["scripts/release_module.py"] = (
-        "import subprocess\n" 'subprocess.run(["python", "scripts/helper_probe.py"])\n'
+        'import subprocess\nsubprocess.run(["python", "scripts/helper_probe.py"])\n'
     )
     files["scripts/helper_probe.py"] = "import json\n"
     derived_files, _ = ra.derive_surface(_dict_reader(files))
@@ -174,8 +173,7 @@ def test_derive_surface_follows_a_python_string_literal_reference(ra) -> None:
 def test_derive_surface_records_a_non_stdlib_top_level_import_as_external(ra) -> None:
     files = _base_files(ra)
     files[ra.ROOT_WORKFLOWS[0]] = (
-        "jobs:\n  build:\n    steps:\n"
-        "      - run: python scripts/release_module.py\n"
+        "jobs:\n  build:\n    steps:\n      - run: python scripts/release_module.py\n"
     )
     files["scripts/release_module.py"] = (
         "import dotmac_kernel\nfrom dotmac_kernel.modules import ModuleRegistry\n"
@@ -205,8 +203,7 @@ def test_derive_surface_raises_on_a_dangling_composite_action_reference(ra) -> N
     # defect rule 6 describes, not a heuristic miss.
     files = _base_files(ra)
     files[ra.ROOT_WORKFLOWS[0]] = (
-        "jobs:\n  build:\n    steps:\n"
-        "      - uses: ./.github/actions/does-not-exist\n"
+        "jobs:\n  build:\n    steps:\n      - uses: ./.github/actions/does-not-exist\n"
     )
     with pytest.raises(ra.ReleaseAuthorityError):
         ra.derive_surface(_dict_reader(files))
@@ -653,15 +650,14 @@ def test_native_compiler_pins_are_required_release_control(ra):
 def test_poetry_native_composite_action_chain_is_in_the_release_surface(ra):
     files = _base_files(ra)
     files[ra.ROOT_WORKFLOWS[0]] = (
-        "jobs:\n  build:\n    steps:\n" "      - uses: ./.github/actions/setup-poetry\n"
+        "jobs:\n  build:\n    steps:\n      - uses: ./.github/actions/setup-poetry\n"
     )
     files[".github/actions/setup-poetry/action.yml"] = (
         "runs:\n  using: composite\n  steps:\n"
         "    - uses: ./.github/actions/setup-native\n"
     )
     files[".github/actions/setup-native/action.yml"] = (
-        "runs:\n  using: composite\n  steps:\n"
-        "    - run: rustup show active-toolchain\n"
+        "runs:\n  using: composite\n  steps:\n    - run: rustup show active-toolchain\n"
     )
     derived, _ = ra.derive_surface(_dict_reader(files))
     assert ".github/actions/setup-native/action.yml" in derived

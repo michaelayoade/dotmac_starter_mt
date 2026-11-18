@@ -237,9 +237,9 @@ class TestUnauthenticatedArrivalsChangeNothingAndAreRecorded:
         attempts = observation_attempts(db)
         assert len(attempts) == 1, "the tripwire must be recorded, not discarded"
         assert attempts[0].authenticated_target_ref is None
-        assert (
-            attempts[0].eligibility_at_receipt == "n/a"
-        ), "the eligibility of an unproven claim is not a meaningful question"
+        assert attempts[0].eligibility_at_receipt == "n/a", (
+            "the eligibility of an unproven claim is not a meaningful question"
+        )
 
     def test_a_valid_signature_with_no_resolved_identity_is_refused(
         self, db, enrolled
@@ -352,9 +352,9 @@ class TestEligibilityIsATimelinePredicate:
         )
         after = get_target(db, target.id)
         assert after is not None
-        assert (
-            after.observed_release_ref == _RELEASE
-        ), "an earlier admitted observation is not undone by a later revocation"
+        assert after.observed_release_ref == _RELEASE, (
+            "an earlier admitted observation is not undone by a later revocation"
+        )
 
     def test_a_report_after_revocation_is_ineligible(self, db, enrolled) -> None:
         _, credential_id = enrolled
@@ -575,9 +575,9 @@ class TestDriftIsMeasuredAgainstWhatWasRolledOut:
         )
         report = drift(db, target.id)
         assert report is not None
-        assert (
-            report.drifted is False
-        ), "an unrolled-out desired-state edit is intent, not drift"
+        assert report.drifted is False, (
+            "an unrolled-out desired-state edit is intent, not drift"
+        )
 
     def test_a_target_running_something_else_is_drifted(self, db, enrolled) -> None:
         target, _ = enrolled

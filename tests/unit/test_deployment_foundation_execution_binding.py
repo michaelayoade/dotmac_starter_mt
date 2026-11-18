@@ -433,13 +433,13 @@ def test_migration_family_work_runs_in_the_candidate_image() -> None:
     assert outcome.succeeded, outcome.failure
     assert effects.migration_images, "no migration-family work was recorded"
     for command, image in effects.migration_images:
-        assert (
-            image == plan.image
-        ), f"{command} ran against {image!r}, not the authorized {plan.image!r}"
+        assert image == plan.image, (
+            f"{command} ran against {image!r}, not the authorized {plan.image!r}"
+        )
     for role, image in effects.candidate_started_with:
-        assert (
-            image == plan.image
-        ), f"candidate {role} started on {image!r}, not {plan.image!r}"
+        assert image == plan.image, (
+            f"candidate {role} started on {image!r}, not {plan.image!r}"
+        )
 
 
 # ── item 8: readiness is REAL for every strategy, after the switch ─────────
@@ -626,13 +626,13 @@ def test_the_exact_authorized_tuple_mutates_once() -> None:
     assert outcome.succeeded, outcome.failure
     switches = [call for call in effects.mutations if call[0] == "switch"]
     assert len(switches) == 1, f"expected exactly one switch, saw {switches}"
-    assert (
-        outcome.execution_plan_digest == digest
-    ), "the outcome must carry the digest that was frozen, not an empty string"
+    assert outcome.execution_plan_digest == digest, (
+        "the outcome must carry the digest that was frozen, not an empty string"
+    )
     assert outcome.descriptor_digest, "the descriptor digest is not persisted"
-    assert (
-        outcome.control_plan_digest == CONTROL_PLAN_DIGEST
-    ), "Control's plan digest must be persisted verbatim, under its own name"
+    assert outcome.control_plan_digest == CONTROL_PLAN_DIGEST, (
+        "Control's plan digest must be persisted verbatim, under its own name"
+    )
     evidence = outcome.as_evidence()
     assert evidence["execution_plan_digest"] == digest
     assert evidence["descriptor_digest"] == outcome.descriptor_digest

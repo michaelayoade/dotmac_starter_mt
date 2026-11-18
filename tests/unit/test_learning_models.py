@@ -423,7 +423,7 @@ MIGRATED_INDEXES = {
         "uq_learning_events_once_per_subject": (
             ("tenant_id", "person_id", "kind", "subject_id"),
             True,
-            "kind IN " "('chapter_completed', " "'certificate_earned')",
+            "kind IN ('chapter_completed', 'certificate_earned')",
         ),
     },
     "chapters": {
