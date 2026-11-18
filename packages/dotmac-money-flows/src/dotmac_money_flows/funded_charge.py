@@ -712,7 +712,7 @@ def start_funded_charge(
     """Start one charge at its due time, in the caller's transaction.
 
     See the module docstring: replay first, no row for an unknown or non-prepaid
-    charge (the contract type is read after the account lock is taken), the
+    charge (the contract type is read again after the account lock is taken), the
     balance covering the whole charge discharges it at ``due_at``, otherwise it is
     held ``pending``. An owner exception propagates.
     """
@@ -724,6 +724,10 @@ def start_funded_charge(
     charge = ports.charges.read(db, scope=scope, key=command.key)
     if charge is None:
         raise FundedChargeRefused("charge_not_found")
+    # Fast path, no lock and no funds read for a postpaid account; the check
+    # under the lock below is the authoritative one.
+    if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
+        raise FundedChargeRefused("not_prepaid")
     ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope).version)
     funded = _fits(ctx, charge, charge.billing_account_id)  # takes the lock
     winner = _find(db, tenant_id, charge_ref=charge_ref)

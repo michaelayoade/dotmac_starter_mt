@@ -568,7 +568,7 @@ def test_j_a_start_blocked_behind_a_switch_and_recheck_leaves_no_pending_row(scr
     assert len(errors) == 1 and isinstance(errors[0], FundedChargeRefused)
     assert errors[0].code == "not_prepaid"
     assert _rows(scratch, scope) == []  # no stranded pending row
-    assert all(event["active"] for event in _access(scratch, scope))  # service on
+    assert _access(scratch, scope) == []  # the service was never switched off
 
 
 def test_k_a_late_start_after_the_recheck_is_held_until_the_recheck_runs_again(
@@ -580,6 +580,7 @@ def test_k_a_late_start_after_the_recheck_is_held_until_the_recheck_runs_again(
     pending and turns the service off; the re-check that already ran cannot see
     it. That is why the caller re-runs the re-check whenever a start returns
     pending (README, N1): the second run withdraws the row and resumes service.
+    Documentation of the caller duty: it passes with or without the N1 fix.
     """
     scope, (account,) = _world(scratch)
     source = FakeChargeSource()

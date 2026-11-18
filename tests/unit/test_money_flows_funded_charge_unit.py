@@ -384,23 +384,26 @@ def test_an_unknown_charge_is_refused_with_no_row_and_no_owner_call(monkeypatch)
 def test_a_charge_that_is_not_prepaid_is_refused_with_no_row(monkeypatch):
     monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
     monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: False)
-    monkeypatch.setattr(flows, "_fits", lambda *a, **k: False)
     monkeypatch.setattr(flows, "_write", _boom)
-    monkeypatch.setattr(flows, "_begin_service", _boom)
+    monkeypatch.setattr(flows, "get_funding_availability", _boom)
     ports = _ports(_Charges(_charge()))
     with pytest.raises(FundedChargeRefused) as refused:
         flows.start_funded_charge(
             None, scope=SCOPE, command=StartFundedChargeV1(KEY), ports=ports
         )
     assert refused.value.code == "not_prepaid"
+    assert ports.policy.reads == 0
 
 
-def test_the_terms_are_read_after_the_account_lock_and_gate_the_start(monkeypatch):
+def test_the_terms_are_read_again_after_the_account_lock_and_gate_the_start(
+    monkeypatch,
+):
     calls = []
+    answers = iter([True, False])  # prepaid before the lock, postpaid after it
     monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
     monkeypatch.setattr(flows, "_fits", lambda *a, **k: calls.append("lock") or False)
     monkeypatch.setattr(
-        flows, "_is_prepaid", lambda *a, **k: calls.append("terms") or False
+        flows, "_is_prepaid", lambda *a, **k: calls.append("terms") or next(answers)
     )
     monkeypatch.setattr(flows, "_write", _boom)
     monkeypatch.setattr(flows, "_begin_service", _boom)
@@ -412,7 +415,7 @@ def test_the_terms_are_read_after_the_account_lock_and_gate_the_start(monkeypatc
             ports=_ports(_Charges(_charge())),
         )
     assert refused.value.code == "not_prepaid"
-    assert calls == ["lock", "terms"]  # terms only after the lock is held
+    assert calls == ["terms", "lock", "terms"]  # authoritative read under the lock
 
 
 def test_a_duplicate_that_won_the_lock_is_replayed_without_reading_terms(
@@ -429,7 +432,7 @@ def test_a_duplicate_that_won_the_lock_is_replayed_without_reading_terms(
     finds = iter([None, winner])
     monkeypatch.setattr(flows, "_find", lambda *a, **k: next(finds))
     monkeypatch.setattr(flows, "_fits", lambda *a, **k: False)
-    monkeypatch.setattr(flows, "_is_prepaid", _boom)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
     outcome = flows.start_funded_charge(
         None,
         scope=SCOPE,

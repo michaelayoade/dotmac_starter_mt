@@ -45,10 +45,14 @@ while a start waits is seen: the start is refused (`not_prepaid`) and leaves no
 pending row. That closes the race, but not a *late start*: a charge due before
 the switch's `at` that is first started after the re-check ran is still prepaid
 at its `due_at`, so the start holds it `pending` and the service off, and the
-re-check that already ran cannot see it. The caller (Sub-thin) must therefore
-re-run `reevaluate_account_terms` for the account whenever a start returns
-`pending` (after the start's transaction commits, with the `at` of the latest
-terms change). The second run withdraws the row and resumes the service.
+re-check that already ran cannot see it. The caller (Sub-thin) must therefore re-run `reevaluate_account_terms` for the
+account whenever a start returns `pending`, including a replayed `pending`
+outcome (a duplicate that won the race), after the start's transaction commits.
+Use `at` = the `effective_from` of the latest terms version already in effect
+(`effective_from` <= now; tenant-default versions count for an account with no
+own terms); skip the call if there is none. Never use a future switch's `at`: it
+would withdraw a valid unfunded prepaid charge now. The call withdraws the row
+and resumes the service.
 
 Changing the tenant default contract type is a runbook event, not code in this
 package: the caller re-checks each prepaid account that falls back to the default

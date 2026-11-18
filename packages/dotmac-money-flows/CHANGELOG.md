@@ -122,7 +122,9 @@ Source only; not published, not composed into any assembly.
   refused (`not_prepaid`) instead of leaving a pending row after the re-check.
   Lock order unchanged; no migration. A start after the re-check for a charge due
   before the switch still holds pending: the caller re-runs the re-check whenever
-  a start returns pending (README).
+  a start returns pending (replays included), with `at` = the latest terms
+  version already in effect, never a future one (README). A postpaid start is
+  still refused before any lock.
 
 ### Release gates (F2)
 
