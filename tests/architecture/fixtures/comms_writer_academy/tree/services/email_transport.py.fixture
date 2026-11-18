@@ -1,0 +1,17 @@
+"""Synthetic fixture: the shared product-owned SMTP transport.
+
+Stored as .py.fixture and materialised by the tests: a committed .py file with a
+real smtplib import would be a genuine outbound-transport source for the
+repository-wide connector governance scan.
+"""
+
+from __future__ import annotations
+
+import smtplib
+
+
+def send_email_detailed(host, port, message):
+    # the shared product-owned SMTP transport (census: shared mechanics)
+    with smtplib.SMTP(host, port) as client:
+        client.starttls()
+        client.send_message(message)

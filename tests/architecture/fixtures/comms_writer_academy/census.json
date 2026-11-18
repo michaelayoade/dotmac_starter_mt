@@ -1,5 +1,5 @@
 {
-  "_comment": "Census (PLAN s1) mapping for the synthetic fixture: 26 send-site lines over 22 numbered rows (9a-9d and 10a-10b split), plus 2 shared outbox writers and 3 findings of the one shared SMTP transport = 31. Real Academy (cron-census tree, app/) yields 32: it also carries app/instructor.py, a byte-identical copy of app/web/instructor.py, so row 9c is found twice (instructor.py and web/instructor.py); the fixture lists it once. Real row 19 is audit_context.py::_SuccessDelivery.__call__ and row 13 is reminder_resend.py (renderer imported inside the function, copy passed as **expected_outbox).",
+  "_comment": "Census (PLAN s1) mapping for the synthetic fixture: 26 send-site lines over 22 numbered rows (9a-9d and 10a-10b split), plus 2 shared outbox writers and 3 findings of the one shared SMTP transport = 31. Real Academy (cron-census tree, app/) yields 32: it also carries app/instructor.py, a byte-identical copy of app/web/instructor.py, so row 9c is found twice (instructor.py and web/instructor.py); the fixture lists it once. Real row 19 is audit_context.py::_SuccessDelivery.__call__ and row 13 is reminder_resend.py (renderer imported inside the function, copy passed as **expected_outbox). In the fixture the shared SMTP transport lives in services/email_transport.py (committed as .py.fixture and materialised by the tests) rather than in services/email.py, to keep a real smtplib import out of a committed .py file.",
   "map": {
     "services/email.py::inline_copy::_queue_first_pass_intents#1": "1",
     "services/completion.py::inline_copy::_email_certificate#1": "2",
@@ -29,8 +29,8 @@
     "web/settings.py::inline_copy::settings_test_email#1": "22",
     "models/email_outbox.py::outbox_writer::EmailOutbox#1": "shared writer: model",
     "services/email_outbox.py::outbox_writer::enqueue_email#1": "shared writer: enqueue",
-    "services/email.py::direct_smtp::import:smtplib#1": "shared SMTP transport",
-    "services/email.py::direct_smtp::call:SMTP#1": "shared SMTP transport",
-    "services/email.py::direct_smtp::call:starttls#1": "shared SMTP transport"
+    "services/email_transport.py::direct_smtp::import:smtplib#1": "shared SMTP transport",
+    "services/email_transport.py::direct_smtp::call:SMTP#1": "shared SMTP transport",
+    "services/email_transport.py::direct_smtp::call:starttls#1": "shared SMTP transport"
   }
 }

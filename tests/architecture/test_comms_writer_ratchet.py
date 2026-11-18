@@ -47,11 +47,27 @@ def _ids(source: str, path: str = "services/x.py") -> list[str]:
     return _scan({path: source})
 
 
+def _materialise(dest: Path) -> Path:
+    """Copy the fixture and turn ``*.py.fixture`` into real ``.py`` files.
+
+    The shared SMTP transport is committed as ``.py.fixture`` so that no real
+    ``smtplib`` import sits in a committed ``.py`` file (the repository-wide
+    connector governance scan would count it as an outbound-transport source).
+    """
+    shutil.copytree(FIXTURE, dest)
+    for path in dest.rglob("*.py.fixture"):
+        path.rename(path.with_suffix(""))
+    return dest
+
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
-    dest = tmp_path / "fx"
-    shutil.copytree(FIXTURE, dest)
-    return dest
+    return _materialise(tmp_path / "fx")
+
+
+@pytest.fixture(scope="module")
+def academy(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return _materialise(tmp_path_factory.mktemp("academy") / "fx")
 
 
 def _run(fx: Path, capsys: pytest.CaptureFixture[str] | None = None) -> int:
@@ -138,9 +154,9 @@ def test_starter_exclusions_are_enforceable() -> None:
 # -- Academy census ----------------------------------------------------------
 
 
-def test_academy_fixture_reproduces_the_census() -> None:
-    config = json.loads((FIXTURE / "config.json").read_text())
-    result = ratchet.scan_product(config, FIXTURE)
+def test_academy_fixture_reproduces_the_census(academy: Path) -> None:
+    config = json.loads((academy / "config.json").read_text())
+    result = ratchet.scan_product(config, academy)
     census = json.loads((FIXTURE / "census.json").read_text())
     mapping = census["map"]
     assert not result.problems
@@ -152,9 +168,9 @@ def test_academy_fixture_reproduces_the_census() -> None:
     assert sum(v == "shared SMTP transport" for v in mapping.values()) == 3
     assert sum(v.startswith("shared writer") for v in mapping.values()) == 2
     assert "app/instructor.py" in census["_comment"], "9c duplicate is documented"
-    assert ratchet.load_backlog(FIXTURE / "backlog.json") == sorted(result.ids)
+    assert ratchet.load_backlog(academy / "backlog.json") == sorted(result.ids)
     assert (
-        ratchet.run(FIXTURE / "config.json", FIXTURE / "backlog.json", write=False) == 0
+        ratchet.run(academy / "config.json", academy / "backlog.json", write=False) == 0
     )
 
 
@@ -167,9 +183,9 @@ def test_academy_fixture_locations_match_the_real_census() -> None:
     assert where["19"].startswith("services/audit_context.py::")
 
 
-def test_academy_fixture_covers_every_family() -> None:
-    config = json.loads((FIXTURE / "config.json").read_text())
-    result = ratchet.scan_product(config, FIXTURE)
+def test_academy_fixture_covers_every_family(academy: Path) -> None:
+    config = json.loads((academy / "config.json").read_text())
+    result = ratchet.scan_product(config, academy)
     for family in config["families"]:
         assert result.families.get(family, 0) > 0
     assert not [i for i in result.ids if i.startswith(("workers/", "scripts/"))]
@@ -561,17 +577,13 @@ def test_an_owner_hides_only_the_kinds_it_lists(
 ) -> None:
     config = _config(tree)
     config["allowed"] = [
-        {
-            "glob": "services/email.py",
-            "kinds": ["direct_smtp"],
-            "premise": "the adapter",
-        }
+        {"glob": "services/email*.py", "kinds": ["direct_smtp"], "premise": "adapter"}
     ]
     _save_config(tree, config)
     data = _backlog(tree)
     data["findings"] = [i for i in data["findings"] if "::direct_smtp::" not in i]
     _save(tree, data)
-    # the 3 smtp findings are hidden; the row-1 inline copy in the same file is NOT
+    # the 3 smtp findings are hidden; the row-1 inline copy in email.py is NOT
     assert _run(tree) == 0
     data["findings"] = [i for i in data["findings"] if "_queue_first_pass" not in i]
     _save(tree, data)
