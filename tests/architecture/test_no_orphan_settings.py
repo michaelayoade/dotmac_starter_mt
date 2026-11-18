@@ -42,7 +42,11 @@ _EXCLUDED_DIR_PREFIX = "app/features/settings/"
 # kernel-boundary split; kernel modules (display, branding) are legitimate
 # spec CONSUMERS, so the corpus scans the kernel too (see `_reader_corpus`).
 _EXCLUDED_FILE = "dotmac_kernel/settings_resolver.py"
-_EXCLUDED_FILES = {_EXCLUDED_FILE, "dotmac_template_studio/settings.py"}
+_EXCLUDED_FILES = {
+    _EXCLUDED_FILE,
+    "dotmac_template_studio/settings.py",
+    "dotmac_delivery_smtp/settings.py",
+}
 
 # Burn-down allowlist — do NOT add to this without a task/plan reference in
 # the comment; a new orphan should get a real consumer instead. EMPTY as of
@@ -74,6 +78,11 @@ def _reader_corpus(root: pathlib.Path) -> str:
         (
             root / "packages/dotmac-template-studio/src/dotmac_template_studio",
             "dotmac_template_studio",
+        ),
+        # The SMTP adapter's reader (`reader.py`) resolves its five specs.
+        (
+            root / "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp",
+            "dotmac_delivery_smtp",
         ),
     )
     chunks: list[str] = []

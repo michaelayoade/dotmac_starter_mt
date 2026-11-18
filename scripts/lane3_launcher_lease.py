@@ -49,6 +49,7 @@ from dotmac_deployment_foundation.lease_release import (
     TerminalOutcome,
     TerminalRefusal,
 )
+from lane3_e10_receipt import E10ReceiptRef
 from lane3_lease_store import (
     HeldLease,
     LeaseStore,
@@ -90,6 +91,7 @@ def take_custody(
     authorization_run: str,
     controller_identity: ControllerSshFingerprintV1,
     ttl_seconds: int,
+    e10_receipt: E10ReceiptRef,
 ) -> HeldLease:
     """The exclusively held lease, or a refusal. The store is a required input.
 
@@ -102,6 +104,7 @@ def take_custody(
             authorization_run=authorization_run,
             controller_identity=controller_identity,
             ttl_seconds=ttl_seconds,
+            e10_receipt=e10_receipt,
         )
     except StoreRefused as exc:
         raise LeaseCustodyRefused(exc.code) from None

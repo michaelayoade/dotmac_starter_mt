@@ -896,6 +896,14 @@ specifics) points here and must never fork these rules.
     (`scripts/product_writer_check.py`; `make product-writer-check`;
     `tests/architecture/test_product_writer_completeness.py`)
 
+    The message-writer half of the same concern is a ratchet too: a product
+    composed from Starter may not own a mail outbox, call SMTP directly or
+    hard-code tenant-facing copy (ADR-0006 5f). `scripts/comms_writer_ratchet.py`
+    scans whole product trees (every entry-point family) against a
+    two-directional backlog; Starter's is empty
+    (`make comms-writer-check`; `tests/architecture/test_comms_writer_ratchet.py`,
+    including its Academy-census fixture and sensitivity proof).
+
 34. **A PUBLISHED version's manifest is its contract, and a contract does not
     move.** An installation adopts a connector by MANIFEST DIGEST: `mod_intg`
     stores the digest a binding was enabled against and

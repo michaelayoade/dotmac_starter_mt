@@ -55,6 +55,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -66,6 +67,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_kernel.models import Base, uuid_pk
@@ -157,7 +159,171 @@ class CommunicationDelivery(Base):
     )
 
 
+# --------------------------------------------------------------------------
+# Dispatch identity (ADR-0006 § 5g, K-3)
+# --------------------------------------------------------------------------
+
+DISPATCH_PENDING = "pending"
+DISPATCH_SENT = "sent"
+DISPATCH_FAILED = "failed"
+DISPATCH_DEAD = "dead"
+DISPATCH_SUPPRESSED = "suppressed"
+#: An imported legacy key: exists only so the same key cannot be sent again. It
+#: has no content, is never enqueued and never loads.
+DISPATCH_HISTORY = "history"
+
+DISPATCH_STATUSES: tuple[str, ...] = (
+    DISPATCH_PENDING,
+    DISPATCH_SENT,
+    DISPATCH_FAILED,
+    DISPATCH_DEAD,
+    DISPATCH_SUPPRESSED,
+    DISPATCH_HISTORY,
+)
+#: States after which the rendered bodies may be redacted (retention job, a
+#: later work package). `history` rows carry no bodies to begin with.
+DISPATCH_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {
+        DISPATCH_SENT,
+        DISPATCH_FAILED,
+        DISPATCH_DEAD,
+        DISPATCH_SUPPRESSED,
+        DISPATCH_HISTORY,
+    }
+)
+
+_JSON_NULLABLE = sa.JSON(none_as_null=True).with_variant(
+    postgresql.JSONB(none_as_null=True), "postgresql"
+)
+
+
+class CommunicationDispatch(Base):
+    """The identity and rendered snapshot of one outbound message.
+
+    **Not a queue.** Attempts, backoff, leasing and dead-letter stay with the
+    kernel outbox relay; `status` here is only the dispatch's outcome as the
+    relay transport (K-8) records it. The outbox event for a dispatch carries
+    nothing but `{"dispatch_id": ...}`, so bodies, tokens and addresses never
+    pass through the cross-tenant dispatcher connection.
+
+    **Privilege boundary (migration 0032).** Tenant RLS with FORCE. `app_user`
+    holds SELECT, INSERT and column-level UPDATE on the mutable columns only
+    (outcome and redaction); no DELETE. `outbox_dispatcher` and the Academy
+    "lab worker" role hold NOTHING on this table.
+
+    **Status.** `pending` -> `sent` | `failed` | `dead` | `suppressed`, and
+    `dead` -> `pending` (K-5 requeue, never once redacted); `history` is
+    import-only. `failed` here means a PERMANENT refusal only: a transient
+    provider failure leaves the dispatch `pending` (the relay retries). The
+    K-2 receipt status `failed` is a different thing and IS retryable. A
+    BEFORE UPDATE trigger (migration 0032, runs as the calling role) enforces
+    the allowlist and that content changes only by redaction: all content
+    columns, including `address`, go NULL together with `redacted_at`
+    (one-way) on an already-terminal row.
+
+    **Content.** `subject` / `text_body` / `html_body` / `headers` /
+    `attachments` are the S6 `OutboundMessage` parts, stored as rendered.
+    `content_fingerprint` is `OutboundMessage.request_fingerprint`; it and
+    `template_provenance` survive post-terminal redaction (`redacted_at` set,
+    the six content columns, including the address, NULLed). A redacted
+    dispatch is never rebuilt.
+    """
+
+    __tablename__ = "communication_dispatches"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'failed', 'dead', 'suppressed', "
+            "'history')",
+            name="ck_communication_dispatches_status",
+        ),
+        # A history row is a bare key: no address, no content.
+        CheckConstraint(
+            "status <> 'history' OR (address IS NULL AND subject IS NULL "
+            "AND text_body IS NULL AND html_body IS NULL AND headers IS NULL "
+            "AND attachments IS NULL AND content_fingerprint IS NULL)",
+            name="ck_communication_dispatches_history_bare",
+        ),
+        CheckConstraint(
+            "status = 'history' OR content_fingerprint IS NOT NULL",
+            name="ck_communication_dispatches_fingerprint",
+        ),
+        CheckConstraint(
+            "status = 'history' OR redacted_at IS NOT NULL OR address IS NOT NULL",
+            name="ck_communication_dispatches_address",
+        ),
+        CheckConstraint(
+            "redacted_at IS NULL OR (address IS NULL AND subject IS NULL "
+            "AND text_body IS NULL AND html_body IS NULL AND headers IS NULL "
+            "AND attachments IS NULL)",
+            name="ck_communication_dispatches_redacted_bare",
+        ),
+        CheckConstraint(
+            "status = 'history' OR redacted_at IS NOT NULL "
+            "OR text_body IS NOT NULL OR html_body IS NOT NULL",
+            name="ck_communication_dispatches_has_body",
+        ),
+        CheckConstraint(
+            "redacted_at IS NULL OR status <> 'pending'",
+            name="ck_communication_dispatches_redact_terminal",
+        ),
+        Index(
+            "uq_communication_dispatches_tenant_key",
+            "tenant_id",
+            "idempotency_key",
+            unique=True,
+        ),
+    )
+
+    dispatch_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Product-supplied dedupe key. Treat as potentially personal: it is never
+    #: copied into the outbox event.
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    channel: Mapped[str] = mapped_column(String(40), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), nullable=False)
+    address: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    html_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Canonical allowlisted headers, `{name: value}`.
+    headers: Mapped[dict | None] = mapped_column(_JSON_NULLABLE, nullable=True)
+    #: `[{kind, ref, filename, content_type}, ...]`: references, never bytes.
+    attachments: Mapped[list | None] = mapped_column(_JSON_NULLABLE, nullable=True)
+    content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: `template:<key>` with `template_revision_id`, or `legacy:<source>`.
+    template_provenance: Mapped[str] = mapped_column(String(255), nullable=False)
+    template_revision_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DISPATCH_PENDING
+    )
+    #: When the product asked for it to be due. The outbox event's own
+    #: `available_at` is what the relay schedules on; this is the requested value.
+    requested_available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    terminal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    redacted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 __all__ = [
+    "DISPATCH_DEAD",
+    "DISPATCH_FAILED",
+    "DISPATCH_HISTORY",
+    "DISPATCH_PENDING",
+    "DISPATCH_SENT",
+    "DISPATCH_STATUSES",
+    "DISPATCH_SUPPRESSED",
+    "DISPATCH_TERMINAL_STATUSES",
+    "CommunicationDispatch",
     "DELIVERY_ACCEPTED",
     "DELIVERY_BOUNCED",
     "DELIVERY_COMPLAINT",

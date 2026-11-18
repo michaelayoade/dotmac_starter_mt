@@ -391,6 +391,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.db",
         "dotmac_kernel.database_catalog_comparator",
         "dotmac_kernel.delivery",
+        "dotmac_kernel.delivery_dispatch",
         "dotmac_kernel.delivery_models",
         "dotmac_kernel.delivery_providers",
         "dotmac_kernel.deps",
