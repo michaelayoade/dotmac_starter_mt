@@ -1123,3 +1123,34 @@ def test_another_pending_row_on_the_same_service_keeps_it_off(db, monkeypatch):
     db.flush()
     flows._signal(ctx, first, True, AT)  # still off: no signal
     assert sent == []
+
+
+@pytest.mark.parametrize("with_cursor", [False, True])
+def test_the_continuation_cursor_clause_is_in_the_query_only_when_set(
+    monkeypatch, with_cursor
+):
+    seen = []
+
+    class Capture(_Rows):
+        def execute(self, statement):
+            seen.append(
+                " ".join(
+                    str(
+                        statement.compile(compile_kwargs={"literal_binds": True})
+                    ).split()
+                )
+            )
+            return self
+
+    monkeypatch.setattr(flows, "get_funding_availability", lambda *a, **k: None)
+    after = FundedChargeCursorV1(DUE + timedelta(minutes=7), uuid4())
+    flows.reevaluate_account_terms(
+        Capture([]),
+        scope=SCOPE,
+        request=AccountTermsChangedV1(ACCOUNT, AT, after if with_cursor else None),
+        ports=_ports(_Charges()),
+    )
+    (sql,) = seen
+    marker = str(after.id).replace("-", "")
+    assert (marker in sql.replace("-", "")) is with_cursor
+    assert ("created_at >" in sql) is with_cursor

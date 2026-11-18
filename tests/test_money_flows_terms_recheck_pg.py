@@ -346,6 +346,51 @@ def test_f_the_cap_bounds_the_batch_and_the_chain_finishes(scratch):
     assert _documents(scratch, scope) == 0
 
 
+def test_f_the_cursor_visits_each_still_prepaid_row_exactly_once(scratch):
+    scope, (account,) = _world(scratch)
+    source = FakeChargeSource()
+    ports = make_funded_ports(source, cap=2)
+    keys = []
+    for index in range(5):
+        keys.append(
+            source.add(
+                scope,
+                account,
+                f"renewal-{index}",
+                due_at=BASE,
+                service_ref=f"service:{index}",
+            )
+        )
+        assembly_start(scratch, scope, keys[-1], ports)
+    before = _states(scratch, scope)
+    source.reads.clear()  # only the re-check's own reads count from here
+
+    request, sizes, visited = _request(account), [], []
+    for _ in range(10):
+        start = len(source.reads)
+        sizes.append(len(assembly_recheck(scratch, scope, request, ports)))
+        visited.extend(source.reads[start:])
+        continuations = _events(scratch, scope, RECHECK)
+        if len(continuations) < len(sizes):
+            break
+        last = continuations[-1]
+        request = _request(
+            account,
+            SWITCH,
+            FundedChargeCursorV1(
+                datetime.fromisoformat(last["after_created_at"]),
+                UUID(last["after_id"]),
+            ),
+        )
+
+    assert sizes == [0, 0, 0]  # still prepaid: nothing changes
+    assert len(_events(scratch, scope, RECHECK)) == 2  # no third continuation
+    assert sorted(visited, key=str) == sorted(keys, key=str)  # each exactly once
+    assert len(visited) == 5
+    assert _states(scratch, scope) == before == [("pending", None, 0)] * 5
+    assert _documents(scratch, scope) == 0
+
+
 # --------------------------------------------------------------------------
 # (g) an account on the tenant default terms resolves through the default
 # --------------------------------------------------------------------------
