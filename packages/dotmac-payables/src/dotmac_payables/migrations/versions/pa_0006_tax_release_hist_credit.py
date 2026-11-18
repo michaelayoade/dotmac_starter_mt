@@ -41,7 +41,9 @@ def _tenant_fk(table: str) -> sa.ForeignKeyConstraint:
     )
 
 
-def _fk(name: str, local: list[str], remote_table: str, remote: list[str]):
+def _fk(
+    name: str, local: list[str], remote_table: str, remote: list[str]
+) -> sa.ForeignKeyConstraint:
     return sa.ForeignKeyConstraint(
         local,
         [f"{_SCHEMA}.{remote_table}.{column}" for column in remote],

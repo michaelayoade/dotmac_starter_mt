@@ -1,5 +1,60 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a6 — unreleased
+
+Publication is authorized by Michael (register v1516, D-9 and the a6 VAT-release and
+WHT work) but happens only through the release lane after review. No assembly adopts
+this candidate by this change. Billing is untouched. No second person is required by
+any new command (Michael, 2026-11-17: maker-checker is optional and off).
+
+- Cash-basis release of deferred input tax at payment. `declare_tax_deferral` declares,
+  as an immutable owner fact (one row per tenant and deferral account, never metadata),
+  that tax booked to a deferral account is released to a release account as the
+  invoice is paid. `record_supplier_payment` now freezes one
+  `supplier_payment_tax_releases` row per (invoice, deferral account): the proportional
+  share of what remains deferred, rounded half up to the policy's minor units, and the
+  exact remainder on the final payment (`deferred_tax_release`,
+  `invoice_deferred_tax_position`). The payment consequence appends Dr release / Cr
+  deferral per row to the a5 lines; the reversal mirrors them. A payment with no rows
+  is byte-identical to a5 (fingerprints pinned). A credit note carrying deferral tax
+  must name its invoice and cannot exceed what remains deferred
+  (`deferred_tax_credit_requires_invoice`, `deferred_tax_credit_exceeds_remaining`).
+  A negative position is a data fault and is refused (`deferred_tax_position_negative`).
+- `admit_historical_tax_deferral`: verifier-bound, no GL. Records the deferral already
+  released before admission on a settled historical invoice, so its first payment here
+  cannot over-release. Without it, such a payment is refused
+  (`historical_deferral_unproven`). Basis-neutral: `released_before_admission`, and
+  opaque `releases` evidence whose meaning the verifier defines. Domain
+  `payables.historical-tax-deferral.v1`.
+- Withholding at payment: a withholding account that is the payment's cash account, an
+  allocated invoice's liability account or a declared deferral or release account is
+  refused at creation and re-checked at approval and recording
+  (`withholding_account_conflict`). The consequence shape is unchanged.
+- `admit_historical_supplier_credit` (R5b): verifier-bound, no GL. Admits a settled
+  historical invoice that was overpaid as an APPROVED credit note (no lines, no tax),
+  an immutable `historical_credit_receipts` row with its settlements, and a
+  `historical_credit_recognized` liability event of minus the credit. Refused unless the
+  settlements exceed the total by exactly the credit (`historical_credit_not_overpaid`)
+  and the carried supplier control amount equals minus the credit
+  (`legacy_gl_does_not_hold_credit`). Such a credit has no accounting consequence or
+  receipt (`historical_credit_has_no_consequence`), and its invoice cannot be recognized,
+  admitted or posted. `apply_credit_note` applies it unchanged. Domain
+  `payables.historical-supplier-credit.v1`.
+- Invoice and credit-note consequences skip a zero-value line's amount entry (a tax-only
+  line keeps its tax entry) and refuse an empty, unbalanced or zero-valued entry set
+  (`consequence_entry_invalid`). Stored lines are unchanged; fingerprints are unchanged
+  for every document without a zero line.
+- `PayablesError` accepts an optional keyword `code`; every new refusal sets it and
+  carries it in parentheses in the message. Existing raises are unchanged.
+- Add `pa_0006_tax_release_hist_credit` (additive: `tax_deferral_policies`,
+  `supplier_payment_tax_releases`, `historical_tax_deferrals`,
+  `historical_credit_receipts`, `historical_credit_settlements`; forced RLS,
+  append-only triggers, SELECT and INSERT grants only). No released table or column
+  changes. Its downgrade refuses once any row exists. The revision id is shortened
+  from the design's `pa_0006_tax_release_history_credit`, which exceeds the 32-character
+  `alembic_version.version_num`.
+- Kernel floor unchanged at a103.
+
 ## 0.1.0a5 — unreleased
 
 Publication is authorized by Michael (register v1302 rulings; W9) but happens only

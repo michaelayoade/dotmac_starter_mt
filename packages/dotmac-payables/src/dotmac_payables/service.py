@@ -3499,13 +3499,16 @@ def admit_historical_supplier_credit(
                     "or accounting evidence"
                 )
         settlement_ids = [item.source_settlement_id for item in evidence.settlements]
-        for model in (HistoricalSettlementRecord, HistoricalCreditSettlementRecord):
+        for settlement_model in (
+            HistoricalSettlementRecord,
+            HistoricalCreditSettlementRecord,
+        ):
             if (
                 session.scalar(
-                    select(model.id)
+                    select(settlement_model.id)
                     .where(
-                        model.tenant_id == scope.tenant_id,
-                        model.source_settlement_id.in_(settlement_ids),
+                        settlement_model.tenant_id == scope.tenant_id,
+                        settlement_model.source_settlement_id.in_(settlement_ids),
                     )
                     .limit(1)
                 )
