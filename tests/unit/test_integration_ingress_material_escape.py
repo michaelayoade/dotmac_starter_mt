@@ -94,9 +94,9 @@ def deliver(registry: Any, session: Session, key: str | None) -> Any:
 
 
 def typed(result: Any) -> IngressOutcome:
-    assert isinstance(result, IngressOutcome), (
-        f"{type(result).__name__} escaped receive() instead of a typed outcome"
-    )
+    assert isinstance(
+        result, IngressOutcome
+    ), f"{type(result).__name__} escaped receive() instead of a typed outcome"
     return result
 
 
@@ -133,9 +133,9 @@ def engine_frames(exc: BaseException) -> str:
             rendered.append(f"{frame.f_code.co_name}: {owned!r}")
         tb = tb.tb_next
     assert rendered, "no frame of the ingress engine is in this traceback"
-    assert any("secrets" in line for line in rendered), (
-        "no engine frame binds a `secrets` local — this proves nothing"
-    )
+    assert any(
+        "secrets" in line for line in rendered
+    ), "no engine frame binds a `secrets` local — this proves nothing"
     return "\n".join(rendered)
 
 
@@ -225,9 +225,9 @@ def test_a_failed_write_reaches_no_error_log_with_provider_content(
         except Exception:
             logging.getLogger("edge").exception("unhandled ingress error")
 
-    assert PAYLOAD_SENTINEL not in caplog.text, (
-        "normalized provider content reached an ERROR log line"
-    )
+    assert (
+        PAYLOAD_SENTINEL not in caplog.text
+    ), "normalized provider content reached an ERROR log line"
     assert caplog.text == "", "the edge logged an unhandled error for a typed refusal"
 
 
@@ -256,9 +256,9 @@ def test_a_failed_write_leaves_the_whole_batch_unwritten(
 
     assert outcome.code is IngressCode.RECEIPT_WRITE_FAILED
     db.rollback()
-    assert db.query(InboxReceipt).count() == 0, (
-        "an event recorded before the failed write survived"
-    )
+    assert (
+        db.query(InboxReceipt).count() == 0
+    ), "an event recorded before the failed write survived"
 
 
 # ── The traceback's frame locals ────────────────────────────────────────────
@@ -280,12 +280,12 @@ def test_a_base_exception_from_the_plugin_carries_no_secret_out(
 
     escaped = deliver(registry, db, key)
 
-    assert isinstance(escaped, asyncio.CancelledError), (
-        "a cancellation must propagate, not be converted"
-    )
-    assert SECRET_SENTINEL not in engine_frames(escaped), (
-        "the materialized secret is reachable through the engine's own frame"
-    )
+    assert isinstance(
+        escaped, asyncio.CancelledError
+    ), "a cancellation must propagate, not be converted"
+    assert SECRET_SENTINEL not in engine_frames(
+        escaped
+    ), "the materialized secret is reachable through the engine's own frame"
 
 
 def test_a_raising_connector_leaves_no_secret_in_the_refusal_traceback(

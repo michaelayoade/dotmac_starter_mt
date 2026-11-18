@@ -534,7 +534,7 @@ def test_a_completed_validation_redelivery_is_idempotent(db: Session) -> None:
 def test_validation_resumes_from_the_committed_checkpoint(
     db: Session,
 ) -> None:
-    data = b"Ref No,Amount Paid\nR-0,1\nR-1,1\nR-2,1\nR-3,1\nR-4,1\n"
+    data = b"Ref No,Amount Paid\n" b"R-0,1\nR-1,1\nR-2,1\nR-3,1\nR-4,1\n"
     run = _dry_run(db, _source(data))
     first = validate_next_chunk(
         db,
@@ -672,7 +672,7 @@ def test_one_failing_row_becomes_an_error_record_not_a_failed_batch(
 ) -> None:
     """Sub's per-row SAVEPOINT, preserved. The duplicate reference raises inside
     the domain's applier; the rows on either side of it must still land."""
-    data = b"Ref No,Amount Paid\nR-1,1\nR-1,2\nR-2,3\n"
+    data = b"Ref No,Amount Paid\n" b"R-1,1\nR-1,2\nR-2,3\n"
     source = _source(data)
     validated = _validated(db, source, data)
     applied = promote(db, tenant_id=TENANT, run_id=validated.id, source=source)

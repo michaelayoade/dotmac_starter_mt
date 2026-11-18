@@ -292,7 +292,7 @@ def test_relay_ping_requires_durable_health_verdict(
     assert worker is not None
     fake_cli = tmp_path / "dotmac-platform"
     fake_cli.write_text(
-        '#!/bin/sh\nprintf \'%s\' "$FAKE_RELAY_RESPONSE"\nexit "$FAKE_RELAY_EXIT"\n'
+        "#!/bin/sh\nprintf '%s' \"$FAKE_RELAY_RESPONSE\"\n" 'exit "$FAKE_RELAY_EXIT"\n'
     )
     fake_cli.chmod(0o700)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")

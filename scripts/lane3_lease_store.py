@@ -52,10 +52,18 @@ separate image-budget ruling, and nothing here touches the CP repository.
     write at most once, and the launcher reads standing afterwards instead of
     repeating a call.
 13. **A lease carries the receipt it was taken under.** `acquire_exclusive`
-    requires the typed E10 receipt for the host's current incarnation and the
-    returned :class:`HeldLease` carries it. A :class:`ReprovisionMarker` reopens a
-    mutated host only when its receipt is a DIFFERENT incarnation and NEWER than
-    that one.
+    requires the typed E10 receipt for the host's current incarnation
+    (`e10-receipt-required` otherwise) and the returned :class:`HeldLease`
+    carries it. A :class:`ReprovisionMarker` must name this host and cite the
+    receipt the new lease is taken under (`reprovision-receipt-mismatch`), and
+    reopens a mutated host only when that receipt is a DIFFERENT incarnation
+    (`reprovision-receipt-same-incarnation`: the same ref, incarnation key or
+    enrolment) and NEWER than the receipt the previous lease was taken under
+    (`reprovision-receipt-not-newer`). "Newer" is the store's own receipt order:
+    for the CP store its `seq`, for the reference fake
+    `incarnation_key_destroyed_at`. It is strictly greater, so an equal position
+    is refused. A receipt a marker has cited once is spent
+    (`reprovision-receipt-spent`).
 
 ## The target's role has no privileges on the lease tables
 

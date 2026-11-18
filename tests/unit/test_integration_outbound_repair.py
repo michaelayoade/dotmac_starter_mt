@@ -808,9 +808,9 @@ def test_no_second_outcome_vocabulary_is_declared() -> None:
     for name, obj in vars(outbound_repair).items():
         if isinstance(obj, type) and issubclass(obj, Enum) and obj is not OutcomeStatus:
             clash = {member.value for member in obj} & reserved
-            assert not clash, (
-                f"{name} re-declares {sorted(clash)} — use retry.OutcomeStatus"
-            )
+            assert (
+                not clash
+            ), f"{name} re-declares {sorted(clash)} — use retry.OutcomeStatus"
 
 
 def test_the_reconciliation_subject_carries_no_session(

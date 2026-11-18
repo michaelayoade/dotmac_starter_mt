@@ -378,9 +378,9 @@ def test_settlement_is_one_conditional_update(db: Session, registry) -> None:
     # Reading BEFORE, to decide whether to write, is the race.
     update_at = source.index("update(DeliveryAttempt)")
     refresh_at = source.find("db.refresh(")
-    assert refresh_at == -1 or refresh_at > update_at, (
-        "settle reads before it writes; a takeover can race between the two"
-    )
+    assert (
+        refresh_at == -1 or refresh_at > update_at
+    ), "settle reads before it writes; a takeover can race between the two"
 
 
 def test_settle_refuses_after_a_takeover(db: Session, registry) -> None:

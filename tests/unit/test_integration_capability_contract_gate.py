@@ -651,9 +651,9 @@ def test_a_valid_result_settles_against_the_GATED_contract(
     settle(db, delivery, good, prepared=prepared, registry=registry)
     db.refresh(delivery)
     assert delivery.state == "delivered"
-    assert delivery.result_json == VALID_RESULT, (
-        "validation without durable storage discards the reply after reporting success"
-    )
+    assert (
+        delivery.result_json == VALID_RESULT
+    ), "validation without durable storage discards the reply after reporting success"
 
 
 def test_a_failed_attempt_is_still_recordable_without_a_result_body(

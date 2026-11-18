@@ -515,7 +515,7 @@ def test_rejects_module_ddl_hidden_in_a_local_helper(tmp_path: Path) -> None:
         location,
         body="    _create_invoices()",
         extra=(
-            '\n\ndef _create_invoices() -> None:\n    op.create_table("invoices")\n'
+            "\n\ndef _create_invoices() -> None:\n" '    op.create_table("invoices")\n'
         ),
     )
     report = _gate(location)

@@ -849,7 +849,8 @@ def test_no_function_taking_provider_input_returns_a_destination() -> None:
 def test_the_return_type_guard_bites() -> None:
     """Sensitivity proof: exactly the refactor the guard exists to catch."""
     hostile = (
-        "def pick(binding, *, claimed_application):\n    return DestinationBinding()\n"
+        "def pick(binding, *, claimed_application):\n"
+        "    return DestinationBinding()\n"
     )
     assert _selects_from_provider_input(hostile) == ["pick"]
     benign = (

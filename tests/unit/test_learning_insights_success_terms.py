@@ -111,9 +111,9 @@ def test_learner_passes_configured_windows_and_grade_terms(monkeypatch):
     monkeypatch.setattr(
         insights,
         "_grade_trend",
-        lambda db, tenant, person, policy: (
-            trend if policy is terms.grade_trend else None
-        ),
+        lambda db, tenant, person, policy: trend
+        if policy is terms.grade_trend
+        else None,
     )
     monkeypatch.setattr(
         insights,

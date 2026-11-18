@@ -350,9 +350,9 @@ def test_a_cookie_less_pre_auth_post_is_still_protected() -> None:
     """
     client = TestClient(_probe_app(csrf=True), raise_server_exceptions=False)
     response = client.post("/mutate")
-    assert response.status_code == 403, (
-        f"a cookie-less unsafe request was not refused (status {response.status_code})"
-    )
+    assert (
+        response.status_code == 403
+    ), f"a cookie-less unsafe request was not refused (status {response.status_code})"
     assert "reached" not in response.text
 
 
@@ -562,9 +562,9 @@ def test_every_declared_route_reference_resolves_in_this_assembly() -> None:
                 )
 
     assert references, "no declared route references; this check is vacuous"
-    assert any(label.startswith("nav ") for label, _ in references), (
-        "no navigation items declared; the nav half of this check is vacuous"
-    )
+    assert any(
+        label.startswith("nav ") for label, _ in references
+    ), "no navigation items declared; the nav half of this check is vacuous"
 
     dangling = [
         f"{label} -> {name}" for label, name in references if name not in mounted
@@ -686,9 +686,9 @@ def test_surface_state_is_per_request_and_per_facet(
 
     assert first["facet"] == "alpha" and first["prefix"] == "/alpha"
     assert second["facet"] == "beta" and second["prefix"] == "/beta"
-    assert first["shell"] != second["shell"], (
-        "both facets reported the same shell; the contexts are not distinct"
-    )
+    assert (
+        first["shell"] != second["shell"]
+    ), "both facets reported the same shell; the contexts are not distinct"
     assert again == first, (
         "the third request saw state left over from the second — surface "
         f"context is leaking across requests: {again} != {first}"

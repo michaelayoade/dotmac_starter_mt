@@ -329,9 +329,9 @@ def test_an_explicit_refusing_provider_refuses_the_recovery_executor_too() -> No
     with pytest.raises(PreconditionFailed) as refusal:
         executor.run(bundle={})
     assert refusal.value.code in HOST_SOURCE_CODES
-    assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
-    )
+    assert (
+        effects.calls == []
+    ), f"the gate did not fire before the first effect: {effects.calls}"
 
 
 # ── the Protocol is satisfied by both shipped implementations ──────────────

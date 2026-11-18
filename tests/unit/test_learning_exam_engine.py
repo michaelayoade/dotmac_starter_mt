@@ -170,9 +170,9 @@ def test_course_learners_now_get_a_per_learner_option_order():
     }
     assert len(orders) > 1, "all learners still see one order"
     for order in orders:
-        assert sorted(order) == sorted(q.options), (
-            "shuffling must not drop or add an option"
-        )
+        assert sorted(order) == sorted(
+            q.options
+        ), "shuffling must not drop or add an option"
 
 
 def test_flat_selection_draws_the_requested_total():

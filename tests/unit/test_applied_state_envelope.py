@@ -706,7 +706,7 @@ def test_applied_state_signing_input_is_stable() -> None:
     different processes and languages. Pinning it is what makes 'both planes
     agree' testable rather than hoped for."""
     assert applied_state_signing_input("k", b"abc") == (
-        b"dotmac-ws8-applied-state/1\x00\x00\x00\x00\x01k\x00\x00\x00\x03abc"
+        b"dotmac-ws8-applied-state/1\x00" b"\x00\x00\x00\x01k" b"\x00\x00\x00\x03abc"
     )
 
 

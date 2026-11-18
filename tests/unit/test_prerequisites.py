@@ -594,9 +594,9 @@ def test_the_files_root_names_no_foreign_revision() -> None:
         if isinstance(target, ast.Name)
     }
     depends_on = assigned["depends_on"]
-    assert isinstance(depends_on, ast.Call), (
-        "`depends_on` must be resolved from the assembly's bindings, not a literal"
-    )
+    assert isinstance(
+        depends_on, ast.Call
+    ), "`depends_on` must be resolved from the assembly's bindings, not a literal"
     assert getattr(depends_on.func, "id", None) == "resolve_depends_on"
     assert ast.literal_eval(assigned["REQUIRES"]) == (
         "tenant_scope_catalog.v1",

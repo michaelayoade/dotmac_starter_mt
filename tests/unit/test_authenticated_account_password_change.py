@@ -41,8 +41,9 @@ def harness(monkeypatch, selected=B):
     account = Mock()
     account.authorize_and_lock.return_value = evidence
     account.lock_current_credentials.side_effect = lambda value: tuple(rows.values())
-    account.revalidate_before_change.side_effect = lambda issued, credentials: (
-        trace.append("revalidate") or (issued is evidence and credentials == originals)
+    account.revalidate_before_change.side_effect = (
+        lambda issued, credentials: trace.append("revalidate")
+        or (issued is evidence and credentials == originals)
     )
     account.synchronize_account_aliases.side_effect = lambda *args: trace.append(
         "aliases"
@@ -71,9 +72,8 @@ def harness(monkeypatch, selected=B):
     policy = Mock()
     policy.validate.side_effect = lambda *args: trace.append("policy")
     verifier = Mock(
-        side_effect=lambda secret, hashed: (
-            trace.append("verify") or hashed == "selected-old-hash"
-        )
+        side_effect=lambda secret, hashed: trace.append("verify")
+        or hashed == "selected-old-hash"
     )
     hasher = Mock(side_effect=lambda secret: trace.append("hash-new") or HASH)
     monkeypatch.setattr(owner, "verify_password", verifier)

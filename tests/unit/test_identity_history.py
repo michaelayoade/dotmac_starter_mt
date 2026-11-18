@@ -122,8 +122,8 @@ def history_case(monkeypatch):
     registry = audit_actions.AuditActionRegistry.from_manifests(())
     monkeypatch.setattr(audit_actions, "_active_registry", registry)
     connection = Mock()
-    connection.dialect.identifier_preparer.quote_identifier.side_effect = lambda name: (
-        '"' + name + '"'
+    connection.dialect.identifier_preparer.quote_identifier.side_effect = (
+        lambda name: '"' + name + '"'
     )
 
     def ids(statement):

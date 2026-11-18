@@ -32,25 +32,39 @@ def incarnation_for(raw: bytes) -> tuple[str, str]:
 
 
 def make_generation_receipt(
-    host_id: str, generation: int, **overrides: Any
+    host_id: str,
+    generation: int,
+    *,
+    ordered_as: int | None = None,
+    incarnation_of: int | None = None,
+    **overrides: Any,
 ) -> E10ReceiptRef:
     """The `generation`-th receipt for a host: each is a DIFFERENT incarnation.
 
-    Generation 1 is `make_receipt()`. Every later one has its own key, enrolment
-    and receipt ref and a later destruction time, as a rebuilt VM's receipt does,
-    so a marker can be told apart from the receipt a lease was taken under.
+    Generation 1 is `make_receipt()`. Every later one has its own key (derived
+    from the generation, never a neighbour's), enrolment and receipt ref, and a
+    destruction time one hour later per generation, as a rebuilt VM's receipt
+    does. `ordered_as` gives it another generation's position in that order
+    (its destruction time); `incarnation_of` gives it another generation's key
+    while its ref, enrolment and order stay its own.
     """
-    if generation == 1:
-        return make_receipt(host_id=host_id, **overrides)
-    raw = bytes((generation * 16 + i) % 256 for i in range(32))
-    key, fingerprint = incarnation_for(raw)
+    position = generation if ordered_as is None else ordered_as
+    key_of = generation if incarnation_of is None else incarnation_of
+    if key_of == 1:
+        key, fingerprint = INCARNATION_B64URL, INCARNATION_FINGERPRINT
+    else:
+        key, fingerprint = incarnation_for(hashlib.sha256(b"gen-%d" % key_of).digest())
     values: dict[str, Any] = {
         "host_id": host_id,
         "incarnation_public_key_b64url": key,
         "incarnation_fingerprint": fingerprint,
-        "enrolment_uuid": str(uuid.UUID(int=generation)),
-        "incarnation_key_destroyed_at": DESTROYED_AT + timedelta(hours=generation),
-        "receipt_ref": f"e10-receipt-{generation:04d}",
+        "enrolment_uuid": (
+            ENROLMENT_UUID if generation == 1 else str(uuid.UUID(int=generation))
+        ),
+        "incarnation_key_destroyed_at": DESTROYED_AT + timedelta(hours=position - 1),
+        "receipt_ref": (
+            "e10-receipt-0001" if generation == 1 else f"e10-receipt-{generation:04d}"
+        ),
     }
     values.update(overrides)
     return make_receipt(**values)

@@ -261,9 +261,9 @@ def test_quarantine_is_not_reported_as_a_misconfiguration(
     assert installation.state == "disabled"
     with pytest.raises(DispatchUnavailable) as raised:
         prepare(db, delivery, registry=registry)
-    assert not isinstance(raised.value, DispatchNotAdmitted), (
-        "a disabled installation is a misconfiguration, not an admission refusal"
-    )
+    assert not isinstance(
+        raised.value, DispatchNotAdmitted
+    ), "a disabled installation is a misconfiguration, not an admission refusal"
 
 
 def test_quarantine_is_scoped_to_the_installation(db: Session, registry: Any) -> None:

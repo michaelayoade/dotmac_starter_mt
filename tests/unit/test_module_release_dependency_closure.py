@@ -187,9 +187,9 @@ def installed_release(tmp_path_factory):
     if not supplied:
         pytest.skip("UNQUALIFIED: hosted MODULE_RELEASE_CLOSURE_WHEEL_DIR not supplied")
     wheels = sorted(Path(supplied).resolve().glob("*.whl"))
-    assert len(wheels) == 3, (
-        "qualification requires exactly kernel, timer and candidate wheels"
-    )
+    assert (
+        len(wheels) == 3
+    ), "qualification requires exactly kernel, timer and candidate wheels"
     assert {wheel.name.split("-")[0] for wheel in wheels} == {
         "dotmac_kernel",
         "dotmac_durable_timers",
@@ -391,11 +391,9 @@ def test_all_closure_native_expectations_reach_installed_check(
     monkeypatch.setattr(
         release,
         "_native_package",
-        lambda entry: (
-            entry["import_name"]
-            if entry["code"] == "durable_timers"
-            else original(entry)
-        ),
+        lambda entry: entry["import_name"]
+        if entry["code"] == "durable_timers"
+        else original(entry),
     )
     calls = []
     monkeypatch.setattr(release, "_registry_wheels", lambda *_args: [])

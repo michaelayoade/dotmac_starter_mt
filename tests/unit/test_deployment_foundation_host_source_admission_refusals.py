@@ -180,7 +180,7 @@ def test_wrong_artifact_refuses_with_package_mismatch_through_a_real_executor() 
         executor.run(bundle={})
     assert refusal.value.code == PACKAGE_MISMATCH
     assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
+        "the gate did not fire before the first effect: " f"{effects.calls}"
     )
 
 
@@ -227,7 +227,7 @@ def test_wrong_host_refuses_with_subject_mismatch_through_a_real_executor() -> N
         executor.run(bundle={})
     assert refusal.value.code == SUBJECT_MISMATCH
     assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
+        "the gate did not fire before the first effect: " f"{effects.calls}"
     )
 
 
@@ -264,7 +264,7 @@ def test_same_author_evidence_refuses_with_same_key_signed_both() -> None:
         executor.run(bundle={})
     assert refusal.value.code == SAME_KEY_SIGNED_BOTH
     assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
+        "the gate did not fire before the first effect: " f"{effects.calls}"
     )
 
 
@@ -305,7 +305,7 @@ def test_revoked_root_refuses_with_root_revoked() -> None:
         executor.run(bundle={})
     assert refusal.value.code == ROOT_REVOKED
     assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
+        "the gate did not fire before the first effect: " f"{effects.calls}"
     )
 
 
@@ -339,7 +339,7 @@ def test_replay_refuses_with_observation_id_mismatch() -> None:
         executor.run(bundle={})
     assert refusal.value.code == OBSERVATION_ID_MISMATCH
     assert effects.calls == [], (
-        f"the gate did not fire before the first effect: {effects.calls}"
+        "the gate did not fire before the first effect: " f"{effects.calls}"
     )
 
 

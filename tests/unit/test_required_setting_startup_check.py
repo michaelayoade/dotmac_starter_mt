@@ -159,9 +159,9 @@ def test_the_report_never_renders_a_bound_parameter(patched) -> None:
         "the startup error rendered a bound parameter — a secret setting's "
         "value would reach the logs and the startup failure message"
     )
-    assert "IntegrityError" in errors[0], (
-        "redaction went too far: the defect must still be identifiable by type"
-    )
+    assert (
+        "IntegrityError" in errors[0]
+    ), "redaction went too far: the defect must still be identifiable by type"
 
 
 def test_a_clean_run_returns_the_validators_findings(monkeypatch) -> None:

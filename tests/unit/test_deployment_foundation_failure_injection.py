@@ -819,9 +819,9 @@ def test_a_candidate_that_never_becomes_ready_is_not_handed_traffic() -> None:
         and outcome.failed_step.value == "gate_candidate"
     )
     ran = [record.kind.value for record in outcome.records]
-    assert "switch" not in ran, (
-        "traffic must not switch to a candidate that is not ready"
-    )
+    assert (
+        "switch" not in ran
+    ), "traffic must not switch to a candidate that is not ready"
 
 
 def test_a_candidate_started_on_the_wrong_digest_is_refused() -> None:
@@ -930,9 +930,9 @@ def test_a_maintenance_required_release_cannot_take_the_online_path() -> None:
     assert "start_candidate" not in kinds
     assert "gate_candidate" not in kinds
     assert "stop_for_maintenance" in kinds
-    assert kinds.index("stop_for_maintenance") < kinds.index("migrate"), (
-        "everything must stop BEFORE the DDL, not after it"
-    )
+    assert kinds.index("stop_for_maintenance") < kinds.index(
+        "migrate"
+    ), "everything must stop BEFORE the DDL, not after it"
 
 
 def test_the_previous_image_is_not_reusable_after_an_incompatible_migration() -> None:

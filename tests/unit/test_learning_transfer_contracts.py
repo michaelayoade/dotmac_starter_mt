@@ -364,9 +364,9 @@ def test_a3_s2_column_contract_refuses_type_nullability_and_chain_drift():
             **expected,
             **{k: v for k, v in s2_activities.items() if k != missing},
         }
-        assert not transfer._column_contract_matches("activities", partial, expected), (
-            missing
-        )
+        assert not transfer._column_contract_matches(
+            "activities", partial, expected
+        ), missing
     assert not transfer._column_contract_matches(
         "activities",
         {

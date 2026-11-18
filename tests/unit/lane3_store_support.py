@@ -66,6 +66,8 @@ class Backing:
         self.lock = threading.Lock()
         #: Writes SENT to the store, whether or not they were accepted.
         self.write_attempts = 0
+        #: Receipt refs a marker has already cited (design rule 5).
+        self.spent: set[str] = set()
 
 
 class FakeStore:
@@ -137,6 +139,8 @@ class FakeStore:
         reprovision: ReprovisionMarker | None = None,
     ) -> HeldLease:
         self._connected()
+        if not isinstance(e10_receipt, E10ReceiptRef):
+            raise StoreRefused("e10-receipt-required")
         if (
             type(ttl_seconds) is not int
             or ttl_seconds < 1
@@ -150,13 +154,24 @@ class FakeStore:
                 live = not row["released"] and self._now < row["expires_at"]
                 if live:
                     raise StoreRefused("lease-held-by-another-run")
+            if reprovision is not None:
+                # Design rules 1 and 2: the marker names this host and cites the
+                # receipt the new lease is taken under.
+                if reprovision.host_id != host_id or reprovision.e10_receipt != (
+                    e10_receipt
+                ):
+                    raise StoreRefused("reprovision-receipt-mismatch")
+            if row is not None:
                 mutated = (
                     row["mutated"] if row["released"] else True  # expired unreleased
                 )
-                if mutated and (reprovision is None or reprovision.host_id != host_id):
+                if mutated and reprovision is None:
                     raise StoreRefused("lease-host-mutated")
-                if mutated:
+                if reprovision is not None:
                     _require_newer_incarnation(row["receipt"], reprovision.e10_receipt)
+            if reprovision is not None:
+                if reprovision.e10_receipt.receipt_ref in self.backing.spent:
+                    raise StoreRefused("reprovision-receipt-spent")
             expires = self._now + timedelta(seconds=ttl_seconds)
             lease = types.SimpleNamespace(
                 controller_identity_fingerprint=controller_identity,
@@ -175,6 +190,8 @@ class FakeStore:
                 "lease": lease,
                 "receipt": e10_receipt,
             }
+            if reprovision is not None:
+                self.backing.spent.add(reprovision.e10_receipt.receipt_ref)
             self._after_commit()
             return HeldLease(
                 lease=lease,  # type: ignore[arg-type]
@@ -265,6 +282,10 @@ def _require_newer_incarnation(
 ) -> None:
     """A marker must cite a DIFFERENT, NEWER receipt than the lease's own.
 
+    "Newer" is the store's receipt order: for the CP store its `seq`, for this
+    fake the receipt's `incarnation_key_destroyed_at`. It must be STRICTLY
+    greater, so an equal position is refused.
+
     The same receipt, key or enrolment is the same incarnation, whatever else
     differs; a different incarnation destroyed no later than the lease's is a
     receipt for a machine that came BEFORE the one the lease was taken under.
@@ -301,10 +322,13 @@ class Fixtures:
     #: `(store, held, *, digest=None, principal=None, controller=None,
     #: released_at=None)`: a release matching `held`, with any named field replaced.
     make_release: Callable[..., Any]
-    #: `(host_id, generation)`: the generation-th E10 receipt for the host. Each
-    #: generation is a different incarnation (key, enrolment, ref), destroyed
-    #: later than the one before; generation 1 is the first.
-    receipt: Callable[[str, int], E10ReceiptRef]
+    #: `(host_id, generation, *, ordered_as=None, incarnation_of=None)`: the
+    #: generation-th E10 receipt for the host. Each generation is a different
+    #: incarnation (key, enrolment, ref), later in the store's receipt order than
+    #: the one before; generation 1 is the first. `ordered_as=n` gives it
+    #: generation n's position in that order; `incarnation_of=n` gives it
+    #: generation n's incarnation key while its ref and order stay its own.
+    receipt: Callable[..., E10ReceiptRef]
     #: `(store, when)`: drop that handle's connection, `when` being
     #: "before_write" or "after_commit" (the commit was sent, the answer lost).
     sever: Callable[[Any, str], None]
@@ -353,6 +377,7 @@ def _acquire(
     ttl: int = 60,
     *,
     generation: int = 1,
+    receipt: Any = None,
     **extra: Any,
 ):
     return store.acquire_exclusive(
@@ -360,7 +385,7 @@ def _acquire(
         authorization_run=run,
         controller_identity=fx.controller_identity,
         ttl_seconds=ttl,
-        e10_receipt=fx.receipt(host, generation),
+        e10_receipt=receipt if receipt is not None else fx.receipt(host, generation),
         **extra,
     )
 
@@ -470,9 +495,10 @@ def case_only_an_explicit_reprovision_marker_reopens_a_mutated_host(
     advance(store, 61)
     other = ReprovisionMarker("host-other", fx.receipt("host-other", 2))
     _raises(
-        "lease-host-mutated",
-        lambda: _acquire(store, fx, run="run-2", reprovision=other),
+        "reprovision-receipt-mismatch",
+        lambda: _acquire(store, fx, run="run-2", generation=2, reprovision=other),
     )
+    _raises("lease-host-mutated", lambda: _acquire(store, fx, run="run-2"))
     marker = ReprovisionMarker("host-a", fx.receipt("host-a", 2))
     held = _acquire(store, fx, run="run-2", generation=2, reprovision=marker)
     assert store.standing("host-a") is LeaseStanding.HELD
@@ -512,6 +538,100 @@ def case_a_marker_must_cite_a_newer_receipt_than_the_leases(
     assert _acquire(store, fx, run="run-2", generation=3, reprovision=newer)
 
 
+def case_a_marker_must_cite_a_strictly_later_receipt_order(
+    make_store: Any, advance: Any, fx: Fixtures
+) -> None:
+    """Newer is the store's receipt order (CP: `seq`), strictly greater."""
+    store = make_store()
+    _acquire(store, fx, generation=2)
+    advance(store, 61)
+    # A different incarnation (ref, key, enrolment) at the SAME position: not newer.
+    tied = fx.receipt("host-a", 3, ordered_as=2)
+    _raises(
+        "reprovision-receipt-not-newer",
+        lambda: _acquire(
+            store,
+            fx,
+            run="run-2",
+            receipt=tied,
+            reprovision=ReprovisionMarker("host-a", tied),
+        ),
+    )
+    # A LATER position but the lease's own incarnation key: still the same one.
+    reused = fx.receipt("host-a", 3, incarnation_of=2)
+    _raises(
+        "reprovision-receipt-same-incarnation",
+        lambda: _acquire(
+            store,
+            fx,
+            run="run-2",
+            receipt=reused,
+            reprovision=ReprovisionMarker("host-a", reused),
+        ),
+    )
+    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
+
+
+def case_a_marker_must_cite_the_receipt_the_new_lease_is_taken_under(
+    make_store: Any, advance: Any, fx: Fixtures
+) -> None:
+    store = make_store()
+    _acquire(store, fx)
+    advance(store, 61)
+    marker = ReprovisionMarker("host-a", fx.receipt("host-a", 2))
+    # The new lease names a different receipt than the marker cites.
+    _raises(
+        "reprovision-receipt-mismatch",
+        lambda: _acquire(store, fx, run="run-2", generation=3, reprovision=marker),
+    )
+    # A marker for another host, whatever it cites.
+    foreign = ReprovisionMarker("host-other", fx.receipt("host-other", 2))
+    _raises(
+        "reprovision-receipt-mismatch",
+        lambda: _acquire(store, fx, run="run-2", generation=2, reprovision=foreign),
+    )
+    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
+
+
+def case_a_lease_needs_a_typed_e10_receipt(
+    make_store: Any, advance: Any, fx: Fixtures
+) -> None:
+    store = make_store()
+    for citation in ("e10-receipt-1", None, {"receipt_ref": "x"}):
+        _raises(
+            "e10-receipt-required",
+            lambda c=citation: store.acquire_exclusive(
+                host_id="host-a",
+                authorization_run="run-1",
+                controller_identity=fx.controller_identity,
+                ttl_seconds=60,
+                e10_receipt=c,
+            ),
+        )
+    assert _acquire(store, fx) is not None
+
+
+def case_a_receipt_a_marker_has_cited_is_spent(
+    make_store: Any, advance: Any, fx: Fixtures
+) -> None:
+    """A marker is used once. Reached through a lease taken under an OLDER
+    receipt after the marker was cited: the cited one is then different from and
+    newer than the lease's own, so only its being spent refuses it."""
+    store = make_store()
+    held = _acquire(store, fx)
+    store.release(held, release=fx.make_release(store, held), host_mutated=False)
+    marker = ReprovisionMarker("host-a", fx.receipt("host-a", 2))
+    held = _acquire(store, fx, run="run-2", generation=2, reprovision=marker)
+    store.release(held, release=fx.make_release(store, held), host_mutated=False)
+    _acquire(store, fx, run="run-3", generation=1)
+    advance(store, 61)
+    _raises(
+        "reprovision-receipt-spent",
+        lambda: _acquire(store, fx, run="run-4", generation=2, reprovision=marker),
+    )
+    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
+
+
 def case_only_one_release(make_store: Any, advance: Any, fx: Fixtures) -> None:
     store = make_store()
     held = _acquire(store, fx)
@@ -547,6 +667,13 @@ def case_a_release_must_match_the_held_lease(
             ),
         )
     assert store.standing("host-a") is LeaseStanding.HELD
+    # The release naming the digest the store computes for THIS lease is accepted.
+    store.release(
+        held,
+        release=fx.make_release(store, held, digest=fx.lease_digest(held)),
+        host_mutated=True,
+    )
+    assert store.standing("host-a") is LeaseStanding.RELEASED
 
 
 def case_the_lease_document_expiry_is_the_rows(
@@ -607,12 +734,12 @@ def case_a_lost_connection_fails_closed_and_writes_nothing(
     sent = fx.write_attempts(survivor)
     # A release over a lost connection writes nothing and the lease stays held.
     lost = make_store(store)
+    # Built on the live handle: the release call itself must be what fails.
+    release = fx.make_release(survivor, held)
     fx.sever(lost, "before_write")
     _raises(
         STORE_UNREACHABLE,
-        lambda: lost.release(
-            held, release=fx.make_release(lost, held), host_mutated=True
-        ),
+        lambda: lost.release(held, release=release, host_mutated=True),
     )
     _raises(
         STORE_UNREACHABLE,

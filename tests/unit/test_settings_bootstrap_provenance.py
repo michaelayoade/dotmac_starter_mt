@@ -146,9 +146,9 @@ def test_a_secret_seeded_from_the_environment_never_writes_its_value(
     assert entry.value_after is None
     assert entry.value_before is None
     assert entry.secret_changed is True
-    assert SEEDED_VALUE not in (entry.change_reason or ""), (
-        "the secret's value reached the history table through change_reason"
-    )
+    assert SEEDED_VALUE not in (
+        entry.change_reason or ""
+    ), "the secret's value reached the history table through change_reason"
 
 
 def test_reseeding_does_not_append_a_second_provenance_row(db, env_spec) -> None:

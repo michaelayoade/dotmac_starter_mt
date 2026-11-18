@@ -76,11 +76,11 @@ def test_the_contract_names_exactly_the_standings_the_destroy_gate_reads() -> No
     }
 
 
-@pytest.mark.parametrize("name", sorted(CASES))
 def _advance(store, seconds) -> None:
     store.advance(seconds)
 
 
+@pytest.mark.parametrize("name", sorted(CASES))
 def test_the_reference_fake_passes_each_conformance_case(name: str) -> None:
     """One test per rule, so a store that breaks one rule fails by its name."""
     CASES[name](factory(), _advance, FAKE_FIXTURES)
@@ -97,6 +97,10 @@ def test_the_conformance_cases_cover_every_rule_in_the_contract() -> None:
         "only_an_explicit_reprovision_marker_reopens_a_mutated_host",
         "a_marker_must_cite_a_different_incarnation_than_the_leases",
         "a_marker_must_cite_a_newer_receipt_than_the_leases",
+        "a_marker_must_cite_a_strictly_later_receipt_order",
+        "a_marker_must_cite_the_receipt_the_new_lease_is_taken_under",
+        "a_lease_needs_a_typed_e10_receipt",
+        "a_receipt_a_marker_has_cited_is_spent",
         "only_one_release",
         "a_release_must_match_the_held_lease",
         "the_lease_document_expiry_is_the_rows",
@@ -206,6 +210,27 @@ class _AcceptsAnyMarker(FakeStore):
         return super().acquire_exclusive(**kwargs)
 
 
+class _IgnoresMarkerBinding(FakeStore):
+    """Takes a marker at its word: never checks its host or its receipt against
+    the lease being taken."""
+
+    def acquire_exclusive(self, **kwargs):
+        if kwargs.get("reprovision") is not None:
+            kwargs["reprovision"] = contract.ReprovisionMarker(
+                kwargs["host_id"], kwargs["e10_receipt"]
+            )
+        return super().acquire_exclusive(**kwargs)
+
+
+class _NeverSpendsAMarker(FakeStore):
+    """Forgets which receipts markers have cited."""
+
+    def acquire_exclusive(self, **kwargs):
+        held = super().acquire_exclusive(**kwargs)
+        self.backing.spent.clear()
+        return held
+
+
 @pytest.mark.parametrize(
     ("broken", "case"),
     [
@@ -222,6 +247,12 @@ class _AcceptsAnyMarker(FakeStore):
             "a_marker_must_cite_a_different_incarnation_than_the_leases",
         ),
         (_AcceptsAnyMarker, "a_marker_must_cite_a_newer_receipt_than_the_leases"),
+        (_AcceptsAnyMarker, "a_marker_must_cite_a_strictly_later_receipt_order"),
+        (
+            _IgnoresMarkerBinding,
+            "a_marker_must_cite_the_receipt_the_new_lease_is_taken_under",
+        ),
+        (_NeverSpendsAMarker, "a_receipt_a_marker_has_cited_is_spent"),
         (_IgnoresTheDrop, "a_lost_connection_fails_closed_and_writes_nothing"),
         (_IgnoresTheDrop, "an_acquire_commit_lost_is_unknown_and_never_retried"),
         (_WipesHistory, "no_reacquire_after_expiry"),

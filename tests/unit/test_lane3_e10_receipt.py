@@ -265,7 +265,7 @@ def test_vm_slot_is_optional_and_checked_when_given() -> None:
     assert support.make_receipt(vm_slot="dotmacproxmox/102").vm_slot == (
         "dotmacproxmox/102"
     )
-    for bad in ("", "node", "node/0", "node/abc", "203.0.113.7:22", 102):
+    for bad in ("", "node", "node/0", "node/abc", "node:22", 102):
         with pytest.raises(e10.ReceiptRefused) as refusal:
             support.make_receipt(vm_slot=bad)
         assert refusal.value.code == "receipt-vm-slot-invalid"

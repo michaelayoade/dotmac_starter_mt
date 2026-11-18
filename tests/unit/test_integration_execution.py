@@ -267,9 +267,9 @@ def test_no_product_error_code_leaks_into_the_generic_claim(
         and isinstance(node.value, str)
         and node not in docstrings
     ]
-    assert not [text for text in literals if "crm_" in text], (
-        "a product's error vocabulary is a code literal in the shared engine"
-    )
+    assert not [
+        text for text in literals if "crm_" in text
+    ], "a product's error vocabulary is a code literal in the shared engine"
 
 
 # ── Retry classification ────────────────────────────────────────────────────
