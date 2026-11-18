@@ -19,8 +19,8 @@ def _email_certificate(db, tenant_id, person):
     return enqueue_email(
         db,
         tenant_id=tenant_id,
-        idempotency_key="_email_certificate:" + str(person.id),
-        kind="_email_certificate",
+        idempotency_key="email_certificate:" + str(person.id),
+        kind="email_certificate",
         recipient=person.email,
         subject=subject,
         html_body=html,

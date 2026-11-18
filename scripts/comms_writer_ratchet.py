@@ -17,9 +17,9 @@ Detector rules (every finding is one of three kinds)
       order, any case, underscores optional), or a class whose ``__tablename__``
       (or a ``Table(...)`` / ``create_table(...)`` first argument) matches.
   O2  a function named ``enqueue_<email|mail|message|sms|notification>*`` or
-      ``queue_<email|mail|...>*`` (a *definition*, not a call).
-  O3  a string literal that is a SQL write (``INSERT INTO`` / ``UPDATE`` /
-      ``DELETE FROM``) against such a table.
+      ``queue_<...>*`` (a *definition*, not a call).
+  O3  a string literal (not a docstring) that is a SQL write (``INSERT INTO`` /
+      ``UPDATE`` / ``DELETE FROM``) against such a table.
   The bare word ``outbox`` is NOT enough: the kernel's event outbox (ADR-0014)
   is used by many modules for domain events, which is allowed.
 
@@ -32,90 +32,107 @@ Detector rules (every finding is one of three kinds)
       receiver, or ``boto3.client("ses"|"sesv2")``.
   S3  ``socket.create_connection``/``connect`` with a literal port 25, 465 or
       587 in the address tuple.
-  Building a message (``email.message``/``email.mime``) is not sending and is
-  not flagged.
+  Building a message (``email.message``/``email.mime``) is not sending.
 
 ``inline_copy`` -- message copy is written in product code.
   C1  a call to a send/enqueue *sink* (callee name ``enqueue_*``, ``queue_*``,
       ``send_*`` or ``dispatch_*`` followed by ``email|mail|message|sms|
       notification|notice`` ..., or ``sendmail``/``send_mail``/``send_email``)
-      with an argument that is inline copy.  Copy-bearing keyword names:
-      ``subject, body, html, html_body, text, text_body, message, content,
-      plain, title, preheader``.  Positional string arguments count too.
-  An argument is *inline copy* when it is: an f-string; a ``str.format`` /
-  ``%`` / ``+`` / ``"".join`` expression containing a string literal; a string
-  literal that contains an HTML tag or three or more words; a name assigned in
-  the same function from any of those; or a name assigned from a call to a
-  same-module function whose body holds such a literal (one hop; this is how
-  product renderers like ``_wrap_html`` are caught).
-  Arguments such as ``kind="score_pass"`` (one word, not a copy keyword) or
-  ``subject=template.subject`` are not copy.  A call that passes a template
-  slug and variables to the kernel is therefore clean.
+      with an argument that is inline copy.  Copy-bearing keywords: ``subject,
+      body, html, html_body, text, text_body, message, content, plain, title,
+      preheader``.  Positional arguments count too, and so does a ``**mapping``
+      whose dict (``dict(...)`` / ``{...}`` / later ``d["subject"] = ...``)
+      carries a copy keyword.
+  An expression is *copy* when it is:
+    * an f-string whose literal parts hold an HTML tag or two or more words;
+    * a string literal with an HTML tag, or two or more words and a space;
+    * ``tmpl.format(...)`` / ``tmpl % x`` / ``a + b`` / ``"".join([...])`` /
+      ``.replace/.strip/...`` where the *template, receiver or an operand* is
+      itself copy -- an incidental literal (``", ".join(to)``,
+      ``.replace("\\n", " ")``) is not;
+    * a name assigned from copy in the same function, module or an enclosing
+      scope (tuple unpacking included);
+    * a call to a *renderer*: a function (same module, or imported from inside
+      the scanned root, at module level or inside a function) whose RETURN
+      value is copy.  Resolution is transitive across the scanned root.
+  Literals that never reach a sink argument or a renderer's return value are
+  never copy: docstrings, log messages, ``raise`` messages and SQL fragments do
+  not count.  ``kind="score_pass"``, ``subject=template.subject`` and a call
+  that passes a template slug and variables to the kernel are clean.
+
+Known blind spots (does NOT detect; reviewed 2026-11-18)
+-------------------------------------------------------
+  * mail-provider HTTP APIs called through a generic HTTP client (no SDK import,
+    no SMTP call, no socket);
+  * queue tables not named like a mail/sms/message outbox, and any function
+    renamed away from ``enqueue_<channel>``/``queue_<channel>``;
+  * notify wrappers: a send routed through a helper whose name does not match the
+    sink pattern (``notify(...)``, ``publish(...)``, ``emit(...)``) with copy
+    inside;
+  * copy loaded from a file, a database row, an environment value or a template
+    engine the product owns;
+  * dynamic imports and renderers reached through a registry or ``getattr``;
+  * message building through ``email.message`` headers (``msg["Subject"] = ...``)
+    when no sink or SMTP call follows in scanned code.
+These are stated, not enforced: the region is unmonitored, not exempt (ADR-0018).
+Review the list when a detector changes or an adopter reports a miss.
 
 Finding identity
 ----------------
 ``<path>::<kind>::<symbol>#<n>`` -- path relative to the product root, the kind,
 the qualified symbol (``Class.method``, ``<module>`` at import scope, or
 ``import:smtplib`` / ``call:SMTP_SSL`` detail for ``direct_smtp``), and an
-ordinal within that (path, kind, symbol).  No line numbers, so unrelated edits
-do not churn the backlog; reordering identical findings inside one function
-does.
+ordinal within that (path, kind, symbol).  No line numbers.
 
-Coverage
---------
-The whole ``root`` is scanned, not a list of directories (ADR-0018: a guard
-that covers one directory is the failure this exists to prevent).  ``families``
-names the entry-point families (web routes, CLI/commands, workers/jobs,
-services, scripts, ...) with their roots.  Every declared family root must
-exist (a renamed directory cannot silently drop out of the scan) and files
-outside every family are still scanned and reported as family ``other``.
-``allowed`` is a list of ``{"glob", "premise"}`` owners (kernel delivery, the
-``dotmac-delivery-*`` adapters); each glob must match at least one file.
-Tests, migrations and alembic trees are not product runtime and are skipped.
+Coverage and exemptions
+-----------------------
+The whole ``root`` is scanned, not a list of directories (ADR-0018).
+``families`` names entry-point families (web routes, CLI/commands, workers/jobs,
+services, scripts, ...) with their roots; every declared family root must exist
+and files outside every family are still scanned as ``other``.
+
+Two lists remove findings, and both share one enforceable shape,
+``{"glob", "kinds", "premise"}`` (``optional: true`` waives the must-match for
+trees that exist only in some checkouts, such as ``.venv``):
+  ``allowed``  -- the named delivery owners (kernel delivery, each
+                  ``dotmac-delivery-*`` adapter, listed one package at a time)
+                  and ONLY the kinds each really needs;
+  ``exclude``  -- non-runtime trees (tests, migrations, vendored code) and the
+                  kinds not scanned there.
+``kinds`` is required (no implicit "everything"), the premise must be stated, a
+glob must match at least one file, and globs are path-segment safe: ``*`` never
+crosses ``/``; ``**`` spans whole segments.  A finding of a kind the entry does
+not list is NOT suppressed.
 
 Backlog
 -------
 Two-directional (ADR-0018): fails when a finding appears that is not listed AND
-when a listed finding is gone.  Lowering is ``--write-backlog`` in the same
-change.  Exit 0 clean, 1 on any ratchet/coverage failure, 2 on usage errors.
+when a listed finding is gone.  ``--write-backlog`` is REMOVE-ONLY: it refuses to
+add a finding unless ``--allow-additions`` is passed (which is the very thing
+the ratchet exists to prevent).  Exit 0 clean, 1 on any failure, 2 on usage.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
-import fnmatch
 import json
+import os
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Final
 
 KINDS: Final = ("outbox_writer", "direct_smtp", "inline_copy")
-SKIP_DIRS: Final = frozenset(
-    {
-        "__pycache__",
-        "node_modules",
-        ".venv",
-        "venv",
-        "tests",
-        "test",
-        "migrations",
-        "alembic",
-        ".git",
-    }
-)
 
 _CHANNEL: Final = r"(?:e?mail|sms|message|notification)s?"
 _OUTBOX_NAME: Final = re.compile(
     rf"(?:{_CHANNEL}[_ ]?outbox|outbox[_ ]?{_CHANNEL})", re.IGNORECASE
 )
-_ENQUEUE_DEF: Final = re.compile(
-    rf"^(?:enqueue|queue)_{_CHANNEL}(?:_|$)|^(?:enqueue|queue)_{_CHANNEL}",
-    re.IGNORECASE,
-)
+_ENQUEUE_DEF: Final = re.compile(rf"^(?:enqueue|queue)_{_CHANNEL}", re.IGNORECASE)
 _SQL_WRITE: Final = re.compile(
     rf"\b(?:insert\s+into|update|delete\s+from)\s+[\w\".]*{_CHANNEL}_?outbox",
     re.IGNORECASE,
@@ -163,6 +180,9 @@ _COPY_KW: Final = frozenset(
         "preheader",
     }
 )
+_STR_PASSTHROUGH: Final = frozenset(
+    {"replace", "strip", "lstrip", "rstrip", "lower", "upper", "title", "encode"}
+)
 _HTML_TAG: Final = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?/?>")
 _WORDS: Final = re.compile(r"[A-Za-z]{2,}")
 
@@ -178,57 +198,158 @@ class Finding:
         return f"{self.path}::{self.kind}::{self.symbol}"
 
 
-def _is_copy_literal(value: str) -> bool:
+# -- path-segment-safe globbing --
+
+
+def glob_match(rel: str, glob: str) -> bool:
+    """``*``/``?``/``[]`` match within one segment; ``**`` spans whole segments."""
+
+    def go(p: list[str], g: list[str]) -> bool:
+        if not g:
+            return not p
+        if g[0] == "**":
+            return any(go(p[i:], g[1:]) for i in range(len(p) + 1))
+        return bool(p) and fnmatchcase(p[0], g[0]) and go(p[1:], g[1:])
+
+    return go(rel.split("/"), glob.split("/"))
+
+
+# -- expression classification --
+
+
+def _text_is_copy(value: str, *, need_space: bool) -> bool:
     if _HTML_TAG.search(value):
         return True
-    return len(_WORDS.findall(value)) >= 3 and " " in value.strip()
+    if need_space and not any(ch.isspace() for ch in value.strip()):
+        return False
+    return len(_WORDS.findall(value)) >= 2
 
 
-def _has_copy_literal(node: ast.AST) -> bool:
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.JoinedStr):
-            return True
-        if (
-            isinstance(sub, ast.Constant)
-            and isinstance(sub.value, str)
-            and _is_copy_literal(sub.value)
-        ):
-            return True
-    return False
+def _fstring_is_copy(node: ast.JoinedStr) -> bool:
+    parts = [
+        v.value
+        for v in node.values
+        if isinstance(v, ast.Constant) and isinstance(v.value, str)
+    ]
+    return _text_is_copy(" ".join(parts), need_space=False)
 
 
-def _is_expr_copy(node: ast.AST) -> bool:
-    """True for an expression that is itself inline copy."""
-    if isinstance(node, ast.JoinedStr):
-        return True
-    if isinstance(node, ast.Constant):
-        return isinstance(node.value, str) and _is_copy_literal(node.value)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add | ast.Mod):
-        return _has_str_literal(node)
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        if node.func.attr in {"format", "join", "format_map", "strip", "replace"}:
-            return _has_str_literal(node.func.value) or any(
-                _has_str_literal(a) for a in node.args
+@dataclass
+class Ctx:
+    """Names known to hold copy (and dicts known to carry a copy keyword)."""
+
+    names: dict[str, bool] = field(default_factory=dict)
+    dicts: dict[str, bool] = field(default_factory=dict)
+    parent: Ctx | None = None
+
+    def name_copy(self, name: str) -> bool:
+        ctx: Ctx | None = self
+        while ctx is not None:
+            if name in ctx.names:
+                return ctx.names[name]
+            ctx = ctx.parent
+        return False
+
+    def dict_copy(self, name: str) -> bool:
+        ctx: Ctx | None = self
+        while ctx is not None:
+            if ctx.dicts.get(name):
+                return True
+            ctx = ctx.parent
+        return False
+
+
+class Resolver:
+    """Decides whether a call target is a renderer. Set by the project pass."""
+
+    def __init__(self) -> None:
+        self.copy_funcs: set[tuple[str, str]] = set()
+        self.imports: dict[str, dict[str, tuple[str, str | None]]] = {}
+        self.local_funcs: dict[str, set[str]] = {}
+
+    def is_renderer(self, rel: str, func: ast.expr) -> bool:
+        if isinstance(func, ast.Name):
+            name = func.id
+            if (rel, name) in self.copy_funcs:
+                return True
+            target = self.imports.get(rel, {}).get(name)
+            return bool(
+                target and target[1] and (target[0], target[1]) in self.copy_funcs
             )
+        if isinstance(func, ast.Attribute):
+            base = func.value
+            if isinstance(base, ast.Name):
+                target = self.imports.get(rel, {}).get(base.id)
+                if target and target[1] is None:  # module alias
+                    return (target[0], func.attr) in self.copy_funcs
+            # self.helper(...) / obj.helper(...): same-file function by name
+            return (rel, func.attr) in self.copy_funcs
+        return False
+
+
+def expr_copy(node: ast.AST, ctx: Ctx, rel: str, res: Resolver) -> bool:
+    """True for an expression that carries inline message copy."""
+    if isinstance(node, ast.JoinedStr):
+        return _fstring_is_copy(node)
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and _text_is_copy(
+            node.value, need_space=True
+        )
+    if isinstance(node, ast.Name):
+        return ctx.name_copy(node.id)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Add):
+            return expr_copy(node.left, ctx, rel, res) or expr_copy(
+                node.right, ctx, rel, res
+            )
+        if isinstance(node.op, ast.Mod):
+            return expr_copy(node.left, ctx, rel, res)
+        return False
     if isinstance(node, ast.IfExp):
-        return _is_expr_copy(node.body) or _is_expr_copy(node.orelse)
+        return expr_copy(node.body, ctx, rel, res) or expr_copy(
+            node.orelse, ctx, rel, res
+        )
+    if isinstance(node, ast.BoolOp):
+        return any(expr_copy(v, ctx, rel, res) for v in node.values)
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Attribute):
+            attr = node.func.attr
+            recv = node.func.value
+            if attr in {"format", "format_map"} or attr in _STR_PASSTHROUGH:
+                return expr_copy(recv, ctx, rel, res)
+            if attr == "join":
+                if expr_copy(recv, ctx, rel, res):
+                    return True
+                for arg in node.args[:1]:
+                    if isinstance(arg, ast.List | ast.Tuple | ast.Set):
+                        if any(expr_copy(e, ctx, rel, res) for e in arg.elts):
+                            return True
+                    elif isinstance(arg, ast.GeneratorExp | ast.ListComp | ast.SetComp):
+                        if expr_copy(arg.elt, ctx, rel, res):
+                            return True
+                return False
+        return res.is_renderer(rel, node.func)
     return False
 
 
-def _has_str_literal(node: ast.AST) -> bool:
-    return any(
-        isinstance(s, ast.JoinedStr)
-        or (isinstance(s, ast.Constant) and isinstance(s.value, str) and s.value)
-        for s in ast.walk(node)
-    )
-
-
-def _callee_name(func: ast.expr) -> str | None:
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return None
+def dict_carries_copy(node: ast.AST, ctx: Ctx, rel: str, res: Resolver) -> bool:
+    if isinstance(node, ast.Name):
+        return ctx.dict_copy(node.id)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id == "dict":
+            return any(
+                kw.arg in _COPY_KW and expr_copy(kw.value, ctx, rel, res)
+                for kw in node.keywords
+                if kw.arg is not None
+            )
+    if isinstance(node, ast.Dict):
+        return any(
+            isinstance(k, ast.Constant)
+            and k.value in _COPY_KW
+            and expr_copy(v, ctx, rel, res)
+            for k, v in zip(node.keys, node.values, strict=True)
+        )
+    return False
 
 
 def _target_names(target: ast.expr) -> list[str]:
@@ -242,51 +363,267 @@ def _target_names(target: ast.expr) -> list[str]:
     return []
 
 
+_OWN_CACHE: dict[int, tuple[ast.AST, list[ast.AST]]] = {}
+
+
+def _own_nodes(scope: ast.AST) -> list[ast.AST]:
+    """Assignment/return nodes in ``scope`` excluding nested defs and lambdas.
+
+    Memoised per scope (the scan walks every scope several times); the cached
+    entry holds the scope itself so its id cannot be reused while cached.
+    """
+    cached = _OWN_CACHE.get(id(scope))
+    if cached is not None and cached[0] is scope:
+        return cached[1]
+    out: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign | ast.Return):
+            out.append(node)
+        if isinstance(
+            node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+        ):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    out.sort(key=lambda n: (getattr(n, "lineno", 0), getattr(n, "col_offset", 0)))
+    _OWN_CACHE[id(scope)] = (scope, out)
+    return out
+
+
+def build_ctx(scope: ast.AST, parent: Ctx | None, rel: str, res: Resolver) -> Ctx:
+    ctx = Ctx(parent=parent)
+    nodes = _own_nodes(scope)
+    for _ in range(2):  # a second pass lets later assignments feed earlier uses
+        for node in nodes:
+            if isinstance(node, ast.Assign):
+                value, targets = node.value, node.targets
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                value, targets = node.value, [node.target]
+            elif isinstance(node, ast.AugAssign):
+                if isinstance(node.target, ast.Name) and expr_copy(
+                    node.value, ctx, rel, res
+                ):
+                    ctx.names[node.target.id] = True
+                continue
+            else:
+                continue
+            is_copy = expr_copy(value, ctx, rel, res)
+            carries = dict_carries_copy(value, ctx, rel, res)
+            for target in targets:
+                if isinstance(target, ast.Subscript) and isinstance(
+                    target.value, ast.Name
+                ):
+                    key = target.slice
+                    if (
+                        isinstance(key, ast.Constant)
+                        and key.value in _COPY_KW
+                        and is_copy
+                    ):
+                        ctx.dicts[target.value.id] = True
+                    continue
+                for name in _target_names(target):
+                    if isinstance(target, ast.Tuple | ast.List) and isinstance(
+                        value, ast.Tuple | ast.List
+                    ):
+                        continue
+                    ctx.names[name] = ctx.names.get(name, False) or is_copy
+                    if carries:
+                        ctx.dicts[name] = True
+                if (
+                    isinstance(target, ast.Tuple | ast.List)
+                    and isinstance(value, ast.Tuple | ast.List)
+                    and len(target.elts) == len(value.elts)
+                ):
+                    for t, v in zip(target.elts, value.elts, strict=True):
+                        for name in _target_names(t):
+                            ctx.names[name] = ctx.names.get(name, False) or expr_copy(
+                                v, ctx, rel, res
+                            )
+    return ctx
+
+
+def returns_copy(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    parent: Ctx | None,
+    rel: str,
+    res: Resolver,
+) -> bool:
+    ctx = build_ctx(fn, parent, rel, res)
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Return) and node.value is not None:
+            elts = (
+                node.value.elts
+                if isinstance(node.value, ast.Tuple | ast.List)
+                else [node.value]
+            )
+            if any(expr_copy(e, ctx, rel, res) for e in elts):
+                return True
+    return False
+
+
+# -- project-wide pass --
+
+
+def _dotted(rel: str) -> str:
+    stem = rel[:-3] if rel.endswith(".py") else rel
+    if stem.endswith("/__init__"):
+        stem = stem[: -len("/__init__")]
+    return stem.replace("/", ".")
+
+
+def _resolve_module(dotted: str, by_dotted: dict[str, str]) -> str | None:
+    best: tuple[int, str] | None = None
+    for d, rel in by_dotted.items():
+        if dotted == d or dotted.endswith("." + d):
+            if best is None or len(d) > best[0]:
+                best = (len(d), rel)
+    return best[1] if best else None
+
+
+def _import_map(
+    rel: str, imports: list[ast.Import | ast.ImportFrom], by_dotted: dict[str, str]
+) -> dict[str, tuple[str, str | None]]:
+    """name -> (target file, original name | None when the name is a module)."""
+    out: dict[str, tuple[str, str | None]] = {}
+    pkg = (
+        _dotted(rel).split(".")[:-1]
+        if not rel.endswith("__init__.py")
+        else _dotted(rel).split(".")
+    )
+    for node in imports:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                target = _resolve_module(alias.name, by_dotted)
+                if target and alias.asname:
+                    out[alias.asname] = (target, None)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = pkg[: len(pkg) - (node.level - 1)] if node.level > 1 else pkg
+                module = ".".join([*base, node.module] if node.module else base)
+            else:
+                module = node.module or ""
+            for alias in node.names:
+                name = alias.asname or alias.name
+                as_module = _resolve_module(f"{module}.{alias.name}", by_dotted)
+                host = _resolve_module(module, by_dotted) if module else None
+                if as_module and as_module != host:
+                    out[name] = (as_module, None)
+                elif host:
+                    out[name] = (host, alias.name)
+    return out
+
+
+@dataclass
+class FileIndex:
+    """One walk per file: functions, imports and docstring node ids."""
+
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef]
+    imports: list[ast.Import | ast.ImportFrom]
+    docs: set[int]
+
+
+def _index(tree: ast.Module) -> FileIndex:
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    imports: list[ast.Import | ast.ImportFrom] = []
+    docs: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            functions.append(node)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            imports.append(node)
+        if isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            first = node.body[0] if node.body else None
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                docs.add(id(first.value))
+    return FileIndex(functions, imports, docs)
+
+
+@dataclass
+class Project:
+    trees: dict[str, ast.Module]
+    index: dict[str, FileIndex]
+    resolver: Resolver
+    problems: list[str]
+
+
+def analyse(sources: dict[str, str]) -> Project:
+    _OWN_CACHE.clear()
+    trees: dict[str, ast.Module] = {}
+    problems: list[str] = []
+    for rel, src in sorted(sources.items()):
+        try:
+            trees[rel] = ast.parse(src, filename=rel)
+        except SyntaxError as exc:
+            problems.append(f"{rel}: cannot parse ({exc.__class__.__name__})")
+    by_dotted = {_dotted(r): r for r in trees}
+    res = Resolver()
+    index = {rel: _index(tree) for rel, tree in trees.items()}
+    for rel in trees:
+        res.imports[rel] = _import_map(rel, index[rel].imports, by_dotted)
+    candidates = {
+        rel: [
+            fn
+            for fn in index[rel].functions
+            if not _ENQUEUE_DEF.match(fn.name)
+            and any(isinstance(n, ast.Return) for n in _own_nodes(fn))
+        ]
+        for rel in trees
+    }
+    for _ in range(6):  # transitive renderers; converges fast, bounded anyway
+        changed = False
+        for rel, fns in candidates.items():
+            if not fns:
+                continue
+            module_ctx = build_ctx(trees[rel], None, rel, res)
+            for fn in fns:
+                key = (rel, fn.name)
+                if key not in res.copy_funcs and returns_copy(fn, module_ctx, rel, res):
+                    res.copy_funcs.add(key)
+                    changed = True
+        if not changed:
+            break
+    return Project(trees, index, res, problems)
+
+
+# -- finding scan --
+
+
+def _callee_name(func: ast.expr) -> str | None:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
 class _Scanner(ast.NodeVisitor):
-    def __init__(self, path: str, tree: ast.Module) -> None:
-        self.path = path
+    def __init__(
+        self, rel: str, tree: ast.Module, res: Resolver, docs: set[int]
+    ) -> None:
+        self.rel = rel
+        self.res = res
         self.found: list[Finding] = []
         self.stack: list[str] = []
-        # One-hop renderers: same-module functions whose body holds copy.
-        self.copy_functions: set[str] = {
-            n.name
-            for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
-            and not _ENQUEUE_DEF.match(n.name)
-            and _has_copy_literal(n)
-        }
-        # Scope-level assignments: symbol -> {name: is_copy}
-        self.assigned: list[dict[str, bool]] = [{}]
+        self.docs = docs
+        self.ctxs: list[Ctx] = [build_ctx(tree, None, rel, res)]
         self.visit(tree)
 
-    # -- helpers -----------------------------------------------------------
     @property
     def symbol(self) -> str:
         return ".".join(self.stack) if self.stack else "<module>"
 
     def emit(self, kind: str, symbol: str | None = None) -> None:
-        self.found.append(Finding(self.path, kind, symbol or self.symbol))
+        self.found.append(Finding(self.rel, kind, symbol or self.symbol))
 
-    def _name_is_copy(self, name: str) -> bool:
-        return any(scope.get(name, False) for scope in reversed(self.assigned))
-
-    def _arg_is_copy(self, node: ast.expr) -> bool:
-        if _is_expr_copy(node):
-            return True
-        if isinstance(node, ast.Name):
-            return self._name_is_copy(node.id)
-        if isinstance(node, ast.Call):
-            name = _callee_name(node.func)
-            return name in self.copy_functions if name else False
-        return False
-
-    # -- scopes ------------------------------------------------------------
-    def _enter(self, name: str, node: ast.AST) -> None:
-        self.stack.append(name)
-        self.assigned.append({})
-        self.generic_visit(node)
-        self.assigned.pop()
-        self.stack.pop()
+    def _copy(self, node: ast.expr) -> bool:
+        return expr_copy(node, self.ctxs[-1], self.rel, self.res)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.stack.append(node.name)
@@ -304,43 +641,32 @@ class _Scanner(ast.NodeVisitor):
             ):
                 hit = True
         if hit:
-            self.emit("outbox_writer", self.symbol)
-        self.assigned.append({})
+            self.emit("outbox_writer")
+        self.ctxs.append(build_ctx(node, self.ctxs[-1], self.rel, self.res))
         self.generic_visit(node)
-        self.assigned.pop()
+        self.ctxs.pop()
         self.stack.pop()
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self.stack.append(node.name)
         if _ENQUEUE_DEF.match(node.name):
-            self.emit("outbox_writer", self.symbol)
+            self.emit("outbox_writer")
+        self.ctxs.append(build_ctx(node, self.ctxs[-1], self.rel, self.res))
+        self.generic_visit(node)
+        self.ctxs.pop()
         self.stack.pop()
-        self._enter(node.name, node)
 
     visit_FunctionDef = _visit_function
     visit_AsyncFunctionDef = _visit_function
 
-    # -- assignments feed the one-function copy tracking -------------------
-    def visit_Assign(self, node: ast.Assign) -> None:
-        scope = self.assigned[-1]
-        is_copy = self._arg_is_copy(node.value)
-        for target in node.targets:
-            for name in _target_names(target):
-                scope[name] = scope.get(name, False) or is_copy
-        self.generic_visit(node)
+    @staticmethod
+    def _is_smtp_module(name: str) -> bool:
+        return any(name == m or name.startswith(m + ".") for m in _SMTP_MODULES)
 
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        if node.value is not None:
-            for name in _target_names(node.target):
-                self.assigned[-1][name] = self._arg_is_copy(node.value)
-        self.generic_visit(node)
-
-    # -- imports ----------------------------------------------------------
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             if self._is_smtp_module(alias.name):
                 self.emit("direct_smtp", f"import:{alias.name}")
-        self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = node.module or ""
@@ -350,19 +676,15 @@ class _Scanner(ast.NodeVisitor):
             for alias in node.names:
                 if self._is_smtp_module(f"{module}.{alias.name}"):
                     self.emit("direct_smtp", f"import:{module}.{alias.name}")
-        self.generic_visit(node)
 
-    @staticmethod
-    def _is_smtp_module(name: str) -> bool:
-        return any(name == m or name.startswith(m + ".") for m in _SMTP_MODULES)
-
-    # -- strings ----------------------------------------------------------
     def visit_Constant(self, node: ast.Constant) -> None:
-        if isinstance(node.value, str) and _SQL_WRITE.search(node.value):
+        if (
+            isinstance(node.value, str)
+            and id(node) not in self.docs
+            and _SQL_WRITE.search(node.value)
+        ):
             self.emit("outbox_writer", f"sql:{self.symbol}")
-        self.generic_visit(node)
 
-    # -- calls ------------------------------------------------------------
     def visit_Call(self, node: ast.Call) -> None:
         name = _callee_name(node.func)
         if name in _SMTP_CALLS:
@@ -382,16 +704,22 @@ class _Scanner(ast.NodeVisitor):
             ):
                 self.emit("outbox_writer", f"table:{first.value}")
         in_writer = bool(self.stack) and bool(_ENQUEUE_DEF.match(self.stack[-1]))
-        if name and _SINK.match(name) and not in_writer:
-            candidates: list[ast.expr] = list(node.args)
-            candidates += [
-                kw.value
-                for kw in node.keywords
-                if kw.arg is not None and kw.arg.lower() in _COPY_KW
-            ]
-            if any(self._arg_is_copy(c) for c in candidates):
-                self.emit("inline_copy", self.symbol)
+        if name and _SINK.match(name) and not in_writer and self._sink_has_copy(node):
+            self.emit("inline_copy")
         self.generic_visit(node)
+
+    def _sink_has_copy(self, node: ast.Call) -> bool:
+        ctx = self.ctxs[-1]
+        for arg in node.args:
+            if self._copy(arg):
+                return True
+        for kw in node.keywords:
+            if kw.arg is None:  # **mapping
+                if dict_carries_copy(kw.value, ctx, self.rel, self.res):
+                    return True
+            elif kw.arg.lower() in _COPY_KW and self._copy(kw.value):
+                return True
+        return False
 
     @staticmethod
     def _socket_port(node: ast.Call) -> bool:
@@ -401,10 +729,6 @@ class _Scanner(ast.NodeVisitor):
                 if isinstance(port, ast.Constant) and port.value in _SMTP_PORTS:
                     return True
         return False
-
-
-def scan_source(path: str, source: str) -> list[Finding]:
-    return _Scanner(path, ast.parse(source, filename=path)).found
 
 
 def number(findings: list[Finding]) -> list[str]:
@@ -417,18 +741,65 @@ def number(findings: list[Finding]) -> list[str]:
     return ids
 
 
-def _iter_files(root: Path) -> list[Path]:
-    files: list[Path] = []
-    for p in sorted(root.rglob("*.py")):
-        rel_parts = p.relative_to(root).parts
-        if any(part in SKIP_DIRS for part in rel_parts[:-1]):
+def scan_sources(sources: dict[str, str]) -> tuple[list[Finding], list[str]]:
+    project = analyse(sources)
+    findings: list[Finding] = []
+    for rel, tree in project.trees.items():
+        findings.extend(
+            _Scanner(rel, tree, project.resolver, project.index[rel].docs).found
+        )
+    return findings, project.problems
+
+
+def scan_source(path: str, source: str) -> list[Finding]:
+    """One-file convenience (renderers are resolved within the file only)."""
+    return scan_sources({path: source})[0]
+
+
+# -- product scan --
+
+
+def _walk(root: Path, prune: list[str]) -> tuple[list[str], dict[str, int]]:
+    """Python files under root, plus how many pruned trees each glob swallowed."""
+    rels: list[str] = []
+    pruned: Counter[str] = Counter()
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath).relative_to(root).as_posix()
+        here = "" if here == "." else here
+        kept = []
+        for d in sorted(dirnames):
+            rel_dir = f"{here}/{d}" if here else d
+            if d == "__pycache__":
+                continue
+            hit = next((g for g in prune if glob_match(f"{rel_dir}/x", g)), None)
+            if hit is not None:
+                if next((root / rel_dir).rglob("*.py"), None) is not None:
+                    pruned[hit] += 1
+                continue
+            kept.append(d)
+        dirnames[:] = kept
+        for f in sorted(filenames):
+            if f.endswith(".py"):
+                rels.append(f"{here}/{f}" if here else f)
+    return sorted(rels), dict(pruned)
+
+
+def _validate_entries(entries: list[dict[str, Any]], label: str) -> list[str]:
+    problems: list[str] = []
+    for e in entries:
+        glob = e.get("glob")
+        if not glob:
+            problems.append(f"{label} entry without a glob: {e!r}")
             continue
-        files.append(p)
-    return files
-
-
-def _matches(rel: str, glob: str) -> bool:
-    return fnmatch.fnmatchcase(rel, glob)
+        if not e.get("premise"):
+            problems.append(f"{label} {glob!r} states no premise")
+        kinds = e.get("kinds")
+        if not isinstance(kinds, list) or not kinds or not set(kinds) <= set(KINDS):
+            problems.append(
+                f"{label} {glob!r} must list its `kinds` explicitly "
+                f"(subset of {list(KINDS)}); there is no implicit 'everything'"
+            )
+    return problems
 
 
 @dataclass
@@ -441,10 +812,9 @@ class Result:
 def scan_product(config: dict[str, Any], base_dir: Path) -> Result:
     """Scan one product config. Paths in ``config`` are relative to base_dir."""
     root = (base_dir / config["root"]).resolve()
-    problems: list[str] = []
     if not root.is_dir():
         return Result([], {}, [f"root {config['root']!r} is not a directory"])
-
+    problems: list[str] = []
     families: dict[str, list[str]] = config.get("families", {})
     for fam, roots in sorted(families.items()):
         for r in roots:
@@ -453,26 +823,31 @@ def scan_product(config: dict[str, Any], base_dir: Path) -> Result:
                     f"family {fam!r} root {r!r} does not exist: an entry-point "
                     "family cannot silently drop out of the scan"
                 )
+    allowed: list[dict[str, Any]] = config.get("allowed", [])
+    excluded: list[dict[str, Any]] = config.get("exclude", [])
+    problems += _validate_entries(allowed, "allowed owner")
+    problems += _validate_entries(excluded, "exclusion")
 
-    allowed: list[dict[str, str]] = config.get("allowed", [])
-    allowed_hit = [0] * len(allowed)
-    for entry in allowed:
-        if not entry.get("premise"):
-            problems.append(f"allowed owner {entry.get('glob')!r} states no premise")
+    full_prune = [
+        e["glob"]
+        for e in excluded
+        if e.get("glob", "").endswith("/**") and set(e.get("kinds") or []) == set(KINDS)
+    ]
+    rels, pruned = _walk(root, full_prune)
 
-    files = _iter_files(root)
-    rels = [p.relative_to(root).as_posix() for p in files]
-    for i, entry in enumerate(allowed):
-        allowed_hit[i] = sum(1 for r in rels if _matches(r, entry["glob"]))
-        if allowed_hit[i] == 0:
+    for entry in [*allowed, *excluded]:
+        glob = entry.get("glob", "")
+        n = sum(1 for r in rels if glob_match(r, glob)) + pruned.get(glob, 0)
+        if n == 0 and not entry.get("optional"):
             problems.append(
-                f"allowed owner {entry['glob']!r} matches no file: the premise "
-                "is unverifiable, remove or fix it"
+                f"{'allowed owner' if entry in allowed else 'exclusion'} "
+                f"{glob!r} matches no file: its premise is unverifiable, "
+                "remove or fix it"
             )
 
+    sources: dict[str, str] = {}
     fam_counts: Counter[str] = Counter()
-    findings: list[Finding] = []
-    for path, rel in zip(files, rels, strict=True):
+    for rel in rels:
         fam, best = "other", -1
         for name, froots in sorted(families.items()):
             for r in froots:
@@ -480,14 +855,27 @@ def scan_product(config: dict[str, Any], base_dir: Path) -> Result:
                 if (rel == r or rel.startswith(r + "/")) and len(r) > best:
                     fam, best = name, len(r)
         fam_counts[fam] += 1
-        if any(_matches(rel, e["glob"]) for e in allowed):
-            continue
         try:
-            source = path.read_text(encoding="utf-8")
-            findings.extend(scan_source(rel, source))
-        except (SyntaxError, UnicodeDecodeError) as exc:
-            problems.append(f"{rel}: cannot parse ({exc.__class__.__name__})")
-    return Result(number(findings), dict(fam_counts), problems)
+            sources[rel] = (root / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError) as exc:
+            problems.append(f"{rel}: cannot read ({exc.__class__.__name__})")
+
+    findings, parse_problems = scan_sources(sources)
+    problems += parse_problems
+
+    def exempt(f: Finding) -> bool:
+        for entry in [*allowed, *excluded]:
+            if f.kind in (entry.get("kinds") or []) and glob_match(
+                f.path, entry.get("glob", "")
+            ):
+                return True
+        return False
+
+    kept = [f for f in findings if not exempt(f)]
+    return Result(number(kept), dict(fam_counts), problems)
+
+
+# -- backlog --
 
 
 def load_backlog(path: Path) -> list[str]:
@@ -500,8 +888,7 @@ def load_backlog(path: Path) -> list[str]:
 
 def compare(ids: list[str], backlog: list[str]) -> list[str]:
     problems: list[str] = []
-    dupes = sorted(i for i, n in Counter(backlog).items() if n > 1)
-    for d in dupes:
+    for d in sorted(i for i, n in Counter(backlog).items() if n > 1):
         problems.append(f"backlog lists {d} more than once")
     current, listed = set(ids), set(backlog)
     for i in sorted(current - listed):
@@ -524,7 +911,7 @@ def write_backlog(path: Path, product: str, ids: list[str]) -> None:
             "ratchet: fails if a finding appears OR a listed finding disappears "
             "without this file being regenerated in the same change. Retire "
             "entries by moving the send to kernel delivery + template-studio, "
-            "then run --write-backlog. Do not hand-edit."
+            "then run --write-backlog (remove-only). Do not hand-edit."
         ),
         "product": product,
         "total": len(ids),
@@ -533,7 +920,13 @@ def write_backlog(path: Path, product: str, ids: list[str]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def run(config_path: Path, backlog_path: Path, *, write: bool) -> int:
+def run(
+    config_path: Path,
+    backlog_path: Path,
+    *,
+    write: bool,
+    allow_additions: bool = False,
+) -> int:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     result = scan_product(config, config_path.parent)
     by_kind: Counter[str] = Counter(i.split("::")[1] for i in result.ids)
@@ -547,9 +940,22 @@ def run(config_path: Path, backlog_path: Path, *, write: bool) -> int:
         + ", ".join(f"{k}={v}" for k, v in sorted(result.families.items()))
     )
     if write:
-        if result.problems:
-            for p in result.problems:
-                print(f"ERROR: {p}", file=sys.stderr)
+        problems = list(result.problems)
+        previous: list[str] | None = None
+        try:
+            previous = load_backlog(backlog_path)
+        except (OSError, ValueError):
+            previous = None
+        added = sorted(set(result.ids) - set(previous or []))
+        if added and not allow_additions:
+            problems += [
+                f"refusing to ADD finding {i}: --write-backlog is remove-only "
+                "(pass --allow-additions only to seed a new product's backlog)"
+                for i in added
+            ]
+        for p in problems:
+            print(f"ERROR: {p}", file=sys.stderr)
+        if problems:
             return 1
         write_backlog(backlog_path, config.get("product", ""), result.ids)
         print(f"wrote {backlog_path} ({len(result.ids)} finding(s))")
@@ -571,9 +977,21 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="default")
     mode.add_argument("--write-backlog", action="store_true")
+    parser.add_argument(
+        "--allow-additions",
+        action="store_true",
+        help="let --write-backlog ADD findings (seeding only; defeats the ratchet)",
+    )
     args = parser.parse_args(argv)
+    if args.allow_additions and not args.write_backlog:
+        parser.error("--allow-additions only applies to --write-backlog")
     try:
-        return run(args.config, args.backlog, write=args.write_backlog)
+        return run(
+            args.config,
+            args.backlog,
+            write=args.write_backlog,
+            allow_additions=args.allow_additions,
+        )
     except (OSError, ValueError, KeyError) as exc:
         print(f"usage error: {exc}", file=sys.stderr)
         return 2
