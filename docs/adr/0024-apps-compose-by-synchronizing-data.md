@@ -9,7 +9,9 @@ succeeded rather than redefined, and a capability exposes product meaning
 rather than provider workflow), and 2026-08-26 (§ 13 below, caller-path parity:
 an independently released caller binds to a pinned published contract, with a
 non-vacuous binding), and 2026-11-03 (§ 14 below, a bounded exception to § 2
-for two named composition packages; approved by Michael). Every amendment
+for two named composition packages; approved by Michael), and 2026-11-18
+(§ 15 below, one Integrator deployment per application; approved by Michael
+as decisions D1-D13 of the topology options paper). Every amendment
 is a dated addition; no earlier text is rewritten, and where a later section
 supersedes an earlier framing it says so by name.
 **Date:** 2026-08-13
@@ -883,3 +885,86 @@ lineage, release, pin or adoption. It changes no owner's authority. It does not
 make `dotmac-workflow-runtime` a money engine, and does not move any state
 machine into it (ADR-0040). Each composition package still needs its own
 dossier, manifest, release and the 14.5 checks before it is installable.
+
+## Decision amendment — 2026-11-18 (§ 15 one Integrator deployment per application)
+
+**Status of this amendment:** Accepted when Michael merges this change.
+Michael ruled the topology on 2026-11-18 (decisions D1-D13, all as
+recommended). This is wording only. It creates no code, package, table, release
+or deployment, and it enables no connector.
+
+**15.1 Topology.** Each composed application runs its own companion Integrator:
+a separate `dotmac_integrator` workload with its own image, process, database
+and roles, and OpenBao workload identity. Platform CP is an application like the
+others and has its own companion. There is no separate shared Integrator. The
+companion's counterparty is its own application, through that application's
+provider-neutral product and query ports. The decision is taken before the first
+Integrator binding is enabled in production, so cutover connectors land in
+their final home once.
+
+**15.2 What this supersedes in §§ 6 and 7, by name.**
+
+- § 6 says "Products do not each compose `dotmac-integration`; doing so would
+  duplicate credential ownership, provider-account rate limiting, backoff and
+  idempotency." The *rationale* is superseded: one instance is no longer the
+  mechanism that prevents that duplication. The *prohibition on composing
+  in-process* stands unchanged: a product never imports, loads or composes
+  `dotmac-integration` or a connector distribution. A companion is a separate
+  image and process.
+- § 7's "the one Integrator module installation composed by `dotmac_integrator`"
+  becomes: one installation per Integrator deployment. The
+  `(installation, capability)` uniqueness rule holds within a deployment, and
+  one provider account is never installed in two deployments.
+
+**15.3 The ownership rule that replaces the single instance.** One provider
+account is owned by exactly one Integrator deployment, which therefore alone
+holds its credential, rate limit, backoff and idempotency state. An application
+that needs an account it does not own reaches it through the owning
+application's port. Credential ownership, rate limiting, backoff and
+idempotency therefore remain single-owner, which is what § 6 protected.
+
+**15.4 Rules that follow.**
+
+- The product never refuses to start because its companion is absent. A
+  companion failure degrades to an ageing outbox and an alert. The companion is
+  a separate deploy unit with its own health gate.
+- The companion's image is bound late as a deploy value entered in the
+  deployment UI, never pinned in the product repository. Adding or changing a
+  provider still does not release the product (§ 7).
+- The companion's database is never the product database or a schema inside it.
+  On a shared Postgres server it is a separate database with separate roles,
+  and the product role has no CONNECT to it.
+- Platform-owned key material, including the licence signing key, is never
+  co-located with a product's companion. A licence check stays in the product
+  kernel. The companion is at most an untrusted transport.
+- First-party channels (platform to application, application to application,
+  for example Billing to ERP under § 14.6) are not provider connectors. When a
+  companion carries one, it obeys every rule above. ERP v2's companion pulls
+  Billing's published facts through Billing's public ordered fact query.
+
+**15.5 WIDENING and gaps (explicit).**
+
+- A companion on the application's host means host-level access to the
+  application also reaches that application's provider credentials. This is
+  accepted for application-owned providers only, at the same trust tier as the
+  application database already on that host.
+- Network egress is reported, not enforced. Projection today is the union over
+  installed manifests, so every companion projects every provider host until the
+  module narrows projection to enabled installations and the network is split
+  per application. No deployment is to be called egress-isolated before that
+  hardening, which follows the first companion.
+- Licence delivery and enforcement are new feature work and stay parked. Only
+  the shape is reserved: the companion is the deployment's only egress and would
+  pull platform traffic outbound-only.
+
+**15.6 Verification.** A connector's cutover is verified by rails, never by a
+shadow, side-by-side or N-day gate: a backtest over recorded data, saved golden
+tests, a one-shot real-record preview, and a guarded enable of one binding with a
+target cap and a disable-binding kill switch. The incumbent writer is sealed
+before a binding becomes writable.
+
+**15.7 S11 clarification.** `dotmac-delivery-smtp` stays in-product. The recorded
+transfer of the `outbound_transport` baseline from 0 to 1 retires to
+`dotmac-connector-smtp`, read as hosted in Academy's companion Integrator, and
+the baseline then returns to 0 with cutover evidence. Governance ADR 0011 (its
+2026-11-18 amendment) records the same.
