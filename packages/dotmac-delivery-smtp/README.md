@@ -7,8 +7,8 @@ SMTP adapter for the kernel delivery-provider seam
   features (`html`, `attachments`) and header names it honours.
 - **Settings** (`delivery_smtp` domain): host, port, starttls, username, from
   address, entered in the settings UI through the kernel settings mechanism.
-  `resolve_config(db, tenant_id, production=...)` builds the
-  `SmtpConfig`. No env file, no `env_var`.
+  `resolve_config(db, production=...)` builds the `SmtpConfig` at PLATFORM scope
+  only (a tenant row could otherwise redirect the platform password). No env file, no `env_var`.
 - **Password** is not a setting. It is read by NAME from the kernel
   `SecretSource` (`dotmac_kernel.secret_sources`); the product binds its current
   custody to that seam. This package adds no secret path.
@@ -21,11 +21,10 @@ SMTP adapter for the kernel delivery-provider seam
   (`AttachmentRef -> bytes`; no storage here). `Message-ID` is
   `<dispatch_id@from-domain>`.
 - **Admission hook**: a callable invoked before any connection (the product
-  passes e.g. its mail-gate lease). A refusal is returned as `failed` with code
-  `admission_refused` and nothing is connected. S8 follow-up: replace with the
-  kernel `DeliveryDeferred` (K-4) once it exists.
-- **Classification** is documented in `classify.py`: RCPT 5.1.x `bounced`,
-  5.7.x `rejected`, soft 5.2/5.4 and 4xx/timeouts/connection errors `failed`.
+  passes e.g. its mail-gate lease). A refusal raises `SmtpAdmissionRefused`: nothing is connected and no
+  receipt is written. S8 follow-up: kernel `DeliveryDeferred` (K-4).
+- **Classification** is documented in `classify.py`: RCPT 5.1.1/2/3/6/10 `bounced`,
+  5.7.x `rejected`, sender-side 5.1.7/5.1.8 and any MAIL-stage 5xx raise (operator fault), soft 5.2/5.4 and 4xx/timeouts/connection errors `failed`.
   A reply lost after the DATA payload raises `SmtpOutcomeUnknown` (SMTP has no
   idempotency key, so the kernel contract forbids returning `failed`).
 

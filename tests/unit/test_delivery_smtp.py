@@ -31,12 +31,13 @@ from dotmac_delivery_smtp import (
 )
 from dotmac_delivery_smtp.manifest import module
 from dotmac_delivery_smtp.provider import (
-    CODE_ADMISSION_REFUSED,
     CODE_CONNECTION_ERROR,
     CODE_STARTTLS_UNAVAILABLE,
     CODE_TLS_VERIFICATION_FAILED,
+    SmtpAdmissionRefused,
     SmtpAttachmentError,
     SmtpAuthenticationError,
+    SmtpOperatorFault,
 )
 from dotmac_kernel import secret_sources
 from dotmac_kernel.delivery_providers import (
@@ -424,6 +425,13 @@ def test_missing_password_and_bad_password_raise_without_value(
     [
         ("rcpt", 550, "5.1.1 user unknown", "bounced"),
         ("rcpt", 553, "5.1.3 bad address syntax", "bounced"),
+        ("rcpt", 550, "5.1.2 bad domain", "bounced"),
+        ("rcpt", 550, "5.1.6 mailbox moved", "bounced"),
+        ("rcpt", 550, "5.1.10 null mx", "bounced"),
+        ("rcpt", 550, "5.1.7 bad sender mailbox syntax", "operator_fault"),
+        ("rcpt", 550, "5.1.8 bad sender system address", "operator_fault"),
+        ("rcpt", 550, "5.1.0 other address status", "rejected"),
+        ("rcpt", 550, "5.1.4 ambiguous", "rejected"),
         ("rcpt", 550, "5.7.1 relay denied", "rejected"),
         ("rcpt", 554, "5.7.1 policy", "rejected"),
         ("rcpt", 552, "5.2.2 mailbox full", "failed"),
@@ -433,8 +441,8 @@ def test_missing_password_and_bad_password_raise_without_value(
         ("rcpt", 550, "no enhanced code", "rejected"),
         ("rcpt", 550, "4.1.1 class mismatch is not trusted", "rejected"),
         ("rcpt", 554, "5.3.0 other", "rejected"),
-        ("mail", 550, "5.1.8 bad sender", "rejected"),
-        ("mail", 550, "5.7.1 sender policy", "rejected"),
+        ("mail", 550, "5.1.8 bad sender", "operator_fault"),
+        ("mail", 550, "5.7.1 sender policy", "operator_fault"),
         ("mail", 451, "4.3.0 local error", "failed"),
         ("data", 554, "5.6.0 content refused", "rejected"),
         ("data", 552, "5.3.4 too large", "rejected"),
@@ -454,7 +462,8 @@ def test_classification_table(stage: str, code: int, text: str, expected: str) -
         ("rcpt", "550 5.1.1 no such user", "bounced"),
         ("rcpt", "550 5.7.1 denied", "rejected"),
         ("rcpt", "451 4.7.1 later", "failed"),
-        ("mail", "550 5.7.1 sender denied", "rejected"),
+        ("mail", "550 5.7.1 sender denied", "OPERATOR"),
+        ("rcpt", "550 5.1.8 bad sender", "OPERATOR"),
         ("data_cmd", "554 5.3.0 refused", "rejected"),
         ("data", "554 5.7.1 spam", "rejected"),
         ("data", "451 4.3.0 local error", "failed"),
@@ -462,6 +471,11 @@ def test_classification_table(stage: str, code: int, text: str, expected: str) -
 )
 def test_wire_classification(server, trusting, key, reply, status) -> None:
     server.replies[key] = reply
+    if status == "OPERATOR":
+        with pytest.raises(SmtpOperatorFault):
+            provider(server, trusting).send(msg())
+        assert server.messages == []
+        return
     result = provider(server, trusting).send(msg())
     assert result.status == status and result.response_code == reply[:3]
     if key != "data":  # the fake stores the payload before its final reply
@@ -509,28 +523,35 @@ def test_reply_lost_after_data_is_unknown_not_failed(server, trusting) -> None:
 
 
 # ---------------------------------------------------------- admission hook
-def test_admission_refusal_does_not_connect(server, trusting) -> None:
+def test_admission_refusal_raises_without_connecting(server, trusting) -> None:
     calls: list[UUID] = []
 
     def gate(m: OutboundMessage) -> str:
         calls.append(m.dispatch_id)
         return "gate closed"
 
-    result = provider(server, trusting, admission=gate).send(msg())
-    assert (result.status, result.response_code, result.response_body) == (
-        "failed",
-        CODE_ADMISSION_REFUSED,
-        "gate closed",
-    )
+    with pytest.raises(SmtpAdmissionRefused, match="gate closed"):
+        provider(server, trusting, admission=gate).send(msg())
     assert calls == [DISPATCH] and server.commands == []
 
 
-def test_admission_false_and_lease_context_manager(server, trusting) -> None:
-    assert (
-        provider(server, trusting, admission=lambda m: False).send(msg()).response_code
-        == CODE_ADMISSION_REFUSED
-    )
+def test_admission_false_and_self_returning_lease_fail_closed(server, trusting) -> None:
+    with pytest.raises(SmtpAdmissionRefused):
+        provider(server, trusting, admission=lambda m: False).send(msg())
 
+    class SelfLease:
+        def __enter__(self) -> SelfLease:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+    with pytest.raises(SmtpAdmissionRefused):
+        provider(server, trusting, admission=lambda m: SelfLease()).send(msg())
+    assert server.commands == []
+
+
+def test_lease_context_manager_admits_and_releases(server, trusting) -> None:
     events: list[str] = []
 
     class Lease:
@@ -567,3 +588,70 @@ def test_non_email_channel_refused(server, trusting) -> None:
     )
     with pytest.raises(SmtpConfigError):
         provider(server, trusting).send(sms)
+
+
+# ------------------------------------------------------------------- F4/F8
+def test_data_reply_uses_the_long_timeout(server, trusting) -> None:
+    seen: list[float | None] = []
+    import smtplib
+
+    original = smtplib.SMTP.data
+
+    def spy(self, msg):  # type: ignore[no-untyped-def]
+        seen.append(self.sock.gettimeout())
+        return original(self, msg)
+
+    smtplib.SMTP.data = spy  # type: ignore[method-assign]
+    try:
+        p = SmtpDeliveryProvider(
+            config=lambda: cfg(server),
+            ssl_context=trusting,
+            timeout=3,
+            data_timeout=321,
+        )
+        assert p.send(msg()).status == "accepted"
+    finally:
+        smtplib.SMTP.data = original  # type: ignore[method-assign]
+    assert seen == [321]
+
+
+def test_header_set_is_a_literal_of_five_names() -> None:
+    assert SmtpDeliveryProvider.message_headers == frozenset(
+        {
+            "In-Reply-To",
+            "List-Unsubscribe",
+            "List-Unsubscribe-Post",
+            "References",
+            "Reply-To",
+        }
+    )
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_old_tls_context_is_refused() -> None:
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1
+    with pytest.raises(SmtpConfigError):
+        SmtpDeliveryProvider(config=lambda: None, ssl_context=ctx)  # type: ignore[arg-type,return-value]
+
+
+def test_total_attachment_size_is_capped(server, trusting) -> None:
+    refs = [
+        AttachmentRef(
+            kind="document",
+            ref=f"d{i}",
+            filename=f"f{i}.pdf",
+            content_type="application/pdf",
+        )
+        for i in range(3)
+    ]
+    p = provider(
+        server,
+        trusting,
+        attachment_resolver=lambda r: b"x" * 600,
+        max_attachment_bytes=1000,
+        max_total_attachment_bytes=1500,
+    )
+    with pytest.raises(SmtpAttachmentError):
+        p.send(msg(attachments=refs))
+    assert server.messages == []

@@ -6,9 +6,11 @@ from dotmac_delivery_smtp.provider import (
     AdmissionHook,
     AttachmentResolver,
     SmtpAdapterError,
+    SmtpAdmissionRefused,
     SmtpAttachmentError,
     SmtpAuthenticationError,
     SmtpDeliveryProvider,
+    SmtpOperatorFault,
     SmtpOutcomeUnknown,
 )
 from dotmac_delivery_smtp.reader import resolve_config
@@ -17,6 +19,8 @@ __all__ = [
     "AdmissionHook",
     "AttachmentResolver",
     "SmtpAdapterError",
+    "SmtpAdmissionRefused",
+    "SmtpOperatorFault",
     "SmtpAttachmentError",
     "SmtpAuthenticationError",
     "SmtpConfig",

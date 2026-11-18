@@ -14,8 +14,15 @@ Outcome contract with `dotmac_kernel.delivery_providers.send`:
   kernel's rule applies: the adapter RAISES `SmtpOutcomeUnknown` rather than
   return `failed`.
 * Operator-side faults (unusable configuration, plaintext in production,
-  missing password, authentication rejected, attachment resolver failure) RAISE;
-  they are not verdicts on the recipient and must not become receipts.
+  missing password, authentication rejected, a MAIL-stage or sender-address
+  refusal, attachment resolver failure) RAISE; they are not verdicts on the
+  recipient and must not become receipts.
+* An admission refusal RAISES `SmtpAdmissionRefused` and writes no receipt. S8
+  follow-up: it becomes kernel `DeliveryDeferred` (K-4); likewise
+  `SmtpOutcomeUnknown` becomes the kernel unknown-outcome type (S8/S10).
+* Today the kernel relay retries EVERY raised exception, including the ones
+  above that are operator faults. A raise therefore means "no receipt, retried
+  by the relay", not "terminal"; a terminal type is a kernel follow-up.
 * Never logs or raises with the password, the message body or the recipient.
 """
 
@@ -38,7 +45,6 @@ from dotmac_kernel.delivery_models import (
     DELIVERY_REJECTED,
 )
 from dotmac_kernel.delivery_providers import (
-    ALLOWED_HEADERS,
     FEATURE_ATTACHMENTS,
     FEATURE_HTML,
     AttachmentRef,
@@ -48,6 +54,7 @@ from dotmac_kernel.delivery_providers import (
 from dotmac_kernel.secret_sources import get_secret
 
 from dotmac_delivery_smtp.classify import (
+    OPERATOR_FAULT,
     STAGE_DATA,
     STAGE_MAIL,
     STAGE_RCPT,
@@ -60,10 +67,26 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_NAME = "smtp"
 DEFAULT_TIMEOUT_SECONDS = 15.0
+#: RFC 5321 4.5.3.2.6: the final reply to DATA may take up to 10 minutes.
+DEFAULT_DATA_TIMEOUT_SECONDS = 600.0
+#: Per attachment and in total across one message (raised only by a reviewed
+#: change; the total keeps a message under common 25-35 MiB relay limits).
+DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
+_MIN_TLS = ssl.TLSVersion.TLSv1_2
+#: The five headers this adapter writes: a literal, deliberately NOT a copy of
+#: the kernel allowlist, so a kernel addition is never written unreviewed.
+SUPPORTED_HEADERS: frozenset[str] = frozenset(
+    {
+        "In-Reply-To",
+        "List-Unsubscribe",
+        "List-Unsubscribe-Post",
+        "References",
+        "Reply-To",
+    }
+)
 DEFAULT_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 RESPONSE_BODY_LIMIT = 200
 
-CODE_ADMISSION_REFUSED = "admission_refused"
 CODE_CONNECTION_ERROR = "connection_error"
 CODE_STARTTLS_UNAVAILABLE = "starttls_unavailable"
 CODE_TLS_VERIFICATION_FAILED = "tls_verification_failed"
@@ -95,7 +118,22 @@ class SmtpAuthenticationError(SmtpAdapterError):
 
 
 class SmtpAttachmentError(SmtpAdapterError):
-    """An attachment could not be resolved or is unacceptable. Terminal."""
+    """An attachment could not be resolved or is unacceptable.
+
+    Not retryable in intent, but the kernel relay retries any raise today, so it
+    is retried until a terminal type exists (S8/S10 follow-up)."""
+
+
+class SmtpOperatorFault(SmtpAdapterError):
+    """The server refused OUR side (MAIL FROM, or a sender-address 5.1.7/5.1.8).
+
+    An operator misconfiguration, not a verdict on the recipient: no receipt,
+    and above all no suppression of the recipient."""
+
+
+class SmtpAdmissionRefused(SmtpAdapterError):
+    """The admission hook declined; nothing was connected and no receipt is
+    written. S8 follow-up: becomes kernel `DeliveryDeferred` (K-4)."""
 
 
 def _result(status: str, code: str, body: str = "") -> ProviderResult:
@@ -120,7 +158,7 @@ class SmtpDeliveryProvider:
 
     name = PROVIDER_NAME
     message_features = frozenset({FEATURE_HTML, FEATURE_ATTACHMENTS})
-    message_headers = frozenset(ALLOWED_HEADERS)
+    message_headers = SUPPORTED_HEADERS
 
     def __init__(
         self,
@@ -130,8 +168,10 @@ class SmtpDeliveryProvider:
         attachment_resolver: AttachmentResolver | None = None,
         admission: AdmissionHook | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        data_timeout: float = DEFAULT_DATA_TIMEOUT_SECONDS,
         ssl_context: ssl.SSLContext | None = None,
         max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES,
+        max_total_attachment_bytes: int = DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,
     ) -> None:
         self._config = config
         self._password_secret_name = password_secret_name
@@ -139,11 +179,17 @@ class SmtpDeliveryProvider:
         self._admission = admission
         self._timeout = timeout
         self._max_attachment_bytes = max_attachment_bytes
+        self._max_total_attachment_bytes = max_total_attachment_bytes
+        self._data_timeout = data_timeout
         if ssl_context is not None and (
             ssl_context.verify_mode != ssl.CERT_REQUIRED
             or not ssl_context.check_hostname
+            or ssl_context.minimum_version < _MIN_TLS
         ):
-            raise SmtpConfigError("ssl_context must verify certificates and hostnames")
+            raise SmtpConfigError(
+                "ssl_context must verify certificates and hostnames and "
+                "require TLS 1.2 or newer"
+            )
         self._ssl_context = ssl_context
 
     def send(self, message: OutboundMessage) -> ProviderResult:
@@ -168,14 +214,19 @@ class SmtpDeliveryProvider:
         decision: object,
     ) -> ProviderResult:
         if decision is not None and decision is not True:
-            # Not attempted. Closest existing outcome is `failed` (retryable, no
-            # network call). S8 follow-up: kernel DeliveryDeferred (K-4) replaces
-            # this so a deferral leaves no receipt.
-            return _failed(
-                CODE_ADMISSION_REFUSED, decision if isinstance(decision, str) else ""
-            )
+            # Not attempted, and NO receipt: a permanent `failed` row for a
+            # deferral would be a lie. Anything but None/True refuses, so a
+            # lease whose __enter__ returns the lease itself fails closed.
+            reason = decision if isinstance(decision, str) else "not admitted"
+            raise SmtpAdmissionRefused(reason[:RESPONSE_BODY_LIMIT])
         built = self._build(message, cfg)
         return self._transmit(cfg, password, message.address, built)
+
+    @staticmethod
+    def _default_context() -> ssl.SSLContext:
+        context = ssl.create_default_context()
+        context.minimum_version = _MIN_TLS
+        return context
 
     def _password(self, cfg: SmtpConfig) -> str | None:
         if not cfg.username:
@@ -208,8 +259,12 @@ class SmtpDeliveryProvider:
             msg.set_content(html, subtype="html")
         else:
             msg.set_content(text or "")
+        total = 0
         for ref in message.attachments:
             data = self._resolve(ref)
+            total += len(data)
+            if total > self._max_total_attachment_bytes:
+                raise SmtpAttachmentError("attachments exceed the total size limit")
             maintype, _, subtype = ref.content_type.partition("/")
             msg.add_attachment(
                 data, maintype=maintype, subtype=subtype, filename=ref.filename
@@ -266,7 +321,7 @@ class SmtpDeliveryProvider:
             if cfg.starttls:
                 if not smtp.has_extn("starttls"):
                     return _failed(CODE_STARTTLS_UNAVAILABLE)
-                context = self._ssl_context or ssl.create_default_context()
+                context = self._ssl_context or self._default_context()
                 code, text = smtp.starttls(context=context)
                 if code != 220:
                     return self._reply_failure(STAGE_SESSION, code, text)
@@ -294,6 +349,8 @@ class SmtpDeliveryProvider:
             return self._connection_failure(exc)
         # The payload is about to leave: from here a lost reply is UNKNOWN.
         try:
+            if smtp.sock is not None:
+                smtp.sock.settimeout(self._data_timeout)
             code, text = smtp.data(payload)
         except smtplib.SMTPDataError as exc:
             return self._reply_failure(STAGE_DATA, exc.smtp_code, exc.smtp_error)
@@ -317,8 +374,11 @@ class SmtpDeliveryProvider:
     @staticmethod
     def _reply_failure(stage: str, code: int, text: bytes | str) -> ProviderResult:
         decoded = _reply_text(text)
+        status = classify_reply(stage, code, decoded)
+        if status == OPERATOR_FAULT:
+            raise SmtpOperatorFault(f"server refused the sender side ({code})")
         return ProviderResult(
-            status=classify_reply(stage, code, decoded),
+            status=status,
             response_code=str(code),
             response_body=decoded or None,
         )
@@ -335,7 +395,6 @@ class SmtpDeliveryProvider:
 
 
 __all__ = [
-    "CODE_ADMISSION_REFUSED",
     "CODE_CONNECTION_ERROR",
     "CODE_NON_ASCII_ADDRESS",
     "CODE_STARTTLS_UNAVAILABLE",
@@ -344,7 +403,10 @@ __all__ = [
     "PROVIDER_NAME",
     "AdmissionHook",
     "AttachmentResolver",
+    "SUPPORTED_HEADERS",
     "SmtpAdapterError",
+    "SmtpAdmissionRefused",
+    "SmtpOperatorFault",
     "SmtpAttachmentError",
     "SmtpAuthenticationError",
     "SmtpDeliveryProvider",
