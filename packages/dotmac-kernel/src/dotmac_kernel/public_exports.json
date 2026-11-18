@@ -362,10 +362,31 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.delivery_dispatch": {
+      "classification": "supported",
+      "exports": [
+        "DISPATCH_EVENT_TYPE",
+        "DispatchConflict",
+        "DispatchError",
+        "DispatchHistoryOnly",
+        "DispatchIntegrityError",
+        "DispatchNotFound",
+        "DispatchRedacted",
+        "DispatchResult",
+        "LoadedDispatch",
+        "create_dispatch",
+        "find_dispatch_by_key",
+        "import_history_key",
+        "import_pending",
+        "load_dispatch"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.delivery_models": {
       "classification": "supported",
       "exports": [
         "CommunicationDelivery",
+        "CommunicationDispatch",
         "DELIVERY_ACCEPTED",
         "DELIVERY_BOUNCED",
         "DELIVERY_COMPLAINT",
@@ -373,6 +394,14 @@
         "DELIVERY_FAILED",
         "DELIVERY_REJECTED",
         "DELIVERY_STATUSES",
+        "DISPATCH_DEAD",
+        "DISPATCH_FAILED",
+        "DISPATCH_HISTORY",
+        "DISPATCH_PENDING",
+        "DISPATCH_SENT",
+        "DISPATCH_STATUSES",
+        "DISPATCH_SUPPRESSED",
+        "DISPATCH_TERMINAL_STATUSES",
         "SUPPRESSING_STATUSES"
       ],
       "status": "declared"
@@ -2135,6 +2164,7 @@
     "dotmac_kernel.database_catalog_comparator",
     "dotmac_kernel.db",
     "dotmac_kernel.delivery",
+    "dotmac_kernel.delivery_dispatch",
     "dotmac_kernel.delivery_models",
     "dotmac_kernel.delivery_providers",
     "dotmac_kernel.deps",
