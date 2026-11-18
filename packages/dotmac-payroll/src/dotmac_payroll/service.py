@@ -22,6 +22,7 @@ from dotmac_payroll.models import (
     PayrollCalculation,
     PayrollCalculationLine,
     PayrollLiability,
+    PayrollLiabilityAdjustment,
     PayrollLiabilitySettlement,
     PayrollRun,
     PayrollSettlementReversal,
@@ -854,6 +855,23 @@ def cancel_payroll_run(
     return run
 
 
+def effective_liability_amount(liability: PayrollLiability) -> Decimal:
+    """The amount owed: the original ``amount`` plus the signed adjustments.
+
+    ``liability.amount`` is bound to the calculation and never changes; payout
+    and settlement compare against this value instead.
+    """
+    return liability.amount + (liability.amount_adjusted or Decimal(0))
+
+
+def _liability_status(liability: PayrollLiability) -> str:
+    if liability.amount_settled == effective_liability_amount(liability):
+        return "settled"
+    if liability.amount_settled == 0:
+        return "outstanding"
+    return "partially_settled"
+
+
 def record_liability_settlement(
     db: Session,
     *,
@@ -913,7 +931,7 @@ def record_liability_settlement(
                 "settlement was reversed; record re-payment under a new reference"
             )
         return existing
-    if liability.amount_settled + amount.amount > liability.amount:
+    if liability.amount_settled + amount.amount > effective_liability_amount(liability):
         raise PayrollRuleViolation("settlement exceeds the outstanding liability")
     row = PayrollLiabilitySettlement(
         tenant_id=tenant_id,
@@ -925,11 +943,7 @@ def record_liability_settlement(
         recorded_at=recorded_at,
     )
     liability.amount_settled += amount.amount
-    liability.status = (
-        "settled"
-        if liability.amount_settled == liability.amount
-        else "partially_settled"
-    )
+    liability.status = _liability_status(liability)
     db.add(row)
     db.flush()
     return row
@@ -1018,7 +1032,7 @@ def reverse_liability_settlement(
             "settlement reversal requires a different person than the recorder"
         )
     if (
-        settlement.amount != liability.amount
+        settlement.amount != effective_liability_amount(liability)
         or liability.amount_settled != settlement.amount
         or liability.status != "settled"
     ):
@@ -1036,7 +1050,121 @@ def reverse_liability_settlement(
         reversed_at=reversed_at,
     )
     liability.amount_settled -= settlement.amount
-    liability.status = "outstanding"
+    liability.status = _liability_status(liability)
+    db.add(row)
+    db.flush()
+    return row
+
+
+def adjust_liability(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    liability_id: UUID,
+    amount: Money,
+    adjustment_ref: str,
+    reason: str,
+    evidence_ref: str,
+    offset_account_ref: str,
+    adjusted_by_id: UUID,
+    adjusted_at: datetime,
+) -> PayrollLiabilityAdjustment:
+    """Apply one signed, audited adjustment to a liability (a6).
+
+    A negative amount writes the liability down (for example unclaimed salary);
+    a positive amount increases it. ``liability.amount`` is never changed (the
+    run consequence compares it with the calculation); the signed sum lives in
+    ``amount_adjusted`` and the audited rows. Corrections are made forward with
+    an opposite adjustment. No second person is required. An identical replay
+    returns the existing row; any other reuse of the reference is a conflict.
+    Flush-only; the caller owns the transaction.
+    """
+    liability = db.scalar(
+        select(PayrollLiability)
+        .where(
+            PayrollLiability.tenant_id == tenant_id,
+            PayrollLiability.id == liability_id,
+        )
+        .with_for_update()
+    )
+    if liability is None:
+        raise PayrollNotFound("payroll liability not found")
+    if liability.settlement_mode == "internal_recovery":
+        raise PayrollRuleViolation(
+            "internal recovery cannot be adjusted (internal_recovery_not_adjustable)"
+        )
+    if (
+        amount.currency.code != liability.currency_code
+        or amount.currency.minor_units != liability.minor_units
+    ):
+        raise PayrollRuleViolation("adjustment uses the wrong liability currency")
+    quantum = Decimal(1).scaleb(-liability.minor_units)
+    if not amount.amount.is_finite() or amount.amount != amount.amount.quantize(
+        quantum
+    ):
+        raise PayrollRuleViolation("adjustment amount is not at the currency scale")
+    if amount.amount == 0:
+        raise PayrollRuleViolation("adjustment amount must not be zero")
+    ref = _clean(adjustment_ref, "adjustment reference")
+    why = _clean(reason, "adjustment reason")
+    evidence = _clean(evidence_ref, "adjustment evidence reference")
+    offset = _clean(offset_account_ref, "offset account reference")
+    if offset == liability.liability_account_ref.strip():
+        raise PayrollRuleViolation(
+            "offset account must differ from the liability account "
+            "(offset_is_liability_account)"
+        )
+    existing = db.scalar(
+        select(PayrollLiabilityAdjustment).where(
+            PayrollLiabilityAdjustment.tenant_id == tenant_id,
+            PayrollLiabilityAdjustment.liability_id == liability.id,
+            PayrollLiabilityAdjustment.adjustment_ref == ref,
+        )
+    )
+    if existing is not None:
+        if (
+            existing.amount != amount.amount
+            or existing.reason != why
+            or existing.evidence_ref != evidence
+            or existing.offset_account_ref != offset
+            or existing.adjusted_by_id != adjusted_by_id
+        ):
+            raise PayrollConflict(
+                "adjustment reference was reused with different evidence"
+            )
+        return existing
+    if adjusted_at.tzinfo is None or adjusted_at.utcoffset() is None:
+        raise PayrollRuleViolation("adjusted_at must be timezone-aware")
+    created_at = liability.created_at
+    if created_at is not None:
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        if adjusted_at < created_at:
+            raise PayrollRuleViolation(
+                "liability cannot be adjusted before it was created"
+            )
+    if amount.amount < 0 and -amount.amount > (
+        effective_liability_amount(liability) - liability.amount_settled
+    ):
+        raise PayrollRuleViolation(
+            "write-down exceeds the outstanding liability "
+            "(adjustment_exceeds_outstanding)"
+        )
+    row = PayrollLiabilityAdjustment(
+        tenant_id=tenant_id,
+        liability_id=liability.id,
+        amount=amount.amount,
+        adjustment_ref=ref,
+        reason=why,
+        evidence_ref=evidence,
+        offset_account_ref=offset,
+        adjusted_by_id=adjusted_by_id,
+        adjusted_at=adjusted_at,
+    )
+    liability.amount_adjusted = (
+        liability.amount_adjusted or Decimal(0)
+    ) + amount.amount
+    liability.status = _liability_status(liability)
     db.add(row)
     db.flush()
     return row
@@ -1046,6 +1174,7 @@ __all__ = [
     "PayrollConflict",
     "PayrollNotFound",
     "PayrollRuleViolation",
+    "adjust_liability",
     "approve_payroll_run",
     "assign_employee_pay_structure",
     "calculate_employee_payroll",
@@ -1053,6 +1182,7 @@ __all__ = [
     "create_pay_component",
     "create_pay_structure",
     "create_payroll_run",
+    "effective_liability_amount",
     "finalize_payroll_run",
     "publish_pay_structure_revision",
     "read_payroll_run_totals",
