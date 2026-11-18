@@ -7,6 +7,54 @@ changes, each called out here.
 
 ## Unreleased
 
+### Editor, deploy check and optional maker-checker (S3; ADR-0006 § 5h)
+
+Still source-only at the `0.2.0a6+dev` marker.
+
+- Staff editor: a version workspace at `/templates/{id}/versions/{n}` to edit a
+  draft (subject, text, optional html) through the same validation and sanitizer
+  as the API (refusals are shown), preview with the context's `sample` values
+  (text escaped; html ONLY inside `<iframe sandbox>` with no `allow-scripts` and
+  no `allow-same-origin`, plus a `default-src 'none'` CSP in the `srcdoc`), a
+  per-part plain-text diff against the published revision, deactivate and
+  reactivate, and an explicit confirmation page before publish or restore.
+  Preview needs `templates.manage`; confirmation needs `templates.publish`. The
+  edit, status, test-send, restore and publish forms all carry the CSRF token.
+- Service: `render_preview` (any revision, sample values), `diff_against_published`,
+  `restore_version` (audited as `template_studio.version.restore`),
+  `list_published_revisions`. `update_version` treats an explicit empty subject
+  as "clear it".
+- "Send test to me": `configure_test_send(callable, channels=("email",))` is the
+  product's delivery seam (`OwnAddressTestMessage`, `OwnAddressSender`). The
+  message is addressed to the acting user's own account address; there is no
+  recipient input. Hidden until a sender is configured; each attempt is audited
+  (`template_studio.version.test_send`) and limited to 5 per 10 minutes per user
+  per process.
+- Optional maker-checker: setting `template_studio/require_separate_publisher`
+  (tenant, default OFF, never compulsory). When on, the author cannot be the
+  first publisher of a revision (`PublishRefusedError`, audited as
+  `template_studio.version.publish_refused`, HTTP 409 on the API). Restoring an
+  already-published revision is unaffected. The module now declares the
+  `template_studio` setting domain and three audit actions.
+- Deploy check: `python -m dotmac_template_studio.deploycheck --import <app>`
+  (or `deploycheck.check_published_revisions`) runs `validate_revision` over every
+  published revision of every tenant, enumerating tenants through the runtime's
+  resolver session and reading each inside its own `tenant_session`. Reports
+  slug, channel, revision and problems, never content; exits 1 on any failure.
+  Run it before bumping this package's pin.
+- A subject now refuses control characters (Cc), line breaks, bidi controls and
+  every format character (Cf) EXCEPT an explicit allowlist (`SUBJECT_ALLOWED_FORMAT`:
+  U+00AD, U+200C, U+200D, U+200E, U+200F, U+061C), at save and at render. This
+  admits ZWNJ, ZWJ and the soft hyphen in names while Unicode tag characters,
+  invisible operators and the width-less spaces stay refused.
+- `publish_version` and `restore_version` re-run `validate_revision` against the
+  CURRENT context and refuse a revision that no longer validates. While the
+  maker-checker setting is on, a revision with no recorded author cannot be
+  published; the rule compares the original author only (editing someone else's
+  draft does not change it).
+- Deploy check: a tenant that cannot be checked is reported (exception type only)
+  and the run continues; exit 2 if any tenant errored, 1 if any revision failed.
+
 Source change only: the declared version stays at the `0.2.0a6+dev` development marker (not a release) (ADR-0006 § 5h, § 5i).
 
 - `RenderContext` gains additive v2 declarations: `required`, `optional`, `url`,

@@ -1,0 +1,116 @@
+{#
+  Version workspace — edit a draft, preview with the context's sample values,
+  diff against the published revision, test-send to yourself.
+  Context: see dotmac_template_studio.web._workspace_response.
+
+  ESCAPING: every authored or rendered value is autoescaped. The html part's
+  render is placed ONLY in the `srcdoc` attribute of a sandboxed iframe (an empty
+  `sandbox` attribute: no scripts, no same-origin, no forms), and `srcdoc` is
+  attribute-escaped by autoescape. Nothing here may use the `safe` filter.
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<div style="margin-bottom:var(--dmui-space-lg);">
+  <a href="{{ surface_url('detail', template_id=template.id) }}"
+     style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-muted); text-decoration:none;">
+    &larr; {{ template.name }}
+  </a>
+  <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold);
+             color:var(--dmui-text-primary);">
+    {{ template.name }} &middot; v{{ version.version }}
+    {% if is_published %}<span style="font-size:var(--dmui-font-size-sm);">(published)</span>{% endif %}
+  </h1>
+  <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+    <code>{{ template.slug }}</code> &middot; {{ template.channel }} &middot; context <code>{{ template.context }}</code>
+  </p>
+</div>
+
+{% if error %}
+<div role="alert" style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+            border:1px solid var(--dmui-status-negative-border); background:var(--dmui-status-negative-surface);
+            color:var(--dmui-status-negative-foreground); border-radius:var(--dmui-radius-md);
+            font-size:var(--dmui-font-size-sm);">{{ error }}</div>
+{% endif %}
+{% if notice %}
+<div style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+            border:1px solid var(--dmui-status-positive-border); background:var(--dmui-status-positive-surface);
+            color:var(--dmui-status-positive-foreground); border-radius:var(--dmui-radius-md);
+            font-size:var(--dmui-font-size-sm);">{{ notice }}</div>
+{% endif %}
+
+<div style="display:flex; flex-direction:column; gap:var(--dmui-space-lg);">
+
+  <section style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                  background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+    <h2 style="font-size:var(--dmui-font-size-lg); color:var(--dmui-text-primary);">
+      {% if is_draft %}Edit draft{% else %}Content (published, read only){% endif %}
+    </h2>
+    {% if is_draft %}
+    <form method="post" action="{{ surface_url('update_version', template_id=template.id, version=version.version) }}"
+          style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Subject <input type="text" name="subject" value="{{ form.get('subject', '') }}"></label>
+      <label>Text part
+        <textarea name="body" rows="8" style="font-family:var(--dmui-font-family-mono);">{{ form.get('body', '') }}</textarea></label>
+      <label>HTML part (optional; refused, never stripped, if it uses anything outside the allowlist)
+        <textarea name="html_body" rows="8" style="font-family:var(--dmui-font-family-mono);">{{ form.get('html_body', '') }}</textarea></label>
+      {% if variables %}
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        Available:
+        {% for variable in variables %}<code>{{ '{' }}{{ variable }}{{ '}' }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      </span>
+      {% endif %}
+      <div><button type="submit">Save draft</button></div>
+    </form>
+    {% else %}
+    <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-muted);">
+      A published revision is never edited in place. Create a new version from the template page.
+    </p>
+    {% endif %}
+  </section>
+
+  <section style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                  background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+    <h2 style="font-size:var(--dmui-font-size-lg); color:var(--dmui-text-primary);">Preview (sample values)</h2>
+    {% if preview_error %}
+    <p role="alert" style="color:var(--dmui-status-negative-foreground);">{{ preview_error }}</p>
+    {% else %}
+    {% if preview_subject %}<p><strong>Subject:</strong> {{ preview_subject }}</p>{% endif %}
+    <h3 style="font-size:var(--dmui-font-size-sm);">Text part</h3>
+    <pre style="white-space:pre-wrap; word-break:break-word; font-family:var(--dmui-font-family-mono);">{{ preview_text }}</pre>
+    {% if preview_srcdoc %}
+    <h3 style="font-size:var(--dmui-font-size-sm);">HTML part (sandboxed)</h3>
+    <iframe sandbox="{{ iframe_sandbox }}" referrerpolicy="no-referrer" title="HTML preview"
+            srcdoc="{{ preview_srcdoc }}"
+            style="width:100%; min-height:20rem; border:1px solid var(--dmui-border-default); background:var(--dmui-surface-primary);"></iframe>
+    {% endif %}
+    {% endif %}
+    {% if can_test_send %}
+    <form method="post" action="{{ surface_url('test_send_version', template_id=template.id, version=version.version) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Send test to me</button>
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">Goes to your own account address only.</span>
+    </form>
+    {% endif %}
+  </section>
+
+  <section style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                  background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+    <h2 style="font-size:var(--dmui-font-size-lg); color:var(--dmui-text-primary);">
+      Diff against {% if published_version %}published v{{ published_version }}{% else %}nothing (no published version)
+      {% endif %}</h2>
+    {% for d in diffs %}
+    <h3 style="font-size:var(--dmui-font-size-sm);">{{ d.part }}{% if not d.changed %} (unchanged){% endif %}</h3>
+    {% if d.changed %}
+    <pre style="white-space:pre-wrap; word-break:break-word; font-family:var(--dmui-font-family-mono);">{% for tag, text in d.lines %}{{ tag }} {{ text }}
+{% endfor %}</pre>
+    {% endif %}
+    {% endfor %}
+    {% if not is_published %}
+    <a href="{{ surface_url('confirm_version', template_id=template.id, version=version.version) }}">
+      {% if is_draft %}Publish…{% else %}Restore…{% endif %}</a>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

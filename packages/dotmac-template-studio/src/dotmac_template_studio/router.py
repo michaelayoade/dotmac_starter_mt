@@ -19,6 +19,7 @@ from dotmac_kernel.deps import (
 )
 from dotmac_kernel.models import Party, Tenant
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from dotmac_template_studio import service
@@ -257,8 +258,28 @@ def publish_version(
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
     actor: Party = Depends(require_permission("template_studio.templates.publish")),
-) -> TemplateVersion:
-    revision = service.publish_version(db, tenant.id, template_id, version)
+) -> TemplateVersion | JSONResponse:
+    try:
+        revision = service.publish_version(
+            db, tenant.id, template_id, version, actor_party_id=actor.id
+        )
+    except service.PublishRefusedError as exc:
+        # Audit the refusal, then answer without raising so the row commits.
+        write_audit_event(
+            db,
+            tenant_id=tenant.id,
+            actor_party_id=actor.id,
+            actor_type="user",
+            actor_id=str(actor.id),
+            action="template_studio.version.publish_refused",
+            entity_type="template_version",
+            entity_id=f"{template_id}:{version}",
+            details={
+                "template_id": str(template_id),
+                "version": version,
+            },
+        )
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
     write_audit_event(
         db,
         tenant_id=tenant.id,
