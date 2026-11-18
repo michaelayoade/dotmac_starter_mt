@@ -53,11 +53,13 @@ from dotmac_payables.service import (
     approve_credit_note,
     approve_invoice,
     build_credit_accounting_consequence,
+    build_credit_application_accounting_consequence,
     build_invoice_accounting_consequence,
     build_payment_accounting_consequence,
     build_payment_reversal_accounting_consequence,
     create_credit_note,
     create_invoice,
+    credit_application_tax_releases,
     declare_tax_deferral,
     invoice_deferred_tax_position,
     recognize_approved_invoice,
@@ -385,7 +387,9 @@ def test_a_single_full_payment_releases_the_deferred_tax_exactly(db: Session) ->
         (DEFERRAL, Decimal("0"), Decimal("75")),
     ]
     position = _position(db, invoice)
-    assert position.remaining == Decimal("0") and position.released == Decimal("75")
+    assert position.remaining == Decimal(
+        "0"
+    ) and position.released_by_payments == Decimal("75")
 
 
 def test_partial_payments_sum_to_the_deferred_tax_exactly(db: Session) -> None:
@@ -524,8 +528,11 @@ def _credit(
     tax: str = "30",
     account: str | None = DEFERRAL,
     approve: bool = True,
+    lines: list[tuple[str, str, str | None]] | None = None,
 ):
+    """A submitted (and by default approved) credit note, by default one line."""
     n = _n()
+    lines = lines or [(net, tax, account)]
     credit = create_credit_note(
         db,
         scope=SCOPE,
@@ -538,15 +545,16 @@ def _credit(
             currency_code="NGN",
             exchange_rate=Decimal("1"),
             liability_account_ref=LIABILITY,
-            lines=(
+            lines=tuple(
                 PayableLineInput(
-                    description="Credit",
+                    description=f"Credit {i}",
                     quantity=Decimal("1"),
-                    unit_price=Decimal(net),
+                    unit_price=Decimal(line_net),
                     posting_account_ref=EXPENSE,
-                    tax_amount=Decimal(tax),
-                    tax_account_ref=account,
-                ),
+                    tax_amount=Decimal(line_tax),
+                    tax_account_ref=line_account,
+                )
+                for i, (line_net, line_tax, line_account) in enumerate(lines, start=1)
             ),
             original_invoice_id=invoice.id if invoice is not None else None,
         ),
@@ -617,11 +625,11 @@ def test_a_credit_over_what_remains_is_refused(db: Session) -> None:
     invoice, _ = _invoice(db)
     with pytest.raises(InvalidAmount) as caught:
         _credit(db, invoice=invoice, net="100", tax="80")
-    assert caught.value.code == "deferred_tax_credit_exceeds_remaining"
+    assert caught.value.code == "credit_tax_exceeds_invoice_tax"
     _credit(db, invoice=invoice, net="100", tax="45")
     with pytest.raises(InvalidAmount) as again:
-        _credit(db, invoice=invoice, net="100", tax="31")  # only 30 remains
-    assert again.value.code == "deferred_tax_credit_exceeds_remaining"
+        _credit(db, invoice=invoice, net="100", tax="31")  # only 30 of the tax is left
+    assert again.value.code == "credit_tax_exceeds_invoice_tax"
 
 
 def test_a_credit_with_deferral_tax_needs_its_invoice(db: Session) -> None:
@@ -631,13 +639,27 @@ def test_a_credit_with_deferral_tax_needs_its_invoice(db: Session) -> None:
     assert caught.value.code == "deferred_tax_credit_requires_invoice"
 
 
-def test_a_credit_for_an_already_released_invoice_is_refused(db: Session) -> None:
+def test_a_credit_for_an_already_paid_invoice_reverses_the_release_account(
+    db: Session,
+) -> None:
     _declare(db)
     invoice, (ob,) = _invoice(db)
     _pay(db, [(ob, "1075")])
-    with pytest.raises(InvalidAmount) as caught:
-        _credit(db, invoice=invoice, net="10", tax="1")
-    assert caught.value.code == "deferred_tax_credit_exceeds_remaining"
+    credit = _credit(db, invoice=invoice, net="10", tax="1")
+    (split,) = db.scalars(select(models.CreditNoteTaxSplit)).all()
+    assert (split.deferred_amount, split.released_amount) == (
+        Decimal("0"),
+        Decimal("1"),
+    )
+    assert _shape(
+        build_credit_accounting_consequence(
+            db, tenant_id=TENANT, credit_note_id=credit.id
+        )
+    ) == [
+        (LIABILITY, Decimal("11"), Decimal("0")),
+        (EXPENSE, Decimal("0"), Decimal("10")),
+        (RELEASE, Decimal("0"), Decimal("1")),
+    ]
 
 
 def test_credits_without_deferral_tax_are_unaffected_by_the_hook(db: Session) -> None:
@@ -1487,7 +1509,14 @@ def test_the_builder_backstop_refuses_a_forged_unbalanced_document(db: Session) 
 # --- item 3: historical supplier credit ----------------------------------------
 
 
-def _overpaid_case(db: Session, *, n: int | None = None, shell=None, **over):
+def _overpaid_case(
+    db: Session,
+    *,
+    n: int | None = None,
+    shell=None,
+    credit: str = "100.00",
+    **over,
+):
     """A shell invoice plus the evidence that its settlements overpaid it by 100."""
     n = n or _n()
     invoice = shell or create_invoice(
@@ -1514,7 +1543,8 @@ def _overpaid_case(db: Session, *, n: int | None = None, shell=None, **over):
     db.flush()
     total = invoice.total_amount.quantize(Decimal("0.01"))
     first = Decimal("700.00")
-    second = total + Decimal("100.00") - first
+    credit_amount = Decimal(credit)
+    second = total + credit_amount - first
     settlements = (
         HistoricalSettlement(
             f"op-alloc:{n}:1",
@@ -1557,10 +1587,10 @@ def _overpaid_case(db: Session, *, n: int | None = None, shell=None, **over):
         "total_amount": total,
         "liability_account_ref": LIABILITY,
         "settlements": settlements,
-        "settled_amount": total + Decimal("100.00"),
+        "settled_amount": total + credit_amount,
         "withholding_tax_amount": Decimal("20.00"),
-        "credit_amount": Decimal("100.00"),
-        "carried_control_amount": Decimal("-100.00"),
+        "credit_amount": credit_amount,
+        "carried_control_amount": -credit_amount,
         "carried_evidence_ref": "opening-balance:schedule-3#row-41",
         "original_posted_at": NOW,
         "source_journal_ref": "legacy:journal:inv",
@@ -2032,3 +2062,542 @@ def test_a_credit_with_deferral_tax_on_unproven_settled_history_is_refused(
     # Once the position is admitted the same credit is accepted.
     _admit_deferral(db, _deferral_evidence(invoice, _evidence.source_invoice_id))
     _credit(db, invoice=invoice, net="100", tax="10")
+
+
+# --- spec 11: credit approval splits, credit applications, reversal refusal -----
+
+
+def _apply(db: Session, credit, ob, amount: str):
+    return apply_credit_note(
+        db,
+        scope=SCOPE,
+        command=ApplyCredit(credit.id, ob.id, Decimal(amount), "user:ap"),
+        idempotency_key=f"a6:ap:{_n()}",
+        idempotency_expires_at=None,
+        applied_at=NOW,
+    )
+
+
+def _cash_credit(db: Session, amount: str):
+    """A CASH credit: an admitted historical overpayment (item 3)."""
+    _, evidence = _overpaid_case(db, credit=amount)
+    return _admit_credit(db, evidence, key=f"a6:cash:{_n()}")
+
+
+def _identity(db: Session, invoice):
+    p = _position(db, invoice)
+    assert p.remaining >= 0 and p.claimed >= 0
+    assert p.credited + p.credit_released <= p.deferred
+    assert p.deferred == p.remaining + p.claimed + p.credited + p.credit_released
+    return p
+
+
+def _app_rows(db: Session) -> list[models.CreditApplicationTaxRelease]:
+    return list(
+        db.scalars(
+            select(models.CreditApplicationTaxRelease).order_by(
+                models.CreditApplicationTaxRelease.created_at,
+                models.CreditApplicationTaxRelease.deferral_account_ref,
+            )
+        )
+    )
+
+
+def _splits(db: Session) -> list[models.CreditNoteTaxSplit]:
+    return list(
+        db.scalars(
+            select(models.CreditNoteTaxSplit).order_by(
+                models.CreditNoteTaxSplit.created_at,
+                models.CreditNoteTaxSplit.line_number,
+            )
+        )
+    )
+
+
+def _credit_consequence(db: Session, credit):
+    return build_credit_accounting_consequence(
+        db, tenant_id=TENANT, credit_note_id=credit.id
+    )
+
+
+# split at approval
+
+
+def test_split_on_an_unpaid_invoice_puts_all_tax_on_the_deferral_account_a5_bytes(
+    db: Session,
+) -> None:
+    from sqlalchemy import delete
+
+    _declare(db)
+    invoice, _ = _invoice(db)
+    credit = _credit(db, invoice=invoice)  # 400 + 30 deferral tax
+    (split,) = _splits(db)
+    assert (split.deferred_amount, split.released_amount) == (
+        Decimal("30"),
+        Decimal("0"),
+    )
+    consequence = _credit_consequence(db, credit)
+    assert _shape(consequence) == [
+        (LIABILITY, Decimal("430"), Decimal("0")),
+        (EXPENSE, Decimal("0"), Decimal("400")),
+        (DEFERRAL, Decimal("0"), Decimal("30")),
+    ]
+    # Nothing on the release account: byte-identical to the a5 builder, which has no
+    # split rows at all.
+    with_split = consequence.fingerprint
+    db.execute(delete(models.CreditNoteTaxSplit))
+    db.expire_all()
+    assert _credit_consequence(db, credit).fingerprint == with_split
+
+
+def test_split_on_a_fully_paid_invoice_puts_all_tax_on_the_release_account(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "1075")])
+    credit = _credit(db, invoice=invoice)
+    (split,) = _splits(db)
+    assert (split.deferred_amount, split.released_amount) == (
+        Decimal("0"),
+        Decimal("30"),
+    )
+    assert _shape(_credit_consequence(db, credit)) == [
+        (LIABILITY, Decimal("430"), Decimal("0")),
+        (EXPENSE, Decimal("0"), Decimal("400")),
+        (RELEASE, Decimal("0"), Decimal("30")),
+    ]
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed, p.credited, p.credit_released) == (
+        Decimal("0"),
+        Decimal("45"),
+        Decimal("0"),
+        Decimal("30"),
+    )
+
+
+def test_split_on_a_half_paid_invoice_takes_min_of_tax_and_what_remains(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "537.5")])  # releases 37.50, R = 37.50
+    credit = _credit(db, invoice=invoice, net="100", tax="50")
+    (split,) = _splits(db)
+    assert (split.deferred_amount, split.released_amount) == (
+        Decimal("37.5"),
+        Decimal("12.5"),
+    )
+    assert _shape(_credit_consequence(db, credit)) == [
+        (LIABILITY, Decimal("150"), Decimal("0")),
+        (EXPENSE, Decimal("0"), Decimal("100")),
+        (DEFERRAL, Decimal("0"), Decimal("37.5")),
+        (RELEASE, Decimal("0"), Decimal("12.5")),
+    ]
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed) == (Decimal("0"), Decimal("25"))
+
+
+def test_split_allocates_to_the_lines_in_line_number_order(db: Session) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "537.5")])  # R = 37.50
+    credit = _credit(
+        db,
+        invoice=invoice,
+        lines=[("100", "20", DEFERRAL), ("100", "30", DEFERRAL)],
+    )
+    assert [
+        (s.line_number, s.deferred_amount, s.released_amount) for s in _splits(db)
+    ] == [
+        (1, Decimal("20"), Decimal("0")),
+        (2, Decimal("17.5"), Decimal("12.5")),
+    ]
+    assert _shape(_credit_consequence(db, credit)) == [
+        (LIABILITY, Decimal("250"), Decimal("0")),
+        (EXPENSE, Decimal("0"), Decimal("100")),
+        (DEFERRAL, Decimal("0"), Decimal("20")),
+        (EXPENSE, Decimal("0"), Decimal("100")),
+        (DEFERRAL, Decimal("0"), Decimal("17.5")),
+        (RELEASE, Decimal("0"), Decimal("12.5")),
+    ]
+
+
+def test_a_credit_taxed_to_the_release_account_is_refused(db: Session) -> None:
+    _declare(db)
+    invoice, _ = _invoice(db)
+    with pytest.raises(InvalidTransition) as caught:
+        _credit(db, invoice=invoice, net="100", tax="10", account=RELEASE)
+    assert caught.value.code == "credit_tax_on_release_account"
+    assert _splits(db) == []
+
+
+def test_credit_approval_replay_writes_no_second_split(db: Session) -> None:
+    _declare(db)
+    invoice, _ = _invoice(db)
+    credit = _credit(db, invoice=invoice, approve=False)
+    for _ in range(2):
+        approve_credit_note(
+            db,
+            scope=SCOPE,
+            credit_note_id=credit.id,
+            approval_reference="approval:replay",
+            approved_by="user:controller",
+            idempotency_key="a6:cn:replay",
+            idempotency_expires_at=None,
+            approved_at=NOW,
+        )
+    assert len(_splits(db)) == 1
+
+
+# application rule a: CASH credits are payment-like
+
+
+def test_the_high1_repro_pay_then_apply_a_cash_credit_releases_the_rest(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "537.5")])  # releases 37.50
+    credit = _cash_credit(db, "537.50")
+    application = _apply(db, credit, ob, "537.5")
+    assert ob.status == ObligationStatus.SETTLED
+    (row,) = _app_rows(db)
+    assert (row.amount, row.deferral_account_ref, row.release_account_ref) == (
+        Decimal("37.5"),
+        DEFERRAL,
+        RELEASE,
+    )
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed, p.released_by_applications) == (
+        Decimal("0"),
+        Decimal("75"),
+        Decimal("37.5"),
+    )
+    consequence = build_credit_application_accounting_consequence(
+        db, tenant_id=TENANT, application_id=application.id
+    )
+    assert consequence.source.document_kind == "supplier_credit_application"
+    assert consequence.posting_date == NOW.date()
+    assert consequence.currency_code == "NGN"
+    assert _shape(consequence) == [
+        (RELEASE, Decimal("37.5"), Decimal("0")),
+        (DEFERRAL, Decimal("0"), Decimal("37.5")),
+    ]
+    assert credit_application_tax_releases(db, TENANT, application.id) == (row,)
+    # receipt round trip through the existing receipt command
+    for key in ("a6:app:r1", "a6:app:r2"):
+        record_accounting_receipt(
+            db,
+            scope=SCOPE,
+            command=AccountingReceiptInput(
+                "supplier_credit_application",
+                application.id,
+                consequence.fingerprint,
+                "journal:app",
+                "a" * 64,
+            ),
+            idempotency_key=key,
+            idempotency_expires_at=None,
+            recorded_at=NOW,
+        )
+    assert _count(db, models.AccountingReceipt) == 2  # the invoice's + this one
+    with pytest.raises(Conflict):
+        record_accounting_receipt(
+            db,
+            scope=SCOPE,
+            command=AccountingReceiptInput(
+                "supplier_credit_application",
+                application.id,
+                "b" * 64,
+                "journal:app",
+                "a" * 64,
+            ),
+            idempotency_key="a6:app:r3",
+            idempotency_expires_at=None,
+            recorded_at=NOW,
+        )
+
+
+def test_a_cash_credit_applied_as_a_partial_then_the_final(db: Session) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    credit = _cash_credit(db, "1075.00")
+    _apply(db, credit, ob, "500")
+    assert [r.amount for r in _app_rows(db)] == [Decimal("34.88")]
+    _apply(db, credit, ob, "575")  # the final settlement releases exactly R
+    assert [r.amount for r in _app_rows(db)] == [Decimal("34.88"), Decimal("40.12")]
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed) == (Decimal("0"), Decimal("75"))
+    assert credit.available_amount == 0
+
+
+# application rule b: own DOCUMENT credits
+
+
+def test_a_non_final_own_application_releases_nothing_and_the_payment_finishes(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    credit = _credit(db, invoice=invoice)  # 400 + 30, R = 45
+    application = _apply(db, credit, ob, "430")
+    assert _app_rows(db) == []
+    with pytest.raises(InvalidTransition) as caught:
+        build_credit_application_accounting_consequence(
+            db, tenant_id=TENANT, application_id=application.id
+        )
+    assert caught.value.code == "credit_application_has_no_consequence"
+    assert credit_application_tax_releases(db, TENANT, application.id) == ()
+    payment = _pay(db, [(ob, "645")])
+    assert [r.amount for r in _releases(db, payment)] == [Decimal("45")]
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed, p.credited) == (
+        Decimal("0"),
+        Decimal("45"),
+        Decimal("30"),
+    )
+
+
+def test_an_untaxed_own_discount_applied_last_releases_the_remainder(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "537.5")])
+    credit = _credit(db, invoice=invoice, net="537.5", tax="0", account=None)
+    _apply(db, credit, ob, "537.5")
+    (row,) = _app_rows(db)
+    assert row.amount == Decimal("37.5")
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed) == (Decimal("0"), Decimal("75"))
+
+
+def test_a_taxed_own_credit_that_closes_the_invoice_ties_the_totals(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "400")])  # releases 27.91, R = 47.09
+    credit = _credit(db, invoice=invoice, net="625", tax="50")
+    (split,) = _splits(db)
+    assert (split.deferred_amount, split.released_amount) == (
+        Decimal("47.09"),
+        Decimal("2.91"),
+    )
+    _apply(db, credit, ob, "675")  # closes the invoice; R is already 0
+    assert ob.status == ObligationStatus.SETTLED
+    assert _app_rows(db) == []
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed, p.credited, p.credit_released) == (
+        Decimal("0"),
+        Decimal("25"),
+        Decimal("47.09"),
+        Decimal("2.91"),
+    )
+
+
+# application rule c: set-off elsewhere
+
+
+def test_a_document_credit_cannot_be_set_off_against_a_deferring_invoice(
+    db: Session,
+) -> None:
+    _declare(db)
+    _, (target,) = _invoice(db)
+    unlinked = _credit(db, invoice=None, net="100", tax="0", account=None)
+    other_invoice, _ = _invoice(db, lines=[("1000", "0", None)])
+    linked_elsewhere = _credit(
+        db, invoice=other_invoice, net="100", tax="0", account=None
+    )
+    for credit in (unlinked, linked_elsewhere):
+        with pytest.raises(InvalidTransition) as caught:
+            _apply(db, credit, target, "100")
+        assert caught.value.code == "credit_setoff_on_deferred_invoice"
+    assert target.outstanding_amount == Decimal("1075")
+    assert _count(db, models.CreditApplication) == 0
+
+
+def test_a_document_credit_set_off_is_allowed_once_nothing_is_deferred(
+    db: Session,
+) -> None:
+    _declare(db)
+    target_invoice, (target,) = _invoice(db, lines=[("1000", "75", DEFERRAL)])
+    _credit(db, invoice=target_invoice, net="100", tax="75")  # R is now 0
+    assert _identity(db, target_invoice).remaining == 0
+    other = _credit(db, invoice=None, net="100", tax="0", account=None)
+    _apply(db, other, target, "100")  # VAT-neutral
+    assert target.outstanding_amount == Decimal("975")
+    assert _app_rows(db) == []
+    # and an invoice with no deferred tax at all is never affected
+    _, (plain,) = _invoice(db, lines=[("1000", "0", None)])
+    again = _credit(db, invoice=None, net="50", tax="0", account=None)
+    _apply(db, again, plain, "50")
+    assert plain.outstanding_amount == Decimal("950")
+
+
+# interleavings: the end state is exact whatever the order
+
+
+def test_interleaving_pay_credit_apply_pay(db: Session) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _pay(db, [(ob, "300")])  # releases 20.93
+    credit = _credit(db, invoice=invoice, net="200", tax="15")
+    _identity(db, invoice)
+    _apply(db, credit, ob, "215")  # own, not final
+    assert _app_rows(db) == []
+    last = _pay(db, [(ob, "560")])  # final
+    p = _identity(db, invoice)
+    assert p.remaining == 0
+    assert [r.amount for r in _releases(db, last)] == [Decimal("39.07")]
+    assert p.released_by_payments + p.credited == Decimal("75")
+
+
+def test_interleaving_credit_pay_cash_apply(db: Session) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    _credit(db, invoice=invoice)  # 400 + 30, never applied; R = 45
+    _pay(db, [(ob, "500")])  # round(45 * 500 / 1075) = 20.93
+    cash = _cash_credit(db, "575.00")
+    _apply(db, cash, ob, "575")  # final: the exact remainder
+    assert [r.amount for r in _app_rows(db)] == [Decimal("24.07")]
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed) == (Decimal("0"), Decimal("45"))
+
+
+def test_interleaving_on_a_multi_obligation_invoice(db: Session) -> None:
+    _declare(db)
+    invoice, (first, second) = _invoice(db, schedule=["600", "475"])
+    cash = _cash_credit(db, "600.00")
+    _apply(db, cash, first, "600")
+    assert [r.amount for r in _app_rows(db)] == [Decimal("41.86")]
+    payment = _pay(db, [(second, "475")])
+    assert [r.amount for r in _releases(db, payment)] == [Decimal("33.14")]
+    assert _identity(db, invoice).remaining == 0
+
+
+# reversal
+
+
+def test_a_payment_reversal_is_refused_after_a_credit_released_the_vat(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    payment = _pay(db, [(ob, "1075")])
+    _receipt(db, payment)
+    _credit(db, invoice=invoice)  # splits 30 onto the release account
+    with pytest.raises(InvalidTransition) as caught:
+        _reverse_payment(db, payment)
+    assert caught.value.code == "payment_reversal_blocked_by_credit_vat"
+    assert payment.status == SupplierPaymentStatus.RECORDED
+
+
+def test_a_payment_reversal_is_refused_after_an_own_application_released_the_vat(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    payment = _pay(db, [(ob, "537.5")])
+    _receipt(db, payment)
+    credit = _credit(db, invoice=invoice, net="537.5", tax="0", account=None)
+    _apply(db, credit, ob, "537.5")
+    assert len(_app_rows(db)) == 1
+    with pytest.raises(InvalidTransition) as caught:
+        _reverse_payment(db, payment)
+    assert caught.value.code == "payment_reversal_blocked_by_credit_vat"
+
+
+def test_a_payment_reversal_with_only_cash_applications_is_exact(db: Session) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    payment = _pay(db, [(ob, "537.5")])
+    _receipt(db, payment)
+    cash = _cash_credit(db, "537.50")
+    _apply(db, cash, ob, "537.5")  # releases the other 37.50
+    _reverse_payment(db, payment)
+    assert payment.status == SupplierPaymentStatus.REVERSED
+    p = _identity(db, invoice)
+    assert (p.remaining, p.claimed) == (Decimal("37.5"), Decimal("37.5"))
+    assert ob.outstanding_amount == Decimal("537.5")
+    again = _pay(db, [(ob, "537.5")])  # re-payment releases the rest
+    assert [r.amount for r in _releases(db, again)] == [Decimal("37.5")]
+    assert _identity(db, invoice).remaining == 0
+
+
+def _reverse_payment(db: Session, payment):
+    return reverse_supplier_payment(
+        db,
+        scope=SCOPE,
+        payment_id=payment.id,
+        reason="bounced",
+        reversal_date=date(2026, 9, 5),
+        reversed_by="user:reverser",
+        idempotency_key=f"a6:rv:{_n()}",
+        idempotency_expires_at=None,
+        reversed_at=LATER,
+    )
+
+
+# invariants over randomised event sequences
+
+
+def test_the_position_invariants_hold_over_random_event_sequences(
+    db: Session,
+) -> None:
+    import random
+
+    _declare(db)
+    for seed in range(40):
+        rng = random.Random(seed)  # noqa: S311 - a reproducible test generator
+        invoice, obligations = _invoice(
+            db, schedule=["600", "475"] if seed % 2 else None
+        )
+        credits: list = []
+
+        def open_obligations(obligations=obligations):
+            for ob in obligations:
+                db.refresh(ob)
+            return [ob for ob in obligations if ob.outstanding_amount > 0]
+
+        for _step in range(7):
+            kind = rng.choice(["pay", "pay", "credit", "cash", "apply", "apply"])
+            open_obs = open_obligations()
+            try:
+                if kind == "pay" and open_obs:
+                    ob = rng.choice(open_obs)
+                    cents = rng.randint(1, int(ob.outstanding_amount * 100))
+                    _pay(db, [(ob, str(Decimal(cents) / 100))])
+                elif kind == "credit":
+                    tax = rng.randint(0, 40)
+                    credits.append(
+                        _credit(
+                            db,
+                            invoice=invoice,
+                            net=str(rng.randint(1, 300)),
+                            tax=str(tax),
+                            account=DEFERRAL if tax else None,
+                        )
+                    )
+                elif kind == "cash":
+                    credits.append(_cash_credit(db, f"{rng.randint(50, 400)}.00"))
+                elif kind == "apply" and open_obs and credits:
+                    credit = rng.choice(credits)
+                    db.refresh(credit)
+                    ob = rng.choice(open_obs)
+                    ceiling = min(credit.available_amount, ob.outstanding_amount)
+                    if ceiling > 0:
+                        cents = rng.randint(1, int(ceiling * 100))
+                        _apply(db, credit, ob, str(Decimal(cents) / 100))
+            except PayablesError:
+                pass  # a refusal is a legal outcome; the invariants must still hold
+            p = _identity(db, invoice)
+            if not open_obligations():
+                # Whatever closed the invoice, nothing may stay deferred.
+                assert p.remaining == 0, (seed, p)
+    # The generator really exercised every writer of the position.
+    assert _count(db, models.SupplierPaymentTaxRelease) > 10
+    assert _count(db, models.CreditApplicationTaxRelease) > 3
+    assert any(s.released_amount > 0 for s in _splits(db))
+    assert any(s.deferred_amount > 0 for s in _splits(db))

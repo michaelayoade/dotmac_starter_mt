@@ -921,11 +921,14 @@ class DeferredTaxPosition:
     """Deferred-tax position of one invoice against one deferral account."""
 
     deferral_account_ref: str
-    deferred: Decimal
-    released_before_admission: Decimal
-    credited: Decimal
-    released: Decimal
-    remaining: Decimal
+    deferred: Decimal  # D: tax on the invoice's lines booked to the account
+    released_before_admission: Decimal  # L
+    credited: Decimal  # Cdef: credit-note tax that reversed the deferral account
+    credit_released: Decimal  # Crel: credit-note tax that reversed the release account
+    released_by_payments: Decimal  # Rel_pay
+    released_by_applications: Decimal  # Rel_app
+    remaining: Decimal  # R = D - L - Cdef - Rel_pay - Rel_app
+    claimed: Decimal  # Claimed = L + Rel_pay + Rel_app - Crel
 
 
 @dataclass(frozen=True, slots=True)

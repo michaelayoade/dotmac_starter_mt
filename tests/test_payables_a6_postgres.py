@@ -61,6 +61,8 @@ NEW_TABLES = (
     "historical_tax_deferrals",
     "historical_credit_receipts",
     "historical_credit_settlements",
+    "credit_note_tax_splits",
+    "credit_application_tax_releases",
 )
 _n = {"n": 0}
 
@@ -945,3 +947,53 @@ def test_concurrent_admissions_of_one_settlement_id_admit_exactly_one(
         )
     engine.dispose()
     assert taken == 1
+
+
+def test_a_credit_application_and_a_payment_on_one_invoice_serialise(
+    migrated_finance: tuple[str, str],
+) -> None:
+    admin_url, _ = migrated_finance
+    tenant, _ = _seed_tenants(admin_url)
+    _declare(admin_url, tenant)
+    invoice_id, (ob1, ob2) = _invoice(admin_url, tenant, schedule=("600", "475"))
+    shell_invoice, evidence = _credit_fixture(admin_url, tenant)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        credit_id = _admit_credit(db, tenant, evidence).id
+        db.commit()
+    payment = _approved_payment(admin_url, tenant, [(ob1, "600")])
+
+    def apply(db):
+        return apply_credit_note(
+            db,
+            scope=TenantScope(tenant),
+            command=ApplyCredit(credit_id, ob2, Decimal("100"), "u:ap"),
+            idempotency_key="pg:apply:race",
+            idempotency_expires_at=None,
+            applied_at=NOW,
+        ).id
+
+    one, two = _run_pair(admin_url, _recorder(tenant, payment, "e1"), apply)
+    assert one[0] == "ok" and two[0] == "ok", (one, two)
+    # The payment ran first (41.86); the application then measured 100 against the
+    # 475 still outstanding on the invoice: round(33.14 * 100 / 475) = 6.98.
+    assert _amounts(admin_url, invoice_id) == [Decimal("41.86")]
+    with engine.connect() as conn:
+        applied = [
+            Decimal(r[0])
+            for r in conn.execute(
+                text("SELECT amount FROM mod_payables.credit_application_tax_releases")
+            )
+        ]
+        released = Decimal(
+            conn.scalar(
+                text(
+                    "SELECT coalesce(sum(amount),0) FROM "
+                    "mod_payables.supplier_payment_tax_releases"
+                )
+            )
+        )
+    engine.dispose()
+    assert applied == [Decimal("6.98")]
+    assert released + sum(applied) <= Decimal("75")
+    assert shell_invoice != invoice_id

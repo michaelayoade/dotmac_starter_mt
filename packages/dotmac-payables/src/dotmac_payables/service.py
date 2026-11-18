@@ -61,8 +61,10 @@ from dotmac_payables.contracts import (
 from dotmac_payables.models import (
     AccountingReceipt,
     CreditApplication,
+    CreditApplicationTaxRelease,
     CreditNote,
     CreditNoteLine,
+    CreditNoteTaxSplit,
     HistoricalCreditReceipt,
     HistoricalCreditSettlementRecord,
     HistoricalInvoiceReceipt,
@@ -592,49 +594,99 @@ def submit_credit_note(
     return credit
 
 
-def _check_credit_deferred_tax(session: Session, credit: CreditNote) -> None:
-    """Keep a credit note against deferred input tax within what is still deferred."""
+def _split_credit_deferred_tax(
+    session: Session, credit: CreditNote, *, created_at: datetime
+) -> None:
+    """Split a credit note's deferral-account tax between reversing the deferral
+    account and reversing the input VAT already claimed, and freeze the split.
+
+    Per deferral account d: t is the credit's tax on d; the part that still sits on
+    the deferral account (min(t, R)) reverses it, and the rest reverses the release
+    account (the share already claimed). Exact subtraction, no rounding. The credit
+    may not take more than the invoice's net tax, and may not be taxed to a release
+    account directly (that would lower the claim without a split).
+    """
     tenant_id = credit.tenant_id
     policies = _deferral_policies(session, tenant_id)
     if not policies:
         return
     lines = _credit_lines(session, tenant_id, credit.id)
-    if not any(line.tax_account_ref in policies for line in lines):
+    release_accounts = {p.release_account_ref: p for p in policies.values()}
+    on_deferral = any(line.tax_account_ref in policies for line in lines)
+    on_release = any(line.tax_account_ref in release_accounts for line in lines)
+    if not on_deferral and not on_release:
         return
     if credit.original_invoice_id is None:
-        raise _refuse(
-            InvalidTransition,
-            "a credit note with deferred tax requires its original invoice",
-            "deferred_tax_credit_requires_invoice",
-        )
+        if on_deferral:
+            raise _refuse(
+                InvalidTransition,
+                "a credit note with deferred tax requires its original invoice",
+                "deferred_tax_credit_requires_invoice",
+            )
+        return
     # Lock order: credit (held by the caller), then the invoice.
     _invoice(session, tenant_id, credit.original_invoice_id, lock=True)
-    positions = invoice_deferred_tax_position(
-        session, tenant_id, credit.original_invoice_id
-    )
-    for position in positions:
+    positions = {
+        position.deferral_account_ref: position
+        for position in invoice_deferred_tax_position(
+            session, tenant_id, credit.original_invoice_id
+        )
+    }
+    for position in positions.values():
         _require_historical_deferral_proven(
             session,
             tenant_id,
             credit.original_invoice_id,
             position.deferral_account_ref,
         )
-    remaining = {
-        position.deferral_account_ref: position.remaining for position in positions
-    }
-    credited: dict[str, Decimal] = {}
     for line in lines:
-        if line.tax_account_ref in policies:
-            credited[line.tax_account_ref] = _money(
-                credited.get(line.tax_account_ref, Decimal("0")) + line.tax_amount
+        policy = release_accounts.get(line.tax_account_ref or "")
+        if (
+            policy is not None
+            and line.tax_account_ref not in policies
+            and policy.deferral_account_ref in positions
+        ):
+            raise _refuse(
+                InvalidTransition,
+                "a credit line cannot be taxed to a release account while the "
+                "invoice defers tax",
+                "credit_tax_on_release_account",
             )
-    for account, amount in credited.items():
-        if amount > remaining.get(account, Decimal("0")):
+    for account, policy in sorted(policies.items()):
+        account_lines = [line for line in lines if line.tax_account_ref == account]
+        total = _money(sum((line.tax_amount for line in account_lines), Decimal("0")))
+        if total <= 0:
+            continue
+        current = positions.get(account)
+        if current is None or total > _money(
+            current.deferred - current.credited - current.credit_released
+        ):
             raise _refuse(
                 InvalidAmount,
-                "credit note deferred tax exceeds what the invoice still defers",
-                "deferred_tax_credit_exceeds_remaining",
+                "credit note tax exceeds the invoice tax not already credited",
+                "credit_tax_exceeds_invoice_tax",
             )
+        pool = min(total, current.remaining)
+        for line in account_lines:
+            if line.tax_amount <= 0:
+                continue
+            deferred = min(_money(line.tax_amount), pool)
+            pool = _money(pool - deferred)
+            session.add(
+                CreditNoteTaxSplit(
+                    tenant_id=tenant_id,
+                    credit_note_id=credit.id,
+                    line_number=line.line_number,
+                    invoice_id=credit.original_invoice_id,
+                    policy_id=policy.id,
+                    deferral_account_ref=policy.deferral_account_ref,
+                    release_account_ref=policy.release_account_ref,
+                    deferred_amount=deferred,
+                    released_amount=_money(line.tax_amount - deferred),
+                    created_at=created_at,
+                )
+            )
+    session.flush()
 
 
 def approve_credit_note(
@@ -665,7 +717,7 @@ def approve_credit_note(
             raise InvalidTransition(
                 "only a submitted supplier credit note can be approved"
             )
-        _check_credit_deferred_tax(session, credit)
+        _split_credit_deferred_tax(session, credit, created_at=approved_at)
         credit.status = CreditNoteStatus.APPROVED
         credit.available_amount = credit.total_amount
         credit.approval_reference = approval
@@ -731,6 +783,89 @@ def _apply_obligation_reduction(obligation: PaymentObligation, amount: Decimal) 
         obligation.status = ObligationStatus.PARTIALLY_SETTLED
 
 
+def _credit_is_cash(db: Session, tenant_id: UUID, credit_note_id: UUID) -> bool:
+    """CASH credit: a historical overpayment (cash already paid); else DOCUMENT."""
+    return (
+        _historical_credit_receipt_for_credit(db, tenant_id, credit_note_id) is not None
+    )
+
+
+def _credit_application_releases(
+    session: Session, *, credit: CreditNote, invoice: SupplierInvoice, amount: Decimal
+) -> list[tuple[str, TaxDeferralPolicy, Decimal]]:
+    """Deferred tax an application releases, per deferral account (before it is made).
+
+    Called under the credit, obligation and invoice locks, before the obligation is
+    reduced, so O is the balance the share is measured against.
+    - CASH credit (cash already paid): payment-like, the same proportional rule with
+      the exact remainder when the application settles the invoice.
+    - DOCUMENT credit applied to its own invoice: nothing, except the final
+      settlement, which releases exactly R.
+    - DOCUMENT credit applied elsewhere: refused while the invoice still defers tax.
+    """
+    tenant_id = credit.tenant_id
+    policies = _deferral_policies(session, tenant_id)
+    if not policies:
+        return []
+    positions = invoice_deferred_tax_position(session, tenant_id, invoice.id)
+    if not positions:
+        return []
+    for position in positions:
+        _require_historical_deferral_proven(
+            session, tenant_id, invoice.id, position.deferral_account_ref
+        )
+    outstanding = _money(
+        Decimal(
+            session.scalar(
+                select(func.sum(PaymentObligation.outstanding_amount)).where(
+                    PaymentObligation.tenant_id == tenant_id,
+                    PaymentObligation.invoice_id == invoice.id,
+                )
+            )
+            or 0
+        )
+    )
+    cash = _credit_is_cash(session, tenant_id, credit.id)
+    own = (not cash) and credit.original_invoice_id == invoice.id
+    if not cash and not own:
+        if any(position.remaining > 0 for position in positions):
+            raise _refuse(
+                InvalidTransition,
+                "a document credit cannot be set off against an invoice that "
+                "still defers tax",
+                "credit_setoff_on_deferred_invoice",
+            )
+        return []
+    releases: list[tuple[str, TaxDeferralPolicy, Decimal]] = []
+    for position in positions:
+        policy = policies[position.deferral_account_ref]
+        if cash:
+            release = deferred_tax_release(
+                position.remaining, amount, outstanding, policy.minor_units
+            )
+        else:
+            release = position.remaining if amount == outstanding else Decimal("0")
+        if release > 0:
+            releases.append((position.deferral_account_ref, policy, release))
+    return releases
+
+
+def credit_application_tax_releases(
+    db: Session, tenant_id: UUID, application_id: UUID
+) -> tuple[CreditApplicationTaxRelease, ...]:
+    """Deferred-tax release rows of one credit application (none: nothing to post)."""
+    return tuple(
+        db.scalars(
+            select(CreditApplicationTaxRelease)
+            .where(
+                CreditApplicationTaxRelease.tenant_id == tenant_id,
+                CreditApplicationTaxRelease.application_id == application_id,
+            )
+            .order_by(CreditApplicationTaxRelease.deferral_account_ref)
+        )
+    )
+
+
 def apply_credit_note(
     db: Session,
     *,
@@ -766,6 +901,9 @@ def apply_credit_note(
             )
         if amount > credit.available_amount:
             raise InvalidAmount("amount exceeds available supplier credit")
+        releases = _credit_application_releases(
+            session, credit=credit, invoice=invoice, amount=amount
+        )
         _apply_obligation_reduction(obligation, amount)
         credit.available_amount = _money(credit.available_amount - amount)
         credit.updated_at = applied_at
@@ -779,6 +917,20 @@ def apply_credit_note(
             applied_at=applied_at,
         )
         session.add(application)
+        session.flush()
+        for deferral_account, policy, release in releases:
+            session.add(
+                CreditApplicationTaxRelease(
+                    tenant_id=tenant_id,
+                    application_id=application.id,
+                    invoice_id=invoice.id,
+                    policy_id=policy.id,
+                    deferral_account_ref=deferral_account,
+                    release_account_ref=policy.release_account_ref,
+                    amount=_money(release),
+                    created_at=applied_at,
+                )
+            )
         session.flush()
         return {"application_id": str(application.id)}
 
@@ -1040,6 +1192,15 @@ def build_credit_accounting_consequence(
             description=f"Supplier credit {credit.number}",
         )
     ]
+    splits = {
+        row.line_number: row
+        for row in db.scalars(
+            select(CreditNoteTaxSplit).where(
+                CreditNoteTaxSplit.tenant_id == tenant_id,
+                CreditNoteTaxSplit.credit_note_id == credit.id,
+            )
+        )
+    }
     for line in _credit_lines(db, tenant_id, credit.id):
         dimensions = tuple(
             (str(code), str(value)) for code, value in line.dimension_refs
@@ -1056,14 +1217,38 @@ def build_credit_accounting_consequence(
         if line.tax_amount > 0:
             if not line.tax_account_ref:
                 raise InvalidAmount("persisted taxed line has no tax account reference")
-            entries.append(
-                AccountingEntry(
-                    account_ref=line.tax_account_ref,
-                    credit=line.tax_amount,
-                    description=f"Tax reversal: {line.description}",
-                    dimension_refs=dimensions,
+            split = splits.get(line.line_number)
+            if split is None:
+                entries.append(
+                    AccountingEntry(
+                        account_ref=line.tax_account_ref,
+                        credit=line.tax_amount,
+                        description=f"Tax reversal: {line.description}",
+                        dimension_refs=dimensions,
+                    )
                 )
-            )
+            else:
+                # Frozen at approval: the part still deferred reverses the deferral
+                # account (the a5 entry, unchanged); the part already claimed
+                # reverses the release account.
+                if split.deferred_amount > 0:
+                    entries.append(
+                        AccountingEntry(
+                            account_ref=line.tax_account_ref,
+                            credit=split.deferred_amount,
+                            description=f"Tax reversal: {line.description}",
+                            dimension_refs=dimensions,
+                        )
+                    )
+                if split.released_amount > 0:
+                    entries.append(
+                        AccountingEntry(
+                            account_ref=split.release_account_ref,
+                            credit=split.released_amount,
+                            description=f"Tax reversal: {line.description}",
+                            dimension_refs=dimensions,
+                        )
+                    )
     _check_consequence_entries(entries)
     return _consequence(
         source=ConsequenceSource(
@@ -1107,6 +1292,10 @@ def record_accounting_receipt(
     elif kind == "supplier_payment_reversal":
         consequence = build_payment_reversal_accounting_consequence(
             db, tenant_id=tenant_id, payment_id=command.document_id
+        )
+    elif kind == "supplier_credit_application":
+        consequence = build_credit_application_accounting_consequence(
+            db, tenant_id=tenant_id, application_id=command.document_id
         )
     else:
         raise InvalidTransition("unknown accounting receipt document kind")
@@ -1909,18 +2098,54 @@ def invoice_deferred_tax_position(
 ) -> tuple[DeferredTaxPosition, ...]:
     """The deferred-tax position of an invoice, per declared deferral account.
 
-    D (tax on lines booked to the deferral account) less L (released before
-    admission, from the verifier-bound historical record), C (deferral tax on
-    APPROVED credit notes against the invoice) and Rel (releases of RECORDED
-    payments; a REVERSED payment's rows are excluded because its reversal mirrors
-    them). Only accounts with D > 0 appear. A negative remainder is a data fault
-    and is refused, never repaired. Call under the invoice row lock to write.
+    All figures come from frozen rows. D is the tax on the invoice's lines booked to
+    the deferral account; L the deferral released before admission; Cdef and Crel
+    the deferral and release shares of APPROVED credit notes against the invoice
+    (``credit_note_tax_splits``; an approved credit with no split rows counts its
+    whole deferral-line tax in Cdef); Rel_pay the releases of RECORDED payments (a
+    REVERSED payment's rows are excluded because its reversal mirrors them);
+    Rel_app the releases of credit applications (permanent).
+
+    R = D - L - Cdef - Rel_pay - Rel_app is what is still deferred, and
+    Claimed = L + Rel_pay + Rel_app - Crel is the input VAT currently claimed, so
+    D = R + Claimed + Ctax with Ctax = Cdef + Crel. The owner refuses to ever hold
+    R < 0, Claimed < 0 or Ctax > D (a data fault, never repaired). Only accounts
+    with D > 0 appear. Call under the invoice row lock to write.
     """
     policies = _deferral_policies(db, tenant_id)
     if not policies:
         return ()
     positions: list[DeferredTaxPosition] = []
     lines = _invoice_lines(db, tenant_id, invoice_id)
+    credit_lines = list(
+        db.execute(
+            select(
+                CreditNoteLine.credit_note_id,
+                CreditNoteLine.line_number,
+                CreditNoteLine.tax_amount,
+                CreditNoteLine.tax_account_ref,
+            )
+            .join(
+                CreditNote,
+                (CreditNote.tenant_id == CreditNoteLine.tenant_id)
+                & (CreditNote.id == CreditNoteLine.credit_note_id),
+            )
+            .where(
+                CreditNote.tenant_id == tenant_id,
+                CreditNote.original_invoice_id == invoice_id,
+                CreditNote.status == CreditNoteStatus.APPROVED,
+            )
+        )
+    )
+    splits = {
+        (row.credit_note_id, row.line_number): row
+        for row in db.scalars(
+            select(CreditNoteTaxSplit).where(
+                CreditNoteTaxSplit.tenant_id == tenant_id,
+                CreditNoteTaxSplit.invoice_id == invoice_id,
+            )
+        )
+    }
     for account in sorted(policies):
         deferred = _sum_money(
             line.tax_amount for line in lines if line.tax_account_ref == account
@@ -1934,23 +2159,18 @@ def invoice_deferred_tax_position(
                 HistoricalTaxDeferralRecord.deferral_account_ref == account,
             )
         )
-        credited = _sum_money(
-            db.scalars(
-                select(CreditNoteLine.tax_amount)
-                .join(
-                    CreditNote,
-                    (CreditNote.tenant_id == CreditNoteLine.tenant_id)
-                    & (CreditNote.id == CreditNoteLine.credit_note_id),
-                )
-                .where(
-                    CreditNote.tenant_id == tenant_id,
-                    CreditNote.original_invoice_id == invoice_id,
-                    CreditNote.status == CreditNoteStatus.APPROVED,
-                    CreditNoteLine.tax_account_ref == account,
-                )
-            )
-        )
-        released = _sum_money(
+        credit_deferred = Decimal("0")
+        credit_released = Decimal("0")
+        for credit_id, line_number, tax, tax_account in credit_lines:
+            if tax_account != account:
+                continue
+            split = splits.get((credit_id, line_number))
+            if split is None:
+                credit_deferred += Decimal(tax)
+            else:
+                credit_deferred += Decimal(split.deferred_amount)
+                credit_released += Decimal(split.released_amount)
+        by_payments = _sum_money(
             db.scalars(
                 select(SupplierPaymentTaxRelease.amount)
                 .join(
@@ -1966,9 +2186,21 @@ def invoice_deferred_tax_position(
                 )
             )
         )
+        by_applications = _sum_money(
+            db.scalars(
+                select(CreditApplicationTaxRelease.amount).where(
+                    CreditApplicationTaxRelease.tenant_id == tenant_id,
+                    CreditApplicationTaxRelease.invoice_id == invoice_id,
+                    CreditApplicationTaxRelease.deferral_account_ref == account,
+                )
+            )
+        )
         before = _money(Decimal(historical or 0))
-        remaining = _money(deferred - before - credited - released)
-        if remaining < 0:
+        cdef = _money(credit_deferred)
+        crel = _money(credit_released)
+        remaining = _money(deferred - before - cdef - by_payments - by_applications)
+        claimed = _money(before + by_payments + by_applications - crel)
+        if remaining < 0 or claimed < 0 or cdef + crel > deferred:
             raise _refuse(
                 InvalidAmount,
                 "deferred tax position is negative",
@@ -1979,9 +2211,12 @@ def invoice_deferred_tax_position(
                 deferral_account_ref=account,
                 deferred=deferred,
                 released_before_admission=before,
-                credited=credited,
-                released=released,
+                credited=cdef,
+                credit_released=crel,
+                released_by_payments=by_payments,
+                released_by_applications=by_applications,
                 remaining=remaining,
+                claimed=claimed,
             )
         )
     return tuple(positions)
@@ -2768,6 +3003,47 @@ def _payment_has_ledger_receipt(db: Session, tenant_id: UUID, payment_id: UUID) 
     )
 
 
+def _invoice_has_credit_vat_decision(
+    db: Session, tenant_id: UUID, invoice_id: UUID
+) -> bool:
+    """A credit split put VAT on the release account, or a DOCUMENT credit
+    application released the remainder: both assumed the payment's cash stays paid."""
+    if (
+        db.scalar(
+            select(CreditNoteTaxSplit.id)
+            .where(
+                CreditNoteTaxSplit.tenant_id == tenant_id,
+                CreditNoteTaxSplit.invoice_id == invoice_id,
+                CreditNoteTaxSplit.released_amount > 0,
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        return True
+    return (
+        db.scalar(
+            select(CreditApplicationTaxRelease.id)
+            .join(
+                CreditApplication,
+                (CreditApplication.tenant_id == CreditApplicationTaxRelease.tenant_id)
+                & (CreditApplication.id == CreditApplicationTaxRelease.application_id),
+            )
+            .where(
+                CreditApplicationTaxRelease.tenant_id == tenant_id,
+                CreditApplicationTaxRelease.invoice_id == invoice_id,
+                CreditApplication.credit_note_id.not_in(
+                    select(HistoricalCreditReceipt.credit_note_id).where(
+                        HistoricalCreditReceipt.tenant_id == tenant_id
+                    )
+                ),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def reverse_supplier_payment(
     db: Session,
     *,
@@ -2839,6 +3115,14 @@ def reverse_supplier_payment(
                 {row.invoice_id for row in locked_obligations.values()}, key=str
             )
         }
+        for invoice_id in locked_invoices:
+            if _invoice_has_credit_vat_decision(session, tenant_id, invoice_id):
+                raise _refuse(
+                    InvalidTransition,
+                    "a credit has already settled this invoice's VAT; reverse "
+                    "the credit note first",
+                    "payment_reversal_blocked_by_credit_vat",
+                )
         for allocation in ordered:
             obligation = locked_obligations[allocation.obligation_id]
             invoice = locked_invoices[obligation.invoice_id]
@@ -2906,6 +3190,83 @@ def reverse_supplier_payment(
         expires_at=idempotency_expires_at,
     )
     return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
+
+
+def build_credit_application_accounting_consequence(
+    db: Session, *, tenant_id: UUID, application_id: UUID
+) -> AccountingConsequence:
+    """GL consequence of a credit application: the deferred tax it released.
+
+    Dr release account / Cr deferral account per row. There is no 2000 line: the
+    application nets inside the supplier control account, as in a5. An application
+    that released nothing has no consequence.
+    """
+    application = db.scalar(
+        select(CreditApplication).where(
+            CreditApplication.tenant_id == tenant_id,
+            CreditApplication.id == application_id,
+        )
+    )
+    if application is None:
+        raise NotFound("credit application was not found")
+    rows = credit_application_tax_releases(db, tenant_id, application_id)
+    if not rows:
+        raise _refuse(
+            InvalidTransition,
+            "the credit application released no deferred tax",
+            "credit_application_has_no_consequence",
+        )
+    obligation = _obligation(db, tenant_id, application.obligation_id)
+    invoice = _invoice(db, tenant_id, obligation.invoice_id)
+    applied_at = application.applied_at
+    if applied_at.tzinfo is None:
+        applied_at = applied_at.replace(tzinfo=UTC)
+    entries: list[AccountingEntry] = []
+    for row in rows:
+        description = (
+            f"Deferred input tax released: credit application {application.id}"
+        )
+        entries.append(
+            AccountingEntry(
+                account_ref=row.release_account_ref,
+                debit=row.amount,
+                description=description,
+            )
+        )
+        entries.append(
+            AccountingEntry(
+                account_ref=row.deferral_account_ref,
+                credit=row.amount,
+                description=description,
+            )
+        )
+    total = _money(sum((row.amount for row in rows), Decimal("0")))
+    if (
+        sum((e.debit for e in entries), Decimal("0")) != total
+        or sum((e.credit for e in entries), Decimal("0")) != total
+    ):
+        raise InvalidAmount("persisted credit application does not balance")
+    return _consequence(
+        source=ConsequenceSource(
+            owner="payables",
+            document_kind="supplier_credit_application",
+            document_id=str(application.id),
+            version="1",
+            fingerprint=fingerprint_of(
+                {
+                    "credit_note_id": str(application.credit_note_id),
+                    "obligation_id": str(application.obligation_id),
+                    "amount": str(application.amount),
+                    "applied_at": canonical_instant(applied_at),
+                }
+            ),
+        ),
+        posting_date=applied_at.astimezone(UTC).date(),
+        description=f"Credit application {application.id}",
+        currency_code=invoice.currency_code,
+        exchange_rate=invoice.exchange_rate,
+        entries=tuple(entries),
+    )
 
 
 def build_payment_reversal_accounting_consequence(
@@ -3732,6 +4093,8 @@ def supplier_liability_balance(
 
 
 __all__ = [
+    "build_credit_application_accounting_consequence",
+    "credit_application_tax_releases",
     "admit_historical_supplier_credit",
     "admit_historical_tax_deferral",
     "declare_tax_deferral",

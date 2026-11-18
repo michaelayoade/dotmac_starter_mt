@@ -47,12 +47,33 @@ any new command (Michael, 2026-11-17: maker-checker is optional and off).
 - `PayablesError` accepts an optional keyword `code`; every new refusal sets it and
   carries it in parentheses in the message. Existing raises are unchanged.
 - Add `pa_0006_tax_release_hist_credit` (additive: `tax_deferral_policies`,
-  `supplier_payment_tax_releases`, `historical_tax_deferrals`,
+  `supplier_payment_tax_releases`, `credit_note_tax_splits`,
+  `credit_application_tax_releases`, `historical_tax_deferrals`,
   `historical_credit_receipts`, `historical_credit_settlements`; forced RLS,
   append-only triggers, SELECT and INSERT grants only). No released table or column
   changes. Its downgrade refuses once any row exists. The revision id is shortened
   from the design's `pa_0006_tax_release_history_credit`, which exceeds the 32-character
   `alembic_version.version_num`.
+- Credit notes against paid invoices and credit applications (spec rev 3, section 11).
+  Credit kind is structural: a CASH credit is a historical overpayment
+  (`historical_credit_receipts`); every other credit is a DOCUMENT credit. At approval
+  a credit's tax on a deferral account is split, frozen in `credit_note_tax_splits`:
+  min(tax, still deferred) reverses the deferral account and the rest reverses the
+  release account (the share already claimed); the credit consequence emits both
+  (a credit whose split puts nothing on the release account is byte-identical to a5).
+  Refused: tax above the invoice's net tax (`credit_tax_exceeds_invoice_tax`), a line
+  taxed to a release account (`credit_tax_on_release_account`). Applications release
+  deferred tax into `credit_application_tax_releases`: a CASH credit like a payment
+  (proportional, exact remainder at final settlement); an own DOCUMENT credit only at the
+  final settlement, which releases exactly the remainder; a DOCUMENT credit set off against
+  another invoice that still defers tax is refused (`credit_setoff_on_deferred_invoice`).
+  `build_credit_application_accounting_consequence` (Dr release / Cr deferral) and receipt
+  kind `supplier_credit_application`; none when nothing was released
+  (`credit_application_has_no_consequence`). Reversing a payment after a credit settled the
+  invoice's VAT is refused (`payment_reversal_blocked_by_credit_vat`); reverse the credit
+  first. Owner invariants at every write: R >= 0, Claimed >= 0, credit tax <= D
+  (`deferred_tax_position_negative`). No un-apply. `deferred_tax_credit_exceeds_remaining`
+  is removed.
 - Review hardening: a historical-credit replay with another credit number, evidence
   reference or admitting actor is a conflict; credit approval refuses deferral tax on
   unproven settled history (`historical_deferral_unproven`); `apply_credit_note` and

@@ -3,7 +3,7 @@
 Revision ID: pa_0006_tax_release_hist_credit
 Revises: pa_0005_reversal_settled_history
 
-Purely additive: five new tenant tables, each with forced row-level security,
+Purely additive: seven new tenant tables, each with forced row-level security,
 append-only triggers and SELECT/INSERT grants only. No released table or column
 changes. The downgrade refuses once any row exists (permanent financial evidence;
 recovery is a forward correction, as for pa_0003 to pa_0005).
@@ -32,6 +32,8 @@ _TABLES = (
     "historical_tax_deferrals",
     "historical_credit_receipts",
     "historical_credit_settlements",
+    "credit_note_tax_splits",
+    "credit_application_tax_releases",
 )
 
 
@@ -296,6 +298,119 @@ def upgrade() -> None:
         schema=_SCHEMA,
     )
 
+    op.create_table(
+        "credit_note_tax_splits",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("credit_note_id", sa.Uuid(), nullable=False),
+        sa.Column("line_number", sa.Integer(), nullable=False),
+        sa.Column("invoice_id", sa.Uuid(), nullable=False),
+        sa.Column("policy_id", sa.Uuid(), nullable=False),
+        sa.Column("deferral_account_ref", sa.String(255), nullable=False),
+        sa.Column("release_account_ref", sa.String(255), nullable=False),
+        sa.Column("deferred_amount", sa.Numeric(20, 6), nullable=False),
+        sa.Column("released_amount", sa.Numeric(20, 6), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        _tenant_fk("credit_note_tax_splits"),
+        _fk(
+            "fk_credit_note_tax_splits_credit",
+            ["tenant_id", "credit_note_id"],
+            "credit_notes",
+            ["tenant_id", "id"],
+        ),
+        _fk(
+            "fk_credit_note_tax_splits_invoice",
+            ["tenant_id", "invoice_id"],
+            "supplier_invoices",
+            ["tenant_id", "id"],
+        ),
+        _fk(
+            "fk_credit_note_tax_splits_policy",
+            ["tenant_id", "policy_id"],
+            "tax_deferral_policies",
+            ["tenant_id", "id"],
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_credit_note_tax_splits_tenant_id_id"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "credit_note_id",
+            "line_number",
+            name="uq_credit_note_tax_splits_line",
+        ),
+        sa.CheckConstraint(
+            "deferred_amount >= 0 AND released_amount >= 0"
+            " AND deferred_amount + released_amount > 0",
+            name="ck_credit_note_tax_splits_amounts",
+        ),
+        sa.CheckConstraint(
+            "deferral_account_ref <> release_account_ref",
+            name="ck_credit_note_tax_splits_accounts",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "ix_credit_note_tax_splits_tenant_invoice",
+        "credit_note_tax_splits",
+        ["tenant_id", "invoice_id"],
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "credit_application_tax_releases",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("application_id", sa.Uuid(), nullable=False),
+        sa.Column("invoice_id", sa.Uuid(), nullable=False),
+        sa.Column("policy_id", sa.Uuid(), nullable=False),
+        sa.Column("deferral_account_ref", sa.String(255), nullable=False),
+        sa.Column("release_account_ref", sa.String(255), nullable=False),
+        sa.Column("amount", sa.Numeric(20, 6), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        _tenant_fk("credit_application_tax_releases"),
+        _fk(
+            "fk_credit_application_tax_releases_application",
+            ["tenant_id", "application_id"],
+            "credit_applications",
+            ["tenant_id", "id"],
+        ),
+        _fk(
+            "fk_credit_application_tax_releases_invoice",
+            ["tenant_id", "invoice_id"],
+            "supplier_invoices",
+            ["tenant_id", "id"],
+        ),
+        _fk(
+            "fk_credit_application_tax_releases_policy",
+            ["tenant_id", "policy_id"],
+            "tax_deferral_policies",
+            ["tenant_id", "id"],
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_credit_application_tax_releases_tenant_id_id"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "application_id",
+            "deferral_account_ref",
+            name="uq_credit_application_tax_releases_release",
+        ),
+        sa.CheckConstraint(
+            "amount > 0", name="ck_credit_application_tax_releases_amount"
+        ),
+        sa.CheckConstraint(
+            "deferral_account_ref <> release_account_ref",
+            name="ck_credit_application_tax_releases_accounts",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "ix_credit_application_tax_releases_tenant_invoice",
+        "credit_application_tax_releases",
+        ["tenant_id", "invoice_id"],
+        schema=_SCHEMA,
+    )
+
     # A legacy settlement settles exactly one invoice across all admissions. The
     # service checks both directions; this trigger backs the credit side in the
     # database without touching the released historical_settlements table.
@@ -347,12 +462,16 @@ def downgrade() -> None:
         "SELECT EXISTS (SELECT 1 FROM mod_payables.historical_tax_deferrals)",
         "SELECT EXISTS (SELECT 1 FROM mod_payables.historical_credit_receipts)",
         "SELECT EXISTS (SELECT 1 FROM mod_payables.historical_credit_settlements)",
+        "SELECT EXISTS (SELECT 1 FROM mod_payables.credit_note_tax_splits)",
+        "SELECT EXISTS (SELECT 1 FROM mod_payables.credit_application_tax_releases)",
     ):
         if bind.scalar(sa.text(statement)):
             raise RuntimeError(
                 "tax deferral policies, releases, historical deferrals and "
                 "historical credits require forward correction"
             )
+    op.drop_table("credit_application_tax_releases", schema=_SCHEMA)
+    op.drop_table("credit_note_tax_splits", schema=_SCHEMA)
     op.drop_table("historical_credit_settlements", schema=_SCHEMA)
     op.drop_table("historical_credit_receipts", schema=_SCHEMA)
     op.drop_table("historical_tax_deferrals", schema=_SCHEMA)

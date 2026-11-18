@@ -28,6 +28,8 @@ _LATER_MIGRATION_TABLES = {
     "historical_tax_deferrals",
     "historical_credit_receipts",
     "historical_credit_settlements",
+    "credit_note_tax_splits",
+    "credit_application_tax_releases",
 }
 SECOND_MIGRATION = ROOT / "migrations/versions/pa_0002_optional_supplier_doc.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -255,6 +257,8 @@ def test_a6_migration_is_additive_tenant_safe_and_forward_only() -> None:
         "historical_tax_deferrals",
         "historical_credit_receipts",
         "historical_credit_settlements",
+        "credit_note_tax_splits",
+        "credit_application_tax_releases",
     )
     for table in new_tables:
         assert table in module.tables

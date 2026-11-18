@@ -1166,7 +1166,142 @@ class HistoricalCreditSettlementRecord(Base):
     )
 
 
+class CreditNoteTaxSplit(Base):
+    """How one credit-note line's deferral-account tax splits at approval.
+
+    ``deferred_amount`` reverses the deferral account; ``released_amount`` reverses
+    the release account (the share of the invoice's VAT already claimed). Frozen, so
+    the credit consequence is rebuilt from rows and never from later policy or state.
+    """
+
+    __tablename__ = "credit_note_tax_splits"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_credit_note_tax_splits_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "credit_note_id",
+            "line_number",
+            name="uq_credit_note_tax_splits_line",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "credit_note_id"],
+            [f"{SCHEMA}.credit_notes.tenant_id", f"{SCHEMA}.credit_notes.id"],
+            ondelete="RESTRICT",
+            name="fk_credit_note_tax_splits_credit",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            ondelete="RESTRICT",
+            name="fk_credit_note_tax_splits_invoice",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "policy_id"],
+            [
+                f"{SCHEMA}.tax_deferral_policies.tenant_id",
+                f"{SCHEMA}.tax_deferral_policies.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_credit_note_tax_splits_policy",
+        ),
+        CheckConstraint(
+            "deferred_amount >= 0 AND released_amount >= 0"
+            " AND deferred_amount + released_amount > 0",
+            name="ck_credit_note_tax_splits_amounts",
+        ),
+        CheckConstraint(
+            "deferral_account_ref <> release_account_ref",
+            name="ck_credit_note_tax_splits_accounts",
+        ),
+        Index("ix_credit_note_tax_splits_tenant_invoice", "tenant_id", "invoice_id"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    credit_note_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    policy_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    deferral_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    release_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    deferred_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    released_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class CreditApplicationTaxRelease(Base):
+    """Deferred input tax released by one credit application (a sibling of the
+    payment release rows, so payment rows and their keys stay untouched)."""
+
+    __tablename__ = "credit_application_tax_releases"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_credit_application_tax_releases_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "application_id",
+            "deferral_account_ref",
+            name="uq_credit_application_tax_releases_release",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "application_id"],
+            [
+                f"{SCHEMA}.credit_applications.tenant_id",
+                f"{SCHEMA}.credit_applications.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_credit_application_tax_releases_application",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            ondelete="RESTRICT",
+            name="fk_credit_application_tax_releases_invoice",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "policy_id"],
+            [
+                f"{SCHEMA}.tax_deferral_policies.tenant_id",
+                f"{SCHEMA}.tax_deferral_policies.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_credit_application_tax_releases_policy",
+        ),
+        CheckConstraint("amount > 0", name="ck_credit_application_tax_releases_amount"),
+        CheckConstraint(
+            "deferral_account_ref <> release_account_ref",
+            name="ck_credit_application_tax_releases_accounts",
+        ),
+        Index(
+            "ix_credit_application_tax_releases_tenant_invoice",
+            "tenant_id",
+            "invoice_id",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    application_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    policy_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    deferral_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    release_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 ALL_MODELS = (
+    CreditNoteTaxSplit,
+    CreditApplicationTaxRelease,
     TaxDeferralPolicy,
     SupplierPaymentTaxRelease,
     HistoricalTaxDeferralRecord,
@@ -1197,6 +1332,8 @@ def metadata_table(name: str) -> sa.Table:
 
 __all__ = [
     "ALL_MODELS",
+    "CreditApplicationTaxRelease",
+    "CreditNoteTaxSplit",
     "HistoricalCreditReceipt",
     "HistoricalCreditSettlementRecord",
     "HistoricalTaxDeferralRecord",

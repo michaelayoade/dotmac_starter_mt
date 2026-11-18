@@ -49,8 +49,10 @@ from dotmac_payables.migrations import versions_dir
 from dotmac_payables.models import (
     AccountingReceipt,
     CreditApplication,
+    CreditApplicationTaxRelease,
     CreditNote,
     CreditNoteLine,
+    CreditNoteTaxSplit,
     HistoricalCreditReceipt,
     HistoricalCreditSettlementRecord,
     HistoricalInvoiceReceipt,
@@ -78,6 +80,7 @@ from dotmac_payables.service import (
     approve_invoice,
     approve_supplier_payment,
     build_credit_accounting_consequence,
+    build_credit_application_accounting_consequence,
     build_invoice_accounting_consequence,
     build_payment_accounting_consequence,
     build_payment_reversal_accounting_consequence,
@@ -85,6 +88,7 @@ from dotmac_payables.service import (
     create_credit_note,
     create_invoice,
     create_supplier_payment,
+    credit_application_tax_releases,
     declare_tax_deferral,
     invoice_deferred_tax_position,
     recognize_approved_invoice,
@@ -102,6 +106,10 @@ from dotmac_payables.service import (
 __version__ = "0.1.0a6"
 
 __all__ = [
+    "CreditApplicationTaxRelease",
+    "CreditNoteTaxSplit",
+    "build_credit_application_accounting_consequence",
+    "credit_application_tax_releases",
     "DeclareTaxDeferral",
     "DeferredTaxPosition",
     "HistoricalCreditReceipt",
