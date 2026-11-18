@@ -80,7 +80,18 @@ FROM_ADDRESS: SettingSpec[str] = SettingSpec(
 )
 
 ALL_SPECS: list[SettingSpec[Any]] = [HOST, PORT, STARTTLS, USERNAME, FROM_ADDRESS]
-register_specs(ALL_SPECS)
+
+
+def register() -> None:
+    """Register the five specs into the process-global settings registry.
+
+    Deliberately NOT an import side effect: the registry is process-global, so
+    importing this optional adapter in a product that has not installed it
+    would otherwise leak `delivery_smtp` specs (an undeclared domain) into
+    that product. The composing product calls this once, alongside declaring
+    `module.setting_domains`. Idempotent.
+    """
+    register_specs(ALL_SPECS)
 
 
 __all__ = [
@@ -91,4 +102,5 @@ __all__ = [
     "PORT",
     "STARTTLS",
     "USERNAME",
+    "register",
 ]

@@ -33,12 +33,20 @@ from tests.unit.test_delivery_smtp import (
 
 @pytest.fixture(autouse=True)
 def _domain() -> Iterator[None]:
+    # The adapter no longer registers its specs on import; register explicitly
+    # and restore the process-global registry so nothing leaks to other tests.
+    from dotmac_kernel import settings_resolver as sr
+
+    before = dict(sr._REGISTRY)
+    settings.register()
     previous = active_setting_domains()
     install_setting_domains(
         SettingDomainRegistry([("delivery_smtp", settings.DELIVERY_SMTP_DOMAIN.value)])
     )
     yield
     install_setting_domains(previous)
+    sr._REGISTRY.clear()
+    sr._REGISTRY.update(before)
 
 
 @pytest.fixture
