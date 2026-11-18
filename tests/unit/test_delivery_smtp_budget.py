@@ -115,6 +115,9 @@ def test_non_finite_or_non_positive_timeouts_are_refused(
 
 
 def test_default_budget_is_below_the_relay_lease_policy() -> None:
-    operations = 9  # greeting, EHLO, TLS, EHLO, AUTH, MAIL, RCPT, DATA go-ahead, QUIT
-    budget = DEFAULT_DATA_TIMEOUT_SECONDS + operations * DEFAULT_TIMEOUT_SECONDS
+    # 9 command operations (greeting, EHLO, TLS, EHLO, AUTH, MAIL, RCPT, the DATA
+    # command, QUIT) each get `timeout`; smtplib data() gives `data_timeout` to
+    # THREE waits (354 go-ahead, payload send, final reply).
+    budget = 9 * DEFAULT_TIMEOUT_SECONDS + 3 * DEFAULT_DATA_TIMEOUT_SECONDS
+    assert budget == 285
     assert budget < RelayPolicy().stale_lease_seconds
