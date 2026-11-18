@@ -193,7 +193,14 @@ def test_a_green_receipt_cannot_replace_an_authenticated_offline_result(
     captured = capsys.readouterr()
     assert "authenticated_offline_result_unavailable" in captured.err
     assert captured.out == ""
-    assert (tmp_path / "receipt.json").read_bytes() == receipt.canonical_bytes()
+    # Nothing is retained until authentication passes.
+    for name in (
+        "receipt.json",
+        "evidence-bundle.age",
+        "source-status.md",
+        "source-artifact.json",
+    ):
+        assert not (tmp_path / name).exists()
 
 
 def test_a_receipt_from_another_attempt_of_the_selected_run_is_refused(

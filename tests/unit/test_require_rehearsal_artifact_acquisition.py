@@ -269,12 +269,14 @@ def test_sizes_past_archive_end_yield_clean_refusal(monkeypatch, capsys):
 
 
 def test_eof_inside_member_read_is_a_clean_refusal(monkeypatch):
+    raw = bytes(_members_zip())  # build before the patch: writestr uses open()
+
     def eof(self, *args, **kwargs):
         raise EOFError("truncated")
 
     monkeypatch.setattr(zipfile.ZipFile, "open", eof)
     with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
-        _acquire(monkeypatch, bytes(_members_zip()))
+        _acquire(monkeypatch, raw)
 
 
 def test_compressed_size_is_bounded_per_member(monkeypatch):
