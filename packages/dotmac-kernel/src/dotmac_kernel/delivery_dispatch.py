@@ -16,21 +16,38 @@ dispatcher role has NO privilege on `communication_dispatches`; the body is read
 only in a tenant-RLS session. The Academy "lab worker" role concept has none
 either.
 
+## Status meaning
+
+Dispatch `failed` is a PERMANENT refusal only. A transient provider failure
+leaves the dispatch `pending` and the outbox relay retries it; the K-2 receipt
+status `failed` (retryable) is a different thing. The allowlist is enforced by a
+database trigger (see migration 0032 and `CommunicationDispatch`).
+
+## TODO for K-8 (the relay transport) and release
+
+- Never let a database error that echoes parameters (bodies, addresses) reach
+  outbox `last_error`: `worker.py` writes `repr(exc)` there.
+- Consider `SELECT ... FOR UPDATE` in the tenant session when loading.
+- `delivery.dispatch.v1` is declared on a manifest by K-8; S7 must not be
+  released without K-8.
+
 ## Duplicate keys
 
 `INSERT ... ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` then a read-back.
 A concurrent second creator blocks on the first transaction's unique entry, and
 once that commits does nothing and reads the winner: exactly one row and one event.
-If the first rolls back, the second inserts and enqueues. A duplicate with
-DIFFERENT content returns the existing dispatch with `same_content=False` and is
-not refused: the caller decides, because a retried request must stay safe.
+If the first rolls back, the second inserts and enqueues. On a duplicate the
+required `on_conflict` decides: `"return_existing"` returns the existing dispatch
+(`same_content` says whether the content matches; `None` for a history row);
+`"raise_if_different"` raises `DispatchConflict` for a history row or different
+content. There is no default: a caller must choose.
 
 ## Legacy carry-forward (D7)
 
 `import_history_key` records a legacy key as history-only (no content, never
 enqueued, never loadable). `import_pending` carries a pending row's stored content
 byte-for-byte with caller-supplied `legacy:<source>` provenance and its own
-`available_at`. The cutover command is the adopter's; these are primitives.
+`requested_available_at`. The cutover command is the adopter's; these are primitives.
 
 ## Load verifies
 
@@ -45,6 +62,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -75,6 +93,10 @@ class DispatchNotFound(DispatchError):
     pass
 
 
+class DispatchConflict(DispatchError):
+    """The key already exists with different content, or as a history row."""
+
+
 class DispatchHistoryOnly(DispatchError):
     """An imported legacy key: it has no content and is never sent."""
 
@@ -98,8 +120,8 @@ class DispatchResult:
     #: True when this call inserted the row (and, for non-history, enqueued).
     created: bool
     #: For a duplicate key: whether the requested content matches the stored one
-    #: (always True on creation). History-only rows cannot compare: False.
-    same_content: bool
+    #: (True on creation). `None` for a history row, which has no content.
+    same_content: bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,8 +187,17 @@ def find_dispatch_by_key(
     ).scalar_one_or_none()
 
 
+def _check_aware(label: str, value: datetime | None) -> None:
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError(f"{label} must be timezone-aware")
+
+
 def _existing(
-    db: Session, tenant_id: UUID, key: str, fingerprint: str | None
+    db: Session,
+    tenant_id: UUID,
+    key: str,
+    fingerprint: str | None,
+    on_conflict: str,
 ) -> DispatchResult:
     row = db.execute(
         select(CommunicationDispatch)
@@ -182,12 +213,21 @@ def _existing(
             "idempotency key conflicted but the existing dispatch is not "
             "visible to this transaction"
         )
+    if row.status == DISPATCH_HISTORY or row.content_fingerprint is None:
+        same: bool | None = None
+    else:
+        same = fingerprint is not None and row.content_fingerprint == fingerprint
+    if on_conflict == "raise_if_different" and same is not True:
+        raise DispatchConflict(
+            f"idempotency key already used by dispatch {row.dispatch_id} "
+            f"({'history-only' if same is None else 'different content'})"
+        )
     return DispatchResult(
         dispatch_id=row.dispatch_id,
         status=row.status,
         dispatch=row,
         created=False,
-        same_content=fingerprint is not None and row.content_fingerprint == fingerprint,
+        same_content=same,
     )
 
 
@@ -196,6 +236,7 @@ def create_dispatch(
     tenant_id: UUID,
     *,
     idempotency_key: str,
+    on_conflict: Literal["return_existing", "raise_if_different"],
     channel: str,
     category: str,
     address: str,
@@ -206,17 +247,25 @@ def create_dispatch(
     headers: Mapping[str, str] | None = None,
     attachments: Sequence[AttachmentRef] = (),
     template_revision_id: UUID | None = None,
-    available_at: datetime | None = None,
+    requested_available_at: datetime | None = None,
 ) -> DispatchResult:
     """Create a dispatch identity and enqueue its outbox event, in the caller's
     transaction (`add`/`flush` only, never commit).
 
     The content is validated by constructing the S6 `OutboundMessage` (a
     `ValueError` refuses it before anything is written). On a duplicate
-    `(tenant, key)` the existing dispatch is returned and nothing is enqueued.
+    `(tenant, key)` nothing is enqueued and `on_conflict` (required, no default)
+    decides: `"return_existing"` returns the existing dispatch,
+    `"raise_if_different"` raises `DispatchConflict` for a history row or
+    different content. `requested_available_at` must be timezone-aware.
     """
     _check_key(idempotency_key)
     _check_provenance(template_provenance)
+    _check_aware("requested_available_at", requested_available_at)
+    if on_conflict not in ("return_existing", "raise_if_different"):
+        raise ValueError(
+            "on_conflict must be 'return_existing' or 'raise_if_different'"
+        )
     dispatch_id = uuid4()
     message = OutboundMessage(
         dispatch_id=dispatch_id,
@@ -256,10 +305,10 @@ def create_dispatch(
         "template_revision_id": template_revision_id,
         "status": DISPATCH_PENDING,
     }
-    if available_at is not None:
-        values["available_at"] = available_at
+    if requested_available_at is not None:
+        values["requested_available_at"] = requested_available_at
     if not _insert_ignoring_conflict(db, values):
-        return _existing(db, tenant_id, idempotency_key, fingerprint)
+        return _existing(db, tenant_id, idempotency_key, fingerprint, on_conflict)
 
     event = enqueue_event(
         db,
@@ -267,8 +316,8 @@ def create_dispatch(
         event_type=DISPATCH_EVENT_TYPE,
         payload={"dispatch_id": str(dispatch_id)},
     )
-    if available_at is not None:
-        event.available_at = available_at
+    if requested_available_at is not None:
+        event.available_at = requested_available_at
         db.flush()
     row = db.get(CommunicationDispatch, dispatch_id)
     assert row is not None
@@ -312,13 +361,14 @@ def import_history_key(
         "template_provenance": template_provenance,
         "status": DISPATCH_HISTORY,
     }
+    _check_aware("created_at", created_at)
     if created_at is not None:
         values["created_at"] = created_at
         values["terminal_at"] = created_at
     else:
         values["terminal_at"] = func.now()
     if not _insert_ignoring_conflict(db, values):
-        return _existing(db, tenant_id, idempotency_key, None)
+        return _existing(db, tenant_id, idempotency_key, None, "return_existing")
     row = db.get(CommunicationDispatch, dispatch_id)
     assert row is not None
     return DispatchResult(
@@ -326,7 +376,7 @@ def import_history_key(
         status=row.status,
         dispatch=row,
         created=True,
-        same_content=True,
+        same_content=None,
     )
 
 
@@ -339,7 +389,7 @@ def import_pending(
     category: str,
     address: str,
     template_provenance: str,
-    available_at: datetime,
+    requested_available_at: datetime,
     subject: str | None = None,
     text: str | None = None,
     html: str | None = None,
@@ -349,10 +399,12 @@ def import_pending(
     """Carry a legacy pending row forward as a real dispatch (D7).
 
     The stored content is kept as given (no rendering, no template lookup) and
-    `available_at` is preserved, so the outbox event is not due before the legacy
-    row was. `template_provenance` must be `legacy:<source>`. Content the S6
+    `requested_available_at` is preserved, so the outbox event is not due before
+    the legacy row was. `template_provenance` must be `legacy:<source>`. Content the S6
     message rules refuse raises `ValueError`; the adopter's command then reports
-    that row for manual review rather than altering it.
+    that row for manual review rather than altering it. Always
+    `on_conflict="raise_if_different"`: an existing history row or different
+    fingerprint raises `DispatchConflict`; an identical re-run is a no-op.
     """
     _check_provenance(template_provenance, legacy=True)
     return create_dispatch(
@@ -368,7 +420,8 @@ def import_pending(
         html=html,
         headers=headers,
         attachments=attachments,
-        available_at=available_at,
+        requested_available_at=requested_available_at,
+        on_conflict="raise_if_different",
     )
 
 
@@ -417,6 +470,7 @@ def load_dispatch(db: Session, tenant_id: UUID, dispatch_id: UUID) -> LoadedDisp
 
 __all__ = [
     "DISPATCH_EVENT_TYPE",
+    "DispatchConflict",
     "DispatchError",
     "DispatchHistoryOnly",
     "DispatchIntegrityError",

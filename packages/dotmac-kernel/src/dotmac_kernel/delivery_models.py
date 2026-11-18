@@ -211,11 +211,22 @@ class CommunicationDispatch(Base):
     (outcome and redaction); no DELETE. `outbox_dispatcher` and the Academy
     "lab worker" role hold NOTHING on this table.
 
+    **Status.** `pending` -> `sent` | `failed` | `dead` | `suppressed`, and
+    `dead` -> `pending` (K-5 requeue, never once redacted); `history` is
+    import-only. `failed` here means a PERMANENT refusal only: a transient
+    provider failure leaves the dispatch `pending` (the relay retries). The
+    K-2 receipt status `failed` is a different thing and IS retryable. A
+    BEFORE UPDATE trigger (migration 0032, runs as the calling role) enforces
+    the allowlist and that content changes only by redaction: all content
+    columns, including `address`, go NULL together with `redacted_at`
+    (one-way) on an already-terminal row.
+
     **Content.** `subject` / `text_body` / `html_body` / `headers` /
     `attachments` are the S6 `OutboundMessage` parts, stored as rendered.
     `content_fingerprint` is `OutboundMessage.request_fingerprint`; it and
     `template_provenance` survive post-terminal redaction (`redacted_at` set,
-    the five content columns NULLed). A redacted dispatch is never rebuilt.
+    the six content columns, including the address, NULLed). A redacted
+    dispatch is never rebuilt.
     """
 
     __tablename__ = "communication_dispatches"
@@ -233,9 +244,18 @@ class CommunicationDispatch(Base):
             name="ck_communication_dispatches_history_bare",
         ),
         CheckConstraint(
-            "status = 'history' OR (address IS NOT NULL "
-            "AND content_fingerprint IS NOT NULL)",
-            name="ck_communication_dispatches_content_identity",
+            "status = 'history' OR content_fingerprint IS NOT NULL",
+            name="ck_communication_dispatches_fingerprint",
+        ),
+        CheckConstraint(
+            "status = 'history' OR redacted_at IS NOT NULL OR address IS NOT NULL",
+            name="ck_communication_dispatches_address",
+        ),
+        CheckConstraint(
+            "redacted_at IS NULL OR (address IS NULL AND subject IS NULL "
+            "AND text_body IS NULL AND html_body IS NULL AND headers IS NULL "
+            "AND attachments IS NULL)",
+            name="ck_communication_dispatches_redacted_bare",
         ),
         CheckConstraint(
             "status = 'history' OR redacted_at IS NOT NULL "
@@ -252,7 +272,6 @@ class CommunicationDispatch(Base):
             "idempotency_key",
             unique=True,
         ),
-        Index("ix_communication_dispatches_tenant_id", "tenant_id"),
     )
 
     dispatch_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
@@ -279,7 +298,9 @@ class CommunicationDispatch(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=DISPATCH_PENDING
     )
-    available_at: Mapped[datetime] = mapped_column(
+    #: When the product asked for it to be due. The outbox event's own
+    #: `available_at` is what the relay schedules on; this is the requested value.
+    requested_available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(

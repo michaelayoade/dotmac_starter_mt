@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from dotmac_kernel.delivery_dispatch import (
     DISPATCH_EVENT_TYPE,
+    DispatchConflict,
     DispatchHistoryOnly,
     DispatchIntegrityError,
     DispatchNotFound,
@@ -76,6 +77,7 @@ def _create(db: Session, tenant_id: uuid.UUID, key: str = "k-1", **kw):
         "category": "transactional",
         "address": "jane@example.com",
         "template_provenance": "template:password_reset@rev-1",
+        "on_conflict": "return_existing",
         "subject": "Hello",
         "text": "Plain body with token",
         "html": "<p>Html body</p>",
@@ -133,6 +135,96 @@ def test_duplicate_key_returns_existing_and_does_not_enqueue_again(
     assert again.dispatch_id == first.dispatch_id
     assert not different.created and not different.same_content
     assert len(_outbox(admin_session, tenant_a.id)) == 1
+
+
+def test_raise_if_different_refuses_a_different_fingerprint_or_history_row(
+    tenant_a, admin_session: Session, factory
+) -> None:
+    db = _as_tenant(factory, tenant_a.id)
+    try:
+        first = _create(db, tenant_a.id, key="strict")
+        same = _create(db, tenant_a.id, key="strict", on_conflict="raise_if_different")
+        assert not same.created and same.same_content is True
+        assert same.dispatch_id == first.dispatch_id
+        with pytest.raises(DispatchConflict):
+            _create(
+                db,
+                tenant_a.id,
+                key="strict",
+                text="Other",
+                on_conflict="raise_if_different",
+            )
+        import_history_key(
+            db,
+            tenant_a.id,
+            idempotency_key="hist",
+            channel="email",
+            category="transactional",
+            template_provenance="legacy:email_outbox",
+        )
+        with pytest.raises(DispatchConflict):
+            _create(db, tenant_a.id, key="hist", on_conflict="raise_if_different")
+        # return_existing on a history row: same_content is None, not False.
+        again = _create(db, tenant_a.id, key="hist")
+        assert again.same_content is None and again.status == "history"
+        db.commit()
+    finally:
+        db.close()
+    assert len(_outbox(admin_session, tenant_a.id)) == 1
+
+
+def test_on_conflict_is_required_and_validated(tenant_a, factory) -> None:
+    db = _as_tenant(factory, tenant_a.id)
+    try:
+        with pytest.raises(TypeError):
+            create_dispatch(  # type: ignore[call-arg]
+                db,
+                tenant_a.id,
+                idempotency_key="k",
+                channel="email",
+                category="transactional",
+                address="jane@example.com",
+                template_provenance="template:x",
+                text="hi",
+            )
+        with pytest.raises(ValueError):
+            _create(db, tenant_a.id, on_conflict="whatever")
+        with pytest.raises(ValueError):
+            _create(db, tenant_a.id, requested_available_at=datetime(2030, 1, 1))
+    finally:
+        db.close()
+
+
+def test_import_pending_raises_on_history_or_different_content(
+    tenant_a, factory
+) -> None:
+    kw = {
+        "channel": "email",
+        "category": "transactional",
+        "address": "jane@example.com",
+        "template_provenance": "legacy:email_outbox",
+        "requested_available_at": datetime.now(UTC),
+    }
+    db = _as_tenant(factory, tenant_a.id)
+    try:
+        import_history_key(
+            db,
+            tenant_a.id,
+            idempotency_key="h",
+            channel="email",
+            category="transactional",
+            template_provenance="legacy:email_outbox",
+        )
+        with pytest.raises(DispatchConflict):
+            import_pending(db, tenant_a.id, idempotency_key="h", text="x", **kw)
+        first = import_pending(db, tenant_a.id, idempotency_key="p", text="x", **kw)
+        rerun = import_pending(db, tenant_a.id, idempotency_key="p", text="x", **kw)
+        assert first.created and not rerun.created and rerun.same_content is True
+        with pytest.raises(DispatchConflict):
+            import_pending(db, tenant_a.id, idempotency_key="p", text="y", **kw)
+    finally:
+        db.rollback()
+        db.close()
 
 
 def test_same_key_in_two_tenants_is_two_dispatches(tenant_a, tenant_b, factory) -> None:
@@ -287,9 +379,13 @@ def test_load_refuses_tampered_content_and_unknown_id(
         did = res.dispatch_id
     finally:
         db.close()
-    # app_admin tampers with the stored body (app_user may only redact).
+    # app_admin changes the recorded fingerprint (the guard trigger covers
+    # content, not the fingerprint): the stored content no longer matches it.
     admin_session.execute(
-        text(f"UPDATE {TABLE} SET text_body = 'changed' WHERE dispatch_id = :d"),
+        text(
+            f"UPDATE {TABLE} SET content_fingerprint = repeat('0', 64) "
+            "WHERE dispatch_id = :d"
+        ),
         {"d": str(did)},
     )
     admin_session.commit()
@@ -319,23 +415,84 @@ def test_load_refuses_history_and_redacted(tenant_a, factory) -> None:
         _retenant(db, tenant_a.id)
         with pytest.raises(DispatchHistoryOnly):
             load_dispatch(db, tenant_a.id, hist.dispatch_id)
-        # The redaction job's shape: terminal status + NULL bodies, fingerprint
-        # and provenance kept. app_user holds column UPDATE for exactly this.
+        # The bypass: one update that marks a PENDING row sent+redacted and
+        # nulls its content must be refused by the guard trigger.
+        for stmt in (
+            f"UPDATE {TABLE} SET status = 'sent', terminal_at = now(), "
+            "redacted_at = now(), address = NULL, subject = NULL, "
+            "text_body = NULL, html_body = NULL, headers = NULL, "
+            "attachments = NULL WHERE dispatch_id = :d",
+            f"UPDATE {TABLE} SET redacted_at = now(), address = NULL, "
+            "subject = NULL, text_body = NULL, html_body = NULL, headers = NULL, "
+            "attachments = NULL WHERE dispatch_id = :d",
+            f"UPDATE {TABLE} SET text_body = 'changed' WHERE dispatch_id = :d",
+        ):
+            with pytest.raises(DBAPIError):
+                db.execute(text(stmt), {"d": str(sent.dispatch_id)})
+            db.rollback()
+            _retenant(db, tenant_a.id)
+        # Legitimate path: terminal transition first, then redaction.
         db.execute(
             text(
-                f"UPDATE {TABLE} SET status = 'sent', terminal_at = now(), "
-                "redacted_at = now(), subject = NULL, text_body = NULL, "
-                "html_body = NULL, headers = NULL, attachments = NULL "
+                f"UPDATE {TABLE} SET status = 'sent', terminal_at = now() "
                 "WHERE dispatch_id = :d"
             ),
             {"d": str(sent.dispatch_id)},
         )
+        redact = (
+            f"UPDATE {TABLE} SET redacted_at = now(), address = NULL, "
+            "subject = NULL, text_body = NULL, html_body = NULL, headers = NULL, "
+            "attachments = NULL WHERE dispatch_id = :d"
+        )
+        db.execute(text(redact), {"d": str(sent.dispatch_id)})
         db.commit()
+        # One-way, and a redacted row cannot be requeued or un-redacted.
+        _retenant(db, tenant_a.id)
+        for stmt in (
+            f"UPDATE {TABLE} SET redacted_at = NULL WHERE dispatch_id = :d",
+            f"UPDATE {TABLE} SET status = 'pending' WHERE dispatch_id = :d",
+        ):
+            with pytest.raises(DBAPIError):
+                db.execute(text(stmt), {"d": str(sent.dispatch_id)})
+            db.rollback()
+            _retenant(db, tenant_a.id)
         _retenant(db, tenant_a.id)
         with pytest.raises(DispatchRedacted):
             load_dispatch(db, tenant_a.id, sent.dispatch_id)
         row = find_dispatch_by_key(db, tenant_a.id, "to-redact")
         assert row.content_fingerprint and row.template_provenance
+    finally:
+        db.close()
+
+
+def test_status_allowlist_is_enforced(tenant_a, factory) -> None:
+    db = _as_tenant(factory, tenant_a.id)
+    try:
+        res = _create(db, tenant_a.id, key="allow")
+        db.commit()
+        did = {"d": str(res.dispatch_id)}
+        up = f"UPDATE {TABLE} SET status = :s WHERE dispatch_id = :d"
+
+        def move(to: str) -> None:
+            _retenant(db, tenant_a.id)
+            db.execute(text(up), {"s": to, **did})
+
+        move("dead")  # pending -> dead
+        move("pending")  # dead -> pending (K-5 requeue, not redacted)
+        move("sent")
+        db.commit()
+        for bad in ("pending", "failed", "dead", "history"):  # sent is final
+            with pytest.raises(DBAPIError):
+                move(bad)
+            db.rollback()
+        _retenant(db, tenant_a.id)
+        other = _create(db, tenant_a.id, key="allow-2")
+        db.commit()
+        for bad in ("history", "queued"):
+            with pytest.raises(DBAPIError):
+                _retenant(db, tenant_a.id)
+                db.execute(text(up), {"s": bad, "d": str(other.dispatch_id)})
+            db.rollback()
     finally:
         db.close()
 
@@ -393,7 +550,7 @@ def test_history_import_requires_legacy_provenance(tenant_a, factory) -> None:
         db.close()
 
 
-def test_pending_carried_forward_byte_for_byte_with_available_at(
+def test_pending_carried_forward_byte_for_byte_with_requested_available_at(
     tenant_a, admin_session: Session, factory
 ) -> None:
     due = datetime.now(UTC) + timedelta(hours=3)
@@ -410,7 +567,7 @@ def test_pending_carried_forward_byte_for_byte_with_available_at(
             category="transactional",
             address="jane@example.com",
             template_provenance="legacy:email_outbox",
-            available_at=due,
+            requested_available_at=due,
             subject=subject,
             text=body,
             html=html,
@@ -420,7 +577,7 @@ def test_pending_carried_forward_byte_for_byte_with_available_at(
         row = find_dispatch_by_key(db, tenant_a.id, "legacy-pending-1")
         assert (row.subject, row.text_body, row.html_body) == (subject, body, html)
         assert row.template_provenance == "legacy:email_outbox"
-        assert row.available_at == due and row.status == "pending"
+        assert row.requested_available_at == due and row.status == "pending"
         assert load_dispatch(db, tenant_a.id, row.dispatch_id).message.text == body
     finally:
         db.close()
@@ -441,7 +598,7 @@ def test_pending_import_requires_legacy_provenance(tenant_a, factory) -> None:
                 category="transactional",
                 address="jane@example.com",
                 template_provenance="template:foo",
-                available_at=datetime.now(UTC),
+                requested_available_at=datetime.now(UTC),
                 text="hi",
             )
     finally:
@@ -493,7 +650,10 @@ def test_no_tenant_context_sees_and_writes_nothing(tenant_a, factory) -> None:
     bare = factory()
     try:
         assert bare.execute(text(f"SELECT 1 FROM {TABLE}")).fetchall() == []
+        with pytest.raises((DBAPIError, IntegrityError)):
+            _create(bare, tenant_a.id, key="no-context")
     finally:
+        bare.rollback()
         bare.close()
 
 
@@ -531,7 +691,6 @@ def test_app_user_has_minimal_grants_and_no_delete(
     }
     for col in (
         "idempotency_key",
-        "address",
         "content_fingerprint",
         "tenant_id",
         "template_provenance",
@@ -554,7 +713,9 @@ def test_app_user_has_minimal_grants_and_no_delete(
             f"UPDATE {TABLE} SET content_fingerprint = repeat('0', 64) "
             "WHERE dispatch_id = :d",
             f"UPDATE {TABLE} SET address = 'x@example.com' WHERE dispatch_id = :d",
+            f"UPDATE {TABLE} SET address = NULL WHERE dispatch_id = :d",
         ):
+            _retenant(db, tenant_a.id)
             with pytest.raises(DBAPIError):
                 db.execute(text(sql), {"d": did})
             db.rollback()
@@ -637,20 +798,26 @@ def test_outbox_dispatcher_has_no_privilege_on_the_table(
 def test_no_lab_worker_role_holds_a_privilege(admin_session: Session) -> None:
     """The Academy "lab worker" concept is not granted here: no role other than
     the table owner, app_user and the superuser/admin roles has any privilege."""
+    # Table ACL and column ACLs, via aclexplode on the catalogue (grantee 0 is
+    # PUBLIC, which must hold nothing either).
     grantees = {
         r[0]
         for r in admin_session.execute(
             text(
-                "SELECT DISTINCT grantee FROM information_schema.role_table_grants "
-                "WHERE table_schema = 'public' AND table_name = :t "
-                "UNION SELECT DISTINCT grantee FROM "
-                "information_schema.role_column_grants "
-                "WHERE table_schema = 'public' AND table_name = :t"
-            ),
-            {"t": TABLE},
+                "SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' "
+                "ELSE a.grantee::regrole::text END "
+                "FROM pg_class c, aclexplode(c.relacl) a "
+                "WHERE c.oid = 'public.communication_dispatches'::regclass "
+                "UNION SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' "
+                "ELSE a.grantee::regrole::text END "
+                "FROM pg_attribute t, aclexplode(t.attacl) a "
+                "WHERE t.attrelid = 'public.communication_dispatches'::regclass "
+                "AND t.attacl IS NOT NULL"
+            )
         )
     }
     owner = admin_session.execute(
         text("SELECT tableowner FROM pg_tables WHERE tablename = :t"), {"t": TABLE}
     ).scalar()
-    assert grantees - {owner, "app_user", "postgres"} == set()
+    assert "PUBLIC" not in grantees
+    assert grantees - {owner, "app_user"} == set()
