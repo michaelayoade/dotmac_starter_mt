@@ -1,0 +1,25 @@
+{
+  "product": "academy-fixture",
+  "root": "tree",
+  "families": {
+    "web": [
+      "web"
+    ],
+    "cli": [
+      "cli"
+    ],
+    "workers": [
+      "workers"
+    ],
+    "services": [
+      "services"
+    ],
+    "scripts": [
+      "scripts"
+    ],
+    "models": [
+      "models"
+    ]
+  },
+  "allowed": []
+}

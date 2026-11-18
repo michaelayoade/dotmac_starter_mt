@@ -1,0 +1,15 @@
+{
+  "product": "dotmac_starter_mt",
+  "root": "../..",
+  "families": {
+    "web_routes": ["app/features"],
+    "assembly_and_runtime": ["app"],
+    "modules_and_kernel": ["packages"],
+    "scripts": ["scripts"],
+    "tools": ["tools"]
+  },
+  "allowed": [
+    {"glob": "packages/dotmac-kernel/src/dotmac_kernel/delivery*.py", "premise": "kernel delivery owns dispatch identity, the provider seam and receipts (ADR-0006 5d/5g)"},
+    {"glob": "packages/dotmac-delivery-*/src/**", "premise": "dotmac-delivery-* adapter packages are the only transport owners (ADR-0006 5f)"}
+  ]
+}

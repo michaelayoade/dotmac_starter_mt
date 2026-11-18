@@ -133,6 +133,10 @@ rehearsal-status-check: ## Fail if the GENERATED Lane 3 status document drifted
 	poetry run python scripts/generate_rehearsal_status.py --check
 module-catalog: ## Regenerate the composable-module discovery catalogue
 	poetry run python scripts/module_catalog.py
+comms-writer-check: ## Product-writer ratchet (ADR-0006 5f, ADR-0018): no product outbox, direct SMTP or inline message copy
+	poetry run python scripts/comms_writer_ratchet.py --check --config tests/architecture/comms_writer_ratchet_config.json --backlog tests/architecture/comms_writer_backlog_starter.json
+comms-writer-baseline: ## Regenerate the Starter product-writer backlog (commit the diff in the same change)
+	poetry run python scripts/comms_writer_ratchet.py --write-backlog --config tests/architecture/comms_writer_ratchet_config.json --backlog tests/architecture/comms_writer_backlog_starter.json
 module-catalog-check: ## Fail if the committed module catalogue is stale
 	poetry run python scripts/module_catalog.py --check
 native-check: ## Verify generated native build hooks and pinned inputs
@@ -142,7 +146,7 @@ poetry-lock-check: ## Exact Poetry pin + committed root lock (never regenerates)
 	poetry check --lock
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check native-check manifest-digest-check product-writer-check rehearsal-status-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
+check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check native-check manifest-digest-check product-writer-check comms-writer-check rehearsal-status-check deployment-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + published manifest digests + design-system assets + deployment descriptor
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
