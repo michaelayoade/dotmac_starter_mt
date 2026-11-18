@@ -1987,3 +1987,48 @@ def test_no_second_person_is_required_to_declare_or_admit(db: Session) -> None:
         db, evidence, command=_credit_command(evidence, admitted_by="user:solo")
     )
     assert credit.approved_by == credit.submitted_by == "user:solo"
+
+
+# --- review fixes: replay identity, unproven credit hook ------------------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"credit_number": "HCN-OTHER"},
+        {"evidence_reference": "finance:other#1"},
+        {"admitted_by": "user:someone-else"},
+    ],
+)
+def test_a_credit_replay_with_other_number_reference_or_actor_is_a_conflict(
+    db: Session, change: dict[str, str]
+) -> None:
+    _, evidence = _overpaid_case(db)
+    first = _admit_credit(db, evidence)
+    with pytest.raises(Conflict, match="different permanent historical evidence"):
+        _admit_credit(
+            db,
+            evidence,
+            key="a6:hc:replay",
+            command=_credit_command(evidence, **change),
+        )
+    with pytest.raises(Conflict, match="different permanent historical evidence"):
+        _admit_credit(
+            db, evidence, key="a6:hc", command=_credit_command(evidence, **change)
+        )
+    # The identical command still replays.
+    assert _admit_credit(db, evidence, key="a6:hc:again").id == first.id
+    assert _count(db, models.CreditNote) == 1
+
+
+def test_a_credit_with_deferral_tax_on_unproven_settled_history_is_refused(
+    db: Session,
+) -> None:
+    _declare(db)
+    invoice, _evidence, _ob = _settled_with_deferral(db)
+    with pytest.raises(InvalidTransition) as caught:
+        _credit(db, invoice=invoice, net="100", tax="10")
+    assert caught.value.code == "historical_deferral_unproven"
+    # Once the position is admitted the same credit is accepted.
+    _admit_deferral(db, _deferral_evidence(invoice, _evidence.source_invoice_id))
+    _credit(db, invoice=invoice, net="100", tax="10")

@@ -53,6 +53,12 @@ any new command (Michael, 2026-11-17: maker-checker is optional and off).
   changes. Its downgrade refuses once any row exists. The revision id is shortened
   from the design's `pa_0006_tax_release_history_credit`, which exceeds the 32-character
   `alembic_version.version_num`.
+- Review hardening: a historical-credit replay with another credit number, evidence
+  reference or admitting actor is a conflict; credit approval refuses deferral tax on
+  unproven settled history (`historical_deferral_unproven`); `apply_credit_note` and
+  `reverse_supplier_payment` take the invoice lock (payment, obligations, invoices in
+  id order); both historical admission paths queue on a PostgreSQL advisory lock keyed
+  by (tenant, legacy settlement id).
 - Kernel floor unchanged at a103.
 
 ## 0.1.0a5 — unreleased

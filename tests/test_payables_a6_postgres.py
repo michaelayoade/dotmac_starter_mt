@@ -456,9 +456,9 @@ class _Fixed:
         return self.evidence
 
 
-def _admit_settled_with_deferral(
-    admin_url: str, tenant: uuid.UUID, invoice_id: uuid.UUID
-) -> HistoricalTaxDeferralCommand:
+def _settled_admission(
+    db, tenant: uuid.UUID, invoice_id: uuid.UUID, settlement_id: str
+):
     from dotmac_payables.contracts import (
         HistoricalSettledInvoiceCommand,
         HistoricalSettledInvoiceEvidence,
@@ -466,65 +466,71 @@ def _admit_settled_with_deferral(
     )
     from dotmac_payables.service import admit_historical_settled_invoice
 
+    invoice = db.get(pm.SupplierInvoice, invoice_id)
+    names = (
+        "number supplier_ref supplier_name_snapshot supplier_document_number "
+        "invoice_date received_date currency_code exchange_rate subtotal "
+        "tax_amount total_amount liability_account_ref procurement_ref "
+        "receipt_evidence_fingerprint submitted_by submitted_at approved_by "
+        "approved_at approval_reference"
+    ).split()
+    evidence = HistoricalSettledInvoiceEvidence(
+        tenant_id=tenant,
+        source_owner="legacy",
+        source_invoice_id=f"src:{invoice_id}",
+        source_snapshot_sha256="a" * 64,
+        invoice_id=invoice_id,
+        source_status="POSTED",
+        invoice_type="STANDARD",
+        settlements=(
+            HistoricalSettlement(
+                settlement_id,
+                "PAY-1",
+                date(2026, 8, 20),
+                Decimal("500.00"),
+                Decimal("0.00"),
+                "NGN",
+                Decimal("1"),
+                "cv1:" + "1" * 64,
+                "legacy:p1",
+                "v2:p1",
+            ),
+        ),
+        settled_amount=Decimal("500.00"),
+        residual_amount=Decimal("575.00"),
+        withholding_tax_amount=Decimal("0.00"),
+        prepayment_amount=Decimal(0),
+        due_date=date(2026, 8, 31),
+        original_posted_at=datetime(2026, 8, 1, tzinfo=UTC),
+        source_journal_ref="s",
+        destination_journal_ref="d",
+        accounting_evidence_fingerprint="cv1:" + "b" * 64,
+        facts_fingerprint="cv1:" + "c" * 64,
+        **{name: getattr(invoice, name) for name in names},
+    )
+    return admit_historical_settled_invoice(
+        db,
+        scope=TenantScope(tenant),
+        command=HistoricalSettledInvoiceCommand(
+            "legacy",
+            evidence.source_invoice_id,
+            invoice_id,
+            "a" * 64,
+            evidence.fingerprint(),
+        ),
+        verifier=_Fixed(evidence),
+        idempotency_key=f"pg:settled:{invoice_id}",
+        idempotency_expires_at=None,
+        admitted_at=datetime(2026, 10, 1, tzinfo=UTC),
+    )
+
+
+def _admit_settled_with_deferral(
+    admin_url: str, tenant: uuid.UUID, invoice_id: uuid.UUID
+) -> HistoricalTaxDeferralCommand:
     engine = create_engine(admin_url)
     with Session(engine) as db:
-        invoice = db.get(pm.SupplierInvoice, invoice_id)
-        names = (
-            "number supplier_ref supplier_name_snapshot supplier_document_number "
-            "invoice_date received_date currency_code exchange_rate subtotal "
-            "tax_amount total_amount liability_account_ref procurement_ref "
-            "receipt_evidence_fingerprint submitted_by submitted_at approved_by "
-            "approved_at approval_reference"
-        ).split()
-        evidence = HistoricalSettledInvoiceEvidence(
-            tenant_id=tenant,
-            source_owner="legacy",
-            source_invoice_id=f"src:{invoice_id}",
-            source_snapshot_sha256="a" * 64,
-            invoice_id=invoice_id,
-            source_status="POSTED",
-            invoice_type="STANDARD",
-            settlements=(
-                HistoricalSettlement(
-                    f"alloc:{invoice_id}",
-                    "PAY-1",
-                    date(2026, 8, 20),
-                    Decimal("500.00"),
-                    Decimal("0.00"),
-                    "NGN",
-                    Decimal("1"),
-                    "cv1:" + "1" * 64,
-                    "legacy:p1",
-                    "v2:p1",
-                ),
-            ),
-            settled_amount=Decimal("500.00"),
-            residual_amount=Decimal("575.00"),
-            withholding_tax_amount=Decimal("0.00"),
-            prepayment_amount=Decimal(0),
-            due_date=date(2026, 8, 31),
-            original_posted_at=datetime(2026, 8, 1, tzinfo=UTC),
-            source_journal_ref="s",
-            destination_journal_ref="d",
-            accounting_evidence_fingerprint="cv1:" + "b" * 64,
-            facts_fingerprint="cv1:" + "c" * 64,
-            **{name: getattr(invoice, name) for name in names},
-        )
-        admit_historical_settled_invoice(
-            db,
-            scope=TenantScope(tenant),
-            command=HistoricalSettledInvoiceCommand(
-                "legacy",
-                evidence.source_invoice_id,
-                invoice_id,
-                "a" * 64,
-                evidence.fingerprint(),
-            ),
-            verifier=_Fixed(evidence),
-            idempotency_key=f"pg:settled:{invoice_id}",
-            idempotency_expires_at=None,
-            admitted_at=datetime(2026, 10, 1, tzinfo=UTC),
-        )
+        _settled_admission(db, tenant, invoice_id, f"alloc:{invoice_id}")
         db.commit()
     engine.dispose()
     return HistoricalTaxDeferralCommand(
@@ -899,3 +905,43 @@ def test_pa_0006_downgrade_is_allowed_empty_and_refused_once_populated(
                 migration.downgrade()
         transaction.rollback()
     engine.dispose()
+
+
+def test_concurrent_admissions_of_one_settlement_id_admit_exactly_one(
+    migrated_finance: tuple[str, str],
+) -> None:
+    """The advisory lock serialises the two admission paths on a settlement id."""
+    from dataclasses import replace
+
+    admin_url, _ = migrated_finance
+    tenant, _ = _seed_tenants(admin_url)
+    settled_invoice, _ = _invoice(admin_url, tenant, imported=True)
+    _, credit_evidence = _credit_fixture(admin_url, tenant)
+    shared = "alloc:shared-settlement"
+    clash = replace(credit_evidence.settlements[0], source_settlement_id=shared)
+    credit_evidence = replace(credit_evidence, settlements=(clash,))
+
+    def credit(db):
+        return _admit_credit(db, tenant, credit_evidence, key="pg:race:credit").id
+
+    def settled(db):
+        return _settled_admission(db, tenant, settled_invoice, shared).id
+
+    one, two = _run_pair(admin_url, credit, settled)
+    outcomes = sorted([one[0], two[0]])
+    assert outcomes == ["err", "ok"], (one, two)
+    failed = one if one[0] == "err" else two
+    assert isinstance(failed[1], Conflict), failed
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        taken = conn.scalar(
+            text(
+                "SELECT (SELECT count(*) FROM mod_payables.historical_settlements"
+                " WHERE source_settlement_id=:s)"
+                " + (SELECT count(*) FROM mod_payables.historical_credit_settlements"
+                " WHERE source_settlement_id=:s)"
+            ),
+            {"s": shared},
+        )
+    engine.dispose()
+    assert taken == 1
