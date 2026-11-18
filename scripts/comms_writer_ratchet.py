@@ -203,7 +203,7 @@ def _is_expr_copy(node: ast.AST) -> bool:
         return True
     if isinstance(node, ast.Constant):
         return isinstance(node.value, str) and _is_copy_literal(node.value)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add | ast.Mod):
         return _has_str_literal(node)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
         if node.func.attr in {"format", "join", "format_map", "strip", "replace"}:
@@ -234,7 +234,7 @@ def _callee_name(func: ast.expr) -> str | None:
 def _target_names(target: ast.expr) -> list[str]:
     if isinstance(target, ast.Name):
         return [target.id]
-    if isinstance(target, (ast.Tuple, ast.List)):
+    if isinstance(target, ast.Tuple | ast.List):
         out: list[str] = []
         for elt in target.elts:
             out.extend(_target_names(elt))
@@ -251,7 +251,7 @@ class _Scanner(ast.NodeVisitor):
         self.copy_functions: set[str] = {
             n.name
             for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
             and not _ENQUEUE_DEF.match(n.name)
             and _has_copy_literal(n)
         }
