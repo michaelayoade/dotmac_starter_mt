@@ -132,6 +132,18 @@ def _assembly_manifests() -> list[FeatureManifest]:
     return load_manifests(FEATURE_MODULES)
 
 
+def _declared_setting_domains() -> set[str]:
+    """Domains declared by the assembly's features AND its installed modules
+    (a module such as template-studio owns its own setting domain)."""
+    from app.assembly import assembly
+
+    return {
+        str(d)
+        for m in (*_assembly_manifests(), *assembly.modules)
+        for d in getattr(m, "setting_domains", ())
+    }
+
+
 def _restore_process_declarations() -> None:
     """`create_app` installs the PROCESS-active catalogues and surface globals.
     A test that boots a synthetic assembly must put the real ones back, or it
@@ -328,7 +340,7 @@ def test_every_registered_spec_names_a_declared_domain() -> None:
     perform this check itself: the spec registry is process-global while a
     domain registry belongs to ONE assembly, so this belongs in CI over the
     real assembly rather than at every boot."""
-    declared = {str(d) for m in _assembly_manifests() for d in m.setting_domains}
+    declared = _declared_setting_domains()
     undeclared = sorted({str(spec.domain) for spec in all_specs()} - declared)
     assert not undeclared, (
         f"Registered setting spec(s) name undeclared domain(s): {undeclared}. "
@@ -344,7 +356,7 @@ def test_no_orphan_setting_domain_declarations() -> None:
     unrelated string, so a grep would pass for a domain nothing declares a
     setting in.
     """
-    declared = {str(d) for m in _assembly_manifests() for d in m.setting_domains}
+    declared = _declared_setting_domains()
     used = {str(spec.domain) for spec in all_specs()}
     orphans = sorted(declared - used)
     assert not orphans, (

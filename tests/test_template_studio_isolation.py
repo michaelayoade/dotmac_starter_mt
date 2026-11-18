@@ -247,3 +247,94 @@ def test_composite_fk_blocks_a_cross_tenant_version_even_as_admin(
             text("DELETE FROM mod_tstudio.templates WHERE id = :id"), {"id": str(tid)}
         )
         admin_session.commit()
+
+
+# ── `html_body` (ts_0004): the new column inherits the table's isolation ─────
+
+_SECRET_HTML = "<p>tenant A's confidential html part</p>"
+
+
+def test_html_body_in_tenant_a_is_invisible_and_unwritable_by_tenant_b(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        tid = _insert_template(a, tenant_id=tenant_a.id, slug="welcome-html")
+        vid = uuid.uuid4()
+        a.execute(
+            text(
+                "INSERT INTO mod_tstudio.template_versions "
+                "(id, tenant_id, template_id, version, body, html_body, variables) "
+                "VALUES (:id, :tenant_id, :template_id, 1, 'text', :html, '[]'::jsonb)"
+            ),
+            {
+                "id": str(vid),
+                "tenant_id": str(tenant_a.id),
+                "template_id": str(tid),
+                "html": _SECRET_HTML,
+            },
+        )
+        a.commit()
+    finally:
+        a.close()
+
+    try:
+        b = _as_tenant(tenant_sessionmaker, tenant_b.id)
+        try:
+            # Neither the row nor the column is reachable by any projection.
+            assert (
+                b.execute(
+                    text(
+                        "SELECT html_body FROM mod_tstudio.template_versions "
+                        "WHERE id = :id"
+                    ),
+                    {"id": str(vid)},
+                ).fetchall()
+                == []
+            )
+            assert (
+                b.execute(
+                    text(
+                        "SELECT count(*) FROM mod_tstudio.template_versions "
+                        "WHERE html_body = :html"
+                    ),
+                    {"html": _SECRET_HTML},
+                ).scalar_one()
+                == 0
+            )
+            # Nor writable: the policy hides the row from UPDATE as well.
+            updated = b.execute(
+                text(
+                    "UPDATE mod_tstudio.template_versions SET html_body = '<p>x</p>' "
+                    "WHERE id = :id"
+                ),
+                {"id": str(vid)},
+            )
+            assert updated.rowcount == 0
+        finally:
+            b.rollback()
+            b.close()
+
+        a2 = _as_tenant(tenant_sessionmaker, tenant_a.id)
+        try:
+            assert (
+                a2.execute(
+                    text(
+                        "SELECT html_body FROM mod_tstudio.template_versions "
+                        "WHERE id = :id"
+                    ),
+                    {"id": str(vid)},
+                ).scalar_one()
+                == _SECRET_HTML
+            )  # tenant A still reads its own, untouched
+        finally:
+            a2.rollback()
+            a2.close()
+    finally:
+        admin_session.execute(
+            text("DELETE FROM mod_tstudio.templates WHERE id = :id"), {"id": str(tid)}
+        )
+        admin_session.commit()

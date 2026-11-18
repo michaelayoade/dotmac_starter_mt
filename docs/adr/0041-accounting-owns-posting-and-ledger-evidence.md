@@ -161,3 +161,15 @@ whole-transaction retry. The migration does not certify or repair historical
 source content; immutable posted ledger snapshots remain authoritative. Fresh
 and exact released-predecessor PostgreSQL canaries require hosted CI execution.
 This source candidate allocates no publication, adoption or production change.
+
+## Amendment, 2026-11-14 — governed void of orphan drafts
+
+The same unreleased `0.1.0a2` adds `ac_0003_draft_void` and
+`void_draft_journal`. A never-posted DRAFT journal (for example one orphaned by
+a rejected maker-checker request) may be retired with a reason, a requester, a
+distinct approver and an approval reference, recorded as an immutable
+`JOURNAL_VOID` `period_events` row in the same transaction; the database refuses
+the transition without that row or with any posting evidence. POSTED and
+REVERSED journals are never voided: correction is reversal only. VOID journals
+stay frozen and keep their source identity. Downgrade refuses once such rows
+exist.

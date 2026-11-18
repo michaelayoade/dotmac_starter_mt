@@ -36,3 +36,52 @@ run-total fields, migrations, shadow runs or new authority are introduced.
 
 ERP adoption must pin a published successor and supply persisted scalar facts
 after flush. This declaration is not publication or ERP adoption evidence.
+
+The declared `0.1.0a3` successor adds read-only GL consequence facts
+(`dotmac_payroll.consequences`). `PayrollAccountingConsequence` mirrors the
+payables `AccountingConsequence` field names: `source`
+(`PayrollConsequenceSource`: owner `payroll`, document_kind `payroll_run` or
+`payroll_liability_settlement`, document_id, version `1`, fingerprint),
+`posting_date`, `description`, `currency_code`, `entries`
+(`PayrollAccountingEntry`: account_ref, debit, credit, description,
+dimension_refs) and `fingerprint` (sha256 of the content). Extras:
+`minor_units` and `idempotency_key`.
+
+`build_run_accounting_consequence` turns a finalized run into one balanced fact
+(Dr earning and employer-liability expense; Cr deduction/employer liability
+accounts; Cr the configured net payable account) dated at the run period end,
+and refuses if component liability rows drift from the calculation lines.
+`build_liability_settlement_consequence` turns a recorded settlement or
+statutory remittance into Dr liability account / Cr a bank GL ref, dated by an
+explicit caller-supplied `posting_date` (the bank value date, included in the
+fingerprint). Both call `db.flush()` and take no lock: finalized runs are
+immutable.
+
+Payroll stores no exchange rate, so the facts have no `exchange_rate` and
+adopters must refuse a non-functional currency. Payroll writes no journals,
+moves no money and calls no provider; there is no migration. This declaration
+is not publication evidence.
+
+The declared `0.1.0a4` successor adds a per-rule deduction `settlement_mode`
+(`external`, the default, or `internal_recovery`), the `cancel_payroll_run`
+owner command and mid-month-leaver assignment lookup at
+min(period end, assignment end). An internal recovery is recorded at finalize as
+already recovered against the employee reference and the asset account ref (for
+example a staff loan); no outstanding external payable is created,
+`record_liability_settlement` refuses it, and the run consequence still credits
+the asset ref. Cancelling a draft or approved run stores actor, instant and a
+mandatory reason; a finalized run cannot be cancelled. The additive migration
+is `py_0002_mode_and_run_cancel`. This declaration is not publication
+evidence.
+
+The declared `0.1.0a5` successor adds `reverse_liability_settlement`, the
+governed correction for a bank-returned salary credit: whole settlement only,
+mandatory bank return reference and reason, a reverser different from the
+recorder, refused for internal recoveries and for liabilities the settlement
+does not fully settle. It inserts an append-only reversal row and reopens the
+liability (`outstanding`, settled amount reduced) so the payee can be paid again
+under a new settlement reference. `build_settlement_reversal_consequence`
+returns the balanced fact Dr bank cash GL / Cr liability account for the
+assembly to post. The additive migration is `py_0003_settlement_reversal`; its
+downgrade refuses once a reversal exists. This declaration is not publication
+evidence.

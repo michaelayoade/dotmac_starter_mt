@@ -7690,6 +7690,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-accounting ──
+    "dotmac-accounting-v0.1.0a2": (
+        "dotmac-accounting",
+        "adf15837767e3a013d662c0af85ff299c24ef9a9",
+        {
+            "ac_0001_accounting.py": (
+                "ed2aedd04df0c7446ae7a7b90d6e97d40c2f352f806b9c8eba26558521ef686e"
+            ),
+            "ac_0002_posted_content.py": (
+                "fc9dcf698fa6cfc32e72dc48767d1e03dd2043ac33b75fe998660cf1a111373d"
+            ),
+            "ac_0003_draft_void.py": (
+                "ae340a29f4de0356436bb74a5c49038a97e8de5f8c0af1a9c973714aa22d5183"
+            ),
+        },
+    ),
     "dotmac-accounting-v0.1.0a1": (
         "dotmac-accounting",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -8011,6 +8026,45 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a5": (
+        "dotmac-payables",
+        "6ed9ab5cd1067916229c8993dafbccd5ccc0e682",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+            "pa_0004_supplier_payments.py": (
+                "1228dca6a16fda7c3ab458d4144e0f3d74838029355213c3fb61c174a8af772b"
+            ),
+            "pa_0005_reversal_settled_history.py": (
+                "1cf9e92760e2a8406f5e7bceb2dd81bd774a03795bde7abc537989f7031ab4cf"
+            ),
+        },
+    ),
+    "dotmac-payables-v0.1.0a4": (
+        "dotmac-payables",
+        "fdf6cb3cc5cf850135492c0869ed9badb76c84a5",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+            "pa_0004_supplier_payments.py": (
+                "1228dca6a16fda7c3ab458d4144e0f3d74838029355213c3fb61c174a8af772b"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a3": (
         "dotmac-payables",
         "ec7af09897c8123067344b57216ff643fafb09d1",
@@ -8048,6 +8102,42 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a5": (
+        "dotmac-payroll",
+        "c983358a8f8387fec57507d4d15a258574e80c0b",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+            "py_0002_mode_and_run_cancel.py": (
+                "8743517c31f90ec941bf57a6ddb93040c4b2b468c06bec0b633b0900e2805135"
+            ),
+            "py_0003_settlement_reversal.py": (
+                "4ef14914aab73e7b40ba21f060a05eba5878bfc7621534618c17ac68efc42135"
+            ),
+        },
+    ),
+    "dotmac-payroll-v0.1.0a4": (
+        "dotmac-payroll",
+        "469f60b47dee3e54cd2410c411c164fa591e9775",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+            "py_0002_mode_and_run_cancel.py": (
+                "8743517c31f90ec941bf57a6ddb93040c4b2b468c06bec0b633b0900e2805135"
+            ),
+        },
+    ),
+    "dotmac-payroll-v0.1.0a3": (
+        "dotmac-payroll",
+        "8b9b7e7cdf58df4d9a68c3112039658521df35fe",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+        },
+    ),
     "dotmac-payroll-v0.1.0a2": (
         "dotmac-payroll",
         "9ee4bdb4707ae250a7e64e3beb53c8e7aa17c0fa",
@@ -8688,9 +8778,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "su_0006_pending_validity.py",
         }
     ),
-    # `bi_0013` and `bi_0014` shipped in billing 0.1.0a11 (published) and are
-    # frozen. `bi_0015` to `bi_0017` are a12's, still editable until a12 is tagged.
-    "dotmac-billing": frozenset(),
+    # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
+    # frozen. `bi_0018` (account terms) is a13's, editable until a13 is tagged.
+    "dotmac-billing": frozenset({"bi_0018_account_terms.py"}),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8704,7 +8794,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `dotmac-service-access-policy` 0.1.0a2 is tagged.
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
-    "dotmac-template-studio": frozenset(),
+    # `ts_0004` adds the nullable html part column; still editable until a
+    # release tags a template-studio version carrying it.
+    "dotmac-template-studio": frozenset({"ts_0004_html_body.py"}),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
@@ -8712,7 +8804,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # remains editable until a verified published tag carries it and its digest
     # is recorded above.
     "dotmac-kernel": frozenset(),
-    "dotmac-accounting": frozenset({"ac_0002_posted_content.py"}),
+    "dotmac-accounting": frozenset(),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
@@ -8739,7 +8831,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
+    # `pa_0005` adds payment reversal, settled historical admission and invoice
+    # recognition; still editable until `dotmac-payables` 0.1.0a5 is tagged.
     "dotmac-payables": frozenset(),
+    # `py_0003` adds the settlement reversal table; editable until
+    # `dotmac-payroll` 0.1.0a5 is tagged.
     "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until

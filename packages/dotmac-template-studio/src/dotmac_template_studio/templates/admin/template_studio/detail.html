@@ -17,7 +17,19 @@
     <code>{{ template.slug }}</code> &middot; {{ template.channel }}
     &middot; context <code>{{ template.context }}</code>
     &middot; created {{ template.created_at | local_date }}
+    {% if not template.is_active %}&middot; <strong>inactive</strong>{% endif %}
   </p>
+  <form method="post" action="{{ surface_url('set_status', template_id=template.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="active" value="{{ '1' if not template.is_active else '0' }}">
+    <button type="submit"
+            style="border-radius:var(--dmui-radius-md); border:1px solid var(--dmui-border-default);
+                   background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
+                   padding:var(--dmui-space-3xs) var(--dmui-space-xs); font-size:var(--dmui-font-size-xs);
+                   cursor:pointer;">
+      {% if template.is_active %}Deactivate (stop rendering; versions are kept){% else %}Reactivate{% endif %}
+    </button>
+  </form>
 </div>
 
 <div style="display:flex; flex-direction:column; gap:var(--dmui-space-lg);">
@@ -34,7 +46,7 @@
           hx-target="#versions-panel" hx-swap="outerHTML"
           style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="text" name="subject" placeholder="Subject"
+      <input type="text" name="subject" placeholder="Subject" value="{{ form.get('subject', '') }}"
              style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                     border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                     background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
@@ -42,7 +54,12 @@
                 style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                        border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                        background:var(--dmui-surface-primary); color:var(--dmui-text-primary);
-                       font-family:var(--dmui-font-family-mono);"></textarea>
+                       font-family:var(--dmui-font-family-mono);">{{ form.get('body', '') }}</textarea>
+      <textarea name="html_body" rows="8" placeholder="Optional HTML part"
+                style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                       border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                       background:var(--dmui-surface-primary); color:var(--dmui-text-primary);
+                       font-family:var(--dmui-font-family-mono);">{{ form.get('html_body', '') }}</textarea>
       <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
         Single-brace placeholders only. Double braces are rejected when you save —
         they are not substituted at send time and would reach the recipient

@@ -302,6 +302,15 @@ disposition = "not_an_executor"
 premise = "commands no deployment verb, directly or through any in-tree callee"
 
 [[entrypoint]]
+name = "workflow:no-new-public-ip-literals"
+family = "workflow"
+path = ".github/workflows/no-new-public-ip-literals.yml"
+trigger = "pull_request"
+credential = "none"
+disposition = "not_an_executor"
+premise = "reads the pull request's own diff with git and reports; commands no deployment verb, directly or through any in-tree callee"
+
+[[entrypoint]]
 name = "workflow:foundation-candidate"
 family = "workflow"
 path = ".github/workflows/foundation-candidate.yml"

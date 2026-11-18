@@ -149,7 +149,7 @@
       "package_dir": "packages/dotmac-accounting",
       "import_name": "dotmac_accounting",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a85",
+      "kernel_floor": "0.1.0a98",
       "db_schema": "mod_accounting",
       "tag_prefix": "dotmac-accounting-v",
       "wheel_contents": {
@@ -160,6 +160,7 @@
           "dotmac_accounting/migrations/__init__.py",
           "dotmac_accounting/migrations/versions/ac_0001_accounting.py",
           "dotmac_accounting/migrations/versions/ac_0002_posted_content.py",
+          "dotmac_accounting/migrations/versions/ac_0003_draft_void.py",
           "dotmac_accounting/models.py",
           "dotmac_accounting/service.py"
         ],
@@ -515,6 +516,8 @@
           "dotmac_billing/migrations/versions/bi_0015_line_price_version_fk.py",
           "dotmac_billing/migrations/versions/bi_0016_withholding_components.py",
           "dotmac_billing/migrations/versions/bi_0017_open_documents_index.py",
+          "dotmac_billing/migrations/versions/bi_0018_account_terms.py",
+          "dotmac_billing/account_terms.py",
           "dotmac_billing/account_statement.py"
         ],
         "forbidden_prefixes": [
@@ -1696,7 +1699,9 @@
           "dotmac_template_studio/service.py",
           "dotmac_template_studio/templates/admin/template_studio/index.html",
           "dotmac_template_studio/web.py",
-          "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py"
+          "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py",
+          "dotmac_template_studio/migrations/versions/ts_0004_html_body.py",
+          "dotmac_template_studio/htmlsanitize.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -1707,6 +1712,7 @@
         "allowed_requires": [
           "dotmac-kernel",
           "fastapi",
+          "nh3",
           "pydantic",
           "sqlalchemy",
           "python"
@@ -2490,6 +2496,8 @@
           "dotmac_payables/migrations/versions/pa_0001_payables.py",
           "dotmac_payables/migrations/versions/pa_0002_optional_supplier_doc.py",
           "dotmac_payables/migrations/versions/pa_0003_historical_invoice.py",
+          "dotmac_payables/migrations/versions/pa_0004_supplier_payments.py",
+          "dotmac_payables/migrations/versions/pa_0005_reversal_settled_history.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],
@@ -2568,10 +2576,13 @@
       "wheel_contents": {
         "required": [
           "dotmac_payroll/py.typed",
+          "dotmac_payroll/consequences.py",
           "dotmac_payroll/contracts.py",
           "dotmac_payroll/manifest.py",
           "dotmac_payroll/migrations/__init__.py",
           "dotmac_payroll/migrations/versions/py_0001_payroll.py",
+          "dotmac_payroll/migrations/versions/py_0002_mode_and_run_cancel.py",
+          "dotmac_payroll/migrations/versions/py_0003_settlement_reversal.py",
           "dotmac_payroll/models.py",
           "dotmac_payroll/service.py"
         ],

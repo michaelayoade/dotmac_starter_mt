@@ -29,6 +29,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 SCHEMA = module_schema("payroll")
 MONEY = Numeric(20, 6)
 RATE = Numeric(12, 8)
+SETTLEMENT_MODES = ("external", "internal_recovery")
+SETTLEMENT_MODE_CHECK = "settlement_mode IN ('external','internal_recovery')"
+CANCEL_PRESENT_CHECK = (
+    "status <> 'cancelled' OR (cancelled_by_id IS NOT NULL "
+    "AND cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL)"
+)
+CANCEL_ABSENT_CHECK = (
+    "status = 'cancelled' OR (cancelled_by_id IS NULL "
+    "AND cancelled_at IS NULL AND cancel_reason IS NULL)"
+)
 
 
 class PayComponent(Base, TimestampMixin):
@@ -174,6 +184,9 @@ class PayStructureRule(Base):
             "fixed_amount IS NULL OR fixed_amount >= 0",
             name="ck_pay_structure_rules_fixed_amount",
         ),
+        CheckConstraint(
+            SETTLEMENT_MODE_CHECK, name="ck_pay_structure_rules_settlement_mode"
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -194,6 +207,9 @@ class PayStructureRule(Base):
     fixed_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     rate: Mapped[Decimal | None] = mapped_column(RATE)
     prorates: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    settlement_mode: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="external", server_default="external"
+    )
 
     revision: Mapped[PayStructureRevision] = relationship(back_populates="rules")
     bases: Mapped[list[PayRuleBasis]] = relationship(
@@ -299,6 +315,8 @@ class PayrollRun(Base):
         CheckConstraint(
             "minor_units BETWEEN 0 AND 6", name="ck_payroll_runs_minor_units"
         ),
+        CheckConstraint(CANCEL_PRESENT_CHECK, name="ck_payroll_runs_cancel_present"),
+        CheckConstraint(CANCEL_ABSENT_CHECK, name="ck_payroll_runs_cancel_absent"),
         schema_table_args(SCHEMA),
     )
 
@@ -320,6 +338,9 @@ class PayrollRun(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finalized_by_id: Mapped[UUID | None] = mapped_column(Uuid())
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by_id: Mapped[UUID | None] = mapped_column(Uuid())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class PayrollCalculation(Base):
@@ -417,6 +438,9 @@ class PayrollCalculationLine(Base):
             name="fk_payroll_calculation_lines_component",
         ),
         CheckConstraint("amount >= 0", name="ck_payroll_calculation_lines_amount"),
+        CheckConstraint(
+            SETTLEMENT_MODE_CHECK, name="ck_payroll_calculation_lines_settlement_mode"
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -436,6 +460,9 @@ class PayrollCalculationLine(Base):
     expense_account_ref: Mapped[str | None] = mapped_column(String(240))
     liability_account_ref: Mapped[str | None] = mapped_column(String(240))
     liability_destination_ref: Mapped[str | None] = mapped_column(String(240))
+    settlement_mode: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="external", server_default="external"
+    )
 
 
 class PayrollLiability(Base):
@@ -484,6 +511,9 @@ class PayrollLiability(Base):
         CheckConstraint(
             "minor_units BETWEEN 0 AND 6", name="ck_payroll_liabilities_minor_units"
         ),
+        CheckConstraint(
+            SETTLEMENT_MODE_CHECK, name="ck_payroll_liabilities_settlement_mode"
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -505,6 +535,9 @@ class PayrollLiability(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    settlement_mode: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="external", server_default="external"
     )
 
 
@@ -547,6 +580,60 @@ class PayrollLiabilitySettlement(Base):
     )
 
 
+class PayrollSettlementReversal(Base):
+    """Append-only reversal of one recorded liability settlement (a5).
+
+    A bank-returned salary credit: the money never reached the payee. The
+    settlement row is never updated; this row is the audited correction.
+    """
+
+    __tablename__ = "payroll_settlement_reversals"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_payroll_settlement_reversals_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "settlement_id",
+            name="uq_payroll_settlement_reversals_settlement",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "settlement_id"],
+            [
+                f"{SCHEMA}.payroll_liability_settlements.tenant_id",
+                f"{SCHEMA}.payroll_liability_settlements.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_payroll_settlement_reversals_settlement",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "liability_id"],
+            [
+                f"{SCHEMA}.payroll_liabilities.tenant_id",
+                f"{SCHEMA}.payroll_liabilities.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_payroll_settlement_reversals_liability",
+        ),
+        CheckConstraint("amount > 0", name="ck_payroll_settlement_reversals_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    settlement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    return_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reversed_by_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    reversed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 TENANT_MODELS = (
     PayComponent,
     PayStructure,
@@ -559,10 +646,13 @@ TENANT_MODELS = (
     PayrollCalculationLine,
     PayrollLiability,
     PayrollLiabilitySettlement,
+    PayrollSettlementReversal,
 )
 TENANT_TABLES = tuple(model.__tablename__ for model in TENANT_MODELS)
 
 __all__ = [
+    "TENANT_MODELS",
+    "TENANT_TABLES",
     "EmployeePayAssignment",
     "PayComponent",
     "PayRuleBasis",
@@ -574,6 +664,5 @@ __all__ = [
     "PayrollLiability",
     "PayrollLiabilitySettlement",
     "PayrollRun",
-    "TENANT_MODELS",
-    "TENANT_TABLES",
+    "PayrollSettlementReversal",
 ]

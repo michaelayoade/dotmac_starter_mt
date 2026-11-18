@@ -31,11 +31,76 @@ from dotmac_payables.contracts import (
     CreditNoteStatus,
     InvoiceStatus,
     ObligationStatus,
+    SupplierPaymentStatus,
 )
 
 SCHEMA = module_schema("payables")
 MONEY = Numeric(20, 6)
 RATE = Numeric(20, 10)
+
+# Lifecycle evidence and separation of duties are database invariants as well as
+# service rules, so a writer that bypasses the service still cannot forge them.
+_NO_REVERSAL = (
+    "reversed_by IS NULL AND reversed_at IS NULL AND reversal_reason IS NULL"
+    " AND reversal_date IS NULL"
+)
+_APPROVED_EVIDENCE = (
+    "approved_by IS NOT NULL AND approved_at IS NOT NULL"
+    " AND approval_reference IS NOT NULL"
+)
+_RECORDED_EVIDENCE = (
+    "recorded_by IS NOT NULL AND recorded_at IS NOT NULL"
+    " AND bank_reference IS NOT NULL"
+)
+_NO_RECORDING = "recorded_by IS NULL AND recorded_at IS NULL AND bank_reference IS NULL"
+_NO_CANCEL = "cancelled_by IS NULL AND cancelled_at IS NULL AND cancel_reason IS NULL"
+SUPPLIER_PAYMENT_EVIDENCE_CHECK = (
+    "(status = 'DRAFT' AND approved_by IS NULL AND approved_at IS NULL"
+    " AND approval_reference IS NULL AND "
+    + _NO_RECORDING
+    + " AND "
+    + _NO_CANCEL
+    + " AND "
+    + _NO_REVERSAL
+    + ")"
+    " OR (status = 'APPROVED' AND "
+    + _APPROVED_EVIDENCE
+    + " AND "
+    + _NO_RECORDING
+    + " AND "
+    + _NO_CANCEL
+    + " AND "
+    + _NO_REVERSAL
+    + ")"
+    " OR (status = 'RECORDED' AND "
+    + _APPROVED_EVIDENCE
+    + " AND "
+    + _RECORDED_EVIDENCE
+    + " AND "
+    + _NO_CANCEL
+    + " AND "
+    + _NO_REVERSAL
+    + ")"
+    " OR (status = 'CANCELLED' AND "
+    + _NO_RECORDING
+    + " AND cancelled_by IS NOT NULL AND cancelled_at IS NOT NULL"
+    " AND cancel_reason IS NOT NULL AND " + _NO_REVERSAL + ")"
+    " OR (status = 'REVERSED' AND "
+    + _APPROVED_EVIDENCE
+    + " AND "
+    + _RECORDED_EVIDENCE
+    + " AND "
+    + _NO_CANCEL
+    + " AND reversed_by IS NOT NULL AND reversed_at IS NOT NULL"
+    " AND reversal_reason IS NOT NULL AND reversal_date IS NOT NULL)"
+)
+SUPPLIER_PAYMENT_SOD_CHECK = (
+    "(approved_by IS NULL OR lower(approved_by) <> lower(prepared_by))"
+    " AND (recorded_by IS NULL OR (lower(recorded_by) <> lower(prepared_by)"
+    " AND lower(recorded_by) <> lower(approved_by)))"
+    " AND (reversed_by IS NULL OR (lower(reversed_by) <> lower(recorded_by)"
+    " AND lower(reversed_by) <> lower(approved_by)))"
+)
 
 
 def _enum(enum_type: type[enum.Enum], name: str) -> sa.Enum:
@@ -539,7 +604,283 @@ class HistoricalInvoiceReceipt(Base):
     )
 
 
+class SupplierPayment(Base, TimestampMixin):
+    """A governed proposal to settle supplier obligations from one cash account.
+
+    DRAFT -> APPROVED -> RECORDED, or CANCELLED from DRAFT/APPROVED. RECORDED
+    asserts that money left through an external channel; it is not an execution.
+    """
+
+    __tablename__ = "supplier_payments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_supplier_payments_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id", "number", name="uq_supplier_payments_tenant_number"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "payer_instrument_ref",
+            "bank_reference",
+            name="uq_supplier_payments_bank_reference",
+        ),
+        CheckConstraint(
+            "length(currency_code) = 3", name="ck_supplier_payments_currency"
+        ),
+        CheckConstraint("exchange_rate > 0", name="ck_supplier_payments_rate_positive"),
+        CheckConstraint(
+            "gross_amount > 0 AND wht_amount >= 0 AND wht_amount < gross_amount"
+            " AND net_amount = gross_amount - wht_amount",
+            name="ck_supplier_payments_amounts",
+        ),
+        CheckConstraint(
+            SUPPLIER_PAYMENT_EVIDENCE_CHECK, name="ck_supplier_payments_evidence"
+        ),
+        CheckConstraint(SUPPLIER_PAYMENT_SOD_CHECK, name="ck_supplier_payments_sod"),
+        Index("ix_supplier_payments_tenant_supplier", "tenant_id", "supplier_ref"),
+        Index("ix_supplier_payments_tenant_status", "tenant_id", "status"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    number: Mapped[str] = mapped_column(String(50), nullable=False)
+    supplier_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    supplier_name_snapshot: Mapped[str] = mapped_column(String(255), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    exchange_rate: Mapped[Decimal] = mapped_column(RATE, nullable=False)
+    value_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cash_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    payer_instrument_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    wht_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    net_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[SupplierPaymentStatus] = mapped_column(
+        _enum(SupplierPaymentStatus, "payables_supplier_payment_status"),
+        nullable=False,
+        default=SupplierPaymentStatus.DRAFT,
+        server_default=SupplierPaymentStatus.DRAFT.value,
+    )
+    prepared_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    prepared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    approval_reference: Mapped[str | None] = mapped_column(String(255))
+    approved_by: Mapped[str | None] = mapped_column(String(255))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bank_reference: Mapped[str | None] = mapped_column(String(255))
+    recorded_by: Mapped[str | None] = mapped_column(String(255))
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by: Mapped[str | None] = mapped_column(String(255))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
+    reversed_by: Mapped[str | None] = mapped_column(String(255))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversal_reason: Mapped[str | None] = mapped_column(Text)
+    reversal_date: Mapped[date | None] = mapped_column(Date)
+
+
+class SupplierPaymentAllocation(Base):
+    __tablename__ = "supplier_payment_allocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_supplier_payment_allocations_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "payment_id",
+            "line_number",
+            name="uq_supplier_payment_allocations_number",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "payment_id",
+            "obligation_id",
+            name="uq_supplier_payment_allocations_obligation",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "payment_id"],
+            [f"{SCHEMA}.supplier_payments.tenant_id", f"{SCHEMA}.supplier_payments.id"],
+            ondelete="RESTRICT",
+            name="fk_supplier_payment_allocations_payment",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "obligation_id"],
+            [
+                f"{SCHEMA}.payment_obligations.tenant_id",
+                f"{SCHEMA}.payment_obligations.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_supplier_payment_allocations_obligation",
+        ),
+        CheckConstraint("amount > 0", name="ck_supplier_payment_allocations_amount"),
+        Index(
+            "ix_supplier_payment_allocations_tenant_obligation",
+            "tenant_id",
+            "obligation_id",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    payment_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    obligation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class SupplierPaymentWithholding(Base):
+    __tablename__ = "supplier_payment_withholdings"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_supplier_payment_withholdings_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "payment_id",
+            "line_number",
+            name="uq_supplier_payment_withholdings_number",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "payment_id"],
+            [f"{SCHEMA}.supplier_payments.tenant_id", f"{SCHEMA}.supplier_payments.id"],
+            ondelete="RESTRICT",
+            name="fk_supplier_payment_withholdings_payment",
+        ),
+        CheckConstraint("amount > 0", name="ck_supplier_payment_withholdings_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    payment_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+    certificate_ref: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class InvoiceRecognition(Base):
+    """Permanent record that an imported APPROVED invoice was recognized."""
+
+    __tablename__ = "invoice_recognitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_invoice_recognitions_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "invoice_id", name="uq_invoice_recognitions_invoice"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_owner",
+            "source_invoice_id",
+            name="uq_invoice_recognitions_source",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            ondelete="RESTRICT",
+            name="fk_invoice_recognitions_invoice",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    evidence_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    recognized_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    approval_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_invoice_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    facts_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    recognized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class HistoricalSettlementRecord(Base):
+    """One immutable legacy settlement of an admitted historical invoice."""
+
+    __tablename__ = "historical_settlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_historical_settlements_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "receipt_id",
+            "line_number",
+            name="uq_historical_settlements_number",
+        ),
+        # A legacy allocation settles exactly one invoice, across all admissions.
+        UniqueConstraint(
+            "tenant_id",
+            "source_settlement_id",
+            name="uq_historical_settlements_source",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "receipt_id"],
+            [
+                f"{SCHEMA}.historical_invoice_receipts.tenant_id",
+                f"{SCHEMA}.historical_invoice_receipts.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_historical_settlements_receipt",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "obligation_id"],
+            [
+                f"{SCHEMA}.payment_obligations.tenant_id",
+                f"{SCHEMA}.payment_obligations.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_historical_settlements_obligation",
+        ),
+        CheckConstraint(
+            "applied_amount > 0 AND withholding_amount >= 0"
+            " AND withholding_amount <= applied_amount",
+            name="ck_historical_settlements_amounts",
+        ),
+        CheckConstraint("exchange_rate > 0", name="ck_historical_settlements_rate"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    obligation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_settlement_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    payment_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    settled_on: Mapped[date] = mapped_column(Date, nullable=False)
+    applied_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    withholding_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    exchange_rate: Mapped[Decimal] = mapped_column(RATE, nullable=False)
+    source_row_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    source_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    destination_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 ALL_MODELS = (
+    InvoiceRecognition,
+    HistoricalSettlementRecord,
     HistoricalInvoiceReceipt,
     SupplierInvoice,
     SupplierInvoiceLine,
@@ -550,6 +891,9 @@ ALL_MODELS = (
     CreditApplication,
     SettlementObservation,
     AccountingReceipt,
+    SupplierPayment,
+    SupplierPaymentAllocation,
+    SupplierPaymentWithholding,
 )
 TABLES = tuple(model.__tablename__ for model in ALL_MODELS)
 
@@ -561,6 +905,8 @@ def metadata_table(name: str) -> sa.Table:
 __all__ = [
     "ALL_MODELS",
     "HistoricalInvoiceReceipt",
+    "HistoricalSettlementRecord",
+    "InvoiceRecognition",
     "TABLES",
     "AccountingReceipt",
     "CreditApplication",
@@ -571,5 +917,10 @@ __all__ = [
     "SettlementObservation",
     "SupplierInvoice",
     "SupplierInvoiceLine",
+    "SupplierPayment",
+    "SupplierPaymentAllocation",
+    "SupplierPaymentWithholding",
+    "SUPPLIER_PAYMENT_EVIDENCE_CHECK",
+    "SUPPLIER_PAYMENT_SOD_CHECK",
     "metadata_table",
 ]

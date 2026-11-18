@@ -380,7 +380,13 @@
     "dotmac_kernel.delivery_providers": {
       "classification": "supported",
       "exports": [
+        "ALLOWED_ATTACHMENT_CONTENT_TYPES",
+        "ALLOWED_HEADERS",
+        "AttachmentRef",
         "DeliveryProvider",
+        "FEATURE_ATTACHMENTS",
+        "FEATURE_HTML",
+        "MAX_PART_BYTES",
         "OutboundMessage",
         "ProviderResult",
         "Sent",
@@ -1074,6 +1080,7 @@
         "MIGRATION_OWNER_LEDGER_DIGEST",
         "MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN",
         "MODULE_SCHEMA_PREFIX",
+        "MONEY_FLOWS_MIGRATION_OWNER",
         "MigrationOwner",
         "NamespaceAllocationError",
         "NamespaceError",

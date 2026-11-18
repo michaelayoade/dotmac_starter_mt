@@ -374,6 +374,10 @@ def test_empty_historical_receipt_migration_can_downgrade(
     engine = create_engine(migrated_finance[0])
     with engine.begin() as conn:
         with Operations.context(MigrationContext.configure(conn)):
+            # pa_0005's historical_settlements depends on the receipts table.
+            import_module(
+                "dotmac_payables.migrations.versions.pa_0005_reversal_settled_history"
+            ).downgrade()
             migration.downgrade()
         assert (
             conn.scalar(
@@ -702,3 +706,1214 @@ def test_historical_admission_concurrency_rls_fk_and_admin_immutability(
             )
     admin.dispose()
     app.dispose()
+
+
+def _seed_payment(admin_url: str, tenant: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
+    """A DRAFT supplier payment with one allocation; returns (payment, obligation)."""
+    engine = create_engine(admin_url)
+    invoice = uuid.uuid4()
+    obligation, payment = uuid.uuid4(), uuid.uuid4()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO mod_payables.supplier_invoices "
+                "(id,tenant_id,number,supplier_ref,supplier_name_snapshot,"
+                "supplier_document_number,invoice_date,received_date,currency_code,"
+                "exchange_rate,liability_account_ref,subtotal,tax_amount,total_amount,"
+                "payment_schedule,request_fingerprint,status,created_at) VALUES "
+                "(:id,:tenant,'PINV-PAY','party:s','S','D-1',DATE '2026-08-01',"
+                "DATE '2026-08-02','NGN',1,'account:2000',100,0,100,"
+                '\'[{"due_date":"2026-08-31","amount":"100"}]\'::jsonb,'
+                ":fp,'DRAFT',now())"
+            ),
+            {"id": invoice, "tenant": tenant, "fp": "a" * 64},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_payables.payment_obligations "
+                "(id,tenant_id,invoice_id,sequence,due_date,currency_code,"
+                "original_amount,outstanding_amount,status) VALUES "
+                "(:id,:tenant,:invoice,1,DATE '2026-08-31','NGN',100,100,'OPEN')"
+            ),
+            {"id": obligation, "tenant": tenant, "invoice": invoice},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_payables.supplier_payments "
+                "(id,tenant_id,number,supplier_ref,supplier_name_snapshot,"
+                "currency_code,exchange_rate,value_date,cash_account_ref,"
+                "payer_instrument_ref,gross_amount,wht_amount,net_amount,"
+                "request_fingerprint,status,prepared_by,prepared_at) VALUES "
+                "(:id,:tenant,'SPAY-1','party:s','S','NGN',1,DATE '2026-09-02',"
+                "'account:1010','instrument:1',100,0,100,:fp,'DRAFT','user:p',now())"
+            ),
+            {"id": payment, "tenant": tenant, "fp": "a" * 64},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_payables.supplier_payment_allocations "
+                "(id,tenant_id,payment_id,line_number,obligation_id,amount,created_at) "
+                "VALUES (:id,:tenant,:payment,1,:obligation,100,now())"
+            ),
+            {
+                "id": uuid.uuid4(),
+                "tenant": tenant,
+                "payment": payment,
+                "obligation": obligation,
+            },
+        )
+    engine.dispose()
+    return payment, obligation
+
+
+def test_supplier_payment_lifecycle_is_enforced_by_the_database(
+    migrated_finance: tuple[str, str],
+) -> None:
+    admin_url, app_url = migrated_finance
+    tenant_a, tenant_b = _seed_tenants(admin_url)
+    payment, _ = _seed_payment(admin_url, tenant_a)
+    engine = create_engine(admin_url)
+
+    def attempt(sql: str, **params: object) -> None:
+        with engine.connect() as conn:
+            with pytest.raises(DBAPIError):
+                conn.execute(text(sql), {"id": payment, **params})
+
+    # Facts are frozen, delete is never allowed, skipping approval is refused.
+    attempt("UPDATE mod_payables.supplier_payments SET gross_amount=1 WHERE id=:id")
+    attempt("DELETE FROM mod_payables.supplier_payments WHERE id=:id")
+    attempt(
+        "UPDATE mod_payables.supplier_payments SET status='RECORDED',"
+        "approved_by='user:a',approved_at=now(),approval_reference='r',"
+        "recorded_by='user:r',recorded_at=now(),bank_reference='b' WHERE id=:id"
+    )
+    # Approver must not be the preparer (row check, even for the admin role).
+    attempt(
+        "UPDATE mod_payables.supplier_payments SET status='APPROVED',"
+        "approved_by='USER:P',approved_at=now(),approval_reference='r' WHERE id=:id"
+    )
+    # Lines are append-only.
+    attempt(
+        "UPDATE mod_payables.supplier_payment_allocations SET amount=1 "
+        "WHERE payment_id=:id"
+    )
+    attempt(
+        "DELETE FROM mod_payables.supplier_payment_allocations WHERE payment_id=:id"
+    )
+    with engine.begin() as conn:  # the legal path
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_payments SET status='APPROVED',"
+                "approved_by='user:a',approved_at=now(),approval_reference='r' "
+                "WHERE id=:id"
+            ),
+            {"id": payment},
+        )
+    # No new lines once the payment is no longer a draft.
+    attempt(
+        "INSERT INTO mod_payables.supplier_payment_withholdings "
+        "(id,tenant_id,payment_id,line_number,account_ref,amount,created_at) "
+        "VALUES (gen_random_uuid(),:tenant,:id,1,'account:2300',1,now())",
+        tenant=tenant_a,
+    )
+    # Terminal states cannot move again.
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_payments SET status='CANCELLED',"
+                "cancelled_by='user:c',cancelled_at=now(),cancel_reason='x' "
+                "WHERE id=:id"
+            ),
+            {"id": payment},
+        )
+    attempt("UPDATE mod_payables.supplier_payments SET status='APPROVED' WHERE id=:id")
+    engine.dispose()
+
+    app = create_engine(app_url)
+    with app.begin() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, false)"),
+            {"tenant": str(tenant_b)},
+        )
+        for count_sql in (
+            "SELECT count(*) FROM mod_payables.supplier_payments",
+            "SELECT count(*) FROM mod_payables.supplier_payment_allocations",
+            "SELECT count(*) FROM mod_payables.supplier_payment_withholdings",
+        ):
+            assert conn.scalar(text(count_sql)) == 0
+    app.dispose()
+
+
+def test_supplier_payment_migration_downgrade_refuses_once_populated(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from importlib import import_module
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    admin_url, _ = migrated_finance
+    tenant, _ = _seed_tenants(admin_url)
+    migration = import_module(
+        "dotmac_payables.migrations.versions.pa_0004_supplier_payments"
+    )
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        transaction = conn.begin()
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.downgrade()  # empty: allowed
+        assert (
+            conn.scalar(text("SELECT to_regclass('mod_payables.supplier_payments')"))
+            is None
+        )
+        transaction.rollback()
+    _seed_payment(admin_url, tenant)
+    with engine.connect() as conn:
+        transaction = conn.begin()
+        with Operations.context(MigrationContext.configure(conn)):
+            with pytest.raises(RuntimeError, match="forward correction"):
+                migration.downgrade()
+        transaction.rollback()
+    engine.dispose()
+
+
+def test_recorded_payment_and_approval_evidence_are_frozen_by_the_database(
+    migrated_finance: tuple[str, str],
+) -> None:
+    admin_url, _ = migrated_finance
+    tenant, _ = _seed_tenants(admin_url)
+    payment, _ = _seed_payment(admin_url, tenant)
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_payments SET status='APPROVED',"
+                "approved_by='user:a',approved_at=now(),approval_reference='r' "
+                "WHERE id=:id"
+            ),
+            {"id": payment},
+        )
+
+    def refused(sql: str) -> None:
+        with engine.connect() as conn:
+            with pytest.raises(DBAPIError):
+                conn.execute(text(sql), {"id": payment})
+
+    # A valid transition may not rewrite the approval evidence.
+    refused(
+        "UPDATE mod_payables.supplier_payments SET status='RECORDED',"
+        "approved_by='user:z',recorded_by='user:r',recorded_at=now(),"
+        "bank_reference='b' WHERE id=:id"
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_payments SET status='RECORDED',"
+                "recorded_by='user:r',recorded_at=now(),bank_reference='b' "
+                "WHERE id=:id"
+            ),
+            {"id": payment},
+        )
+    for status_sql in (
+        "UPDATE mod_payables.supplier_payments SET status='DRAFT' WHERE id=:id",
+        "UPDATE mod_payables.supplier_payments SET status='APPROVED' WHERE id=:id",
+        "UPDATE mod_payables.supplier_payments SET status='CANCELLED' WHERE id=:id",
+        "UPDATE mod_payables.supplier_payments SET status='RECORDED' WHERE id=:id",
+    ):
+        refused(status_sql)
+    refused(
+        "UPDATE mod_payables.supplier_payments SET bank_reference='other' WHERE id=:id"
+    )
+    engine.dispose()
+
+
+# --- concurrency (real PostgreSQL row locks) -----------------------------------
+
+
+def _concurrency_fixture(admin_url: str):
+    """Committed tenant + approved invoice (with receipt) + obligation of 1000."""
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables import models as pm
+    from dotmac_payables.contracts import (
+        CreateSupplierInvoice,
+        ObligationSchedule,
+        PayableLineInput,
+    )
+    from dotmac_payables.service import approve_invoice, create_invoice, submit_invoice
+    from sqlalchemy.orm import Session
+
+    tenant, _ = _seed_tenants(admin_url)
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        scope = TenantScope(tenant)
+        invoice = create_invoice(
+            db,
+            scope=scope,
+            command=CreateSupplierInvoice(
+                number="PINV-C-1",
+                supplier_ref="party:s",
+                supplier_name_snapshot="S",
+                supplier_document_number="C-1",
+                invoice_date=date(2026, 8, 1),
+                received_date=date(2026, 8, 2),
+                currency_code="NGN",
+                exchange_rate=Decimal("1"),
+                liability_account_ref="account:2000",
+                lines=(
+                    PayableLineInput(
+                        description="x",
+                        quantity=Decimal("1"),
+                        unit_price=Decimal("1000"),
+                        posting_account_ref="account:5100",
+                    ),
+                ),
+                schedule=(ObligationSchedule(date(2026, 8, 31), Decimal("1000")),),
+            ),
+            idempotency_key="c:inv",
+            idempotency_expires_at=None,
+            recorded_at=now,
+        )
+        submit_invoice(
+            db,
+            scope=scope,
+            invoice_id=invoice.id,
+            submitted_by="u:ap",
+            submitted_at=now,
+        )
+        approve_invoice(
+            db,
+            scope=scope,
+            invoice_id=invoice.id,
+            approval_reference="a",
+            approved_by="u:c",
+            idempotency_key="c:appr",
+            idempotency_expires_at=None,
+            approved_at=now,
+        )
+        db.add(
+            pm.AccountingReceipt(
+                tenant_id=tenant,
+                document_kind="supplier_invoice",
+                document_id=invoice.id,
+                consequence_fingerprint="e" * 64,
+                accounting_reference="j",
+                accounting_evidence_fingerprint="f" * 64,
+                recorded_at=now,
+            )
+        )
+        obligation = db.scalars(
+            __import__("sqlalchemy")
+            .select(pm.PaymentObligation)
+            .where(pm.PaymentObligation.invoice_id == invoice.id)
+        ).one()
+        obligation_id = obligation.id
+        db.commit()
+    engine.dispose()
+    return tenant, obligation_id
+
+
+def _payment_command(obligation_id: uuid.UUID, number: str):
+    from datetime import date
+    from decimal import Decimal
+
+    from dotmac_payables.contracts import (
+        CreateSupplierPayment,
+        SupplierPaymentAllocationInput,
+    )
+
+    return CreateSupplierPayment(
+        number=number,
+        supplier_ref="party:s",
+        supplier_name_snapshot="S",
+        currency_code="NGN",
+        exchange_rate=Decimal("1"),
+        value_date=date(2026, 9, 2),
+        cash_account_ref="account:1010",
+        payer_instrument_ref="instrument:1",
+        allocations=(SupplierPaymentAllocationInput(obligation_id, Decimal("1000")),),
+        prepared_by="u:prep",
+    )
+
+
+def _run_pair(admin_url: str, first, second):
+    """Run ``first`` (holds its transaction open briefly) and ``second``
+    concurrently, each in its own session and transaction. Returns both outcomes
+    as ('ok', value) or ('err', exception)."""
+    import threading
+    import time
+
+    from sqlalchemy.orm import Session
+
+    started = threading.Event()
+    results: dict[str, tuple[str, object]] = {}
+
+    def worker(name: str, fn, hold: bool) -> None:
+        engine = create_engine(admin_url)
+        try:
+            with Session(engine) as db:
+                try:
+                    value = fn(db)
+                    if hold:
+                        started.set()
+                        time.sleep(1.0)
+                    db.commit()
+                    results[name] = ("ok", value)
+                except Exception as exc:
+                    db.rollback()
+                    results[name] = ("err", exc)
+                    started.set()
+        finally:
+            engine.dispose()
+
+    a = threading.Thread(target=worker, args=("first", first, True))
+    a.start()
+    started.wait(10)
+    b = threading.Thread(target=worker, args=("second", second, False))
+    b.start()
+    a.join(30)
+    b.join(30)
+    return results["first"], results["second"]
+
+
+def test_concurrent_creates_on_one_obligation_allow_exactly_one(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.contracts import InvalidAmount
+    from dotmac_payables.service import create_supplier_payment
+
+    admin_url, _ = migrated_finance
+    tenant, obligation = _concurrency_fixture(admin_url)
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+
+    def make(number: str):
+        return lambda db: create_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            command=_payment_command(obligation, number),
+            idempotency_key=f"k:{number}",
+            idempotency_expires_at=None,
+            prepared_at=now,
+        ).id
+
+    first, second = _run_pair(admin_url, make("SPAY-A"), make("SPAY-B"))
+    assert first[0] == "ok"
+    assert second[0] == "err" and isinstance(second[1], InvalidAmount)
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(text("SELECT count(*) FROM mod_payables.supplier_payments"))
+            == 1
+        )
+    engine.dispose()
+
+
+def _approved_payment(admin_url: str, tenant, obligation, number="SPAY-R"):
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.service import (
+        approve_supplier_payment,
+        create_supplier_payment,
+    )
+    from sqlalchemy.orm import Session
+
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        payment = create_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            command=_payment_command(obligation, number),
+            idempotency_key=f"k:{number}",
+            idempotency_expires_at=None,
+            prepared_at=now,
+        )
+        pid = payment.id
+        approve_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            payment_id=pid,
+            approval_reference="ap",
+            approved_by="u:appr",
+            idempotency_key=f"a:{number}",
+            idempotency_expires_at=None,
+            approved_at=now,
+        )
+        db.commit()
+    engine.dispose()
+    return pid
+
+
+def test_concurrent_recorders_settle_the_obligation_once(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.contracts import InvalidTransition
+    from dotmac_payables.service import record_supplier_payment
+
+    admin_url, _ = migrated_finance
+    tenant, obligation = _concurrency_fixture(admin_url)
+    pid = _approved_payment(admin_url, tenant, obligation)
+    now = datetime(2026, 9, 2, tzinfo=UTC)
+
+    def record(actor: str, ref: str):
+        return lambda db: record_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            payment_id=pid,
+            bank_reference=ref,
+            recorded_by=actor,
+            idempotency_key=f"r:{actor}",
+            idempotency_expires_at=None,
+            recorded_at=now,
+        ).id
+
+    first, second = _run_pair(
+        admin_url, record("u:rec1", "BR-1"), record("u:rec2", "BR-2")
+    )
+    assert first[0] == "ok"
+    assert second[0] == "err" and isinstance(second[1], InvalidTransition)
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM mod_payables.settlement_observations")
+            )
+            == 1
+        )
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT outstanding_amount FROM mod_payables.payment_obligations "
+                    "WHERE id=:id"
+                ),
+                {"id": obligation},
+            )
+            == 0
+        )
+    engine.dispose()
+
+
+def test_approve_racing_cancel_leaves_a_consistent_reservation(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.service import (
+        approve_supplier_payment,
+        cancel_supplier_payment,
+        create_supplier_payment,
+    )
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_finance
+    tenant, obligation = _concurrency_fixture(admin_url)
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        pid = create_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            command=_payment_command(obligation, "SPAY-X"),
+            idempotency_key="k:x",
+            idempotency_expires_at=None,
+            prepared_at=now,
+        ).id
+        db.commit()
+    engine.dispose()
+
+    first, second = _run_pair(
+        admin_url,
+        lambda db: approve_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            payment_id=pid,
+            approval_reference="ap",
+            approved_by="u:appr",
+            idempotency_key="a:x",
+            idempotency_expires_at=None,
+            approved_at=now,
+        ).status,
+        lambda db: cancel_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            payment_id=pid,
+            reason="race",
+            cancelled_by="u:c",
+            idempotency_key="c:x",
+            idempotency_expires_at=None,
+            cancelled_at=now,
+        ).status,
+    )
+    assert first[0] == "ok"
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        status = conn.scalar(
+            text("SELECT status FROM mod_payables.supplier_payments WHERE id=:id"),
+            {"id": pid},
+        )
+        reserved = conn.scalar(
+            text(
+                "SELECT coalesce(sum(a.amount),0) FROM "
+                "mod_payables.supplier_payment_allocations a JOIN "
+                "mod_payables.supplier_payments p ON p.id=a.payment_id "
+                "WHERE a.obligation_id=:o AND p.status IN ('DRAFT','APPROVED')"
+            ),
+            {"o": obligation},
+        )
+    engine.dispose()
+    # Approve ran first, so cancel then moved APPROVED -> CANCELLED: the
+    # reservation is released and the final state is terminal and consistent.
+    assert second[0] == "ok"
+    assert status == "CANCELLED"
+    assert reserved == 0
+
+
+# --- 0.1.0a5: reversal, recognition, settled admission (PostgreSQL) -------------
+
+
+def _imported_approved_invoice(
+    admin_url: str, tenant: uuid.UUID, number: str
+) -> uuid.UUID:
+    """An invoice the importer moved to APPROVED by direct UPDATE: no obligations."""
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.contracts import (
+        CreateSupplierInvoice,
+        ObligationSchedule,
+        PayableLineInput,
+    )
+    from dotmac_payables.service import create_invoice, submit_invoice
+    from sqlalchemy.orm import Session
+
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        invoice = create_invoice(
+            db,
+            scope=TenantScope(tenant),
+            command=CreateSupplierInvoice(
+                number=number,
+                supplier_ref="party:s",
+                supplier_name_snapshot="S",
+                supplier_document_number=f"D-{number}",
+                invoice_date=date(2026, 8, 1),
+                received_date=date(2026, 8, 2),
+                currency_code="NGN",
+                exchange_rate=Decimal("1"),
+                liability_account_ref="account:2000",
+                lines=(
+                    PayableLineInput(
+                        description="x",
+                        quantity=Decimal("1"),
+                        unit_price=Decimal("1000"),
+                        posting_account_ref="account:5100",
+                    ),
+                ),
+                schedule=(
+                    ObligationSchedule(date(2026, 8, 31), Decimal("600")),
+                    ObligationSchedule(date(2026, 9, 30), Decimal("400")),
+                ),
+            ),
+            idempotency_key=f"imp:{number}",
+            idempotency_expires_at=None,
+            recorded_at=now,
+        )
+        submit_invoice(
+            db,
+            scope=TenantScope(tenant),
+            invoice_id=invoice.id,
+            submitted_by="legacy:u",
+            submitted_at=now,
+        )
+        invoice_id = invoice.id
+        db.commit()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_invoices SET status='APPROVED',"
+                "approved_by='legacy:a',approved_at=now(),approval_reference='legacy' "
+                "WHERE id=:id"
+            ),
+            {"id": invoice_id},
+        )
+    engine.dispose()
+    return invoice_id
+
+
+class _RecognitionVerifier:
+    def __init__(self, evidence):
+        self.evidence = evidence
+
+    def verify(self, *, scope, command, destination):
+        return self.evidence
+
+
+def _recognize_in(db, tenant, invoice_id, *, key, evidence="census:1#1", facts="9"):
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables import models as pm
+    from dotmac_payables.contracts import (
+        ApprovedInvoiceRecognitionEvidence,
+        RecognizeApprovedInvoice,
+    )
+    from dotmac_payables.service import recognize_approved_invoice
+
+    invoice = db.get(pm.SupplierInvoice, invoice_id)
+    proof = ApprovedInvoiceRecognitionEvidence(
+        tenant_id=tenant,
+        source_owner="legacy",
+        source_invoice_id=f"src:{invoice_id}",
+        source_snapshot_sha256="a" * 64,
+        invoice_id=invoice_id,
+        source_status="APPROVED",
+        source_journal_entry_id=None,
+        source_posted_at=None,
+        source_gl_line_count=0,
+        number=invoice.number,
+        supplier_ref=invoice.supplier_ref,
+        currency_code=invoice.currency_code,
+        total_amount=invoice.total_amount,
+        facts_fingerprint="cv1:" + facts * 64,
+    )
+    return recognize_approved_invoice(
+        db,
+        scope=TenantScope(tenant),
+        command=RecognizeApprovedInvoice(
+            invoice_id,
+            evidence,
+            "u:fin",
+            "appr:1",
+            "legacy",
+            proof.source_invoice_id,
+            "a" * 64,
+            proof.fingerprint(),
+        ),
+        verifier=_RecognitionVerifier(proof),
+        idempotency_key=key,
+        idempotency_expires_at=None,
+        recognized_at=datetime(2026, 9, 4, tzinfo=UTC),
+    ).id
+
+
+def test_recognition_is_guarded_and_append_only_in_the_database(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from sqlalchemy.orm import Session
+
+    admin_url, app_url = migrated_finance
+    tenant_a, tenant_b = _seed_tenants(admin_url)
+    imported = _imported_approved_invoice(admin_url, tenant_a, "PINV-G-1")
+    engine = create_engine(admin_url)
+    insert = (
+        "INSERT INTO mod_payables.invoice_recognitions "
+        "(id,tenant_id,invoice_id,evidence_reference,recognized_by,"
+        "approval_reference,source_owner,source_invoice_id,source_snapshot_sha256,"
+        "evidence_fingerprint,facts_fingerprint,evidence,recognized_at) VALUES "
+        "(gen_random_uuid(),:tenant,:invoice,'e','u','a','legacy','s','a','f','f',"
+        "'{}'::json,now())"
+    )
+    # Not APPROVED -> refused (the seeded DRAFT invoices from _seed_tenants).
+    with engine.connect() as conn:
+        draft = conn.scalar(
+            text(
+                "SELECT id FROM mod_payables.supplier_invoices WHERE tenant_id=:t "
+                "AND status='DRAFT' LIMIT 1"
+            ),
+            {"t": tenant_a},
+        )
+    with engine.connect() as conn:
+        with pytest.raises(DBAPIError):
+            conn.execute(text(insert), {"tenant": tenant_a, "invoice": draft})
+    # Through the owner: recognized once; the row is append-only; a second raw row
+    # for an invoice that now has obligations is refused.
+    with Session(engine) as db:
+        _recognize_in(db, tenant_a, imported, key="g:1")
+        db.commit()
+    with engine.connect() as conn:
+        with pytest.raises(DBAPIError):
+            conn.execute(text(insert), {"tenant": tenant_a, "invoice": imported})
+    for sql in (
+        "UPDATE mod_payables.invoice_recognitions SET recognized_by='x'",
+        "DELETE FROM mod_payables.invoice_recognitions",
+    ):
+        with engine.connect() as conn:
+            with pytest.raises(DBAPIError):
+                conn.execute(text(sql))
+    # Tenant isolation for the application role.
+    app = create_engine(app_url)
+    with app.begin() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant', :t, false)"),
+            {"t": str(tenant_b)},
+        )
+        assert (
+            conn.scalar(text("SELECT count(*) FROM mod_payables.invoice_recognitions"))
+            == 0
+        )
+    app.dispose()
+    engine.dispose()
+
+
+def test_concurrent_recognitions_write_the_liability_once(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from dotmac_payables.contracts import Conflict
+
+    admin_url, _ = migrated_finance
+    tenant, _ = _seed_tenants(admin_url)
+    imported = _imported_approved_invoice(admin_url, tenant, "PINV-G-2")
+    first, second = _run_pair(
+        admin_url,
+        lambda db: _recognize_in(db, tenant, imported, key="g:a"),
+        lambda db: _recognize_in(db, tenant, imported, key="g:b"),
+    )
+    assert first[0] == "ok" and second[0] == "ok"  # same facts: replay, not a clash
+    other_first, other_second = _run_pair(
+        admin_url,
+        lambda db: _recognize_in(db, tenant, imported, key="g:c"),
+        lambda db: _recognize_in(
+            db, tenant, imported, key="g:d", evidence="census:x#9"
+        ),
+    )
+    assert other_first[0] == "ok"
+    assert other_second[0] == "err" and isinstance(other_second[1], Conflict)
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT count(*) FROM mod_payables.payment_obligations "
+                    "WHERE invoice_id=:i"
+                ),
+                {"i": imported},
+            )
+            == 2
+        )
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT count(*) FROM mod_payables.liability_events "
+                    "WHERE document_id=:i"
+                ),
+                {"i": imported},
+            )
+            == 1
+        )
+    engine.dispose()
+
+
+def _recorded_with_receipt(admin_url: str, tenant, obligation):
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.contracts import AccountingReceiptInput
+    from dotmac_payables.service import (
+        build_payment_accounting_consequence,
+        record_accounting_receipt,
+        record_supplier_payment,
+    )
+    from sqlalchemy.orm import Session
+
+    pid = _approved_payment(admin_url, tenant, obligation, number="SPAY-REV")
+    now = datetime(2026, 9, 2, tzinfo=UTC)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        record_supplier_payment(
+            db,
+            scope=TenantScope(tenant),
+            payment_id=pid,
+            bank_reference="BR-REV",
+            recorded_by="u:rec",
+            idempotency_key="rec:rev",
+            idempotency_expires_at=None,
+            recorded_at=now,
+        )
+        consequence = build_payment_accounting_consequence(
+            db, tenant_id=tenant, payment_id=pid
+        )
+        record_accounting_receipt(
+            db,
+            scope=TenantScope(tenant),
+            command=AccountingReceiptInput(
+                "supplier_payment", pid, consequence.fingerprint, "j", "a" * 64
+            ),
+            idempotency_key="receipt:rev",
+            idempotency_expires_at=None,
+            recorded_at=now,
+        )
+        db.commit()
+    engine.dispose()
+    return pid
+
+
+def _reverse_in(db, tenant, pid, *, actor, key):
+    from datetime import UTC, date, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.service import reverse_supplier_payment
+
+    return reverse_supplier_payment(
+        db,
+        scope=TenantScope(tenant),
+        payment_id=pid,
+        reason="bounced",
+        reversal_date=date(2026, 9, 5),
+        reversed_by=actor,
+        idempotency_key=key,
+        idempotency_expires_at=None,
+        reversed_at=datetime(2026, 9, 5, tzinfo=UTC),
+    ).id
+
+
+def test_concurrent_reversals_reopen_the_obligation_once(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from dotmac_payables.contracts import InvalidTransition
+
+    admin_url, _ = migrated_finance
+    tenant, obligation = _concurrency_fixture(admin_url)
+    pid = _recorded_with_receipt(admin_url, tenant, obligation)
+    first, second = _run_pair(
+        admin_url,
+        lambda db: _reverse_in(db, tenant, pid, actor="u:rev1", key="rv:1"),
+        lambda db: _reverse_in(db, tenant, pid, actor="u:rev2", key="rv:2"),
+    )
+    assert first[0] == "ok"
+    assert second[0] == "err" and isinstance(second[1], InvalidTransition)
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT outstanding_amount FROM mod_payables.payment_obligations "
+                    "WHERE id=:o"
+                ),
+                {"o": obligation},
+            )
+            == 1000
+        )
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT count(*) FROM mod_payables.liability_events "
+                    "WHERE event_kind='settlement_reversed'"
+                )
+            )
+            == 1
+        )
+    engine.dispose()
+
+
+def test_reversal_lifecycle_and_downgrade_policy_in_the_database(
+    migrated_finance: tuple[str, str],
+) -> None:
+    from importlib import import_module
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    admin_url, _ = migrated_finance
+    tenant, obligation = _concurrency_fixture(admin_url)
+    pid = _recorded_with_receipt(admin_url, tenant, obligation)
+    engine = create_engine(admin_url)
+
+    def refused(sql: str, **params: object) -> None:
+        with engine.connect() as conn:
+            with pytest.raises(DBAPIError):
+                conn.execute(text(sql), {"id": pid, **params})
+
+    # The reverser must not be the recorder or approver (row CHECK).
+    refused(
+        "UPDATE mod_payables.supplier_payments SET status='REVERSED',"
+        "reversed_by='U:REC',reversed_at=now(),reversal_reason='x',"
+        "reversal_date=DATE '2026-09-05' WHERE id=:id"
+    )
+    # Reversal facts cannot appear on a RECORDED payment, nor skip the fields.
+    refused("UPDATE mod_payables.supplier_payments SET reversed_by='u:x' WHERE id=:id")
+    refused("UPDATE mod_payables.supplier_payments SET status='REVERSED' WHERE id=:id")
+    # Recording evidence is immutable even across a valid transition.
+    refused(
+        "UPDATE mod_payables.supplier_payments SET status='REVERSED',"
+        "bank_reference='other',reversed_by='u:v',reversed_at=now(),"
+        "reversal_reason='x',reversal_date=DATE '2026-09-05' WHERE id=:id"
+    )
+    migration = import_module(
+        "dotmac_payables.migrations.versions.pa_0005_reversal_settled_history"
+    )
+    # Downgrade is allowed while nothing a5-specific exists ...
+    with engine.connect() as conn:
+        transaction = conn.begin()
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.downgrade()
+        assert (
+            conn.scalar(text("SELECT to_regclass('mod_payables.invoice_recognitions')"))
+            is None
+        )
+        transaction.rollback()
+    # ... the legal path works ...
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_payments SET status='REVERSED',"
+                "reversed_by='u:v',reversed_at=now(),reversal_reason='x',"
+                "reversal_date=DATE '2026-09-05' WHERE id=:id"
+            ),
+            {"id": pid},
+        )
+    # ... REVERSED is terminal ...
+    for status in ("RECORDED", "APPROVED", "CANCELLED", "DRAFT"):
+        refused(
+            "UPDATE mod_payables.supplier_payments SET status=:status WHERE id=:id",
+            status=status,
+        )
+    # ... and a populated database refuses the downgrade.
+    with engine.connect() as conn:
+        transaction = conn.begin()
+        with Operations.context(MigrationContext.configure(conn)):
+            with pytest.raises(RuntimeError, match="forward correction"):
+                migration.downgrade()
+        transaction.rollback()
+    engine.dispose()
+
+
+def _settled_evidence(db, invoice_id, tenant):
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_payables import models as pm
+    from dotmac_payables.contracts import (
+        HistoricalSettledInvoiceCommand,
+        HistoricalSettledInvoiceEvidence,
+        HistoricalSettlement,
+    )
+
+    invoice = db.get(pm.SupplierInvoice, invoice_id)
+    names = (
+        "number supplier_ref supplier_name_snapshot supplier_document_number "
+        "invoice_date received_date currency_code exchange_rate subtotal tax_amount "
+        "total_amount liability_account_ref procurement_ref "
+        "receipt_evidence_fingerprint submitted_by submitted_at approved_by "
+        "approved_at approval_reference"
+    ).split()
+    evidence = HistoricalSettledInvoiceEvidence(
+        tenant_id=tenant,
+        source_owner="legacy",
+        source_invoice_id=f"src:{invoice_id}",
+        source_snapshot_sha256="a" * 64,
+        invoice_id=invoice_id,
+        source_status="POSTED",
+        invoice_type="STANDARD",
+        settlements=(
+            HistoricalSettlement(
+                "alloc:1",
+                "PAY-1",
+                date(2026, 8, 20),
+                Decimal("300.00"),
+                Decimal("15.00"),
+                "NGN",
+                Decimal("1"),
+                "cv1:" + "1" * 64,
+                "legacy:gl.journal_entry:p1",
+                "v2:journal:p1",
+            ),
+        ),
+        settled_amount=Decimal("300.00"),
+        residual_amount=Decimal("700.00"),
+        withholding_tax_amount=Decimal("15.00"),
+        prepayment_amount=Decimal(0),
+        due_date=date(2026, 8, 31),
+        original_posted_at=datetime(2026, 8, 1, tzinfo=UTC),
+        source_journal_ref="s",
+        destination_journal_ref="d",
+        accounting_evidence_fingerprint="cv1:" + "b" * 64,
+        facts_fingerprint="cv1:" + "c" * 64,
+        **{name: getattr(invoice, name) for name in names},
+    )
+    return evidence, HistoricalSettledInvoiceCommand(
+        "legacy",
+        evidence.source_invoice_id,
+        invoice_id,
+        "a" * 64,
+        evidence.fingerprint(),
+    )
+
+
+class _FixedVerifier:
+    def __init__(self, evidence):
+        self.evidence = evidence
+
+    def verify(self, *, scope, command, destination):
+        return self.evidence
+
+
+def _admit_settled_in(db, tenant, invoice_id, *, key):
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.service import admit_historical_settled_invoice
+
+    evidence, command = _settled_evidence(db, invoice_id, tenant)
+    return admit_historical_settled_invoice(
+        db,
+        scope=TenantScope(tenant),
+        command=command,
+        verifier=_FixedVerifier(evidence),
+        idempotency_key=key,
+        idempotency_expires_at=None,
+        admitted_at=datetime(2026, 10, 1, tzinfo=UTC),
+    ).id
+
+
+def _one_installment_invoice(admin_url: str, tenant: uuid.UUID) -> uuid.UUID:
+    """APPROVED imported invoice with a single full-face schedule line."""
+    from datetime import UTC, date, datetime
+    from decimal import Decimal
+
+    from dotmac_kernel.cache import TenantScope
+    from dotmac_payables.contracts import (
+        CreateSupplierInvoice,
+        ObligationSchedule,
+        PayableLineInput,
+    )
+    from dotmac_payables.service import create_invoice, submit_invoice
+    from sqlalchemy.orm import Session
+
+    now = datetime(2026, 9, 1, tzinfo=UTC)
+    engine = create_engine(admin_url)
+    with Session(engine) as db:
+        invoice = create_invoice(
+            db,
+            scope=TenantScope(tenant),
+            command=CreateSupplierInvoice(
+                number="PINV-S-1",
+                supplier_ref="party:s",
+                supplier_name_snapshot="S",
+                supplier_document_number="S-1",
+                invoice_date=date(2026, 8, 1),
+                received_date=date(2026, 8, 2),
+                currency_code="NGN",
+                exchange_rate=Decimal("1"),
+                liability_account_ref="account:2000",
+                lines=(
+                    PayableLineInput(
+                        description="x",
+                        quantity=Decimal("1"),
+                        unit_price=Decimal("1000"),
+                        posting_account_ref="account:5100",
+                    ),
+                ),
+                schedule=(ObligationSchedule(date(2026, 8, 31), Decimal("1000")),),
+            ),
+            idempotency_key="one:inv",
+            idempotency_expires_at=None,
+            recorded_at=now,
+        )
+        submit_invoice(
+            db,
+            scope=TenantScope(tenant),
+            invoice_id=invoice.id,
+            submitted_by="legacy:u",
+            submitted_at=now,
+        )
+        invoice_id = invoice.id
+        db.commit()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_payables.supplier_invoices SET status='APPROVED',"
+                "approved_by='legacy:a',approved_at=now(),approval_reference='legacy' "
+                "WHERE id=:id"
+            ),
+            {"id": invoice_id},
+        )
+    engine.dispose()
+    return invoice_id
+
+
+def test_settled_admission_postgres_rows_rls_immutability_and_concurrency(
+    migrated_finance: tuple[str, str],
+) -> None:
+    admin_url, app_url = migrated_finance
+    tenant, other = _seed_tenants(admin_url)
+    invoice_id = _one_installment_invoice(admin_url, tenant)
+    first, second = _run_pair(
+        admin_url,
+        lambda db: _admit_settled_in(db, tenant, invoice_id, key="s:a"),
+        lambda db: _admit_settled_in(db, tenant, invoice_id, key="s:b"),
+    )
+    assert first[0] == "ok" and second[0] == "ok" and first[1] == second[1]
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM mod_payables.historical_settlements")
+            )
+            == 1
+        )
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM mod_payables.historical_invoice_receipts")
+            )
+            == 1
+        )
+        row = conn.execute(
+            text(
+                "SELECT original_amount,outstanding_amount,status FROM "
+                "mod_payables.payment_obligations WHERE invoice_id=:i"
+            ),
+            {"i": invoice_id},
+        ).one()
+        assert (row[0], row[1], row[2]) == (1000, 700, "PARTIALLY_SETTLED")
+    for sql in (
+        "UPDATE mod_payables.historical_settlements SET applied_amount=1",
+        "DELETE FROM mod_payables.historical_settlements",
+        "INSERT INTO mod_payables.historical_settlements "
+        "(id,tenant_id,receipt_id,obligation_id,line_number,source_settlement_id,"
+        "payment_ref,settled_on,applied_amount,withholding_amount,currency_code,"
+        "exchange_rate,source_row_fingerprint,source_journal_ref,"
+        "destination_journal_ref,recorded_at) "
+        "SELECT gen_random_uuid(),tenant_id,receipt_id,obligation_id,2,'x','p',"
+        "DATE '2026-08-21',-5,0,'NGN',1,'cv1:x','s','d',now() "
+        "FROM mod_payables.historical_settlements",
+        # A legacy allocation settles exactly one invoice: the id is unique per
+        # tenant even for a different receipt line.
+        "INSERT INTO mod_payables.historical_settlements "
+        "(id,tenant_id,receipt_id,obligation_id,line_number,source_settlement_id,"
+        "payment_ref,settled_on,applied_amount,withholding_amount,currency_code,"
+        "exchange_rate,source_row_fingerprint,source_journal_ref,"
+        "destination_journal_ref,recorded_at) "
+        "SELECT gen_random_uuid(),tenant_id,receipt_id,obligation_id,2,"
+        "source_settlement_id,'p',DATE '2026-08-21',5,0,'NGN',1,'cv1:x','s','d',now() "
+        "FROM mod_payables.historical_settlements",
+    ):
+        with engine.connect() as conn:
+            with pytest.raises(DBAPIError):
+                conn.execute(text(sql))
+    app = create_engine(app_url)
+    with app.begin() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant', :t, false)"),
+            {"t": str(other)},
+        )
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM mod_payables.historical_settlements")
+            )
+            == 0
+        )
+    app.dispose()
+    engine.dispose()

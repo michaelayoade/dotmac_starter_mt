@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from dotmac_payroll.contracts import (
     PayRuleInput,
 )
 from dotmac_payroll.models import (
+    SETTLEMENT_MODES,
     EmployeePayAssignment,
     PayComponent,
     PayrollCalculation,
@@ -23,6 +24,7 @@ from dotmac_payroll.models import (
     PayrollLiability,
     PayrollLiabilitySettlement,
     PayrollRun,
+    PayrollSettlementReversal,
     PayRuleBasis,
     PayStructure,
     PayStructureRevision,
@@ -236,6 +238,18 @@ def publish_pay_structure_revision(
     for rule in rules:
         if rule.calculation_method not in {"input", "fixed", "percentage"}:
             raise PayrollRuleViolation("unknown payroll calculation method")
+        if rule.settlement_mode not in SETTLEMENT_MODES:
+            raise PayrollRuleViolation("unknown deduction settlement mode")
+        if rule.settlement_mode == "internal_recovery":
+            rule_component = components[rule.component_id]
+            if rule_component.kind != "deduction":
+                raise PayrollRuleViolation(
+                    "internal recovery applies only to deduction components"
+                )
+            if not rule_component.liability_account_ref:
+                raise PayrollRuleViolation(
+                    "internal recovery requires an asset account reference"
+                )
         if rule.calculation_method == "input":
             if (
                 rule.fixed_amount is not None
@@ -311,6 +325,7 @@ def publish_pay_structure_revision(
             ),
             rate=command.rate,
             prorates=command.prorates,
+            settlement_mode=command.settlement_mode,
         )
         stored_rule.bases.extend(
             PayRuleBasis(tenant_id=tenant_id, component_id=component_id)
@@ -431,6 +446,40 @@ def _active_assignment(
     return rows[0]
 
 
+def _assignment_for_period(
+    db: Session, tenant_id: UUID, employee_ref: str, run: PayrollRun
+) -> tuple[EmployeePayAssignment, date]:
+    """Assignment and its effective date for the run period.
+
+    An assignment active at the period end is used exactly as before. A
+    mid-month leaver has none at the period end, so the lookup date becomes
+    min(period_end, assignment end date) of the latest assignment that ends
+    inside the period.
+    """
+    try:
+        return (
+            _active_assignment(db, tenant_id, employee_ref, run.period_end),
+            run.period_end,
+        )
+    except PayrollNotFound:
+        pass
+    candidate_ends = db.scalars(
+        select(EmployeePayAssignment.effective_to).where(
+            EmployeePayAssignment.tenant_id == tenant_id,
+            EmployeePayAssignment.employee_ref == employee_ref,
+            EmployeePayAssignment.status == "active",
+            EmployeePayAssignment.effective_from <= run.period_end,
+            EmployeePayAssignment.effective_to.is_not(None),
+            EmployeePayAssignment.effective_to >= run.period_start,
+        )
+    ).all()
+    ends = [end for end in candidate_ends if end is not None]
+    if not ends:
+        raise PayrollNotFound("employee has no active pay assignment")
+    as_of = min(run.period_end, max(ends))
+    return _active_assignment(db, tenant_id, employee_ref, as_of), as_of
+
+
 def calculate_employee_payroll(
     db: Session,
     *,
@@ -456,7 +505,7 @@ def calculate_employee_payroll(
     )
     if existing is not None:
         raise PayrollConflict("employee already has a calculation in this run")
-    assignment = _active_assignment(db, tenant_id, cleaned_employee, run.period_end)
+    assignment, as_of = _assignment_for_period(db, tenant_id, cleaned_employee, run)
     revision = db.scalar(
         select(PayStructureRevision)
         .options(
@@ -477,8 +526,8 @@ def calculate_employee_payroll(
         or structure.minor_units != run.minor_units
     ):
         raise PayrollRuleViolation("pay structure currency does not match payroll run")
-    if not revision.effective_from <= run.period_end or (
-        revision.effective_to is not None and revision.effective_to < run.period_end
+    if not revision.effective_from <= as_of or (
+        revision.effective_to is not None and revision.effective_to < as_of
     ):
         raise PayrollRuleViolation("assigned pay structure revision is not effective")
     input_by_component: dict[UUID, EmployeeComponentInput] = {}
@@ -583,6 +632,7 @@ def calculate_employee_payroll(
                 expense_account_ref=rule.expense_account_ref,
                 liability_account_ref=rule.liability_account_ref,
                 liability_destination_ref=rule.liability_destination_ref,
+                settlement_mode=rule.settlement_mode,
             )
         )
     db.flush()
@@ -711,6 +761,36 @@ def finalize_payroll_run(
             )
         ).all()
         for line in lines:
+            if line.settlement_mode == "internal_recovery":
+                # Already recovered against the employee and the asset account
+                # (e.g. a staff loan); never an outstanding external payable.
+                if line.component_kind != "deduction":
+                    raise PayrollRuleViolation(
+                        "internal recovery applies only to deduction components"
+                    )
+                if not line.liability_account_ref:
+                    raise PayrollRuleViolation(
+                        f"internal recovery {line.component_code} has no asset account"
+                    )
+                db.add(
+                    PayrollLiability(
+                        tenant_id=tenant_id,
+                        run_id=run.id,
+                        calculation_id=calculation.id,
+                        liability_key=f"component:{line.component_id}",
+                        beneficiary_type="employee",
+                        beneficiary_ref=calculation.employee_ref,
+                        component_id=line.component_id,
+                        liability_account_ref=line.liability_account_ref,
+                        amount=line.amount,
+                        amount_settled=line.amount,
+                        currency_code=run.currency_code,
+                        minor_units=run.minor_units,
+                        status="settled",
+                        settlement_mode="internal_recovery",
+                    )
+                )
+                continue
             if not line.liability_account_ref or not line.liability_destination_ref:
                 raise PayrollRuleViolation(
                     f"liability component {line.component_code} has no destination"
@@ -739,6 +819,41 @@ def finalize_payroll_run(
     return run
 
 
+def cancel_payroll_run(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    run_id: UUID,
+    cancelled_by_id: UUID,
+    reason: str,
+    cancelled_at: datetime,
+) -> PayrollRun:
+    """Owner command: draft or approved -> cancelled, with actor and reason.
+
+    Refused once finalized. The actor, instant and reason are stored on the run
+    as the audit record. Idempotent: repeating the same actor and reason returns
+    the already-cancelled run unchanged; a different actor or reason conflicts.
+    Calculations are kept as evidence. The row is locked; flush-only.
+    """
+    cleaned_reason = _clean(reason, "cancel reason")
+    run = _run(db, tenant_id, run_id)
+    if run.status == "cancelled":
+        if (
+            run.cancelled_by_id != cancelled_by_id
+            or run.cancel_reason != cleaned_reason
+        ):
+            raise PayrollConflict("payroll run was already cancelled differently")
+        return run
+    if run.status not in ("draft", "approved"):
+        raise PayrollConflict("only a draft or approved payroll run can be cancelled")
+    run.status = "cancelled"
+    run.cancelled_by_id = cancelled_by_id
+    run.cancelled_at = cancelled_at
+    run.cancel_reason = cleaned_reason
+    db.flush()
+    return run
+
+
 def record_liability_settlement(
     db: Session,
     *,
@@ -760,6 +875,10 @@ def record_liability_settlement(
     )
     if liability is None:
         raise PayrollNotFound("payroll liability not found")
+    if liability.settlement_mode == "internal_recovery":
+        raise PayrollRuleViolation(
+            "internal recovery is recovered at finalize and cannot be settled"
+        )
     if (
         amount.currency.code != liability.currency_code
         or amount.currency.minor_units != liability.minor_units
@@ -784,6 +903,15 @@ def record_liability_settlement(
             raise PayrollConflict(
                 "settlement reference was reused with different evidence"
             )
+        if db.scalar(
+            select(PayrollSettlementReversal.id).where(
+                PayrollSettlementReversal.tenant_id == tenant_id,
+                PayrollSettlementReversal.settlement_id == existing.id,
+            )
+        ):
+            raise PayrollConflict(
+                "settlement was reversed; record re-payment under a new reference"
+            )
         return existing
     if liability.amount_settled + amount.amount > liability.amount:
         raise PayrollRuleViolation("settlement exceeds the outstanding liability")
@@ -807,6 +935,113 @@ def record_liability_settlement(
     return row
 
 
+def reverse_liability_settlement(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    settlement_id: UUID,
+    return_ref: str,
+    reason: str,
+    reversed_by_id: UUID,
+    reversed_at: datetime,
+) -> PayrollSettlementReversal:
+    """Reverse one whole recorded settlement whose bank credit was returned.
+
+    The money never reached the payee, so the liability is reopened for
+    re-payment. The settlement row is never updated: an append-only reversal
+    row is inserted and the liability's settled amount is reduced by exactly
+    the settlement amount (status back to ``outstanding``) in the caller's
+    transaction. Refuses the settlement's own recorder (a second person must
+    attest the bank return), internal recoveries, and a liability this
+    settlement does not fully settle. An identical replay (same return reference,
+    reason and reverser) returns the existing reversal; anything else is a
+    conflict. ``reversed_at`` must be timezone-aware and not before the
+    settlement's ``recorded_at``.
+
+    Caller duty (the ERP pin; this package cannot prove it): the bank account
+    passed to ``build_settlement_reversal_consequence`` must be the cash GL of
+    the settlement's ORIGINAL posted journal, not the current account mapping.
+    Refuse a mismatch, route a now-retired cash GL to the manual exception
+    queue, and post on a date not earlier than the settlement's posting date.
+    """
+    ref = _clean(return_ref, "bank return reference")
+    why = _clean(reason, "reversal reason")
+    settlement = db.scalar(
+        select(PayrollLiabilitySettlement).where(
+            PayrollLiabilitySettlement.tenant_id == tenant_id,
+            PayrollLiabilitySettlement.id == settlement_id,
+        )
+    )
+    if settlement is None:
+        raise PayrollNotFound("payroll settlement not found")
+    liability = db.scalar(
+        select(PayrollLiability)
+        .where(
+            PayrollLiability.tenant_id == tenant_id,
+            PayrollLiability.id == settlement.liability_id,
+        )
+        .with_for_update()
+    )
+    if liability is None:
+        raise PayrollNotFound("payroll liability not found")
+    existing = db.scalar(
+        select(PayrollSettlementReversal).where(
+            PayrollSettlementReversal.tenant_id == tenant_id,
+            PayrollSettlementReversal.settlement_id == settlement.id,
+        )
+    )
+    if existing is not None:
+        if (
+            existing.return_ref != ref
+            or existing.reason != why
+            or existing.reversed_by_id != reversed_by_id
+        ):
+            raise PayrollConflict(
+                "settlement was already reversed with different evidence"
+            )
+        return existing
+    if reversed_at.tzinfo is None or reversed_at.utcoffset() is None:
+        raise PayrollRuleViolation("reversed_at must be timezone-aware")
+    recorded_at = settlement.recorded_at
+    if recorded_at.tzinfo is None:
+        recorded_at = recorded_at.replace(tzinfo=UTC)
+    if reversed_at < recorded_at:
+        raise PayrollRuleViolation(
+            "settlement cannot be reversed before it was recorded"
+        )
+    if liability.settlement_mode == "internal_recovery":
+        raise PayrollRuleViolation(
+            "internal recovery is recovered at finalize and cannot be reversed"
+        )
+    if reversed_by_id == settlement.recorded_by_id:
+        raise PayrollRuleViolation(
+            "settlement reversal requires a different person than the recorder"
+        )
+    if (
+        settlement.amount != liability.amount
+        or liability.amount_settled != settlement.amount
+        or liability.status != "settled"
+    ):
+        raise PayrollRuleViolation(
+            "settlement does not fully settle the liability and cannot be reversed"
+        )
+    row = PayrollSettlementReversal(
+        tenant_id=tenant_id,
+        settlement_id=settlement.id,
+        liability_id=liability.id,
+        amount=settlement.amount,
+        return_ref=ref,
+        reason=why,
+        reversed_by_id=reversed_by_id,
+        reversed_at=reversed_at,
+    )
+    liability.amount_settled -= settlement.amount
+    liability.status = "outstanding"
+    db.add(row)
+    db.flush()
+    return row
+
+
 __all__ = [
     "PayrollConflict",
     "PayrollNotFound",
@@ -814,6 +1049,7 @@ __all__ = [
     "approve_payroll_run",
     "assign_employee_pay_structure",
     "calculate_employee_payroll",
+    "cancel_payroll_run",
     "create_pay_component",
     "create_pay_structure",
     "create_payroll_run",
@@ -822,5 +1058,6 @@ __all__ = [
     "read_payroll_run_totals",
     "record_liability_settlement",
     "retire_pay_component",
+    "reverse_liability_settlement",
     "update_pay_component",
 ]

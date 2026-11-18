@@ -1,0 +1,37 @@
+name: No new public IP literals
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
+
+# CI hygiene, not a feature (approved by Michael, 2026-11-14). This repository
+# is public; existing content is left as it is and only ADDED lines are
+# checked, so a new public IP address literal cannot land going forward.
+# Pull requests only; no secrets and no pull_request_target.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  no-new-public-ip-literals:
+    name: No new public IP literals
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The three-dot diff needs a merge base with the base commit.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # The base SHA, never the base ref, passed through `env:` so the value is
+      # never interpolated into the script line. Stdlib only: no installs.
+      - name: Refuse new public IP address literals
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python -I scripts/check_new_ip_literals.py --base "$BASE_SHA"
