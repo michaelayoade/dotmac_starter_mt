@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, fields
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 from uuid import UUID
 
@@ -20,7 +20,18 @@ from sqlalchemy.orm import Session
 
 
 class PayablesError(ValueError):
-    """Base for supplier-liability refusals."""
+    """Base for supplier-liability refusals.
+
+    ``code`` is an optional machine-readable refusal code (a6, additive). Every
+    refusal introduced in a6 sets it and also carries it in parentheses in the
+    message, as the a5 refusals do in text; existing raises are unchanged.
+    """
+
+    code: str | None
+
+    def __init__(self, *args: object, code: str | None = None) -> None:
+        super().__init__(*args)
+        self.code = code
 
 
 class NotFound(PayablesError):
@@ -826,4 +837,289 @@ __all__ += [
     "HistoricalSettledInvoiceVerifier",
     "HistoricalSettlement",
     "RecognizeApprovedInvoice",
+]
+
+
+# --- a6: cash-basis deferred-VAT release, historical deferral, historical credit ---
+
+
+def _scalar(value: object) -> object:
+    if value is None:
+        return ABSENT
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _two_decimal(value: object, label: str) -> None:
+    if (
+        not isinstance(value, Decimal)
+        or not value.is_finite()
+        or value != value.quantize(Decimal("0.01"))
+    ):
+        raise InvalidAmount(f"{label} must be exact finite two-decimal money")
+
+
+@dataclass(frozen=True, slots=True)
+class DeclareTaxDeferral:
+    """Owner fact: tax booked to ``deferral_account_ref`` is released to
+    ``release_account_ref`` in proportion to the outstanding balance paid.
+
+    A line is deferred exactly when its ``tax_account_ref`` equals a declared
+    deferral account. The declaration is immutable and never metadata.
+    """
+
+    deferral_account_ref: str
+    release_account_ref: str
+    minor_units: int
+    declared_by: str
+    evidence_reference: str
+
+    def validate(self) -> None:
+        deferral = _required(self.deferral_account_ref, "deferral account", 255)
+        release = _required(self.release_account_ref, "release account", 255)
+        _required(self.declared_by, "declared by", 255)
+        _required(self.evidence_reference, "evidence reference", 255)
+        if type(self.minor_units) is not int or not 0 <= self.minor_units <= 6:
+            raise InvalidAmount("minor units must be an integer from 0 to 6")
+        if deferral == release:
+            raise Conflict(
+                "deferral and release account must differ (tax_deferral_same_account)",
+                code="tax_deferral_same_account",
+            )
+
+
+def deferred_tax_release(
+    remaining: Decimal, allocated: Decimal, outstanding: Decimal, minor_units: int
+) -> Decimal:
+    """Deferred tax released by a payment of ``allocated`` against ``outstanding``.
+
+    The final payment (``allocated == outstanding``) releases the exact
+    ``remaining``; otherwise the proportional share is rounded half up to
+    ``minor_units`` and never exceeds ``remaining``. Pure: no policy is read.
+    """
+    if remaining < 0:
+        raise InvalidAmount(
+            "deferred tax position is negative (deferred_tax_position_negative)",
+            code="deferred_tax_position_negative",
+        )
+    if outstanding <= 0 or allocated <= 0 or allocated > outstanding:
+        raise InvalidAmount("allocation must lie within the outstanding balance")
+    if allocated == outstanding:
+        return remaining
+    quantum = Decimal(1).scaleb(-minor_units)
+    share = (remaining * allocated / outstanding).quantize(
+        quantum, rounding=ROUND_HALF_UP
+    )
+    return min(share, remaining)
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredTaxPosition:
+    """Deferred-tax position of one invoice against one deferral account."""
+
+    deferral_account_ref: str
+    deferred: Decimal
+    released_before_admission: Decimal
+    credited: Decimal
+    released: Decimal
+    remaining: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalTaxDeferralCommand:
+    source_owner: str
+    source_invoice_id: str
+    invoice_id: UUID
+    deferral_account_ref: str
+    source_snapshot_sha256: str
+    evidence_fingerprint: str
+
+    def validate(self) -> None:
+        for value, label, maximum in (
+            (self.source_owner, "source owner", 120),
+            (self.source_invoice_id, "source invoice id", 255),
+            (self.deferral_account_ref, "deferral account", 255),
+        ):
+            if _required(value, label, maximum) != value:
+                raise PayablesError(f"{label} must be canonical")
+        if not isinstance(self.invoice_id, UUID):
+            raise PayablesError("invoice id must be UUID")
+        if _fingerprint(self.source_snapshot_sha256) != self.source_snapshot_sha256:
+            raise PayablesError("snapshot digest must be canonical")
+        _historical_digest(self.evidence_fingerprint)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalTaxDeferralRelease:
+    """One opaque piece of evidence for a release before admission.
+
+    The verifier defines what ``evidence_ref`` names (a legacy reclass journal, a
+    reviewed opening-schedule row, ...); the owner only checks the amounts add up.
+    """
+
+    evidence_ref: str
+    released_amount: Decimal
+    evidence_fingerprint: str
+
+    def validate(self) -> None:
+        _required(self.evidence_ref, "release evidence reference", 255)
+        _two_decimal(self.released_amount, "released amount")
+        if self.released_amount <= 0:
+            raise InvalidAmount("a release evidence amount must be positive")
+        _historical_digest(self.evidence_fingerprint)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalTaxDeferralEvidence:
+    """Verifier proof of the deferral already released before admission.
+
+    Basis-neutral (a6, spec 5b): ``released_before_admission`` is the deferred tax
+    that left the deferral account before the invoice reached this owner, and
+    ``releases`` is opaque evidence whose meaning the verifier defines.
+    """
+
+    tenant_id: UUID
+    source_owner: str
+    source_invoice_id: str
+    source_snapshot_sha256: str
+    invoice_id: UUID
+    deferral_account_ref: str
+    deferred_tax_total: Decimal
+    releases: tuple[HistoricalTaxDeferralRelease, ...]
+    released_before_admission: Decimal
+    remaining: Decimal
+    accounting_evidence_fingerprint: str
+    facts_fingerprint: str
+
+    def fingerprint(self) -> str:
+        values: list[tuple[str, object]] = []
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if field.name == "releases":
+                value = encode_ordered(
+                    encode_fields(
+                        [(f.name, _scalar(getattr(item, f.name))) for f in fields(item)]
+                    )
+                    for item in value
+                )
+            values.append((field.name, _scalar(value)))
+        return digest_of("payables.historical-tax-deferral.v1", encode_fields(values))
+
+
+class HistoricalTaxDeferralVerifier(Protocol):
+    def verify(
+        self,
+        *,
+        scope: TenantScope,
+        command: HistoricalTaxDeferralCommand,
+        destination: Session,
+    ) -> HistoricalTaxDeferralEvidence: ...
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalSupplierCreditCommand:
+    source_owner: str
+    source_invoice_id: str
+    invoice_id: UUID
+    credit_number: str
+    source_snapshot_sha256: str
+    evidence_fingerprint: str
+    evidence_reference: str
+    admitted_by: str
+
+    def validate(self) -> None:
+        for value, label, maximum in (
+            (self.source_owner, "source owner", 120),
+            (self.source_invoice_id, "source invoice id", 255),
+            (self.credit_number, "credit number", 50),
+        ):
+            if _required(value, label, maximum) != value:
+                raise PayablesError(f"{label} must be canonical")
+        if not isinstance(self.invoice_id, UUID):
+            raise PayablesError("invoice id must be UUID")
+        if _fingerprint(self.source_snapshot_sha256) != self.source_snapshot_sha256:
+            raise PayablesError("snapshot digest must be canonical")
+        _historical_digest(self.evidence_fingerprint)
+        _required(self.evidence_reference, "evidence reference", 255)
+        _required(self.admitted_by, "admitted by", 255)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalSupplierCreditEvidence:
+    """Verifier proof that a settled legacy invoice was overpaid.
+
+    ``credit_amount`` is ``settled_amount - total_amount`` (> 0).
+    ``carried_control_amount`` is the supplier control-account net, in the
+    credit-positive convention, carried for the invoice and its settlements: an
+    overpayment leaves a net DEBIT, so it must equal ``-credit_amount`` exactly.
+    ``carried_evidence_ref`` names where that figure was read (basis-neutral).
+    """
+
+    tenant_id: UUID
+    source_owner: str
+    source_invoice_id: str
+    source_snapshot_sha256: str
+    invoice_id: UUID
+    source_status: str
+    invoice_type: str
+    number: str
+    supplier_ref: str
+    supplier_name_snapshot: str
+    currency_code: str
+    exchange_rate: Decimal
+    total_amount: Decimal
+    liability_account_ref: str
+    settlements: tuple[HistoricalSettlement, ...]
+    settled_amount: Decimal
+    withholding_tax_amount: Decimal
+    credit_amount: Decimal
+    carried_control_amount: Decimal
+    carried_evidence_ref: str
+    original_posted_at: datetime
+    source_journal_ref: str
+    destination_journal_ref: str
+    accounting_evidence_fingerprint: str
+    facts_fingerprint: str
+
+    def fingerprint(self) -> str:
+        values: list[tuple[str, object]] = []
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if field.name == "settlements":
+                value = encode_ordered(
+                    encode_fields(
+                        [(f.name, _scalar(getattr(item, f.name))) for f in fields(item)]
+                    )
+                    for item in value
+                )
+            values.append((field.name, _scalar(value)))
+        return digest_of(
+            "payables.historical-supplier-credit.v1", encode_fields(values)
+        )
+
+
+class HistoricalSupplierCreditVerifier(Protocol):
+    def verify(
+        self,
+        *,
+        scope: TenantScope,
+        command: HistoricalSupplierCreditCommand,
+        destination: Session,
+    ) -> HistoricalSupplierCreditEvidence: ...
+
+
+__all__ += [
+    "DeclareTaxDeferral",
+    "DeferredTaxPosition",
+    "HistoricalSupplierCreditCommand",
+    "HistoricalSupplierCreditEvidence",
+    "HistoricalSupplierCreditVerifier",
+    "HistoricalTaxDeferralCommand",
+    "HistoricalTaxDeferralEvidence",
+    "HistoricalTaxDeferralRelease",
+    "HistoricalTaxDeferralVerifier",
+    "deferred_tax_release",
 ]

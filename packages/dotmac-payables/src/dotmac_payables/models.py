@@ -878,7 +878,300 @@ class HistoricalSettlementRecord(Base):
     )
 
 
+class TaxDeferralPolicy(Base):
+    """Owner fact: tax booked to one account is deferred and released on payment."""
+
+    __tablename__ = "tax_deferral_policies"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_tax_deferral_policies_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "deferral_account_ref",
+            name="uq_tax_deferral_policies_deferral",
+        ),
+        CheckConstraint(
+            "deferral_account_ref <> release_account_ref",
+            name="ck_tax_deferral_policies_accounts",
+        ),
+        CheckConstraint(
+            "minor_units >= 0 AND minor_units <= 6",
+            name="ck_tax_deferral_policies_minor_units",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    deferral_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    release_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    declared_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    declared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class SupplierPaymentTaxRelease(Base):
+    """Deferred input tax released by one payment against one invoice.
+
+    The account refs are copied from the policy at the moment of release, so the
+    consequence is rebuilt from frozen rows and never from policy read later.
+    """
+
+    __tablename__ = "supplier_payment_tax_releases"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_supplier_payment_tax_releases_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "payment_id",
+            "line_number",
+            name="uq_supplier_payment_tax_releases_number",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "payment_id",
+            "invoice_id",
+            "deferral_account_ref",
+            name="uq_supplier_payment_tax_releases_release",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "payment_id"],
+            [f"{SCHEMA}.supplier_payments.tenant_id", f"{SCHEMA}.supplier_payments.id"],
+            ondelete="RESTRICT",
+            name="fk_supplier_payment_tax_releases_payment",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            ondelete="RESTRICT",
+            name="fk_supplier_payment_tax_releases_invoice",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "policy_id"],
+            [
+                f"{SCHEMA}.tax_deferral_policies.tenant_id",
+                f"{SCHEMA}.tax_deferral_policies.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_supplier_payment_tax_releases_policy",
+        ),
+        CheckConstraint("amount > 0", name="ck_supplier_payment_tax_releases_amount"),
+        CheckConstraint(
+            "deferral_account_ref <> release_account_ref",
+            name="ck_supplier_payment_tax_releases_accounts",
+        ),
+        Index(
+            "ix_supplier_payment_tax_releases_tenant_invoice", "tenant_id", "invoice_id"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    payment_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    policy_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    deferral_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    release_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class HistoricalTaxDeferralRecord(Base):
+    """Permanent, verifier-bound record of the deferral released before admission."""
+
+    __tablename__ = "historical_tax_deferrals"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_historical_tax_deferrals_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "invoice_id",
+            "deferral_account_ref",
+            name="uq_historical_tax_deferrals_invoice",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            ondelete="RESTRICT",
+            name="fk_historical_tax_deferrals_invoice",
+        ),
+        CheckConstraint(
+            "deferred_tax_total > 0 AND released_before_admission >= 0"
+            " AND remaining >= 0"
+            " AND remaining = deferred_tax_total - released_before_admission",
+            name="ck_historical_tax_deferrals_amounts",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    deferral_account_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_invoice_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    facts_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    accounting_evidence_fingerprint: Mapped[str] = mapped_column(
+        String(68), nullable=False
+    )
+    deferred_tax_total: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    released_before_admission: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    remaining: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    admitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class HistoricalCreditReceipt(Base):
+    """Permanent evidence that a historical overpayment was admitted as a credit."""
+
+    __tablename__ = "historical_credit_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_historical_credit_receipts_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "credit_note_id", name="uq_historical_credit_receipts_credit"
+        ),
+        UniqueConstraint(
+            "tenant_id", "invoice_id", name="uq_historical_credit_receipts_invoice"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_owner",
+            "source_invoice_id",
+            name="uq_historical_credit_receipts_source",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "credit_note_id"],
+            [f"{SCHEMA}.credit_notes.tenant_id", f"{SCHEMA}.credit_notes.id"],
+            ondelete="RESTRICT",
+            name="fk_historical_credit_receipts_credit",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            [f"{SCHEMA}.supplier_invoices.tenant_id", f"{SCHEMA}.supplier_invoices.id"],
+            ondelete="RESTRICT",
+            name="fk_historical_credit_receipts_invoice",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "event_id"],
+            [f"{SCHEMA}.liability_events.tenant_id", f"{SCHEMA}.liability_events.id"],
+            ondelete="RESTRICT",
+            name="fk_historical_credit_receipts_event",
+        ),
+        CheckConstraint(
+            "credit_amount > 0", name="ck_historical_credit_receipts_credit"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    credit_note_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    invoice_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    event_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_invoice_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    facts_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    accounting_evidence_fingerprint: Mapped[str] = mapped_column(
+        String(68), nullable=False
+    )
+    source_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    destination_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    carried_evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    admitted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    credit_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    carried_control_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    original_posted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    admitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class HistoricalCreditSettlementRecord(Base):
+    """One immutable legacy settlement of an overpaid historical invoice."""
+
+    __tablename__ = "historical_credit_settlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_historical_credit_settlements_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "receipt_id",
+            "line_number",
+            name="uq_historical_credit_settlements_number",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_settlement_id",
+            name="uq_historical_credit_settlements_source",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "receipt_id"],
+            [
+                f"{SCHEMA}.historical_credit_receipts.tenant_id",
+                f"{SCHEMA}.historical_credit_receipts.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_historical_credit_settlements_receipt",
+        ),
+        CheckConstraint(
+            "applied_amount > 0 AND withholding_amount >= 0"
+            " AND withholding_amount <= applied_amount",
+            name="ck_historical_credit_settlements_amounts",
+        ),
+        CheckConstraint(
+            "exchange_rate > 0", name="ck_historical_credit_settlements_rate"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_settlement_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    payment_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    settled_on: Mapped[date] = mapped_column(Date, nullable=False)
+    applied_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    withholding_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    exchange_rate: Mapped[Decimal] = mapped_column(RATE, nullable=False)
+    source_row_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    source_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    destination_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 ALL_MODELS = (
+    TaxDeferralPolicy,
+    SupplierPaymentTaxRelease,
+    HistoricalTaxDeferralRecord,
+    HistoricalCreditReceipt,
+    HistoricalCreditSettlementRecord,
     InvoiceRecognition,
     HistoricalSettlementRecord,
     HistoricalInvoiceReceipt,
@@ -904,6 +1197,11 @@ def metadata_table(name: str) -> sa.Table:
 
 __all__ = [
     "ALL_MODELS",
+    "HistoricalCreditReceipt",
+    "HistoricalCreditSettlementRecord",
+    "HistoricalTaxDeferralRecord",
+    "SupplierPaymentTaxRelease",
+    "TaxDeferralPolicy",
     "HistoricalInvoiceReceipt",
     "HistoricalSettlementRecord",
     "InvoiceRecognition",

@@ -33,9 +33,17 @@ from dotmac_payables.contracts import (
     CreateSupplierInvoice,
     CreateSupplierPayment,
     CreditNoteStatus,
+    DeclareTaxDeferral,
+    DeferredTaxPosition,
     HistoricalSettledInvoiceCommand,
     HistoricalSettledInvoiceEvidence,
     HistoricalSettledInvoiceVerifier,
+    HistoricalSupplierCreditCommand,
+    HistoricalSupplierCreditEvidence,
+    HistoricalSupplierCreditVerifier,
+    HistoricalTaxDeferralCommand,
+    HistoricalTaxDeferralEvidence,
+    HistoricalTaxDeferralVerifier,
     HistoricalUnpaidInvoiceCommand,
     HistoricalUnpaidInvoiceEvidence,
     HistoricalUnpaidInvoiceVerifier,
@@ -44,17 +52,22 @@ from dotmac_payables.contracts import (
     InvoiceStatus,
     NotFound,
     ObligationStatus,
+    PayablesError,
     RecognizeApprovedInvoice,
     SettlementObservationInput,
     SupplierPaymentStatus,
+    deferred_tax_release,
 )
 from dotmac_payables.models import (
     AccountingReceipt,
     CreditApplication,
     CreditNote,
     CreditNoteLine,
+    HistoricalCreditReceipt,
+    HistoricalCreditSettlementRecord,
     HistoricalInvoiceReceipt,
     HistoricalSettlementRecord,
+    HistoricalTaxDeferralRecord,
     InvoiceRecognition,
     LiabilityEvent,
     PaymentObligation,
@@ -63,7 +76,9 @@ from dotmac_payables.models import (
     SupplierInvoiceLine,
     SupplierPayment,
     SupplierPaymentAllocation,
+    SupplierPaymentTaxRelease,
     SupplierPaymentWithholding,
+    TaxDeferralPolicy,
 )
 
 MONEY_QUANTUM = Decimal("0.000001")
@@ -87,6 +102,28 @@ def _fingerprint(value: str, label: str) -> str:
     if len(result) != 64 or any(c not in "0123456789abcdef" for c in result):
         raise InvalidTransition(f"{label} must be a 64-character SHA-256")
     return result
+
+
+def _refuse(exc_type: type[PayablesError], message: str, code: str) -> PayablesError:
+    """Build an a6 refusal: the code is an attribute and also in the message."""
+    return exc_type(f"{message} ({code})", code=code)
+
+
+def _check_consequence_entries(entries: list[AccountingEntry]) -> None:
+    """Backstop for the document builders: never emit an unpostable shape."""
+    if (
+        not entries
+        or any(e.debit < 0 or e.credit < 0 for e in entries)
+        or any(e.debit == 0 and e.credit == 0 for e in entries)
+        or sum((e.debit for e in entries), Decimal("0"))
+        != sum((e.credit for e in entries), Decimal("0"))
+    ):
+        raise _refuse(
+            InvalidAmount,
+            "accounting consequence entries are empty, unbalanced or hold a "
+            "zero entry",
+            "consequence_entry_invalid",
+        )
 
 
 def _flush_unique(db: Session, row: object, *, label: str) -> None:
@@ -536,6 +573,44 @@ def submit_credit_note(
     return credit
 
 
+def _check_credit_deferred_tax(session: Session, credit: CreditNote) -> None:
+    """Keep a credit note against deferred input tax within what is still deferred."""
+    tenant_id = credit.tenant_id
+    policies = _deferral_policies(session, tenant_id)
+    if not policies:
+        return
+    lines = _credit_lines(session, tenant_id, credit.id)
+    if not any(line.tax_account_ref in policies for line in lines):
+        return
+    if credit.original_invoice_id is None:
+        raise _refuse(
+            InvalidTransition,
+            "a credit note with deferred tax requires its original invoice",
+            "deferred_tax_credit_requires_invoice",
+        )
+    # Lock order: credit (held by the caller), then the invoice.
+    _invoice(session, tenant_id, credit.original_invoice_id, lock=True)
+    remaining = {
+        position.deferral_account_ref: position.remaining
+        for position in invoice_deferred_tax_position(
+            session, tenant_id, credit.original_invoice_id
+        )
+    }
+    credited: dict[str, Decimal] = {}
+    for line in lines:
+        if line.tax_account_ref in policies:
+            credited[line.tax_account_ref] = _money(
+                credited.get(line.tax_account_ref, Decimal("0")) + line.tax_amount
+            )
+    for account, amount in credited.items():
+        if amount > remaining.get(account, Decimal("0")):
+            raise _refuse(
+                InvalidAmount,
+                "credit note deferred tax exceeds what the invoice still defers",
+                "deferred_tax_credit_exceeds_remaining",
+            )
+
+
 def approve_credit_note(
     db: Session,
     *,
@@ -564,6 +639,7 @@ def approve_credit_note(
             raise InvalidTransition(
                 "only a submitted supplier credit note can be approved"
             )
+        _check_credit_deferred_tax(session, credit)
         credit.status = CreditNoteStatus.APPROVED
         credit.available_amount = credit.total_amount
         credit.approval_reference = approval
@@ -842,6 +918,12 @@ def build_invoice_accounting_consequence(
         raise InvalidTransition(
             "historical invoice already has imported accounting evidence"
         )
+    if _historical_credit_receipt_for_invoice(db, tenant_id, invoice_id) is not None:
+        raise _refuse(
+            InvalidTransition,
+            "invoice carries a historical supplier credit and has no consequence",
+            "invoice_carries_historical_credit",
+        )
     recognized = db.scalar(
         select(LiabilityEvent.id)
         .where(
@@ -863,14 +945,17 @@ def build_invoice_accounting_consequence(
         dimensions = tuple(
             (str(code), str(value)) for code, value in line.dimension_refs
         )
-        entries.append(
-            AccountingEntry(
-                account_ref=line.posting_account_ref,
-                debit=line.line_amount,
-                description=line.description,
-                dimension_refs=dimensions,
+        # A zero-value line is document evidence only: the ledger refuses a 0/0
+        # entry. A tax-only line keeps its tax entry below.
+        if line.line_amount != 0:
+            entries.append(
+                AccountingEntry(
+                    account_ref=line.posting_account_ref,
+                    debit=line.line_amount,
+                    description=line.description,
+                    dimension_refs=dimensions,
+                )
             )
-        )
         if line.tax_amount > 0:
             if not line.tax_account_ref:
                 raise InvalidAmount("persisted taxed line has no tax account reference")
@@ -889,6 +974,7 @@ def build_invoice_accounting_consequence(
             description=f"Supplier liability {invoice.number}",
         )
     )
+    _check_consequence_entries(entries)
     return _consequence(
         source=ConsequenceSource(
             owner="payables",
@@ -909,6 +995,13 @@ def build_credit_accounting_consequence(
     db: Session, *, tenant_id: UUID, credit_note_id: UUID
 ) -> AccountingConsequence:
     credit = _credit(db, tenant_id, credit_note_id)
+    if _historical_credit_receipt_for_credit(db, tenant_id, credit.id) is not None:
+        raise _refuse(
+            InvalidTransition,
+            "a historical supplier credit has no accounting consequence "
+            "(the carried ledger already holds it)",
+            "historical_credit_has_no_consequence",
+        )
     if credit.status != CreditNoteStatus.APPROVED:
         raise InvalidTransition(
             "only an approved credit note has an accounting consequence"
@@ -924,14 +1017,15 @@ def build_credit_accounting_consequence(
         dimensions = tuple(
             (str(code), str(value)) for code, value in line.dimension_refs
         )
-        entries.append(
-            AccountingEntry(
-                account_ref=line.posting_account_ref,
-                credit=line.line_amount,
-                description=line.description,
-                dimension_refs=dimensions,
+        if line.line_amount != 0:
+            entries.append(
+                AccountingEntry(
+                    account_ref=line.posting_account_ref,
+                    credit=line.line_amount,
+                    description=line.description,
+                    dimension_refs=dimensions,
+                )
             )
-        )
         if line.tax_amount > 0:
             if not line.tax_account_ref:
                 raise InvalidAmount("persisted taxed line has no tax account reference")
@@ -943,6 +1037,7 @@ def build_credit_accounting_consequence(
                     dimension_refs=dimensions,
                 )
             )
+    _check_consequence_entries(entries)
     return _consequence(
         source=ConsequenceSource(
             owner="payables",
@@ -1065,6 +1160,28 @@ def _historical_receipt(
     )
 
 
+def _historical_credit_receipt_for_invoice(
+    db: Session, tenant_id: UUID, invoice_id: UUID
+) -> HistoricalCreditReceipt | None:
+    return db.scalar(
+        select(HistoricalCreditReceipt).where(
+            HistoricalCreditReceipt.tenant_id == tenant_id,
+            HistoricalCreditReceipt.invoice_id == invoice_id,
+        )
+    )
+
+
+def _historical_credit_receipt_for_credit(
+    db: Session, tenant_id: UUID, credit_note_id: UUID
+) -> HistoricalCreditReceipt | None:
+    return db.scalar(
+        select(HistoricalCreditReceipt).where(
+            HistoricalCreditReceipt.tenant_id == tenant_id,
+            HistoricalCreditReceipt.credit_note_id == credit_note_id,
+        )
+    )
+
+
 def _historical_money(value: Decimal) -> None:
     if (
         not isinstance(value, Decimal)
@@ -1091,7 +1208,9 @@ def _json_value(value: object) -> object:
 def _evidence_json(
     evidence: HistoricalUnpaidInvoiceEvidence
     | HistoricalSettledInvoiceEvidence
-    | ApprovedInvoiceRecognitionEvidence,
+    | ApprovedInvoiceRecognitionEvidence
+    | HistoricalTaxDeferralEvidence
+    | HistoricalSupplierCreditEvidence,
 ) -> dict[str, object]:
     return {f.name: _json_value(getattr(evidence, f.name)) for f in fields(evidence)}
 
@@ -1106,10 +1225,14 @@ def _run_verifier(
     scope: TenantScope,
     command: HistoricalUnpaidInvoiceCommand
     | HistoricalSettledInvoiceCommand
-    | RecognizeApprovedInvoice,
+    | RecognizeApprovedInvoice
+    | HistoricalTaxDeferralCommand
+    | HistoricalSupplierCreditCommand,
     verifier: HistoricalUnpaidInvoiceVerifier
     | HistoricalSettledInvoiceVerifier
-    | ApprovedInvoiceRecognitionVerifier,
+    | ApprovedInvoiceRecognitionVerifier
+    | HistoricalTaxDeferralVerifier
+    | HistoricalSupplierCreditVerifier,
 ) -> tuple[SupplierInvoice, object]:
     """Lock the invoice, then run the read-only verifier in a discarded savepoint."""
     # All invoice writers and accounting guards share this lock. Verify the
@@ -1162,10 +1285,16 @@ def _run_verifier(
 
 
 def _check_historical_common(
-    evidence: HistoricalUnpaidInvoiceEvidence | HistoricalSettledInvoiceEvidence,
+    evidence: HistoricalUnpaidInvoiceEvidence
+    | HistoricalSettledInvoiceEvidence
+    | HistoricalTaxDeferralEvidence
+    | HistoricalSupplierCreditEvidence,
     *,
     tenant_id: UUID,
-    command: HistoricalUnpaidInvoiceCommand | HistoricalSettledInvoiceCommand,
+    command: HistoricalUnpaidInvoiceCommand
+    | HistoricalSettledInvoiceCommand
+    | HistoricalTaxDeferralCommand
+    | HistoricalSupplierCreditCommand,
 ) -> str:
     if (
         evidence.tenant_id,
@@ -1404,6 +1533,10 @@ def _admit_historical(
                 & (AccountingReceipt.document_id == invoice.id),
             ),
             (InvoiceRecognition, InvoiceRecognition.invoice_id == invoice.id),
+            (
+                HistoricalCreditReceipt,
+                HistoricalCreditReceipt.invoice_id == invoice.id,
+            ),
         ):
             if (
                 session.scalar(
@@ -1428,7 +1561,17 @@ def _admit_historical(
                 )
                 .limit(1)
             )
-            if taken is not None:
+            taken_by_credit = session.scalar(
+                select(HistoricalCreditSettlementRecord.id)
+                .where(
+                    HistoricalCreditSettlementRecord.tenant_id == scope.tenant_id,
+                    HistoricalCreditSettlementRecord.source_settlement_id.in_(
+                        [item.source_settlement_id for item in settlements]
+                    ),
+                )
+                .limit(1)
+            )
+            if taken is not None or taken_by_credit is not None:
                 raise Conflict(
                     "a legacy settlement was already admitted against an invoice"
                 )
@@ -1616,6 +1759,324 @@ def admit_historical_settled_invoice(
         admitted_at=admitted_at,
         settled=True,
     )
+
+
+# --- a6: cash-basis release of deferred input tax --------------------------------
+
+
+def _deferral_policies(db: Session, tenant_id: UUID) -> dict[str, TaxDeferralPolicy]:
+    return {
+        row.deferral_account_ref: row
+        for row in db.scalars(
+            select(TaxDeferralPolicy)
+            .where(TaxDeferralPolicy.tenant_id == tenant_id)
+            .order_by(TaxDeferralPolicy.deferral_account_ref)
+        )
+    }
+
+
+def declare_tax_deferral(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: DeclareTaxDeferral,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    declared_at: datetime,
+) -> TaxDeferralPolicy:
+    """Declare that tax booked to one account is deferred until payment.
+
+    One immutable row per (tenant, deferral account). An identical replay returns
+    the existing row; any other declaration for that account is a conflict.
+    """
+    command.validate()
+    tenant_id = scope.tenant_id
+    canonical_instant(declared_at)
+    deferral = command.deferral_account_ref.strip()
+    release = command.release_account_ref.strip()
+    declared_by = command.declared_by.strip()
+    evidence_reference = command.evidence_reference.strip()
+    payload = {
+        "deferral_account_ref": deferral,
+        "release_account_ref": release,
+        "minor_units": command.minor_units,
+        "declared_by": declared_by,
+        "evidence_reference": evidence_reference,
+    }
+
+    def operation(session: Session) -> Mapping[str, object]:
+        policies = _deferral_policies(session, tenant_id)
+        existing = policies.get(deferral)
+        if existing is not None:
+            if (
+                existing.release_account_ref != release
+                or existing.minor_units != command.minor_units
+                or existing.declared_by != declared_by
+                or existing.evidence_reference != evidence_reference
+            ):
+                raise _refuse(
+                    Conflict,
+                    "a different tax deferral is already declared for this account",
+                    "tax_deferral_already_declared",
+                )
+            return {"policy_id": str(existing.id)}
+        if any(row.release_account_ref == deferral for row in policies.values()) or any(
+            row.deferral_account_ref == release for row in policies.values()
+        ):
+            raise _refuse(
+                Conflict,
+                "a deferral account cannot be another policy's release account",
+                "tax_deferral_chain",
+            )
+        policy = TaxDeferralPolicy(
+            tenant_id=tenant_id,
+            deferral_account_ref=deferral,
+            release_account_ref=release,
+            minor_units=command.minor_units,
+            declared_by=declared_by,
+            evidence_reference=evidence_reference,
+            declared_at=declared_at,
+        )
+        session.add(policy)
+        session.flush()
+        return {"policy_id": str(policy.id)}
+
+    try:
+        outcome = execute_once(
+            db,
+            tenant_id=tenant_id,
+            scope="payables.declare_tax_deferral",
+            key=idempotency_key,
+            operation=operation,
+            fingerprint=fingerprint_of(payload),
+            expires_at=idempotency_expires_at,
+        )
+    except IntegrityError as exc:
+        raise _refuse(
+            Conflict,
+            "a tax deferral is already declared for this account",
+            "tax_deferral_already_declared",
+        ) from exc
+    policy = db.scalar(
+        select(TaxDeferralPolicy).where(
+            TaxDeferralPolicy.tenant_id == tenant_id,
+            TaxDeferralPolicy.id == UUID(str(outcome.result["policy_id"])),
+        )
+    )
+    if policy is None:
+        raise NotFound("tax deferral policy was not found")
+    return policy
+
+
+def _sum_money(values: object) -> Decimal:
+    return _money(sum((Decimal(v) for v in values), Decimal("0")))  # type: ignore[attr-defined]
+
+
+def invoice_deferred_tax_position(
+    db: Session, tenant_id: UUID, invoice_id: UUID
+) -> tuple[DeferredTaxPosition, ...]:
+    """The deferred-tax position of an invoice, per declared deferral account.
+
+    D (tax on lines booked to the deferral account) less L (released before
+    admission, from the verifier-bound historical record), C (deferral tax on
+    APPROVED credit notes against the invoice) and Rel (releases of RECORDED
+    payments; a REVERSED payment's rows are excluded because its reversal mirrors
+    them). Only accounts with D > 0 appear. A negative remainder is a data fault
+    and is refused, never repaired. Call under the invoice row lock to write.
+    """
+    policies = _deferral_policies(db, tenant_id)
+    if not policies:
+        return ()
+    positions: list[DeferredTaxPosition] = []
+    lines = _invoice_lines(db, tenant_id, invoice_id)
+    for account in sorted(policies):
+        deferred = _sum_money(
+            line.tax_amount for line in lines if line.tax_account_ref == account
+        )
+        if deferred <= 0:
+            continue
+        historical = db.scalar(
+            select(HistoricalTaxDeferralRecord.released_before_admission).where(
+                HistoricalTaxDeferralRecord.tenant_id == tenant_id,
+                HistoricalTaxDeferralRecord.invoice_id == invoice_id,
+                HistoricalTaxDeferralRecord.deferral_account_ref == account,
+            )
+        )
+        credited = _sum_money(
+            db.scalars(
+                select(CreditNoteLine.tax_amount)
+                .join(
+                    CreditNote,
+                    (CreditNote.tenant_id == CreditNoteLine.tenant_id)
+                    & (CreditNote.id == CreditNoteLine.credit_note_id),
+                )
+                .where(
+                    CreditNote.tenant_id == tenant_id,
+                    CreditNote.original_invoice_id == invoice_id,
+                    CreditNote.status == CreditNoteStatus.APPROVED,
+                    CreditNoteLine.tax_account_ref == account,
+                )
+            )
+        )
+        released = _sum_money(
+            db.scalars(
+                select(SupplierPaymentTaxRelease.amount)
+                .join(
+                    SupplierPayment,
+                    (SupplierPayment.tenant_id == SupplierPaymentTaxRelease.tenant_id)
+                    & (SupplierPayment.id == SupplierPaymentTaxRelease.payment_id),
+                )
+                .where(
+                    SupplierPaymentTaxRelease.tenant_id == tenant_id,
+                    SupplierPaymentTaxRelease.invoice_id == invoice_id,
+                    SupplierPaymentTaxRelease.deferral_account_ref == account,
+                    SupplierPayment.status == SupplierPaymentStatus.RECORDED,
+                )
+            )
+        )
+        before = _money(Decimal(historical or 0))
+        remaining = _money(deferred - before - credited - released)
+        if remaining < 0:
+            raise _refuse(
+                InvalidAmount,
+                "deferred tax position is negative",
+                "deferred_tax_position_negative",
+            )
+        positions.append(
+            DeferredTaxPosition(
+                deferral_account_ref=account,
+                deferred=deferred,
+                released_before_admission=before,
+                credited=credited,
+                released=released,
+                remaining=remaining,
+            )
+        )
+    return tuple(positions)
+
+
+def _release_deferred_tax_for_payment(
+    db: Session, payment: SupplierPayment, *, recorded_at: datetime
+) -> None:
+    """Freeze the deferred-tax release of a payment as rows, before settlement.
+
+    Lock order: payment, obligations (already held by the recheck), then the
+    invoices in invoice-id order. Nothing here reads policy that could change
+    after the rows are written; the consequence is rebuilt from the rows.
+    """
+    tenant_id = payment.tenant_id
+    policies = _deferral_policies(db, tenant_id)
+    if not policies:
+        return
+    allocated: dict[UUID, Decimal] = {}
+    for allocation in _payment_allocations(db, tenant_id, payment.id):
+        obligation = _obligation(db, tenant_id, allocation.obligation_id)
+        allocated[obligation.invoice_id] = _money(
+            allocated.get(obligation.invoice_id, Decimal("0")) + allocation.amount
+        )
+    line_number = 0
+    for invoice_id in sorted(allocated, key=str):
+        _invoice(db, tenant_id, invoice_id, lock=True)
+        outstanding = _money(
+            Decimal(
+                db.scalar(
+                    select(func.sum(PaymentObligation.outstanding_amount)).where(
+                        PaymentObligation.tenant_id == tenant_id,
+                        PaymentObligation.invoice_id == invoice_id,
+                    )
+                )
+                or 0
+            )
+        )
+        for position in invoice_deferred_tax_position(db, tenant_id, invoice_id):
+            receipt = _historical_receipt(db, tenant_id, invoice_id)
+            if (
+                receipt is not None
+                and db.scalar(
+                    select(HistoricalSettlementRecord.id)
+                    .where(
+                        HistoricalSettlementRecord.tenant_id == tenant_id,
+                        HistoricalSettlementRecord.receipt_id == receipt.id,
+                    )
+                    .limit(1)
+                )
+                is not None
+                and db.scalar(
+                    select(HistoricalTaxDeferralRecord.id).where(
+                        HistoricalTaxDeferralRecord.tenant_id == tenant_id,
+                        HistoricalTaxDeferralRecord.invoice_id == invoice_id,
+                        HistoricalTaxDeferralRecord.deferral_account_ref
+                        == position.deferral_account_ref,
+                    )
+                )
+                is None
+            ):
+                raise _refuse(
+                    InvalidTransition,
+                    "a settled historical invoice with deferred tax has no "
+                    "admitted deferral position",
+                    "historical_deferral_unproven",
+                )
+            policy = policies[position.deferral_account_ref]
+            amount = deferred_tax_release(
+                position.remaining,
+                allocated[invoice_id],
+                outstanding,
+                policy.minor_units,
+            )
+            if amount <= 0:
+                continue
+            line_number += 1
+            db.add(
+                SupplierPaymentTaxRelease(
+                    tenant_id=tenant_id,
+                    payment_id=payment.id,
+                    line_number=line_number,
+                    invoice_id=invoice_id,
+                    policy_id=policy.id,
+                    deferral_account_ref=policy.deferral_account_ref,
+                    release_account_ref=policy.release_account_ref,
+                    amount=_money(amount),
+                    created_at=recorded_at,
+                )
+            )
+    db.flush()
+
+
+def _payment_tax_releases(
+    db: Session, tenant_id: UUID, payment_id: UUID
+) -> list[SupplierPaymentTaxRelease]:
+    return list(
+        db.scalars(
+            select(SupplierPaymentTaxRelease)
+            .where(
+                SupplierPaymentTaxRelease.tenant_id == tenant_id,
+                SupplierPaymentTaxRelease.payment_id == payment_id,
+            )
+            .order_by(SupplierPaymentTaxRelease.line_number)
+        )
+    )
+
+
+def _check_withholding_accounts(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    cash_account_ref: str,
+    withholding_refs: list[str],
+    liability_refs: set[str],
+) -> None:
+    """A withholding account may not be cash, a liability or a tax-deferral account."""
+    forbidden = {cash_account_ref, *liability_refs}
+    for policy in _deferral_policies(db, tenant_id).values():
+        forbidden.update((policy.deferral_account_ref, policy.release_account_ref))
+    if any(ref in forbidden for ref in withholding_refs):
+        raise _refuse(
+            InvalidTransition,
+            "a withholding account cannot be the cash account, an allocated "
+            "invoice's liability account or a tax-deferral account",
+            "withholding_account_conflict",
+        )
 
 
 PAYMENT_SETTLEMENT_OWNER = "payables.supplier_payment"
@@ -1816,6 +2277,21 @@ def create_supplier_payment(
                 exchange_rate=command.exchange_rate,
                 payment_id=None,
             )
+        if withholdings:
+            _check_withholding_accounts(
+                session,
+                tenant_id=tenant_id,
+                cash_account_ref=str(payload["cash_account_ref"]),
+                withholding_refs=[row[0] for row in withholdings],
+                liability_refs={
+                    _invoice(
+                        session,
+                        tenant_id,
+                        _obligation(session, tenant_id, obligation_id).invoice_id,
+                    ).liability_account_ref
+                    for obligation_id, _ in allocations
+                },
+            )
         payment = SupplierPayment(
             tenant_id=tenant_id,
             number=str(payload["number"]),
@@ -1893,6 +2369,29 @@ def _recheck_allocations(db: Session, payment: SupplierPayment) -> None:
             currency_code=payment.currency_code,
             exchange_rate=payment.exchange_rate,
             payment_id=payment.id,
+        )
+    withholding_refs = [
+        row.account_ref
+        for row in _payment_withholdings(db, payment.tenant_id, payment.id)
+    ]
+    if withholding_refs:
+        _check_withholding_accounts(
+            db,
+            tenant_id=payment.tenant_id,
+            cash_account_ref=payment.cash_account_ref,
+            withholding_refs=withholding_refs,
+            liability_refs={
+                _invoice(
+                    db,
+                    payment.tenant_id,
+                    _obligation(
+                        db, payment.tenant_id, allocation.obligation_id
+                    ).invoice_id,
+                ).liability_account_ref
+                for allocation in _payment_allocations(
+                    db, payment.tenant_id, payment.id
+                )
+            },
         )
 
 
@@ -1997,6 +2496,7 @@ def record_supplier_payment(
         if duplicate is not None:
             raise Conflict("bank reference was already recorded against a payment")
         _recheck_allocations(session, payment)
+        _release_deferred_tax_for_payment(session, payment, recorded_at=recorded_at)
         for allocation in sorted(
             _payment_allocations(session, tenant_id, payment.id),
             key=lambda row: str(row.obligation_id),
@@ -2102,6 +2602,32 @@ def cancel_supplier_payment(
     return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
 
 
+def _check_payment_balance(
+    entries: list[AccountingEntry],
+    by_account: dict[str, Decimal],
+    release_entries: list[AccountingEntry],
+    rows: list[SupplierPaymentTaxRelease],
+    payment: SupplierPayment,
+    *,
+    reversal: bool = False,
+) -> None:
+    """Debits equal credits, liability lines equal gross, release lines equal rows."""
+    debits = sum((entry.debit for entry in entries), Decimal("0"))
+    credits = sum((entry.credit for entry in entries), Decimal("0"))
+    rows_total = _money(sum((row.amount for row in rows), Decimal("0")))
+    if (
+        debits != credits
+        or _money(sum(by_account.values(), Decimal("0"))) != payment.gross_amount
+        or sum((e.debit for e in release_entries), Decimal("0")) != rows_total
+        or sum((e.credit for e in release_entries), Decimal("0")) != rows_total
+    ):
+        raise InvalidAmount(
+            "persisted supplier payment reversal does not balance"
+            if reversal
+            else "persisted supplier payment does not balance"
+        )
+
+
 def build_payment_accounting_consequence(
     db: Session, *, tenant_id: UUID, payment_id: UUID
 ) -> AccountingConsequence:
@@ -2152,10 +2678,26 @@ def build_payment_accounting_consequence(
                 or f"Withholding tax: payment {payment.number}",
             )
         )
-    debits = sum((entry.debit for entry in entries), Decimal("0"))
-    credits = sum((entry.credit for entry in entries), Decimal("0"))
-    if debits != credits or debits != payment.gross_amount:
-        raise InvalidAmount("persisted supplier payment does not balance")
+    releases = _payment_tax_releases(db, tenant_id, payment.id)
+    release_entries: list[AccountingEntry] = []
+    for release in releases:
+        description = f"Deferred input tax released: payment {payment.number}"
+        release_entries.append(
+            AccountingEntry(
+                account_ref=release.release_account_ref,
+                debit=release.amount,
+                description=description,
+            )
+        )
+        release_entries.append(
+            AccountingEntry(
+                account_ref=release.deferral_account_ref,
+                credit=release.amount,
+                description=description,
+            )
+        )
+    entries.extend(release_entries)
+    _check_payment_balance(entries, by_account, release_entries, releases, payment)
     return _consequence(
         source=ConsequenceSource(
             owner="payables",
@@ -2356,10 +2898,30 @@ def build_payment_reversal_accounting_consequence(
                 description=f"Reversal of supplier payment {payment.number}",
             )
         )
-    debits = sum((entry.debit for entry in entries), Decimal("0"))
-    credits = sum((entry.credit for entry in entries), Decimal("0"))
-    if debits != credits or debits != payment.gross_amount:
-        raise InvalidAmount("persisted supplier payment reversal does not balance")
+    releases = _payment_tax_releases(db, tenant_id, payment.id)
+    release_entries: list[AccountingEntry] = []
+    for release in releases:
+        description = (
+            f"Reversal of deferred input tax release: payment {payment.number}"
+        )
+        release_entries.append(
+            AccountingEntry(
+                account_ref=release.deferral_account_ref,
+                debit=release.amount,
+                description=description,
+            )
+        )
+        release_entries.append(
+            AccountingEntry(
+                account_ref=release.release_account_ref,
+                credit=release.amount,
+                description=description,
+            )
+        )
+    entries.extend(release_entries)
+    _check_payment_balance(
+        entries, by_account, release_entries, releases, payment, reversal=True
+    )
     return _consequence(
         source=ConsequenceSource(
             owner="payables",
@@ -2512,6 +3074,10 @@ def recognize_approved_invoice(
                 HistoricalInvoiceReceipt,
                 HistoricalInvoiceReceipt.invoice_id == invoice.id,
             ),
+            (
+                HistoricalCreditReceipt,
+                HistoricalCreditReceipt.invoice_id == invoice.id,
+            ),
         ):
             if (
                 session.scalar(
@@ -2600,6 +3166,488 @@ def recognize_approved_invoice(
     return _invoice(db, tenant_id, command.invoice_id)
 
 
+def admit_historical_tax_deferral(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: HistoricalTaxDeferralCommand,
+    verifier: HistoricalTaxDeferralVerifier,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    admitted_at: datetime,
+) -> HistoricalTaxDeferralRecord:
+    """Record, with no GL, the deferral already released on a settled history invoice.
+
+    Without it, the first v2 payment of a settled historical invoice would release
+    deferred tax that legacy had already released. The verifier proves the amount
+    released before admission; the owner proves it adds up against the invoice's
+    own lines. One permanent row per (invoice, deferral account).
+    """
+    command.validate()
+    if verifier is None or not callable(getattr(verifier, "verify", None)):
+        raise InvalidTransition("historical deferral admission requires a verifier")
+    canonical_instant(admitted_at)
+    if not isinstance(db, Session) or isinstance(db, scoped_session):
+        raise InvalidTransition(
+            "historical deferral admission requires a plain Session"
+        )
+    locked, evidence = _run_verifier(
+        db, scope=scope, command=command, verifier=verifier
+    )
+    if not isinstance(evidence, HistoricalTaxDeferralEvidence):
+        raise InvalidTransition("historical verifier returned no typed evidence")
+    fingerprint = _check_historical_common(
+        evidence, tenant_id=scope.tenant_id, command=command
+    )
+    if evidence.deferral_account_ref != command.deferral_account_ref:
+        raise Conflict("historical evidence deferral account differs from command")
+    for value in (
+        evidence.deferred_tax_total,
+        evidence.released_before_admission,
+        evidence.remaining,
+    ):
+        _historical_money(value)
+    if not isinstance(evidence.releases, tuple):
+        raise InvalidTransition("historical deferral releases must be a tuple")
+    released = Decimal("0")
+    for item in evidence.releases:
+        item.validate()
+        released += item.released_amount
+    if evidence.deferred_tax_total <= 0:
+        raise InvalidAmount("historical deferred tax total must be positive")
+    if (
+        released != evidence.released_before_admission
+        or evidence.remaining
+        != evidence.deferred_tax_total - evidence.released_before_admission
+        or evidence.remaining < 0
+    ):
+        raise InvalidAmount("historical deferral releases do not reconcile")
+
+    def operation(session: Session) -> Mapping[str, object]:
+        invoice = _invoice(session, scope.tenant_id, command.invoice_id, lock=True)
+        existing = session.scalar(
+            select(HistoricalTaxDeferralRecord).where(
+                HistoricalTaxDeferralRecord.tenant_id == scope.tenant_id,
+                HistoricalTaxDeferralRecord.invoice_id == invoice.id,
+                HistoricalTaxDeferralRecord.deferral_account_ref
+                == command.deferral_account_ref,
+            )
+        )
+        if existing is not None:
+            if existing.evidence_fingerprint != fingerprint:
+                raise Conflict("invoice has different permanent deferral evidence")
+            return {"record_id": str(existing.id)}
+        receipt = _historical_receipt(session, scope.tenant_id, invoice.id)
+        settled = (
+            receipt is not None
+            and session.scalar(
+                select(HistoricalSettlementRecord.id)
+                .where(
+                    HistoricalSettlementRecord.tenant_id == scope.tenant_id,
+                    HistoricalSettlementRecord.receipt_id == receipt.id,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+        if receipt is None or not settled:
+            raise _refuse(
+                InvalidTransition,
+                "a historical deferral requires a settled historical invoice",
+                "historical_deferral_invoice_not_settled",
+            )
+        if (receipt.source_owner, receipt.source_invoice_id) != (
+            command.source_owner,
+            command.source_invoice_id,
+        ):
+            raise Conflict("historical deferral source differs from the receipt")
+        deferred = _sum_money(
+            line.tax_amount
+            for line in _invoice_lines(session, scope.tenant_id, invoice.id)
+            if line.tax_account_ref == command.deferral_account_ref
+        )
+        if deferred != evidence.deferred_tax_total:
+            raise Conflict("historical deferred tax differs from the invoice lines")
+        row = HistoricalTaxDeferralRecord(
+            tenant_id=scope.tenant_id,
+            invoice_id=invoice.id,
+            deferral_account_ref=command.deferral_account_ref,
+            source_owner=command.source_owner,
+            source_invoice_id=command.source_invoice_id,
+            source_snapshot_sha256=command.source_snapshot_sha256,
+            evidence_fingerprint=fingerprint,
+            facts_fingerprint=evidence.facts_fingerprint,
+            accounting_evidence_fingerprint=evidence.accounting_evidence_fingerprint,
+            deferred_tax_total=evidence.deferred_tax_total,
+            released_before_admission=evidence.released_before_admission,
+            remaining=evidence.remaining,
+            evidence=_evidence_json(evidence),
+            admitted_at=admitted_at,
+        )
+        session.add(row)
+        session.flush()
+        return {"record_id": str(row.id)}
+
+    existing_row = db.scalar(
+        select(HistoricalTaxDeferralRecord).where(
+            HistoricalTaxDeferralRecord.tenant_id == scope.tenant_id,
+            HistoricalTaxDeferralRecord.invoice_id == locked.id,
+            HistoricalTaxDeferralRecord.deferral_account_ref
+            == command.deferral_account_ref,
+        )
+    )
+    if existing_row is not None and existing_row.evidence_fingerprint != fingerprint:
+        raise Conflict("invoice has different permanent deferral evidence")
+    try:
+        outcome = execute_once(
+            db,
+            tenant_id=scope.tenant_id,
+            scope="payables.admit_historical_tax_deferral",
+            key=idempotency_key,
+            fingerprint=fingerprint_of(
+                {"historical_evidence_fingerprint": fingerprint}
+            ),
+            operation=operation,
+            expires_at=idempotency_expires_at,
+        )
+    except IntegrityError as exc:
+        raise Conflict("historical deferral identity already exists") from exc
+    row = db.scalar(
+        select(HistoricalTaxDeferralRecord).where(
+            HistoricalTaxDeferralRecord.tenant_id == scope.tenant_id,
+            HistoricalTaxDeferralRecord.id == UUID(str(outcome.result["record_id"])),
+        )
+    )
+    if row is None:
+        raise NotFound("historical tax deferral was not found")
+    return row
+
+
+def _check_credit_evidence(
+    evidence: HistoricalSupplierCreditEvidence, *, admitted_at: datetime
+) -> None:
+    """Owner proof that the settlements overpaid the invoice, exactly."""
+    for value in (
+        evidence.total_amount,
+        evidence.settled_amount,
+        evidence.withholding_tax_amount,
+        evidence.credit_amount,
+        evidence.carried_control_amount,
+    ):
+        _historical_money(value)
+    if evidence.source_status != "POSTED" or evidence.invoice_type != "STANDARD":
+        raise InvalidTransition("historical admission requires POSTED STANDARD source")
+    if not evidence.exchange_rate.is_finite() or evidence.exchange_rate <= 0:
+        raise InvalidAmount("historical exchange rate must be positive and finite")
+    if evidence.total_amount <= 0:
+        raise InvalidAmount("historical invoice total must be positive")
+    settlements = evidence.settlements
+    if not isinstance(settlements, tuple) or not settlements:
+        raise InvalidTransition("historical credit admission requires settlements")
+    seen: set[str] = set()
+    applied = Decimal("0")
+    withheld = Decimal("0")
+    for item in settlements:
+        item.validate()
+        if item.source_settlement_id in seen:
+            raise Conflict("historical settlement source ids must be unique")
+        seen.add(item.source_settlement_id)
+        if (
+            item.currency_code.strip().upper() != evidence.currency_code
+            or item.exchange_rate != evidence.exchange_rate
+        ):
+            raise InvalidAmount(
+                "historical settlement currency or exchange rate differs from "
+                "the invoice (fx_difference_unsupported)"
+            )
+        if item.settled_on > admitted_at.date():
+            raise InvalidTransition("historical settlement cannot follow admission")
+        applied += item.applied_amount
+        withheld += item.withholding_amount
+    if (
+        applied != evidence.settled_amount
+        or withheld != evidence.withholding_tax_amount
+    ):
+        raise InvalidAmount("historical settlements do not sum to the declared totals")
+    if (
+        evidence.settled_amount <= evidence.total_amount
+        or evidence.credit_amount != evidence.settled_amount - evidence.total_amount
+    ):
+        raise _refuse(
+            InvalidAmount,
+            "the settlements do not overpay the invoice",
+            "historical_credit_not_overpaid",
+        )
+    if evidence.carried_control_amount != -evidence.credit_amount:
+        raise _refuse(
+            InvalidAmount,
+            "the carried supplier control net does not hold the credit",
+            "legacy_gl_does_not_hold_credit",
+        )
+    for reference in (
+        evidence.carried_evidence_ref,
+        evidence.source_journal_ref,
+        evidence.destination_journal_ref,
+    ):
+        _required(reference, "historical evidence reference", 255)
+    canonical_instant(evidence.original_posted_at)
+    if evidence.original_posted_at > admitted_at:
+        raise InvalidTransition("historical posting cannot follow admission")
+
+
+def admit_historical_supplier_credit(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: HistoricalSupplierCreditCommand,
+    verifier: HistoricalSupplierCreditVerifier,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    admitted_at: datetime,
+) -> CreditNote:
+    """Admit a historical overpayment as an APPROVED supplier credit (no GL).
+
+    The carried ledger already holds the debit balance and the verifier proves it
+    exactly, so the credit has no accounting consequence. It lowers the supplier
+    liability balance by the credit amount and can be applied with the existing
+    ``apply_credit_note``. The destination invoice stays a shell: it has no
+    obligation, liability event, receipt or recognition, and can never be paid.
+    """
+    command.validate()
+    if verifier is None or not callable(getattr(verifier, "verify", None)):
+        raise InvalidTransition("historical credit admission requires a verifier")
+    canonical_instant(admitted_at)
+    if not isinstance(db, Session) or isinstance(db, scoped_session):
+        raise InvalidTransition("historical credit admission requires a plain Session")
+    locked, evidence = _run_verifier(
+        db, scope=scope, command=command, verifier=verifier
+    )
+    if not isinstance(evidence, HistoricalSupplierCreditEvidence):
+        raise InvalidTransition("historical verifier returned no typed evidence")
+    fingerprint = _check_historical_common(
+        evidence, tenant_id=scope.tenant_id, command=command
+    )
+    _check_credit_evidence(evidence, admitted_at=admitted_at)
+    credit_number = _required(command.credit_number, "credit number", 50).upper()
+    evidence_reference = _required(
+        command.evidence_reference, "evidence reference", 255
+    )
+    admitted_by = _required(command.admitted_by, "admitted by", 255)
+    credit_amount = evidence.credit_amount
+    last_settled = max(item.settled_on for item in evidence.settlements)
+
+    def operation(session: Session) -> Mapping[str, object]:
+        invoice = _invoice(session, scope.tenant_id, command.invoice_id, lock=True)
+        existing = _historical_credit_receipt_for_invoice(
+            session, scope.tenant_id, invoice.id
+        )
+        if existing is not None:
+            if existing.evidence_fingerprint != fingerprint:
+                raise Conflict("invoice has different permanent historical evidence")
+            return {"credit_note_id": str(existing.credit_note_id)}
+        source_existing = session.scalar(
+            select(HistoricalCreditReceipt.id).where(
+                HistoricalCreditReceipt.tenant_id == scope.tenant_id,
+                HistoricalCreditReceipt.source_owner == command.source_owner,
+                HistoricalCreditReceipt.source_invoice_id == command.source_invoice_id,
+            )
+        )
+        if source_existing is not None:
+            raise Conflict("source invoice already admitted to another invoice")
+        if invoice.status != InvoiceStatus.APPROVED:
+            raise InvalidTransition("historical destination must already be APPROVED")
+        for name, expected in (
+            ("number", evidence.number),
+            ("supplier_ref", evidence.supplier_ref),
+            ("currency_code", evidence.currency_code),
+            ("exchange_rate", evidence.exchange_rate),
+            ("total_amount", evidence.total_amount),
+            ("liability_account_ref", evidence.liability_account_ref),
+        ):
+            if getattr(invoice, name) != expected:
+                raise Conflict(f"historical destination differs on {name}")
+        if any(item.settled_on < invoice.invoice_date for item in evidence.settlements):
+            raise InvalidTransition("historical settlement precedes the invoice")
+        for model, predicate in (
+            (PaymentObligation, PaymentObligation.invoice_id == invoice.id),
+            (
+                LiabilityEvent,
+                (LiabilityEvent.document_kind == "supplier_invoice")
+                & (LiabilityEvent.document_id == invoice.id),
+            ),
+            (
+                AccountingReceipt,
+                (AccountingReceipt.document_kind == "supplier_invoice")
+                & (AccountingReceipt.document_id == invoice.id),
+            ),
+            (
+                HistoricalInvoiceReceipt,
+                HistoricalInvoiceReceipt.invoice_id == invoice.id,
+            ),
+            (InvoiceRecognition, InvoiceRecognition.invoice_id == invoice.id),
+        ):
+            if (
+                session.scalar(
+                    select(model.id)
+                    .where(model.tenant_id == scope.tenant_id, predicate)
+                    .limit(1)
+                )
+                is not None
+            ):
+                raise Conflict(
+                    "historical invoice already has owner recognition "
+                    "or accounting evidence"
+                )
+        settlement_ids = [item.source_settlement_id for item in evidence.settlements]
+        for model in (HistoricalSettlementRecord, HistoricalCreditSettlementRecord):
+            if (
+                session.scalar(
+                    select(model.id)
+                    .where(
+                        model.tenant_id == scope.tenant_id,
+                        model.source_settlement_id.in_(settlement_ids),
+                    )
+                    .limit(1)
+                )
+                is not None
+            ):
+                raise Conflict(
+                    "a legacy settlement was already admitted against an invoice"
+                )
+        if (
+            session.scalar(
+                select(CreditNote.id).where(
+                    CreditNote.tenant_id == scope.tenant_id,
+                    CreditNote.number == credit_number,
+                )
+            )
+            is not None
+        ):
+            raise Conflict("credit number already exists")
+        request_fingerprint = fingerprint_of(
+            {"historical_evidence_fingerprint": fingerprint}
+        )
+        # Walk the document's own transitions (DRAFT -> SUBMITTED -> APPROVED) so
+        # the database's document guard sees only legal, field-limited updates.
+        credit = CreditNote(
+            tenant_id=scope.tenant_id,
+            original_invoice_id=invoice.id,
+            number=credit_number,
+            supplier_ref=evidence.supplier_ref,
+            supplier_name_snapshot=evidence.supplier_name_snapshot,
+            supplier_document_number=None,
+            credit_date=last_settled,
+            currency_code=evidence.currency_code,
+            exchange_rate=evidence.exchange_rate,
+            liability_account_ref=evidence.liability_account_ref,
+            subtotal=credit_amount,
+            tax_amount=Decimal("0"),
+            total_amount=credit_amount,
+            available_amount=Decimal("0"),
+            request_fingerprint=request_fingerprint,
+            status=CreditNoteStatus.DRAFT,
+            created_at=admitted_at,
+            updated_at=admitted_at,
+        )
+        session.add(credit)
+        session.flush()
+        credit.status = CreditNoteStatus.SUBMITTED
+        credit.submitted_by = admitted_by
+        credit.submitted_at = admitted_at
+        credit.updated_at = admitted_at
+        session.flush()
+        credit.status = CreditNoteStatus.APPROVED
+        credit.available_amount = credit_amount
+        credit.approval_reference = evidence_reference
+        credit.approved_by = admitted_by
+        credit.approved_at = admitted_at
+        credit.updated_at = admitted_at
+        session.flush()
+        event = LiabilityEvent(
+            tenant_id=scope.tenant_id,
+            event_kind="historical_credit_recognized",
+            document_kind="credit_note",
+            document_id=credit.id,
+            supplier_ref=evidence.supplier_ref,
+            currency_code=evidence.currency_code,
+            amount=-credit_amount,
+            source_reference=command.source_invoice_id,
+            source_fingerprint=fingerprint[4:],
+            occurred_at=datetime.combine(last_settled, datetime.min.time(), UTC),
+        )
+        session.add(event)
+        session.flush()
+        receipt = HistoricalCreditReceipt(
+            tenant_id=scope.tenant_id,
+            credit_note_id=credit.id,
+            invoice_id=invoice.id,
+            event_id=event.id,
+            source_owner=command.source_owner,
+            source_invoice_id=command.source_invoice_id,
+            source_snapshot_sha256=command.source_snapshot_sha256,
+            evidence_fingerprint=fingerprint,
+            facts_fingerprint=evidence.facts_fingerprint,
+            accounting_evidence_fingerprint=evidence.accounting_evidence_fingerprint,
+            source_journal_ref=evidence.source_journal_ref,
+            destination_journal_ref=evidence.destination_journal_ref,
+            carried_evidence_ref=evidence.carried_evidence_ref,
+            evidence_reference=evidence_reference,
+            admitted_by=admitted_by,
+            credit_amount=credit_amount,
+            carried_control_amount=evidence.carried_control_amount,
+            evidence=_evidence_json(evidence),
+            original_posted_at=evidence.original_posted_at,
+            admitted_at=admitted_at,
+        )
+        session.add(receipt)
+        session.flush()
+        for number, item in enumerate(evidence.settlements, start=1):
+            session.add(
+                HistoricalCreditSettlementRecord(
+                    tenant_id=scope.tenant_id,
+                    receipt_id=receipt.id,
+                    line_number=number,
+                    source_settlement_id=item.source_settlement_id,
+                    payment_ref=item.payment_ref,
+                    settled_on=item.settled_on,
+                    applied_amount=item.applied_amount,
+                    withholding_amount=item.withholding_amount,
+                    currency_code=item.currency_code.strip().upper(),
+                    exchange_rate=item.exchange_rate,
+                    source_row_fingerprint=item.source_row_fingerprint,
+                    source_journal_ref=item.source_journal_ref,
+                    destination_journal_ref=item.destination_journal_ref,
+                    recorded_at=admitted_at,
+                )
+            )
+        session.flush()
+        return {"credit_note_id": str(credit.id)}
+
+    existing_receipt = _historical_credit_receipt_for_invoice(
+        db, scope.tenant_id, locked.id
+    )
+    if (
+        existing_receipt is not None
+        and existing_receipt.evidence_fingerprint != fingerprint
+    ):
+        raise Conflict("invoice has different permanent historical evidence")
+    try:
+        outcome = execute_once(
+            db,
+            tenant_id=scope.tenant_id,
+            scope="payables.admit_historical_supplier_credit",
+            key=idempotency_key,
+            fingerprint=fingerprint_of(
+                {"historical_evidence_fingerprint": fingerprint}
+            ),
+            operation=operation,
+            expires_at=idempotency_expires_at,
+        )
+    except IntegrityError as exc:
+        raise Conflict("historical source identity or evidence already exists") from exc
+    return _credit(db, scope.tenant_id, UUID(str(outcome.result["credit_note_id"])))
+
+
 def supplier_liability_balance(
     db: Session, *, tenant_id: UUID, supplier_ref: str, currency_code: str
 ) -> Decimal:
@@ -2614,6 +3662,10 @@ def supplier_liability_balance(
 
 
 __all__ = [
+    "admit_historical_supplier_credit",
+    "admit_historical_tax_deferral",
+    "declare_tax_deferral",
+    "invoice_deferred_tax_position",
     "admit_historical_settled_invoice",
     "admit_historical_unpaid_invoice",
     "build_payment_reversal_accounting_consequence",
