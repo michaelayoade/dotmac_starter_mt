@@ -8794,9 +8794,12 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `dotmac-service-access-policy` 0.1.0a2 is tagged.
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
-    # `ts_0004` adds the nullable html part column; still editable until a
-    # release tags a template-studio version carrying it.
-    "dotmac-template-studio": frozenset({"ts_0004_html_body.py"}),
+    # `ts_0004` adds the nullable html part column and `ts_0005` the nullable
+    # layout opt-in column; still editable until a release tags a
+    # template-studio version carrying them.
+    "dotmac-template-studio": frozenset(
+        {"ts_0004_html_body.py", "ts_0005_layout_slug.py"}
+    ),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),

@@ -71,6 +71,9 @@ class VersionCreate(BaseModel):
         ),
     )
     subject: str | None = Field(default=None, max_length=300)
+    layout_slug: str | None = Field(
+        default=None, pattern=_SLUG_PATTERN, description="Optional email layout slug."
+    )
 
 
 class VersionUpdate(BaseModel):
@@ -80,6 +83,8 @@ class VersionUpdate(BaseModel):
         default=None, min_length=1, max_length=MAX_TEMPLATE_CHARS
     )
     subject: str | None = Field(default=None, max_length=300)
+    # Omitted leaves the layout alone; an explicit null removes it.
+    layout_slug: str | None = Field(default=None, pattern=_SLUG_PATTERN)
 
 
 class VersionRead(BaseModel):
@@ -91,6 +96,7 @@ class VersionRead(BaseModel):
     subject: str | None
     body: str
     html_body: str | None = None
+    layout_slug: str | None = None
     variables: list[str]
     author_party_id: UUID | None
     published_at: datetime | None

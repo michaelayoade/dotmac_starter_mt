@@ -311,6 +311,9 @@ class RenderContext:
 
 
 _REGISTRY: dict[str, RenderContext] = {}
+# Reserved name of the synthesized layout context (see `layout.py`; duplicated as
+# a literal because `layout` imports this module).
+_LAYOUT_NAME = "email_layout"
 
 
 def register_contexts(*contexts: RenderContext) -> None:
@@ -319,6 +322,11 @@ def register_contexts(*contexts: RenderContext) -> None:
     Idempotent for an identical re-registration; raises on a conflicting one.
     """
     for context in contexts:
+        if context.name == _LAYOUT_NAME:
+            raise ValueError(
+                f"render context name {_LAYOUT_NAME!r} is reserved for the email "
+                "layout; declare brand variables with `layout.configure_brand`"
+            )
         existing = _REGISTRY.get(context.name)
         if existing is not None and existing != context:
             raise RenderContextConflictError(
@@ -332,6 +340,10 @@ def register_contexts(*contexts: RenderContext) -> None:
 
 def get_context(name: str) -> RenderContext:
     """The registered context, or `UnknownRenderContextError` naming the fix."""
+    if name == _LAYOUT_NAME:
+        from dotmac_template_studio.layout import layout_context
+
+        return layout_context()
     context = _REGISTRY.get(name)
     if context is None:
         known = ", ".join(sorted(_REGISTRY)) or "(none registered)"

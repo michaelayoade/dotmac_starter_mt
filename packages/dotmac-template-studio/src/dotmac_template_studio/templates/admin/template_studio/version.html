@@ -55,6 +55,15 @@
         <textarea name="body" rows="8" style="font-family:var(--dmui-font-family-mono);">{{ form.get('body', '') }}</textarea></label>
       <label>HTML part (optional; refused, never stripped, if it uses anything outside the allowlist)
         <textarea name="html_body" rows="8" style="font-family:var(--dmui-font-family-mono);">{{ form.get('html_body', '') }}</textarea></label>
+      {% if layouts %}
+      <label>Email layout (optional; applied around the content when sent)
+        <select name="layout_slug">
+          <option value="">None</option>
+          {% for slug, name in layouts %}
+          <option value="{{ slug }}" {% if form.get('layout_slug') == slug %}selected{% endif %}>{{ name }} ({{ slug }})</option>
+          {% endfor %}
+        </select></label>
+      {% endif %}
       {% if variables %}
       <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
         Available:

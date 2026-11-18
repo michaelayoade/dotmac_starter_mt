@@ -163,6 +163,9 @@ class TemplateVersion(Base, TimestampMixin):
     # The optional html part (§ 5h), stored AFTER sanitizing. NULL means "no html
     # part" — every row that predates `ts_0004` is exactly that.
     html_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional opt-in to a tenant email layout (TS-5): the slug of a template on
+    # channel `email_layout`. NULL (every row before `ts_0005`) means no layout.
+    layout_slug: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # The placeholder names this revision declares, e.g. `["customer_name"]`.
     # Stored as data so the renderer can report an unknown or missing variable
     # without parsing the body twice.
