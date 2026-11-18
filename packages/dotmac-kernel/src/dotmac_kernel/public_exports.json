@@ -366,6 +366,7 @@
       "classification": "supported",
       "exports": [
         "DISPATCH_EVENT_TYPE",
+        "DispatchConflict",
         "DispatchError",
         "DispatchHistoryOnly",
         "DispatchIntegrityError",
