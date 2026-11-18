@@ -768,6 +768,12 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # receipt reconstruction plus bounded UNQUALIFIED review packet. The review
     # path compares/emits evidence and never writes a Foundation store record.
     "python_lock_bootstrap.py": 6,
+    # `lane3.selected-rehearsal-artifact.v1` provenance (source-artifact.json):
+    # owned by require_rehearsal.py, which selects and retains the rehearsal
+    # artifact. It is a local retention file beside the downloaded receipt and
+    # ciphertext; it writes no Foundation plan, lease, release, attestation or
+    # package-owned store record.
+    "require_rehearsal.py": 1,
     "release_artifact_verification.py": 1,
     # The ReleaseAuthority.v1 canonical digest document; owned by
     # release_authority.py, stored nowhere but as the ledger's digest.

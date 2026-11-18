@@ -403,6 +403,9 @@ jobs:
           name: foundation-offline-verification-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .rehearsal/receipt.json
+            .rehearsal/evidence-bundle.age
+            .rehearsal/source-status.md
+            .rehearsal/source-artifact.json
             .rehearsal/offline-result.json
             .rehearsal/offline-result.sshsig
           if-no-files-found: error
