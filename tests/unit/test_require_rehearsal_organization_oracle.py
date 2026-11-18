@@ -57,6 +57,7 @@ def _build(held_subject, **overrides):
 
 def _status_for(receipt):
     """The status document as the runner derives it; synthetic if unparseable."""
+    from dotmac_deployment_foundation.errors import SpecError
     from dotmac_deployment_foundation.rehearsal import (
         RehearsalReceiptV2,
         render_status_document,
@@ -64,7 +65,7 @@ def _status_for(receipt):
 
     try:
         return render_status_document(RehearsalReceiptV2.from_json(receipt)).encode()
-    except Exception:
+    except SpecError:
         return b"synthetic status\n"
 
 

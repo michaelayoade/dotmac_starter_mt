@@ -257,13 +257,10 @@ def _members_zip(compression=zipfile.ZIP_STORED, **overrides):
 
 
 def test_truncated_member_yields_clean_refusal(monkeypatch, capsys):
-    raw = _members_zip(
-        zipfile.ZIP_DEFLATED, **{"receipt.json": bytes(range(256)) * 64}
-    )
-    # Truncate the first member's data in place: keep the central directory
-    # (the carrier is still well formed) but make its compressed stream short.
-    marker = raw.index(b"receipt.json") + len(b"receipt.json")
-    raw[marker + 8 : marker + 40] = b"\x00" * 32
+    raw = _members_zip(**{"receipt.json": b"x" * 64})
+    # A stored member whose central-directory sizes run past the archive end.
+    entry = raw.index(b"PK\x01\x02")
+    raw[entry + 20 : entry + 28] = (100_000).to_bytes(4, "little") * 2
     with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
         _acquire(monkeypatch, bytes(raw))
     assert capsys.readouterr() == ("", "")
@@ -280,16 +277,47 @@ def test_eof_inside_member_read_is_a_clean_refusal(monkeypatch):
 
 def test_compressed_size_is_bounded_per_member(monkeypatch):
     real = zipfile.ZipFile
+    limits = {name: 64 for name in oracle._MEMBER_LIMITS}
+    monkeypatch.setattr(oracle, "_MEMBER_LIMITS", limits)
+    raw = bytes(_members_zip())
+    claimed = 64 + (64 >> 8) + 64 + 1  # one past the per-member bound
+    # The archive is larger than the claim, so the archive-length bound alone
+    # would not refuse: only the per-member bound does.
+    assert len(raw) > claimed
 
     class Inflated(real):
         def infolist(self):
             infos = super().infolist()
-            infos[0].compress_size = oracle._MEMBER_LIMITS[infos[0].filename] * 4 + 1024
+            infos[0].compress_size = claimed
             return infos
 
     monkeypatch.setattr(oracle.zipfile, "ZipFile", Inflated)
     with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
-        _acquire(monkeypatch, bytes(_members_zip()))
+        _acquire(monkeypatch, raw)
+
+
+def test_reformatted_receipt_is_refused_before_authentication(
+    subject,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    receipt = _build(subject)
+    canonical = receipt.canonical_bytes()
+    reformatted = json.dumps(json.loads(canonical), indent=2, sort_keys=False).encode()
+    assert reformatted != canonical
+    _network(monkeypatch, canonical)
+    monkeypatch.setattr(
+        oracle, "_download", lambda *a, **k: _archive(reformatted)
+    )
+    monkeypatch.setattr(
+        oracle,
+        "_require_authenticated_offline_result",
+        lambda *a: pytest.fail("non-canonical receipt reached authentication"),
+    )
+    assert _main(tmp_path, TOPOLOGY) == oracle.EXIT_REFUSED
+    assert "rehearsal_receipt_binding_invalid" in capsys.readouterr().err
+    assert not (tmp_path / "receipt.json").exists()
 
 
 def test_expiry_is_rechecked_before_retention(subject, tmp_path, monkeypatch):  # noqa: F811

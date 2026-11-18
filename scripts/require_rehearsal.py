@@ -493,6 +493,10 @@ def _prepare_retention(
         selected.expires_at
     ):
         raise RehearsalMissing("rehearsal_ciphertext_binding_invalid")
+    # The authenticated digest is over canonical bytes; the retained receipt
+    # must be exactly those bytes, not a reformatted equivalent.
+    if selected.receipt_bytes != receipt.canonical_bytes():
+        raise RehearsalMissing("rehearsal_receipt_binding_invalid")
     # source-status.md is derived from the receipt, so the authenticated
     # receipt digest authenticates it only if the bytes equal that derivation.
     if selected.status_bytes != status_document.encode("utf-8"):
