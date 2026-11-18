@@ -433,7 +433,9 @@ def _receipt_bytes(
                     or info.compress_type
                     not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
                     or not 0 < info.file_size <= limit
-                    or not 0 <= info.compress_size <= _MAX_ARTIFACT_BYTES
+                    or not 0
+                    < info.compress_size
+                    <= min(_MAX_ARTIFACT_BYTES, len(archive), limit + (limit >> 8) + 64)
                 ):
                     raise ValueError
                 with bundle.open(info) as source:
@@ -462,6 +464,11 @@ def _receipt_bytes(
         RuntimeError,
         NotImplementedError,
         zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+        EOFError,
+        OverflowError,
+        IndexError,
+        UnicodeError,
         struct.error,
         http.client.HTTPException,
         zlib.error,
@@ -469,15 +476,31 @@ def _receipt_bytes(
         raise RehearsalMissing("rehearsal_artifact_invalid") from None
 
 
-def _retain_selected_artifact(
-    selected, receipt, *, receipt_out, repository, repository_id, run_id, run_attempt
+def _prepare_retention(
+    selected,
+    receipt,
+    status_document,
+    *,
+    receipt_out,
+    repository,
+    repository_id,
+    run_id,
+    run_attempt,
 ):
-    """Bind ciphertext before authentication and retain only the acquired carrier."""
+    """Bind every retained byte before authentication; write nothing."""
     digest = "sha256:" + hashlib.sha256(selected.ciphertext_bytes).hexdigest()
     if digest != receipt.content["evidence_bundle_digest"] or not _future_expiry(
         selected.expires_at
     ):
         raise RehearsalMissing("rehearsal_ciphertext_binding_invalid")
+    # The authenticated digest is over canonical bytes; the retained receipt
+    # must be exactly those bytes, not a reformatted equivalent.
+    if selected.receipt_bytes != receipt.canonical_bytes():
+        raise RehearsalMissing("rehearsal_receipt_binding_invalid")
+    # source-status.md is derived from the receipt, so the authenticated
+    # receipt digest authenticates it only if the bytes equal that derivation.
+    if selected.status_bytes != status_document.encode("utf-8"):
+        raise RehearsalMissing("rehearsal_status_binding_invalid")
     members = {
         "receipt.json": selected.receipt_bytes,
         "evidence-bundle.age": selected.ciphertext_bytes,
@@ -508,18 +531,25 @@ def _retain_selected_artifact(
             for name, raw in members.items()
         },
     }
-    try:
-        destination = pathlib.Path(receipt_out)
-        destination.write_bytes(selected.receipt_bytes)
-        (destination.parent / "evidence-bundle.age").write_bytes(
-            selected.ciphertext_bytes
-        )
-        (destination.parent / "source-status.md").write_bytes(selected.status_bytes)
-        (destination.parent / "source-artifact.json").write_bytes(
+    destination = pathlib.Path(receipt_out)
+    return (
+        (destination, selected.receipt_bytes),
+        (destination.parent / "evidence-bundle.age", selected.ciphertext_bytes),
+        (destination.parent / "source-status.md", selected.status_bytes),
+        (
+            destination.parent / "source-artifact.json",
             (
                 json.dumps(provenance, sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode()
-        )
+            ).encode(),
+        ),
+    )
+
+
+def _retain_selected_artifact(prepared):
+    """Write the prepared files; called only after offline authentication."""
+    try:
+        for path, payload in prepared:
+            path.write_bytes(payload)
     except OSError:
         raise RehearsalMissing("rehearsal_artifact_retention_failed") from None
 
@@ -732,6 +762,7 @@ def main(argv: list[str] | None = None) -> int:
     from dotmac_deployment_foundation.rehearsal import (
         ExecutionRunBindingV1,
         RehearsalReceiptV2,
+        render_status_document,
         require_execution_run,
         require_rehearsed_artifact,
         verify_publication,
@@ -759,9 +790,10 @@ def main(argv: list[str] | None = None) -> int:
         # bound rather than merely recorded — the digest identifies exactly one
         # `CandidateArtifact.v1`, and that record names exactly one `source_sha`.
         require_rehearsed_artifact(receipt, artifact_digest=args.artifact_digest)
-        _retain_selected_artifact(
+        prepared = _prepare_retention(
             selected_artifact,
             receipt,
+            render_status_document(receipt),
             receipt_out=args.receipt_out,
             repository=repo,
             repository_id=topology.execution_repository_id,
@@ -794,6 +826,13 @@ def main(argv: list[str] | None = None) -> int:
             "INDETERMINATE: authenticated_offline_result_unavailable", file=sys.stderr
         )
         return EXIT_USAGE
+
+    # Nothing from the selected artifact is retained until authentication passed.
+    try:
+        _retain_selected_artifact(prepared)
+    except RehearsalMissing as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
 
     print(f"rehearsal_run_id={proof['run_id']}")
     print(f"rehearsal_run_attempt={attempt}")
