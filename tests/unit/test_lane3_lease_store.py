@@ -15,6 +15,7 @@ SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import lane3_lease_store as contract  # noqa: E402
+from lane3_e10_receipt import E10ReceiptRef  # noqa: E402
 
 from tests.unit.lane3_e10_support import (  # noqa: E402
     make_generation_receipt,
@@ -214,9 +215,10 @@ class _AnyHostsReceipt(FakeStore):
     """Leases a host under whatever receipt it is given, another host's included."""
 
     def acquire_exclusive(self, **kwargs):
-        kwargs["e10_receipt"] = dataclasses.replace(
-            kwargs["e10_receipt"], host_id=kwargs["host_id"]
-        )
+        if isinstance(kwargs["e10_receipt"], E10ReceiptRef):
+            kwargs["e10_receipt"] = dataclasses.replace(
+                kwargs["e10_receipt"], host_id=kwargs["host_id"]
+            )
         return super().acquire_exclusive(**kwargs)
 
 
