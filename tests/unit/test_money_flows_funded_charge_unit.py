@@ -418,7 +418,7 @@ def test_the_terms_are_read_again_after_the_account_lock_and_gate_the_start(
     assert calls == ["terms", "lock", "terms"]  # authoritative read under the lock
 
 
-def test_a_duplicate_that_won_the_lock_is_replayed_without_reading_terms(
+def test_a_duplicate_that_won_the_lock_is_replayed_without_the_post_lock_terms_read(
     monkeypatch,
 ):
     winner = SimpleNamespace(
@@ -432,7 +432,10 @@ def test_a_duplicate_that_won_the_lock_is_replayed_without_reading_terms(
     finds = iter([None, winner])
     monkeypatch.setattr(flows, "_find", lambda *a, **k: next(finds))
     monkeypatch.setattr(flows, "_fits", lambda *a, **k: False)
-    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
+    reads = []
+    monkeypatch.setattr(
+        flows, "_is_prepaid", lambda *a, **k: reads.append("terms") or True
+    )
     outcome = flows.start_funded_charge(
         None,
         scope=SCOPE,
@@ -440,6 +443,7 @@ def test_a_duplicate_that_won_the_lock_is_replayed_without_reading_terms(
         ports=_ports(_Charges(_charge())),
     )
     assert outcome.replayed
+    assert reads == ["terms"]  # the fast path only; none after the lock
 
 
 def test_a_re_evaluated_row_that_is_no_longer_prepaid_is_withdrawn_unposted(
