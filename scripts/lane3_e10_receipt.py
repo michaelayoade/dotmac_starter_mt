@@ -43,6 +43,7 @@ __all__ = [
 _OPENSSH_FINGERPRINT: Final = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
 _INCARNATION_FINGERPRINT: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _ALIAS: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
+_VM_SLOT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}/[1-9][0-9]{0,8}")
 _MACHINE_ID: Final = re.compile(r"[0-9a-f]{32}")
 _TOKEN: Final = re.compile(r"[\x21-\x7e]{1,256}")
 
@@ -98,6 +99,9 @@ class E10ReceiptRef:
     enrolment_uuid: str
     incarnation_key_destroyed_at: datetime
     receipt_ref: str
+    #: Proxmox slot, `node/vmid`, or None. REQUIRED like every field (no default),
+    #: but may be None: the receipt row carries it (E3 U7), nothing compares it yet.
+    vm_slot: str | None
 
     def __post_init__(self) -> None:
         if not isinstance(self.vm_alias, str) or not _ALIAS.fullmatch(self.vm_alias):
@@ -114,6 +118,10 @@ class E10ReceiptRef:
             self.ssh_host_key_fingerprint, str
         ) or not _OPENSSH_FINGERPRINT.fullmatch(self.ssh_host_key_fingerprint):
             raise ReceiptRefused("receipt-ssh-fingerprint-invalid")
+        if self.vm_slot is not None and (
+            not isinstance(self.vm_slot, str) or not _VM_SLOT.fullmatch(self.vm_slot)
+        ):
+            raise ReceiptRefused("receipt-vm-slot-invalid")
         validate_incarnation_fingerprint(self.incarnation_fingerprint)
         derived = (
             "sha256:"
