@@ -141,6 +141,8 @@ class FakeStore:
         self._connected()
         if not isinstance(e10_receipt, E10ReceiptRef):
             raise StoreRefused("e10-receipt-required")
+        if e10_receipt.host_id != host_id:
+            raise StoreRefused("e10-receipt-for-another-host")
         if (
             type(ttl_seconds) is not int
             or ttl_seconds < 1
@@ -608,28 +610,12 @@ def case_a_lease_needs_a_typed_e10_receipt(
                 e10_receipt=c,
             ),
         )
-    assert _acquire(store, fx) is not None
-
-
-def case_a_receipt_a_marker_has_cited_is_spent(
-    make_store: Any, advance: Any, fx: Fixtures
-) -> None:
-    """A marker is used once. Reached through a lease taken under an OLDER
-    receipt after the marker was cited: the cited one is then different from and
-    newer than the lease's own, so only its being spent refuses it."""
-    store = make_store()
-    held = _acquire(store, fx)
-    store.release(held, release=fx.make_release(store, held), host_mutated=False)
-    marker = ReprovisionMarker("host-a", fx.receipt("host-a", 2))
-    held = _acquire(store, fx, run="run-2", generation=2, reprovision=marker)
-    store.release(held, release=fx.make_release(store, held), host_mutated=False)
-    _acquire(store, fx, run="run-3", generation=1)
-    advance(store, 61)
+    # A well-formed receipt for ANOTHER host is not this host's receipt.
     _raises(
-        "reprovision-receipt-spent",
-        lambda: _acquire(store, fx, run="run-4", generation=2, reprovision=marker),
+        "e10-receipt-for-another-host",
+        lambda: _acquire(store, fx, receipt=fx.receipt("host-b", 1)),
     )
-    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
+    assert _acquire(store, fx) is not None
 
 
 def case_only_one_release(make_store: Any, advance: Any, fx: Fixtures) -> None:

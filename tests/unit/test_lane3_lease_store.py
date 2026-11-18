@@ -3,6 +3,7 @@ any store that cannot supply database time."""
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import pathlib
 import sys
@@ -100,7 +101,6 @@ def test_the_conformance_cases_cover_every_rule_in_the_contract() -> None:
         "a_marker_must_cite_a_strictly_later_receipt_order",
         "a_marker_must_cite_the_receipt_the_new_lease_is_taken_under",
         "a_lease_needs_a_typed_e10_receipt",
-        "a_receipt_a_marker_has_cited_is_spent",
         "only_one_release",
         "a_release_must_match_the_held_lease",
         "the_lease_document_expiry_is_the_rows",
@@ -210,6 +210,16 @@ class _AcceptsAnyMarker(FakeStore):
         return super().acquire_exclusive(**kwargs)
 
 
+class _AnyHostsReceipt(FakeStore):
+    """Leases a host under whatever receipt it is given, another host's included."""
+
+    def acquire_exclusive(self, **kwargs):
+        kwargs["e10_receipt"] = dataclasses.replace(
+            kwargs["e10_receipt"], host_id=kwargs["host_id"]
+        )
+        return super().acquire_exclusive(**kwargs)
+
+
 class _IgnoresMarkerBinding(FakeStore):
     """Takes a marker at its word: never checks its host or its receipt against
     the lease being taken."""
@@ -252,7 +262,7 @@ class _NeverSpendsAMarker(FakeStore):
             _IgnoresMarkerBinding,
             "a_marker_must_cite_the_receipt_the_new_lease_is_taken_under",
         ),
-        (_NeverSpendsAMarker, "a_receipt_a_marker_has_cited_is_spent"),
+        (_AnyHostsReceipt, "a_lease_needs_a_typed_e10_receipt"),
         (_IgnoresTheDrop, "a_lost_connection_fails_closed_and_writes_nothing"),
         (_IgnoresTheDrop, "an_acquire_commit_lost_is_unknown_and_never_retried"),
         (_WipesHistory, "no_reacquire_after_expiry"),
@@ -375,3 +385,42 @@ def test_a_severed_handle_does_not_sever_another_handle() -> None:
     with pytest.raises(contract.StoreRefused) as refusal:
         first.database_time()
     assert refusal.value.code == "store-unreachable"
+
+
+# ── fake-only: a marker's receipt is spent once cited ───────────────────────
+# Not a conformance case. Design rule 5 (spent) comes AFTER rule 4 (different
+# incarnation), and a lease is taken under the host's CURRENT receipt (rule 13),
+# so through a store that enforces both, re-citing a consumed receipt is refused
+# `-same-incarnation` first. The spent refusal is reachable here only by leasing
+# a clean host under an OLDER receipt, which the fake permits and CP will not.
+# `-spent` is therefore covered for CP by its own UNIQUE constraint.
+
+
+def _spent_scenario(make_store, fx=FAKE_FIXTURES):
+    from tests.unit.lane3_store_support import (
+        ReprovisionMarker,
+        _acquire,
+        _raises,
+    )
+
+    store = make_store()
+    held = _acquire(store, fx)
+    store.release(held, release=fx.make_release(store, held), host_mutated=False)
+    marker = ReprovisionMarker("host-a", fx.receipt("host-a", 2))
+    held = _acquire(store, fx, run="run-2", generation=2, reprovision=marker)
+    store.release(held, release=fx.make_release(store, held), host_mutated=False)
+    _acquire(store, fx, run="run-3", generation=1)
+    store.advance(61)
+    _raises(
+        "reprovision-receipt-spent",
+        lambda: _acquire(store, fx, run="run-4", generation=2, reprovision=marker),
+    )
+
+
+def test_a_receipt_a_marker_has_cited_is_spent_in_the_fake() -> None:
+    _spent_scenario(factory())
+
+
+def test_a_store_that_forgets_spent_markers_fails_the_spent_scenario() -> None:
+    with pytest.raises(AssertionError):
+        _spent_scenario(factory(_NeverSpendsAMarker))
