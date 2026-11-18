@@ -49,6 +49,9 @@ jobs:
             # `fetch-depth: 0`.
             manifest-digest-check,
             product-writer-check,
+            # ADR-0006 5f / ADR-0018. Stdlib AST scan of the product trees against
+            # an empty two-directional backlog; no database or network.
+            comms-writer-check,
             rehearsal-status-check,
             # ADR-0070. Validates `deploy/product.toml` and proves the committed
             # rendered assets still match it. Offline and tag-free like the

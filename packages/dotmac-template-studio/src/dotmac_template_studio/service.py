@@ -74,6 +74,15 @@ from dotmac_template_studio.composition import (
 )
 from dotmac_template_studio.contexts import RenderContext, get_context
 from dotmac_template_studio.htmlsanitize import sanitize_html
+from dotmac_template_studio.layout import (
+    LAYOUT_CHANNEL,
+    LAYOUT_CONTEXT_NAME,
+    LAYOUT_TARGET_CHANNEL,
+    fragment_problem,
+    layout_context,
+    resolve_brand,
+    wrap_part,
+)
 from dotmac_template_studio.models import Template, TemplateVersion
 from dotmac_template_studio.rendering import (
     _PLACEHOLDER,
@@ -86,7 +95,7 @@ from dotmac_template_studio.rendering import (
 )
 from dotmac_template_studio.sections import TemplateSyntaxError
 from dotmac_template_studio.settings import REQUIRE_SEPARATE_PUBLISHER
-from dotmac_template_studio.validation import check_revision
+from dotmac_template_studio.validation import check_revision, validate_revision
 
 # Double-brace tokens, for save-time REJECTION only. Never rendered.
 _DOUBLE_BRACE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
@@ -225,6 +234,11 @@ def create_template(
     # as the fix. Validated here so a template can never exist with a context
     # that no send path implements.
     get_context(context)
+    if (context == LAYOUT_CONTEXT_NAME) != (channel == LAYOUT_CHANNEL):
+        raise BadRequestError(
+            f"the {LAYOUT_CONTEXT_NAME!r} context and the {LAYOUT_CHANNEL!r} "
+            "channel go together: a layout uses both, nothing else uses either"
+        )
 
     existing = db.execute(
         select(Template.id).where(
@@ -268,6 +282,8 @@ def update_template(
     a different vocabulary. Those are a delete-and-recreate, not an edit.
     """
     template = get_template(db, tenant_id, template_id)
+    if is_active is False and template.is_active:
+        _refuse_if_layout_in_use(db, tenant_id, template, "deactivated")
     if name is not None:
         template.name = name
     if description is not None:
@@ -280,6 +296,7 @@ def update_template(
 
 def delete_template(db: Session, tenant_id: UUID, template_id: UUID) -> None:
     template = get_template(db, tenant_id, template_id)
+    _refuse_if_layout_in_use(db, tenant_id, template, "deleted")
     db.delete(template)
     db.flush()
 
@@ -319,6 +336,170 @@ def _stored_html(
         context, subject=subject, text=body, html=result.html, kind_hint="stored html"
     )
     return result.html
+
+
+# ── Layouts (TS-5) ──────────────────────────────────────────────────────────
+
+_SAMPLE_TEXT = "Sample message content."
+_SAMPLE_HTML = "<p>Sample message content.</p>"
+
+
+def list_layouts(db: Session, tenant_id: UUID) -> list[Template]:
+    """This tenant's layouts (templates on the `email_layout` channel)."""
+    return list_templates(db, tenant_id, channel=LAYOUT_CHANNEL)
+
+
+def _check_layout_opt_in(
+    db: Session, tenant_id: UUID, template: Template, layout_slug: str | None
+) -> None:
+    """Save-time rule for a revision's opt-in: only email, and the layout exists."""
+    if not layout_slug:
+        return
+    if template.channel != LAYOUT_TARGET_CHANNEL:
+        raise BadRequestError(
+            f"only {LAYOUT_TARGET_CHANNEL!r} templates may use a layout, not "
+            f"{template.channel!r}"
+        )
+    try:
+        layout = get_by_slug(db, tenant_id, layout_slug, LAYOUT_CHANNEL)
+    except NotFoundError as exc:
+        raise BadRequestError(f"layout {layout_slug!r} does not exist") from exc
+    if not layout.is_active:
+        raise BadRequestError(f"layout {layout_slug!r} is not active")
+
+
+def _apply_layout(
+    db: Session,
+    tenant_id: UUID,
+    layout_slug: str,
+    text: str,
+    html: str | None,
+    *,
+    layout_revision: TemplateVersion | None = None,
+) -> tuple[str, str | None, TemplateVersion]:
+    """Wrap already-rendered parts in the layout. Fail closed: never unwrapped.
+
+    Uses the layout's PUBLISHED revision unless `layout_revision` is given (the
+    candidate being published). The layout is re-validated against the CURRENT
+    layout context first, so a changed brand vocabulary cannot send half a layout.
+    """
+    try:
+        layout = get_by_slug(db, tenant_id, layout_slug, LAYOUT_CHANNEL)
+    except NotFoundError as exc:
+        raise RenderRefusedError(f"layout {layout_slug!r} does not exist") from exc
+    if not layout.is_active:
+        raise RenderRefusedError(f"layout {layout_slug!r} is not active")
+    revision = layout_revision or get_published(db, tenant_id, layout.id)
+    if revision is None:
+        raise RenderRefusedError(f"layout {layout_slug!r} has no published version")
+    context = layout_context()
+    problems = validate_revision(context, text=revision.body, html=revision.html_body)
+    if problems:
+        raise RenderRefusedError(
+            f"layout {layout_slug!r} no longer validates: " + "; ".join(problems)
+        )
+    brand = resolve_brand(db, tenant_id)
+    wrapped_text = wrap_part(revision.body, "text", text, brand, context)
+    wrapped_html = None
+    if html is not None:
+        if revision.html_body is None:
+            raise RenderRefusedError(
+                f"layout {layout_slug!r} has no html part but the message does"
+            )
+        wrapped_html = wrap_part(revision.html_body, "html", html, brand, context)
+    return wrapped_text, wrapped_html, revision
+
+
+def layout_users(db: Session, tenant_id: UUID, layout_slug: str) -> list[str]:
+    """`slug/channel` of every template that still depends on this layout: its
+    CURRENT published revision or any unpublished draft opts in. Older published
+    revisions are immutable history, not a dependency (restoring one is
+    re-validated and refused while the layout is unusable)."""
+    stmt = (
+        select(Template.slug, Template.channel)
+        .join(
+            TemplateVersion,
+            (TemplateVersion.tenant_id == Template.tenant_id)
+            & (TemplateVersion.template_id == Template.id),
+        )
+        .where(
+            Template.tenant_id == tenant_id,
+            TemplateVersion.layout_slug == layout_slug,
+            (TemplateVersion.published_at.is_(None))
+            | (TemplateVersion.version == Template.published_version),
+        )
+        .distinct()
+        .order_by(Template.slug, Template.channel)
+    )
+    return [f"{slug}/{channel}" for slug, channel in db.execute(stmt).all()]
+
+
+def layout_audit_users(db: Session, tenant_id: UUID, template_id: UUID) -> list[str]:
+    """For audit payloads: the templates using this layout; empty for a non-layout."""
+    template = get_template(db, tenant_id, template_id)
+    if template.channel != LAYOUT_CHANNEL:
+        return []
+    return layout_users(db, tenant_id, template.slug)
+
+
+def _refuse_if_layout_in_use(
+    db: Session, tenant_id: UUID, template: Template, verb: str
+) -> None:
+    if template.channel != LAYOUT_CHANNEL:
+        return
+    users = layout_users(db, tenant_id, template.slug)
+    if users:
+        raise ConflictError(
+            f"layout {template.slug!r} cannot be {verb} while these templates "
+            f"use it: {', '.join(users)}. Publish a revision without the layout "
+            "(and remove it from drafts) first."
+        )
+
+
+def _check_fragment_for_layout(layout_slug: str | None, html: str | None) -> None:
+    """Save-time fragment rule for html that will be wrapped in a layout."""
+    if layout_slug and html:
+        problem = fragment_problem(html)
+        if problem:
+            raise BadRequestError(f"html part cannot be used with a layout: {problem}")
+
+
+def _layout_dependents(
+    db: Session, tenant_id: UUID, layout_slug: str
+) -> list[tuple[Template, TemplateVersion]]:
+    stmt = (
+        select(Template, TemplateVersion)
+        .join(
+            TemplateVersion,
+            (TemplateVersion.tenant_id == Template.tenant_id)
+            & (TemplateVersion.template_id == Template.id)
+            & (TemplateVersion.version == Template.published_version),
+        )
+        .where(
+            Template.tenant_id == tenant_id, TemplateVersion.layout_slug == layout_slug
+        )
+        .order_by(Template.slug)
+    )
+    return [tuple(row) for row in db.execute(stmt).all()]
+
+
+def layout_problems(
+    db: Session,
+    tenant_id: UUID,
+    template: Template,
+    revision: TemplateVersion,
+) -> list[str]:
+    """Dry-run problems of a revision's layout assembly with the context sample.
+
+    Empty when the revision has no layout. Used at publish and by the deploy check.
+    """
+    if not revision.layout_slug:
+        return []
+    try:
+        _render_sample(db, tenant_id, template, revision)
+    except BadRequestError as exc:
+        return [str(exc)]
+    return []
 
 
 def list_versions(
@@ -391,8 +572,11 @@ def create_version(
     subject: str | None = None,
     author_party_id: UUID | None = None,
     html_body: str | None = None,
+    layout_slug: str | None = None,
 ) -> TemplateVersion:
     """Add a new revision. The version number is allocated here.
+
+    `layout_slug` opts the revision in to an email layout (default none).
 
     `html_body` is the optional html part: validated, then sanitized, and the
     SANITIZED html is what is stored. Html the sanitizer would change is refused.
@@ -402,6 +586,8 @@ def create_version(
     be published by someone who did not author it.
     """
     template = get_template(db, tenant_id, template_id)
+    layout_slug = layout_slug or None
+    _check_layout_opt_in(db, tenant_id, template, layout_slug)
     check_revision(
         get_context(template.context),
         subject=subject,
@@ -412,6 +598,7 @@ def create_version(
     stored_html = _stored_html(
         html_body, get_context(template.context), subject=subject, body=body
     )
+    _check_fragment_for_layout(layout_slug, stored_html)
     highest = db.execute(
         select(func.max(TemplateVersion.version)).where(
             TemplateVersion.tenant_id == tenant_id,
@@ -425,6 +612,7 @@ def create_version(
         subject=subject,
         body=body,
         html_body=stored_html,
+        layout_slug=layout_slug,
         variables=extract_variables(body, subject, stored_html),
         author_party_id=author_party_id,
     )
@@ -442,10 +630,12 @@ def update_version(
     body: str | None = None,
     subject: str | None = None,
     html_body: str | None | _Unset = _UNSET,
+    layout_slug: str | None | _Unset = _UNSET,
 ) -> TemplateVersion:
     """Edit a DRAFT revision in place.
 
-    `html_body` left out keeps the html part; `None` removes it.
+    `html_body` left out keeps the html part; `None` removes it. `layout_slug`
+    likewise keeps, or with None/empty removes, the layout opt-in.
 
     Refuses a published revision: "what was sent" must not change after the fact.
     Editing published content is a new version, which is what `create_version`
@@ -462,6 +652,12 @@ def update_version(
     # An explicit empty subject clears it (stored as NULL); omitted keeps it.
     new_subject = revision.subject if subject is None else (subject or None)
     new_html = revision.html_body if isinstance(html_body, _Unset) else html_body
+    new_layout = (
+        revision.layout_slug
+        if isinstance(layout_slug, _Unset)
+        else (layout_slug or None)
+    )
+    _check_layout_opt_in(db, tenant_id, template, new_layout)
     check_revision(
         get_context(template.context),
         subject=new_subject,
@@ -472,9 +668,11 @@ def update_version(
     stored_html = _stored_html(
         new_html, get_context(template.context), subject=new_subject, body=new_body
     )
+    _check_fragment_for_layout(new_layout, stored_html)
     revision.body = new_body
     revision.subject = new_subject
     revision.html_body = stored_html
+    revision.layout_slug = new_layout
     revision.variables = extract_variables(new_body, new_subject, stored_html)
     db.flush()
     return revision
@@ -528,7 +726,7 @@ def publish_version(
                 f"version {version} was authored by you and this workspace "
                 "requires a different person to publish it"
             )
-    _require_valid_for_live(template, revision)
+    _require_valid_for_live(db, template, revision)
     if revision.published_at is None:
         revision.published_at = datetime.now(UTC)
     template.published_version = version
@@ -536,7 +734,9 @@ def publish_version(
     return revision
 
 
-def _require_valid_for_live(template: Template, revision: TemplateVersion) -> None:
+def _require_valid_for_live(
+    db: Session, template: Template, revision: TemplateVersion
+) -> None:
     """Refuse to make a revision live if it no longer validates.
 
     A rule may have tightened, or the context changed, since it was saved or
@@ -549,6 +749,25 @@ def _require_valid_for_live(template: Template, revision: TemplateVersion) -> No
         html=revision.html_body,
         kind_hint="version cannot go live:",
     )
+    # Layout re-validation (TS-5). A revision that opts in must assemble with its
+    # layout; a layout going live must keep every message that uses it assembling.
+    problems = layout_problems(db, template.tenant_id, template, revision)
+    if template.channel == LAYOUT_CHANNEL:
+        for other, other_rev in _layout_dependents(
+            db, template.tenant_id, template.slug
+        ):
+            try:
+                _render_sample(
+                    db,
+                    template.tenant_id,
+                    other,
+                    other_rev,
+                    layout_revision=revision,
+                )
+            except BadRequestError as exc:
+                problems.append(f"{other.slug}/{other.channel}: {exc}")
+    if problems:
+        raise BadRequestError("version cannot go live: " + "; ".join(problems))
 
 
 def restore_version(
@@ -570,7 +789,7 @@ def restore_version(
     previous = template.published_version
     if previous == version:
         raise ConflictError(f"version {version} is already the published version")
-    _require_valid_for_live(template, revision)
+    _require_valid_for_live(db, template, revision)
     template.published_version = version
     db.flush()
     return revision, previous
@@ -591,9 +810,34 @@ def render_preview(
     """
     template = get_template(db, tenant_id, template_id)
     revision = get_version(db, tenant_id, template_id, version)
+    return _render_sample(db, tenant_id, template, revision)
+
+
+def _render_sample(
+    db: Session,
+    tenant_id: UUID,
+    template: Template,
+    revision: TemplateVersion,
+    *,
+    layout_revision: TemplateVersion | None = None,
+) -> RenderedTemplate:
     context = get_context(template.context)
     values = context.sample
     try:
+        if template.channel == LAYOUT_CHANNEL:
+            # A layout previews around a fixed sample message, with the tenant's
+            # real brand values from the product resolver.
+            brand = resolve_brand(db, tenant_id)
+            lctx = layout_context()
+            return RenderedTemplate(
+                subject=None,
+                text=wrap_part(revision.body, "text", _SAMPLE_TEXT, brand, lctx),
+                html=(
+                    wrap_part(revision.html_body, "html", _SAMPLE_HTML, brand, lctx)
+                    if revision.html_body
+                    else None
+                ),
+            )
         subject = (
             render_part(
                 revision.subject, values, "subject", context=context, strict=False
@@ -609,9 +853,26 @@ def render_preview(
             if revision.html_body
             else None
         )
+        used = None
+        if revision.layout_slug:
+            text, html, used = _apply_layout(
+                db,
+                tenant_id,
+                revision.layout_slug,
+                text,
+                html,
+                layout_revision=layout_revision,
+            )
     except (MissingTemplateValueError, RenderRefusedError, TemplateSyntaxError) as exc:
         raise BadRequestError(str(exc)) from exc
-    return RenderedTemplate(subject=subject, text=text, html=html)
+    return RenderedTemplate(
+        subject=subject,
+        text=text,
+        html=html,
+        layout_slug=revision.layout_slug if used else None,
+        layout_version=used.version if used else None,
+        layout_revision_id=used.id if used else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -695,6 +956,10 @@ class RenderedTemplate:
     subject: str | None
     text: str
     html: str | None = None
+    # Which layout revision wrapped this render, for provenance (None: no layout).
+    layout_slug: str | None = None
+    layout_version: int | None = None
+    layout_revision_id: UUID | None = None
 
 
 def render_published_parts(
@@ -717,6 +982,8 @@ def render_published_parts(
         # else gets the operator's current answer.
         strict = bool(resolve_flag(db, STRICT_RENDER_FLAG, tenant_id=tenant_id).value)
     template = get_by_slug(db, tenant_id, slug, channel)
+    if template.channel == LAYOUT_CHANNEL:
+        raise ConflictError("a layout is not a message and cannot be rendered alone")
     if not template.is_active:
         raise ConflictError(f"template {slug}/{channel} is not active")
     revision = get_published(db, tenant_id, template.id)
@@ -744,6 +1011,18 @@ def render_published_parts(
             if with_html and revision.html_body
             else None
         )
-        return RenderedTemplate(subject=subject, text=text, html=html)
+        used = None
+        if revision.layout_slug:
+            text, html, used = _apply_layout(
+                db, tenant_id, revision.layout_slug, text, html
+            )
+        return RenderedTemplate(
+            subject=subject,
+            text=text,
+            html=html,
+            layout_slug=revision.layout_slug if used else None,
+            layout_version=used.version if used else None,
+            layout_revision_id=used.id if used else None,
+        )
     except (MissingTemplateValueError, RenderRefusedError, TemplateSyntaxError) as exc:
         raise BadRequestError(str(exc)) from exc

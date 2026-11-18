@@ -1701,7 +1701,9 @@
           "dotmac_template_studio/web.py",
           "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py",
           "dotmac_template_studio/migrations/versions/ts_0004_html_body.py",
-          "dotmac_template_studio/htmlsanitize.py"
+          "dotmac_template_studio/migrations/versions/ts_0005_layout_slug.py",
+          "dotmac_template_studio/htmlsanitize.py",
+          "dotmac_template_studio/layout.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -416,6 +416,10 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "entitlements": "kernel-owned grants; modules read decisions, not tables",
     "consent": "kernel-owned suppression; delivery reads decisions",
     "delivery": "kernel-owned receipts",
+    "delivery_dispatch": (
+        "kernel-owned dispatch identity, same tenant-RLS storage owner as "
+        "delivery receipts"
+    ),
     "delivery_providers": "provider transport, not storage of a module's own",
     "branding": "assembly presentation seam",
     "display": "assembly presentation seam",

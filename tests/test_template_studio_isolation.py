@@ -338,3 +338,75 @@ def test_html_body_in_tenant_a_is_invisible_and_unwritable_by_tenant_b(
             text("DELETE FROM mod_tstudio.templates WHERE id = :id"), {"id": str(tid)}
         )
         admin_session.commit()
+
+
+# ── `layout_slug` (ts_0005): the new column inherits the table's isolation ────
+
+
+def test_layout_slug_in_tenant_a_is_invisible_and_unwritable_by_tenant_b(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        tid = _insert_template(a, tenant_id=tenant_a.id, slug="welcome-layout")
+        vid = uuid.uuid4()
+        a.execute(
+            text(
+                "INSERT INTO mod_tstudio.template_versions "
+                "(id, tenant_id, template_id, version, body, layout_slug, variables) "
+                "VALUES (:id, :tenant_id, :template_id, 1, 'text', 'brand-a', "
+                "'[]'::jsonb)"
+            ),
+            {"id": str(vid), "tenant_id": str(tenant_a.id), "template_id": str(tid)},
+        )
+        a.commit()
+    finally:
+        a.close()
+
+    try:
+        b = _as_tenant(tenant_sessionmaker, tenant_b.id)
+        try:
+            assert (
+                b.execute(
+                    text(
+                        "SELECT count(*) FROM mod_tstudio.template_versions "
+                        "WHERE layout_slug = 'brand-a'"
+                    )
+                ).scalar_one()
+                == 0
+            )
+            updated = b.execute(
+                text(
+                    "UPDATE mod_tstudio.template_versions SET layout_slug = 'x' "
+                    "WHERE id = :id"
+                ),
+                {"id": str(vid)},
+            )
+            assert updated.rowcount == 0
+        finally:
+            b.rollback()
+            b.close()
+
+        a2 = _as_tenant(tenant_sessionmaker, tenant_a.id)
+        try:
+            assert (
+                a2.execute(
+                    text(
+                        "SELECT layout_slug FROM mod_tstudio.template_versions "
+                        "WHERE id = :id"
+                    ),
+                    {"id": str(vid)},
+                ).scalar_one()
+                == "brand-a"
+            )
+        finally:
+            a2.rollback()
+            a2.close()
+    finally:
+        admin_session.execute(
+            text("DELETE FROM mod_tstudio.templates WHERE id = :id"), {"id": str(tid)}
+        )
+        admin_session.commit()
