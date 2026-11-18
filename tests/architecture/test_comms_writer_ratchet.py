@@ -44,6 +44,20 @@ EXPECTED_EXEMPT_FINDINGS: frozenset[str] = frozenset(
 )
 
 
+# The exact Starter exclusion list. Adding an exclusion (for example a broad
+# `packages/**/provider.py` all-kinds glob) hides findings, so it must change this
+# set and be reviewed. All-kinds exclusions may only name non-runtime trees.
+EXPECTED_EXCLUDES: frozenset[tuple[str, tuple[str, ...]]] = frozenset(
+    {
+        ("**/tests/**", ("direct_smtp", "inline_copy", "outbox_writer")),
+        ("**/migrations/**", ("outbox_writer",)),
+        ("alembic/**", ("outbox_writer",)),
+        (".venv/**", ("direct_smtp", "inline_copy", "outbox_writer")),
+        ("node_modules/**", ("direct_smtp", "inline_copy", "outbox_writer")),
+    }
+)
+
+
 def _scan(sources: dict[str, str]) -> list[str]:
     findings, _ = ratchet.scan_sources(sources)
     return ratchet.number(findings)
@@ -658,3 +672,161 @@ def test_migrations_are_still_scanned_for_smtp_and_copy(
     err = capsys.readouterr().err
     assert "migrations/m1.py::direct_smtp::import:smtplib#1" in err
     assert "outbox_writer" not in err.split("migrations/m1.py")[1]
+
+
+# -- pinned exclusions, absolute imports, base-ref, blind spots -------------------
+
+
+def test_starter_excludes_are_exactly_the_pinned_list() -> None:
+    config = json.loads(STARTER_CONFIG.read_text())
+    actual = {(e["glob"], tuple(sorted(e["kinds"]))) for e in config["exclude"]}
+    assert len(actual) == len(config["exclude"]), "duplicate exclusion"
+    assert actual == EXPECTED_EXCLUDES
+
+
+def test_an_all_kinds_exclusion_must_name_a_non_runtime_segment(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The architect's probe: a broad provider.py exclusion hid real findings."""
+    config = _config(tree)
+    config["exclude"] = [
+        {
+            "glob": "services/**/email*.py",
+            "kinds": ["outbox_writer", "direct_smtp", "inline_copy"],
+            "premise": "looks innocent",
+        }
+    ]
+    _save_config(tree, config)
+    _fails_with(tree, capsys, "hides every kind but names no non-runtime segment")
+    # a partial-kind exclusion of the same glob is a different (reviewable) shape
+    config["exclude"][0]["kinds"] = ["direct_smtp"]
+    _save_config(tree, config)
+    capsys.readouterr()
+    assert not any(
+        "non-runtime" in p
+        for p in ratchet._validate_entries(config["exclude"], "exclusion")
+    )
+    # and a non-runtime tree may hide everything
+    config["exclude"] = [
+        {
+            "glob": "tests/**",
+            "kinds": ["outbox_writer", "direct_smtp", "inline_copy"],
+            "premise": "tests",
+        }
+    ]
+    assert not ratchet._validate_entries(config["exclude"], "exclusion")
+
+
+def test_absolute_imports_resolve_in_the_packages_src_layout() -> None:
+    sources = {
+        "packages/dotmac-x/src/dotmac_x/render.py": (
+            "def mail_for(t):\n    return '<p>Hello there</p>'\n"
+        ),
+        # sibling module in the same package, absolute import
+        "packages/dotmac-x/src/dotmac_x/a.py": (
+            "from dotmac_x.render import mail_for\n\n"
+            "def f(d):\n    d.send_email(html=mail_for('x'))\n"
+        ),
+        # relative import still works
+        "packages/dotmac-x/src/dotmac_x/b.py": (
+            "from .render import mail_for\n\n"
+            "def g(d):\n    d.send_email(html=mail_for('x'))\n"
+        ),
+        # the assembly importing a package module by its import name
+        "app/features/c.py": (
+            "from dotmac_x.render import mail_for\n\n"
+            "def h(d):\n    d.send_email(html=mail_for('x'))\n"
+        ),
+    }
+    assert _scan(sources) == [
+        "app/features/c.py::inline_copy::h#1",
+        "packages/dotmac-x/src/dotmac_x/a.py::inline_copy::f#1",
+        "packages/dotmac-x/src/dotmac_x/b.py::inline_copy::g#1",
+    ]
+
+
+def _git(cwd: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(  # noqa: S603
+        [  # noqa: S607
+            "git",
+            "-C",
+            str(cwd),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.test",
+            *args,
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_check_refuses_backlog_ids_not_in_the_base_ref(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _git(tree, "init", "-q")
+    _git(tree, "add", "-A")
+    _git(tree, "commit", "-q", "-m", "base")
+    cfg, bl = tree / "config.json", tree / "backlog.json"
+    # unchanged backlog passes against HEAD
+    assert ratchet.run(cfg, bl, write=False, base_ref="HEAD") == 0
+    # a finding appears AND is hand-added to the backlog: the plain check passes,
+    # the base-ref check refuses
+    (tree / "tree/services/extra.py").write_text(
+        "def go(db, p):\n    enqueue_email(db, subject=f'Hello {p}, a new notice')\n"
+    )
+    data = _backlog(tree)
+    data["findings"].append("services/extra.py::inline_copy::go#1")
+    _save(tree, data)
+    assert ratchet.run(cfg, bl, write=False) == 0
+    capsys.readouterr()
+    assert ratchet.run(cfg, bl, write=False, base_ref="HEAD") == 1
+    assert (
+        "backlog id services/extra.py::inline_copy::go#1 is not in the backlog at HEAD"
+        in capsys.readouterr().err
+    )
+    # unusable refs and missing base backlogs fail closed
+    assert (
+        ratchet.main(["--config", str(cfg), "--backlog", str(bl), "--base-ref", "nope"])
+        == 1
+    )
+    assert ratchet.run(cfg, bl, write=False, base_ref="--oops") == 1
+
+
+def test_the_remaining_documented_blind_spots_are_really_missed() -> None:
+    # copy loaded from a file / database row / environment / template engine
+    assert (
+        _ids(
+            "def f(d, row, env, tpl):\n"
+            "    d.send_email(subject=row.subject, html_body=env['BODY'])\n"
+            "    d.send_email(subject=tpl.render('welcome'))\n"
+            "    d.send_email(body=open('welcome.html').read())\n"
+        )
+        == []
+    )
+    # dynamic imports and renderers reached through a registry or getattr
+    assert (
+        _ids(
+            "import importlib\n\n"
+            "REGISTRY = {'w': lambda: '<p>Hello there friend</p>'}\n\n"
+            "def f(d, name):\n"
+            "    d.send_email(html=REGISTRY[name]())\n"
+            "    d.send_email(html=getattr(importlib.import_module('r'), 'mail')())\n"
+        )
+        == []
+    )
+    # copy placed in email.message headers, with no sink or SMTP call after it
+    assert (
+        _ids(
+            "from email.message import EmailMessage\n\n"
+            "def f():\n"
+            "    msg = EmailMessage()\n"
+            "    msg['Subject'] = 'Your invoice is ready now'\n"
+            "    msg.set_content('Hello there, your invoice is ready.')\n"
+            "    return msg\n"
+        )
+        == []
+    )

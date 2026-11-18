@@ -106,6 +106,9 @@ not list is NOT suppressed.
 
 Backlog
 -------
+``--check --base-ref REF`` additionally refuses any listed id that the backlog
+committed at REF does not already hold (a hand-added id would otherwise hide a
+new finding); use it for adopters whose backlog is non-empty.
 Two-directional (ADR-0018): fails when a finding appears that is not listed AND
 when a listed finding is gone.  ``--write-backlog`` is REMOVE-ONLY: it refuses to
 add a finding unless ``--allow-additions`` is passed (which is the very thing
@@ -119,6 +122,7 @@ import ast
 import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -127,6 +131,10 @@ from pathlib import Path
 from typing import Any, Final
 
 KINDS: Final = ("outbox_writer", "direct_smtp", "inline_copy")
+#: An exclusion hiding every kind must name one of these path segments.
+NON_RUNTIME_SEGMENTS: Final = frozenset(
+    {"tests", "migrations", "alembic", ".venv", "node_modules"}
+)
 
 _CHANNEL: Final = r"(?:e?mail|sms|message|notification)s?"
 _OUTBOX_NAME: Final = re.compile(
@@ -472,6 +480,20 @@ def _dotted(rel: str) -> str:
     return stem.replace("/", ".")
 
 
+def _module_names(rel: str) -> list[str]:
+    """Every dotted name a file can be imported as.
+
+    The path-derived name, plus the name under a ``src/`` layout
+    (``packages/dotmac-x/src/dotmac_x/render.py`` is ``dotmac_x.render``), so an
+    absolute import from a sibling package or the assembly resolves.
+    """
+    names = [_dotted(rel)]
+    if "/src/" in f"/{rel}":
+        tail = f"/{rel}".split("/src/", 1)[1]
+        names.append(_dotted(tail))
+    return names
+
+
 def _resolve_module(dotted: str, by_dotted: dict[str, str]) -> str | None:
     best: tuple[int, str] | None = None
     for d, rel in by_dotted.items():
@@ -562,7 +584,7 @@ def analyse(sources: dict[str, str]) -> Project:
             trees[rel] = ast.parse(src, filename=rel)
         except SyntaxError as exc:
             problems.append(f"{rel}: cannot parse ({exc.__class__.__name__})")
-    by_dotted = {_dotted(r): r for r in trees}
+    by_dotted = {name: r for r in trees for name in _module_names(r)}
     res = Resolver()
     index = {rel: _index(tree) for rel, tree in trees.items()}
     for rel in trees:
@@ -799,6 +821,17 @@ def _validate_entries(entries: list[dict[str, Any]], label: str) -> list[str]:
                 f"{label} {glob!r} must list its `kinds` explicitly "
                 f"(subset of {list(KINDS)}); there is no implicit 'everything'"
             )
+        elif (
+            label == "exclusion"
+            and set(kinds) == set(KINDS)
+            and not NON_RUNTIME_SEGMENTS & set(glob.split("/"))
+        ):
+            problems.append(
+                f"{label} {glob!r} hides every kind but names no non-runtime "
+                f"segment ({sorted(NON_RUNTIME_SEGMENTS)}); an all-kinds "
+                "exclusion is only for non-runtime trees. Use `allowed` with "
+                "explicit kinds for a delivery owner"
+            )
     return problems
 
 
@@ -920,12 +953,41 @@ def write_backlog(path: Path, product: str, ids: list[str]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def base_backlog(backlog_path: Path, ref: str) -> list[str]:
+    """The backlog's ids as committed at ``ref`` (fail-closed on any doubt)."""
+    if not ref or ref.startswith("-"):
+        raise ValueError(f"unusable base ref {ref!r}")
+    cwd = backlog_path.resolve().parent
+    top = subprocess.run(
+        ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if top.returncode != 0:
+        raise ValueError("base-ref check needs a git checkout")
+    rel = backlog_path.resolve().relative_to(Path(top.stdout.strip()).resolve())
+    shown = subprocess.run(
+        ["git", "-C", str(cwd), "show", f"{ref}:{rel.as_posix()}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if shown.returncode != 0:
+        raise ValueError(f"no backlog at {ref}:{rel.as_posix()}")
+    ids = json.loads(shown.stdout).get("findings")
+    if not isinstance(ids, list):
+        raise ValueError("base backlog 'findings' must be a list")
+    return [str(i) for i in ids]
+
+
 def run(
     config_path: Path,
     backlog_path: Path,
     *,
     write: bool,
     allow_additions: bool = False,
+    base_ref: str | None = None,
 ) -> int:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     result = scan_product(config, config_path.parent)
@@ -962,7 +1024,15 @@ def run(
         return 0
     problems = list(result.problems)
     try:
-        problems += compare(result.ids, load_backlog(backlog_path))
+        listed = load_backlog(backlog_path)
+        problems += compare(result.ids, listed)
+        if base_ref is not None:
+            base = set(base_backlog(backlog_path, base_ref))
+            problems += [
+                f"backlog id {i} is not in the backlog at {base_ref}: a backlog "
+                "may only shrink; a hand-added id hides a new finding"
+                for i in sorted(set(listed) - base)
+            ]
     except (OSError, ValueError) as exc:
         problems.append(f"backlog unreadable: {exc}")
     for p in problems:
@@ -982,7 +1052,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="let --write-backlog ADD findings (seeding only; defeats the ratchet)",
     )
+    parser.add_argument(
+        "--base-ref",
+        help="git ref whose committed backlog bounds this one: --check refuses "
+        "any listed id that ref's backlog does not already hold",
+    )
     args = parser.parse_args(argv)
+    if args.base_ref and args.write_backlog:
+        parser.error("--base-ref only applies to --check")
     if args.allow_additions and not args.write_backlog:
         parser.error("--allow-additions only applies to --write-backlog")
     try:
@@ -991,6 +1068,7 @@ def main(argv: list[str] | None = None) -> int:
             args.backlog,
             write=args.write_backlog,
             allow_additions=args.allow_additions,
+            base_ref=args.base_ref,
         )
     except (OSError, ValueError, KeyError) as exc:
         print(f"usage error: {exc}", file=sys.stderr)
