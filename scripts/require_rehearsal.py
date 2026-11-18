@@ -82,14 +82,21 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
+import http.client
 import io
 import json
 import os
 import pathlib
+import re
+import stat
+import struct
 import sys
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -244,6 +251,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+_MAX_ARTIFACT_BYTES = 44 * 1024 * 1024
+_MEMBER_LIMITS = {
+    "receipt.json": 1024 * 1024,
+    "evidence-bundle.age": 41 * 1024 * 1024,
+    "docs/inventories/deployment-exposure-rehearsal-status.md": 1024 * 1024,
+}
+
+
+def _read_artifact_response(response) -> bytes:
+    payload = response.read(_MAX_ARTIFACT_BYTES + 1)
+    if type(payload) is not bytes or not 0 < len(payload) <= _MAX_ARTIFACT_BYTES:
+        raise RehearsalMissing("rehearsal_artifact_download_invalid")
+    return payload
+
+
 def _download(url: str, token: str) -> bytes:
     """An artifact archive, following its ONE redirect WITHOUT the token.
 
@@ -260,24 +282,18 @@ def _download(url: str, token: str) -> bytes:
     opener = urllib.request.build_opener(_NoRedirect)
     try:
         with opener.open(request, timeout=60) as response:
-            return response.read()
+            return _read_artifact_response(response)
     except urllib.error.HTTPError as exc:
         location = exc.headers.get("Location") if exc.code in (301, 302, 307) else None
         if not location or not location.startswith("https://"):
-            raise RehearsalMissing(
-                f"the receipt artifact could not be downloaded (HTTP {exc.code})"
-            ) from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise RehearsalMissing(
-            f"the receipt artifact could not be read ({exc})"
-        ) from exc
+            raise RehearsalMissing("rehearsal_artifact_download_failed") from None
+    except (urllib.error.URLError, TimeoutError, http.client.HTTPException):
+        raise RehearsalMissing("rehearsal_artifact_download_failed") from None
     try:
         with urllib.request.urlopen(location, timeout=60) as response:  # noqa: S310
-            return response.read()
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise RehearsalMissing(
-            f"the receipt artifact's signed URL could not be read ({exc})"
-        ) from exc
+            return _read_artifact_response(response)
+    except (urllib.error.URLError, TimeoutError, http.client.HTTPException):
+        raise RehearsalMissing("rehearsal_artifact_download_failed") from None
 
 
 def _list(url: str, key: str, token: str) -> list[dict[str, Any]]:
@@ -312,36 +328,200 @@ def _list(url: str, key: str, token: str) -> list[dict[str, Any]]:
     return collected
 
 
-def _receipt_bytes(repo: str, run_id: int, artifact: str, token: str) -> bytes:
-    """The receipt from EXACTLY the selected run's one artifact named ``artifact``.
+@dataclass(frozen=True)
+class SelectedRehearsalArtifact:
+    receipt_bytes: bytes
+    ciphertext_bytes: bytes
+    status_bytes: bytes
+    artifact_id: int
+    artifact_name: str
+    reported_size: int
+    expires_at: str
+    archive_size: int
+    archive_digest: str
+    api_digest: str | None
 
-    Fetched here rather than by an earlier workflow step, so the run whose
-    receipt is read is the run that was selected — nothing can land between a
-    selection and a separate download. More than one artifact of that name is
-    refused as ambiguous; the receipt's own run binding then refuses one taken
-    from an earlier attempt.
-    """
-    listed = _list(
-        f"{API_ROOT}/repos/{repo}/actions/runs/{run_id}/artifacts?name={artifact}",
-        "artifacts",
-        token,
-    )
-    if len(listed) != 1 or listed[0].get("expired"):
-        raise RehearsalMissing(
-            f"execution run {run_id} carries {len(listed)} artifact(s) named "
-            f"{artifact!r} (or it expired). Exactly one live receipt is required"
-        )
-    archive = _download(
-        f"{API_ROOT}/repos/{repo}/actions/artifacts/{listed[0]['id']}/zip", token
-    )
+
+def _future_expiry(value: object) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
     try:
+        return datetime.fromisoformat(value[:-1] + "+00:00") > datetime.now(UTC)
+    except ValueError:
+        return False
+
+
+def _require_fixed_zip_directory(archive: bytes) -> None:
+    """Bound directory metadata before ZipFile allocates any ZipInfo objects.
+
+    This small carrier needs neither split archives, ZIP64 nor ZIP comments.
+    The fixed end record bounds a small directory region before parsing.
+    """
+    if len(archive) < 22 or archive[-42:-38] == b"PK\x06\x07":
+        raise ValueError
+    signature, disk, directory_disk, on_disk, total, size, start, comment = (
+        struct.unpack_from("<4s4H2IH", archive, len(archive) - 22)
+    )
+    if (
+        signature != b"PK\x05\x06"
+        or disk
+        or directory_disk
+        or on_disk != 3
+        or total != 3
+        or comment
+        or not 138 <= size <= 16 * 1024
+        or start + size != len(archive) - 22
+    ):
+        raise ValueError
+
+
+def _receipt_bytes(
+    repo: str, run_id: int, artifact: str, token: str
+) -> SelectedRehearsalArtifact:
+    """Acquire the selected run's fixed carrier, without extracting any member."""
+    try:
+        listed = _list(
+            f"{API_ROOT}/repos/{repo}/actions/runs/{run_id}/artifacts?name={artifact}",
+            "artifacts",
+            token,
+        )
+        if len(listed) != 1 or type(listed[0]) is not dict:
+            raise ValueError
+        item = listed[0]
+        identity, size = item.get("id"), item.get("size_in_bytes")
+        expiry, api_digest = item.get("expires_at"), item.get("digest")
+        workflow = item.get("workflow_run")
+        if (
+            type(identity) is not int
+            or identity <= 0
+            or item.get("name") != artifact
+            or item.get("expired") is not False
+            or type(size) is not int
+            or not 0 < size <= _MAX_ARTIFACT_BYTES
+            or not _future_expiry(expiry)
+            or type(workflow) is not dict
+            or type(workflow.get("id")) is not int
+            or workflow["id"] != run_id
+        ):
+            raise ValueError
+        archive = _download(
+            f"{API_ROOT}/repos/{repo}/actions/artifacts/{identity}/zip", token
+        )
+        if type(archive) is not bytes or not 0 < len(archive) <= _MAX_ARTIFACT_BYTES:
+            raise ValueError
+        digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+        if api_digest is not None and (
+            type(api_digest) is not str
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", api_digest) is None
+            or api_digest != digest
+        ):
+            raise ValueError
+        _require_fixed_zip_directory(archive)
+        members = {}
         with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
-            return bundle.read("receipt.json")
-    except (zipfile.BadZipFile, KeyError) as exc:
-        raise RehearsalMissing(
-            f"the receipt artifact of execution run {run_id} has no readable "
-            f"receipt.json ({exc})"
-        ) from exc
+            infos = bundle.infolist()
+            if len(infos) != 3 or {i.filename for i in infos} != set(_MEMBER_LIMITS):
+                raise ValueError
+            for info in infos:
+                limit = _MEMBER_LIMITS[info.filename]
+                mode = stat.S_IFMT(info.external_attr >> 16)
+                if (
+                    info.is_dir()
+                    or info.orig_filename != info.filename
+                    or mode not in (0, stat.S_IFREG)
+                    or info.flag_bits & 0x41
+                    or info.compress_type
+                    not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                    or not 0 < info.file_size <= limit
+                    or not 0 <= info.compress_size <= _MAX_ARTIFACT_BYTES
+                ):
+                    raise ValueError
+                with bundle.open(info) as source:
+                    raw = source.read(limit + 1)
+                if len(raw) != info.file_size or len(raw) > limit:
+                    raise ValueError
+                members[info.filename] = raw
+        return SelectedRehearsalArtifact(
+            members["receipt.json"],
+            members["evidence-bundle.age"],
+            members["docs/inventories/deployment-exposure-rehearsal-status.md"],
+            identity,
+            artifact,
+            size,
+            expiry,
+            len(archive),
+            digest,
+            api_digest,
+        )
+    except (
+        RehearsalMissing,
+        ValueError,
+        TypeError,
+        KeyError,
+        OSError,
+        RuntimeError,
+        NotImplementedError,
+        zipfile.BadZipFile,
+        struct.error,
+        http.client.HTTPException,
+        zlib.error,
+    ):
+        raise RehearsalMissing("rehearsal_artifact_invalid") from None
+
+
+def _retain_selected_artifact(
+    selected, receipt, *, receipt_out, repository, repository_id, run_id, run_attempt
+):
+    """Bind ciphertext before authentication and retain only the acquired carrier."""
+    digest = "sha256:" + hashlib.sha256(selected.ciphertext_bytes).hexdigest()
+    if digest != receipt.content["evidence_bundle_digest"] or not _future_expiry(
+        selected.expires_at
+    ):
+        raise RehearsalMissing("rehearsal_ciphertext_binding_invalid")
+    members = {
+        "receipt.json": selected.receipt_bytes,
+        "evidence-bundle.age": selected.ciphertext_bytes,
+        "docs/inventories/deployment-exposure-rehearsal-status.md": (
+            selected.status_bytes
+        ),
+    }
+    provenance = {
+        "schema": "lane3.selected-rehearsal-artifact.v1",
+        "repository": repository,
+        "repository_id": repository_id,
+        "run_id": run_id,
+        "run_attempt": run_attempt,
+        "artifact": {
+            "id": selected.artifact_id,
+            "name": selected.artifact_name,
+            "size_in_bytes": selected.reported_size,
+            "expires_at": selected.expires_at,
+            "api_digest": selected.api_digest,
+            "downloaded_bytes": selected.archive_size,
+            "downloaded_digest": selected.archive_digest,
+        },
+        "members": {
+            name: {
+                "bytes": len(raw),
+                "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+            }
+            for name, raw in members.items()
+        },
+    }
+    try:
+        destination = pathlib.Path(receipt_out)
+        destination.write_bytes(selected.receipt_bytes)
+        (destination.parent / "evidence-bundle.age").write_bytes(
+            selected.ciphertext_bytes
+        )
+        (destination.parent / "source-status.md").write_bytes(selected.status_bytes)
+        (destination.parent / "source-artifact.json").write_bytes(
+            (
+                json.dumps(provenance, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode()
+        )
+    except OSError:
+        raise RehearsalMissing("rehearsal_artifact_retention_failed") from None
 
 
 # Protected source owns trust; workflow inputs carry public evidence only.
@@ -535,9 +715,10 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(approvals, list):
             raise RehearsalMissing("the approvals oracle returned no array")
         require_run_context(selected, jobs=jobs, approvals=approvals, topology=topology)
-        receipt_bytes = _receipt_bytes(
+        selected_artifact = _receipt_bytes(
             repo, proof["run_id"], topology.receipt_artifact, token
         )
+        receipt_bytes = selected_artifact.receipt_bytes
     except (RehearsalMissing, TopologyRefused, ExecutionRunRefused) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
@@ -556,7 +737,6 @@ def main(argv: list[str] | None = None) -> int:
         verify_publication,
     )
 
-    pathlib.Path(args.receipt_out).write_bytes(receipt_bytes)
     try:
         # v2 ONLY: a v1 receipt cannot carry the authorized
         # `ExecutionPlanDigestV1`, so the reader refuses it by schema.
@@ -579,7 +759,16 @@ def main(argv: list[str] | None = None) -> int:
         # bound rather than merely recorded — the digest identifies exactly one
         # `CandidateArtifact.v1`, and that record names exactly one `source_sha`.
         require_rehearsed_artifact(receipt, artifact_digest=args.artifact_digest)
-    except (SpecError, TypeError, ValueError) as exc:
+        _retain_selected_artifact(
+            selected_artifact,
+            receipt,
+            receipt_out=args.receipt_out,
+            repository=repo,
+            repository_id=topology.execution_repository_id,
+            run_id=int(proof["run_id"]),
+            run_attempt=attempt,
+        )
+    except (SpecError, TypeError, ValueError, RehearsalMissing) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return EXIT_REFUSED
 
