@@ -8807,7 +8807,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # until a verified published tag carries it and its digest is recorded above.
     # (`0031_rate_limit_buckets` is released: see its digest above.)
     "dotmac-kernel": frozenset({"20261118_0032_communication_dispatches.py"}),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),

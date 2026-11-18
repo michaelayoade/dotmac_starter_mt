@@ -20,6 +20,15 @@ OLD and NEW ancestry; only draft ancestry is authorable. A dimension resolves
 its journal through a locked source line, so concurrent line reparenting cannot
 move the authorization check to stale ancestry. The caller owns the transaction.
 
+`ac_0004_account_maintenance` adds governed account maintenance: `recode_account`,
+`update_account_flags`, `retire_account` and `activate_account`, each idempotent,
+audited with reason and actor in the append-only `account_changes` history, and
+enforced by a database guard (the account `id` never changes; code and flags
+change only with a matching history row of the same transaction). Posted ledger
+lines keep the `account_code` they were posted under; reports follow the
+account by `account_id` and show its current code. Retirement refuses a balance,
+a draft journal line, an active child or attested open subledger items.
+
 `ac_0003_draft_void` adds the governed void of a never-posted DRAFT journal
 (`void_draft_journal`): reason, requester, a distinct approver and an approval
 reference are appended as an immutable `JOURNAL_VOID` period event, and the
