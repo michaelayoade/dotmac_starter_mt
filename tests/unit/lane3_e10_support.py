@@ -81,6 +81,7 @@ def make_receipt(**overrides: Any) -> E10ReceiptRef:
         "enrolment_uuid": ENROLMENT_UUID,
         "incarnation_key_destroyed_at": DESTROYED_AT,
         "receipt_ref": "e10-receipt-0001",
+        "vm_slot": None,
     }
     values.update(overrides)
     return E10ReceiptRef(**values)

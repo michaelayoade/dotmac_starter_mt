@@ -260,7 +260,7 @@ def test_a_standard_alphabet_key_is_refused_even_without_padding() -> None:
     assert refusal.value.code == "incarnation-public-key-invalid"
 
 
-def test_vm_slot_is_optional_and_checked_when_given() -> None:
+def test_vm_slot_may_be_none_but_is_checked_when_given() -> None:
     assert support.make_receipt().vm_slot is None
     assert support.make_receipt(vm_slot="dotmacproxmox/102").vm_slot == (
         "dotmacproxmox/102"
@@ -269,3 +269,17 @@ def test_vm_slot_is_optional_and_checked_when_given() -> None:
         with pytest.raises(e10.ReceiptRefused) as refusal:
             support.make_receipt(vm_slot=bad)
         assert refusal.value.code == "receipt-vm-slot-invalid"
+
+
+def test_vm_slot_has_no_default_and_must_be_passed() -> None:
+    import dataclasses
+
+    receipt = support.make_receipt()
+    values = {
+        f.name: getattr(receipt, f.name)
+        for f in dataclasses.fields(e10.E10ReceiptRef)
+        if f.name != "vm_slot"
+    }
+    with pytest.raises(TypeError):
+        e10.E10ReceiptRef(**values)
+    assert e10.E10ReceiptRef(**values, vm_slot=None).vm_slot is None

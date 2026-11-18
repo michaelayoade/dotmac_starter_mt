@@ -99,9 +99,9 @@ class E10ReceiptRef:
     enrolment_uuid: str
     incarnation_key_destroyed_at: datetime
     receipt_ref: str
-    #: Proxmox slot, `node/vmid`. Optional: the receipt row carries it (E3 U7),
-    #: but nothing compares it yet.
-    vm_slot: str | None = None
+    #: Proxmox slot, `node/vmid`, or None. REQUIRED like every field (no default),
+    #: but may be None: the receipt row carries it (E3 U7), nothing compares it yet.
+    vm_slot: str | None
 
     def __post_init__(self) -> None:
         if not isinstance(self.vm_alias, str) or not _ALIAS.fullmatch(self.vm_alias):
