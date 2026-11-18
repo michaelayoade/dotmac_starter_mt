@@ -26,8 +26,8 @@ Starter; this package is the first.
 ## Known limits
 
 Bounce coverage is synchronous only (reply at RCPT/DATA). Asynchronous DSNs
-are not captured. The not-attempted admission outcome is `failed` until kernel
-`DeliveryDeferred` (K-4, S8) exists.
+are not captured. An admission refusal raises `SmtpAdmissionRefused` and writes no receipt,
+until kernel `DeliveryDeferred` (K-4, S8) exists.
 
 ## ERP and Sub: inventoried, no shared writer
 
@@ -38,5 +38,18 @@ asked to adopt, and nothing is retired there.
 
 ## Preserved tests
 
-`dotmac_academy_app:tests/services/test_email.py` is the behaviour reference
-for the Academy send path; the package's own tests use a local SMTP server.
+Academy's SMTP behaviour had one transport test,
+`dotmac_academy_app:tests/services/test_email.py::test_send_email_inert_when_unconfigured`;
+the other tests in that file exercise the notify/queue path, not SMTP. None is
+re-pointed at this package. The behaviour proof is the package's own suites
+(`tests/unit/test_delivery_smtp*.py`, local SMTP server).
+
+| Behaviour | Academy today | This package |
+|---|---|---|
+| Multipart text + html alternative, attachments | kept | kept |
+| STARTTLS when configured, login when a user is set | kept | kept; STARTTLS also required in production, credentials never over plaintext |
+| Empty host: skip quietly (`inert_when_unconfigured`) | `EmailResult(False)` | DELIBERATELY DIFFERENT: raises `SmtpConfigError` (an unconfigured send is an operator fault, not a silent drop) |
+| Any exception swallowed to a bool | yes | DELIBERATELY DIFFERENT: classified outcomes; unknown outcome and operator faults raise |
+| Message-ID | caller-supplied optional | `<dispatch_id@from-domain>` always |
+| Password | env-only `smtp_password` | kernel `SecretSource` by name |
+| Timeout | 15 s whole send | 15 s steps, 180 s final DATA reply |

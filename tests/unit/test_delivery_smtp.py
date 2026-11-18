@@ -655,3 +655,19 @@ def test_total_attachment_size_is_capped(server, trusting) -> None:
     with pytest.raises(SmtpAttachmentError):
         p.send(msg(attachments=refs))
     assert server.messages == []
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "5", None])
+@pytest.mark.parametrize("name", ["timeout", "data_timeout"])
+def test_non_positive_timeouts_are_refused(name: str, bad: object) -> None:
+    with pytest.raises(SmtpConfigError):
+        SmtpDeliveryProvider(config=lambda: None, **{name: bad})  # type: ignore[arg-type,return-value]
+
+
+def test_default_data_timeout_stays_below_the_relay_lease() -> None:
+    from dotmac_delivery_smtp.provider import (
+        DEFAULT_DATA_TIMEOUT_SECONDS,
+        DEFAULT_TIMEOUT_SECONDS,
+    )
+
+    assert DEFAULT_DATA_TIMEOUT_SECONDS + 7 * DEFAULT_TIMEOUT_SECONDS < 300

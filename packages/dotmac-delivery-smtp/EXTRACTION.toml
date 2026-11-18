@@ -17,7 +17,9 @@ source_paths = [
   "dotmac_academy_app:app/services/settings_store.py",
 ]
 preserved_tests = [
-  "dotmac_academy_app:tests/services/test_email.py",
+  "dotmac_starter_mt:tests/unit/test_delivery_smtp.py",
+  "dotmac_starter_mt:tests/unit/test_delivery_smtp_scope.py",
+  "dotmac_starter_mt:tests/unit/test_delivery_smtp_settings.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_academy_app"]

@@ -67,8 +67,10 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_NAME = "smtp"
 DEFAULT_TIMEOUT_SECONDS = 15.0
-#: RFC 5321 4.5.3.2.6: the final reply to DATA may take up to 10 minutes.
-DEFAULT_DATA_TIMEOUT_SECONDS = 600.0
+#: Final DATA reply. RFC 5321 allows 10 minutes, but the kernel relay's
+#: `stale_lease_seconds` is 300: a second worker may reclaim the lease and
+#: double-send if one attempt outlasts it. 7 command steps x 15 s + 180 s < 300.
+DEFAULT_DATA_TIMEOUT_SECONDS = 180.0
 #: Per attachment and in total across one message (raised only by a reviewed
 #: change; the total keeps a message under common 25-35 MiB relay limits).
 DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -173,6 +175,13 @@ class SmtpDeliveryProvider:
         max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES,
         max_total_attachment_bytes: int = DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,
     ) -> None:
+        for label, value in (("timeout", timeout), ("data_timeout", data_timeout)):
+            if (
+                not isinstance(value, int | float)
+                or isinstance(value, bool)
+                or value <= 0
+            ):
+                raise SmtpConfigError(f"{label} must be a positive number of seconds")
         self._config = config
         self._password_secret_name = password_secret_name
         self._resolver = attachment_resolver
