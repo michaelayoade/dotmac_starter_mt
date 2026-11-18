@@ -34,7 +34,7 @@ import smtplib
 import socket
 import ssl
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, suppress
 from email.message import EmailMessage
 from email.policy import SMTP as SMTP_POLICY
 from email.utils import parseaddr
@@ -321,10 +321,9 @@ class SmtpDeliveryProvider:
             return self._connection_failure(exc)
         finally:
             if smtp is not None:
-                try:
+                # Best effort: the outcome is already decided.
+                with suppress(Exception):
                     smtp.close()
-                except Exception:  # pragma: no cover  # noqa: S110 - best effort
-                    pass
 
     def _session(
         self,
@@ -387,10 +386,9 @@ class SmtpDeliveryProvider:
             ) from None
         if code != 250:
             return self._reply_failure(STAGE_DATA, code, text)
-        try:
+        # Best effort: the message is already accepted.
+        with suppress(Exception):
             smtp.quit()
-        except Exception:  # pragma: no cover  # noqa: S110 - already accepted
-            pass
         return ProviderResult(
             status=DELIVERY_ACCEPTED,
             response_code=str(code),
