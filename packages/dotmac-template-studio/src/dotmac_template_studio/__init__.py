@@ -41,6 +41,11 @@ and may change without a contract bump.
 - `validation.validate_revision` — every problem a revision has against its
   context, as a list; the function a deploy-time check calls per published
   revision.
+- `deploycheck` — `python -m dotmac_template_studio.deploycheck --import <app>`
+  validates every published revision of every tenant (run before bumping the
+  pin); reports slug, channel, revision and problems, never content.
+- `configure_test_send` / `OwnAddressTestMessage` — the product's delivery seam
+  for the editor's "Send test to me" (own address only; hidden if not configured).
 
 ## What a consumer must NOT do
 
@@ -61,6 +66,10 @@ if TYPE_CHECKING:
         RenderContext,
         register_contexts,
         registered_contexts,
+    )
+    from dotmac_template_studio.delivery_seam import (
+        OwnAddressTestMessage,
+        configure_test_send,
     )
     from dotmac_template_studio.manifest import module
     from dotmac_template_studio.seeding import (
@@ -94,6 +103,8 @@ _LAZY_EXPORTS = {
     "RenderContext": ("contexts", "RenderContext"),
     "register_contexts": ("contexts", "register_contexts"),
     "registered_contexts": ("contexts", "registered_contexts"),
+    "configure_test_send": ("delivery_seam", "configure_test_send"),
+    "OwnAddressTestMessage": ("delivery_seam", "OwnAddressTestMessage"),
     "SeedOutcome": ("seeding", "SeedOutcome"),
     "TemplateSeed": ("seeding", "TemplateSeed"),
     "seed_templates": ("seeding", "seed_templates"),
@@ -118,10 +129,12 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "OwnAddressTestMessage",
     "RenderContext",
     "SeedOutcome",
     "TemplateSeed",
     "__version__",
+    "configure_test_send",
     "migrations_dir",
     "module",
     "register_contexts",

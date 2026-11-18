@@ -238,7 +238,7 @@ Two rules travel with it:
 | `dotmac_kernel.transactions` | `conflict_savepoint` — engine-free SAVEPOINT mechanics for services that receive a caller-owned session; the caller's boundary still owns the outer commit or rollback |
 | `dotmac_kernel.delivery` | `DeliveryError`, `latest_receipt_for_dispatch`, `receipts_for_address`, `record_receipt` |
 | `dotmac_kernel.delivery_models` | `DELIVERY_ACCEPTED`, `DELIVERY_BOUNCED`, `DELIVERY_COMPLAINT`, `DELIVERY_DELIVERED`, `DELIVERY_FAILED`, `DELIVERY_REJECTED`, `DELIVERY_STATUSES`, `SUPPRESSING_STATUSES`, `CommunicationDelivery` |
-| `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
+| `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage` (parts `text`/`html`, allowlisted `headers`, `attachments`), `AttachmentRef`, `ALLOWED_HEADERS`, `ALLOWED_ATTACHMENT_CONTENT_TYPES`, `MAX_PART_BYTES`, `FEATURE_HTML`, `FEATURE_ATTACHMENTS`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
 | `dotmac_kernel.tenancy` | `bind_single_tenant`, `single_tenant_binding`, `clear_single_tenant_binding` (which tenant, if any, this deployment is bound to) |
 | `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `permission_guard`, `authorize_party`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
 | `dotmac_kernel.machine_auth` | `MachinePrincipal`, `authenticate_machine`, `require_machine_scope`, `hash_machine_key`, `API_KEY_HEADER`, `MACHINE_KEY_SECRET_NAME`, `MachineKeyUnavailableError` — an `X-Api-Key` principal that is not a person; empty scopes authorize nothing and there is no wildcard, prefix or substring match. `MachinePrincipal.application` names the source application, and a credential with no attribution does not authenticate |
@@ -1495,6 +1495,23 @@ principal are your words, not the kernel's.
 No transaction of its own (hard rule 8 — "all targets atomically or none" is a
 property of YOUR boundary), no session issuance, no HTTP, no email or SMS, no
 secret store, no network of any kind, and no default password policy.
+
+### Outbound message parts (`dotmac_kernel.delivery_providers`)
+
+`OutboundMessage.body` is the legacy name for the `text` part and is typed
+`str | None`. Construction normalises `body` and `text` to one value, so after
+construction both are equal (both `None` for an html-only message).
+
+`dataclasses.replace(m, body="new")` on a message whose `text` is set raises
+`ValueError` (`body` and `text` now differ). Replace both —
+`replace(m, body="new", text="new")` — or construct a new message. The same
+applies to `replace(m, text=...)` alone: `body` still holds the old value.
+
+Providers declare what they honour: `message_features` (`FEATURE_HTML`,
+`FEATURE_ATTACHMENTS`) and `message_headers` (names from `ALLOWED_HEADERS`).
+`send` refuses with `DeliveryError` a message needing anything undeclared, and a
+malformed declaration (`None`, a bare string) is also a `DeliveryError`. The
+attachment resolver rules (K-8) are in the module docstring.
 
 ## Internal modules and names (do not import)
 
