@@ -292,7 +292,11 @@ def publish_version(
         action="template_studio.version.publish",
         entity_type="template_version",
         entity_id=str(revision.id),
-        details={"template_id": str(template_id), "version": version},
+        details={
+            "template_id": str(template_id),
+            "version": version,
+            "layout_dependents": service.layout_audit_users(db, tenant.id, template_id),
+        },
     )
     return revision
 

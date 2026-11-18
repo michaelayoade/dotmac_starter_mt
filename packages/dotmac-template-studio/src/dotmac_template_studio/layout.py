@@ -141,12 +141,8 @@ def resolve_brand(db: Any, tenant_id: UUID) -> dict[str, str]:
         return {}
     try:
         raw = spec.resolver(db, tenant_id)
-    except LayoutRefusedError:
-        raise
     except Exception as exc:  # the product's resolver failed; never leak detail
-        raise LayoutRefusedError(
-            f"the brand resolver failed ({type(exc).__name__})"
-        ) from exc
+        raise LayoutRefusedError("the brand resolver failed") from exc
     if not isinstance(raw, Mapping):
         raise LayoutRefusedError("the brand resolver must return a mapping")
     unknown = set(raw) - set(spec.variables)
@@ -167,7 +163,9 @@ def resolve_brand(db: Any, tenant_id: UUID) -> dict[str, str]:
             try:
                 check_url(value)
             except RenderRefusedError as exc:
-                raise LayoutRefusedError(f"brand value {name!r}: {exc}") from exc
+                raise LayoutRefusedError(
+                    f"brand value {name!r} is not an allowed absolute url"
+                ) from exc
         values[name] = value
     return values
 
@@ -194,6 +192,8 @@ def slot_problems(label: str, source: str) -> list[str]:
     problems: list[str] = []
     if nested:
         problems.append(f"{label}: {{{SLOT}}} may not be used inside a section")
+    if label == "html":
+        problems += slot_parent_problems(label, source)
     if top + nested != 1:
         problems.append(
             f"{label}: a layout needs exactly one {{{SLOT}}} slot, found {top + nested}"
@@ -201,7 +201,59 @@ def slot_problems(label: str, source: str) -> list[str]:
     return problems
 
 
+_SLOT_TOKEN = re.compile(r"\{\s*" + SLOT + r"\s*\}")
+# The only elements a layout may place the slot directly inside. Under HTML5
+# parsing a content `<td>`, `<li>`, block element or `<a>` can implicitly close
+# an enclosing `<td>`/`<li>`/`<p>`/`<a>` the layout opened, so the slot must sit
+# where such content cannot (a container whose own end is never implied).
+SLOT_PARENTS = frozenset({"div", "td", "th", "blockquote"})
+
+
+class _SlotParent(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.stack: list[str] = []
+        self.parents: list[str | None] = []
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag not in _VOID:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self.stack:
+            while self.stack and self.stack.pop() != tag:
+                pass
+
+    def handle_data(self, data: str) -> None:
+        for _ in _SLOT_TOKEN.finditer(data):
+            self.parents.append(self.stack[-1] if self.stack else None)
+
+
+def slot_parent_problems(label: str, source: str) -> list[str]:
+    """Refuse an html slot whose innermost parent element is not a safe container."""
+    parser = _SlotParent()
+    try:
+        parser.feed(source)
+        parser.close()
+    except Exception:
+        return [f"{label}: the layout html could not be parsed"]
+    return [
+        f"{label}: {{{SLOT}}} may only sit at the top level or directly inside "
+        f"{', '.join('<' + t + '>' for t in sorted(SLOT_PARENTS))}, not <{parent}>"
+        for parent in parser.parents
+        if parent is not None and parent not in SLOT_PARENTS
+    ]
+
+
 _VOID = frozenset({"br", "hr", "img"})
+_TABLE_PARTS = frozenset(
+    {"thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col"}
+)
+# Start tags that close an open <p> under HTML5 parsing.
+_P_CLOSERS = frozenset(
+    {"p", "div", "ul", "ol", "li", "table", "blockquote", "pre", "hr"}
+    | {f"h{n}" for n in range(1, 7)}
+)
 _WRAPPER_TAGS = frozenset({"html", "head", "body"})
 
 
@@ -215,10 +267,24 @@ class _Balance(HTMLParser):
         if self.problem is None:
             self.problem = message
 
+    def _check_context(self, tag: str) -> None:
+        # HTML5 would let these implicitly close an element OUTSIDE the content
+        # unless the content itself opened the enclosing table/list/paragraph.
+        if tag in _TABLE_PARTS and "table" not in self.stack:
+            self._fail(f"<{tag}> needs an enclosing <table> opened by the content")
+        elif tag == "li" and not ({"ul", "ol"} & set(self.stack)):
+            self._fail("<li> needs an enclosing list opened by the content")
+        elif tag in _P_CLOSERS and "p" in self.stack:
+            self._fail(f"<{tag}> inside <p> would implicitly close the paragraph")
+        elif tag == "a" and "a" in self.stack:
+            self._fail("an <a> inside an <a> is not allowed")
+
     def handle_starttag(self, tag: str, attrs: Any) -> None:
         if tag in _WRAPPER_TAGS:
             self._fail(f"<{tag}> may not appear in a fragment")
-        elif tag not in _VOID:
+            return
+        self._check_context(tag)
+        if tag not in _VOID:
             self.stack.append(tag)
 
     def handle_startendtag(self, tag: str, attrs: Any) -> None:
@@ -226,6 +292,8 @@ class _Balance(HTMLParser):
             self._fail(f"<{tag}> may not appear in a fragment")
         elif tag not in _VOID:
             self._fail(f"<{tag}/> is not a void element")
+        else:
+            self._check_context(tag)
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _VOID:
@@ -249,12 +317,15 @@ class _Balance(HTMLParser):
 
 
 def fragment_problem(html: str) -> str | None:
-    """Why `html` is not a strictly nested fragment, or None.
+    """Why `html` is not a self-contained fragment, or None.
 
     Every start tag must be closed by its own end tag in order (void elements
-    excepted), and a document wrapper, comment or declaration is refused. A
-    fragment like that cannot close an element its container opened nor leave
-    one open into the container.
+    excepted); a document wrapper, comment or declaration is refused. Because
+    HTML5 parsing also closes elements IMPLICITLY, table-part and `<li>` tags
+    are allowed only inside a table/list the content itself opened, a block
+    element or second `<a>` inside an open `<p>`/`<a>` is refused. Together with
+    the slot-parent rule (`SLOT_PARENTS`) the content cannot close or reopen
+    anything the layout owns.
     """
     parser = _Balance()
     try:
@@ -318,6 +389,7 @@ __all__ = [
     "LayoutRefusedError",
     "configure_brand",
     "current_brand",
+    "SLOT_PARENTS",
     "fragment_problem",
     "layout_context",
     "resolve_brand",

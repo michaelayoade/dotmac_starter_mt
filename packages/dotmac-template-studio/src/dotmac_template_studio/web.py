@@ -689,7 +689,13 @@ async def version_publish(
             "template_studio.version.publish",
             "template_version",
             str(revision.id),
-            {"template_id": str(template_id), "version": version},
+            {
+                "template_id": str(template_id),
+                "version": version,
+                "layout_dependents": service.layout_audit_users(
+                    db, tenant.id, template_id
+                ),
+            },
         )
         notice = f"Version {version} is now published."
     return _respond(request, db, tenant, template_id, error=error, notice=notice)
@@ -732,6 +738,9 @@ async def version_restore(
                 "template_id": str(template_id),
                 "version": version,
                 "previous_version": previous,
+                "layout_dependents": service.layout_audit_users(
+                    db, tenant.id, template_id
+                ),
             },
         )
         notice = f"Restored version {version} as the published version."
@@ -753,7 +762,10 @@ async def template_set_status(
     inactive template simply stops rendering."""
     form_data = await request.form()
     active = str(form_data.get("active", "")) == "1"
-    template = service.update_template(db, tenant.id, template_id, is_active=active)
+    try:
+        template = service.update_template(db, tenant.id, template_id, is_active=active)
+    except ConflictError as exc:
+        return _respond(request, db, tenant, template_id, error=str(exc))
     _audit(
         db,
         tenant,

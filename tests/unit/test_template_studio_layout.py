@@ -29,6 +29,7 @@ from dotmac_template_studio.rendering import render_part
 from dotmac_template_studio.schemas import VersionRead
 
 from .test_template_studio_editor import (
+    _audit_actions,
     _build_client,
     _login,
     _party,
@@ -212,7 +213,7 @@ def test_unbalanced_or_wrapped_content_is_refused(bad):
 
 def test_balanced_fragment_with_void_elements_is_accepted():
     assert (
-        fragment_problem('<p>a<br>b<img src="https://x.example.test/a.png"><hr></p>')
+        fragment_problem('<p>a<br>b<img src="https://x.example.test/a.png"></p><hr>')
         is None
     )
     assert fragment_problem("<p>a<br/>b</p>") is None
@@ -524,10 +525,12 @@ def test_render_fails_closed_when_the_layout_is_gone_or_unpublished(
 ):
     t, _ = _make_layout(db, tenant_row)
     _message(db, tenant_row, template, layout_slug="brand")
-    service.update_template(db, tenant_row.id, t.id, is_active=False)
+    t.is_active = False  # legacy state: the service now refuses to create it
+    db.flush()
     with pytest.raises(BadRequestError):
         service.render_published_parts(db, tenant_row.id, "welcome", "email", VALUES)
-    service.update_template(db, tenant_row.id, t.id, is_active=True)
+    t.is_active = True
+    db.flush()
     t.published_version = None
     db.flush()
     with pytest.raises(BadRequestError):
@@ -711,3 +714,260 @@ def test_editor_create_layout_opt_in_preview_and_publish(
         data={"subject": "S", "body": TEXT, "html_body": HTML, "layout_slug": "ghost"},
     )
     assert "does not exist" in missing.text
+
+
+# ── Review fixes (S4 round 2) ───────────────────────────────────────────────
+
+
+def test_layout_in_use_cannot_be_deactivated_or_deleted(db, tenant_row, template):
+    t, _ = _make_layout(db, tenant_row)
+    draft = service.create_version(
+        db, tenant_row.id, template.id, body=TEXT, layout_slug="brand"
+    )  # a DRAFT reference is enough
+    for call in (
+        lambda: service.update_template(db, tenant_row.id, t.id, is_active=False),
+        lambda: service.delete_template(db, tenant_row.id, t.id),
+    ):
+        with pytest.raises(ConflictError) as err:
+            call()
+        assert "welcome/email" in str(err.value)
+    assert t.is_active
+    # once the reference is removed both are allowed
+    service.update_version(
+        db, tenant_row.id, template.id, draft.version, layout_slug=None
+    )
+    service.update_template(db, tenant_row.id, t.id, is_active=False)
+    service.delete_template(db, tenant_row.id, t.id)
+
+
+def test_layout_in_use_api_paths_are_409(db, tenant_row, template, author):
+    from dotmac_template_studio import router as api
+    from dotmac_template_studio.schemas import TemplateUpdate
+
+    t, _ = _make_layout(db, tenant_row)
+    _message(db, tenant_row, template, layout_slug="brand")
+    with pytest.raises(ConflictError):
+        api.update_template(
+            t.id, TemplateUpdate(is_active=False), db, tenant_row, author
+        )
+    with pytest.raises(ConflictError):
+        api.delete_template(t.id, db, tenant_row, author)
+    assert service.get_template(db, tenant_row.id, t.id).is_active
+
+
+def test_layout_in_use_web_deactivate_is_refused_in_the_page(
+    client, cookies, db, tenant_row, template
+):
+    t, _ = _make_layout(db, tenant_row)
+    _message(db, tenant_row, template, layout_slug="brand")
+    resp = client.post(_url(t, "status"), cookies=cookies, data={"active": "0"})
+    assert resp.status_code == 200 and "welcome/email" in resp.text
+    db.refresh(t)
+    assert t.is_active
+
+
+# Each case escapes (or would escape) a layout element under HTML5 parsing even
+# though a strict-nesting check passes it.
+_ESCAPES = [
+    ("<td>x</td>", "td"),
+    ("<tr><td>x</td></tr>", "tr"),
+    ("<li>x</li>", "li"),
+    ("<p><div>x</div></p>", "div in p"),
+    ("<p><ul><li>x</li></ul></p>", "ul in p"),
+    (
+        '<a href="https://a.example.test/">x<a href="https://b.example.test/">y</a></a>',
+        "a in a",
+    ),
+    ("<thead><tr><th>x</th></tr></thead>", "thead"),
+]
+
+
+@pytest.mark.parametrize(("bad", "why"), _ESCAPES)
+def test_html5_implicit_close_escapes_are_refused(bad, why):
+    assert fragment_problem(bad) is not None, why
+
+
+def test_content_owned_table_and_list_are_allowed():
+    ok = "<table><tbody><tr><td>x</td></tr></tbody></table><ul><li>a</li></ul>"
+    assert fragment_problem(ok) is None
+
+
+def _html5(html: str) -> str:
+    import nh3
+
+    return nh3.clean(
+        html,
+        tags={"table", "tbody", "tr", "td", "th", "p", "div", "ul", "li", "a", "b"},
+        attributes={},
+    )
+
+
+def test_layout_structure_survives_html5_parsing_for_allowed_content():
+    layout_html = (
+        "<table><tbody><tr><td>{content}</td></tr>"
+        "<tr><td>FOOTER</td></tr></tbody></table>"
+    )
+    content = "<table><tbody><tr><td>x</td></tr></tbody></table><ul><li>a</li></ul>"
+    out = wrap_part(layout_html, "html", content, {}, layout.layout_context())
+    cleaned = _html5(out)
+    assert cleaned.endswith("<tr><td>FOOTER</td></tr></tbody></table>")
+    assert cleaned.count("FOOTER") == 1
+
+
+@pytest.mark.parametrize(("bad", "why"), _ESCAPES)
+def test_escape_content_is_refused_at_wrap_time(bad, why):
+    with pytest.raises(LayoutRefusedError):
+        wrap_part(
+            "<table><tbody><tr><td>{content}</td></tr><tr><td>FOOTER</td></tr>"
+            "</tbody></table>",
+            "html",
+            bad,
+            {},
+            layout.layout_context(),
+        )
+
+
+def test_the_td_escape_is_real_under_html5():
+    """Why the rule exists: a content <td> splits the layout cell in html5."""
+    out = (
+        "<table><tbody><tr><td>"
+        + "<td>x</td>"
+        + "</td><td>FOOTER</td></tr></tbody></table>"
+    )
+    assert "<td>x</td></td>" not in _html5(out)
+
+
+@pytest.mark.parametrize("parent", ["p", "li", "a", "span", "b"])
+def test_slot_parent_must_be_a_safe_container(db, tenant_row, parent):
+    t = _new_layout_template(db, tenant_row)
+    html = f"<{parent}>{{content}}</{parent}>"
+    with pytest.raises(BadRequestError) as err:
+        service.create_version(
+            db, tenant_row.id, t.id, body="{content}", html_body=html
+        )
+    assert "may only sit" in str(err.value) or "html" in str(err.value)
+
+
+@pytest.mark.parametrize("parent", ["div", "blockquote"])
+def test_slot_parent_allowed_containers(db, tenant_row, parent):
+    t = _new_layout_template(db, tenant_row)
+    service.create_version(
+        db,
+        tenant_row.id,
+        t.id,
+        body="{content}",
+        html_body=f"<{parent}>{{content}}</{parent}>",
+    )
+    assert layout.slot_parent_problems("html", "{content}") == []
+    assert (
+        layout.slot_parent_problems(
+            "html", "<table><tbody><tr><td>{content}</td></tr></tbody></table>"
+        )
+        == []
+    )
+
+
+def test_render_records_the_layout_revision(db, tenant_row, template):
+    t, v = _make_layout(db, tenant_row)
+    _message(db, tenant_row, template, layout_slug="brand")
+    parts = service.render_published_parts(
+        db, tenant_row.id, "welcome", "email", VALUES
+    )
+    assert (parts.layout_slug, parts.layout_version) == ("brand", v.version)
+    assert parts.layout_revision_id == v.id
+    sample = service.render_preview(db, tenant_row.id, template.id, 1)
+    assert sample.layout_version == v.version
+
+
+def test_no_layout_render_records_none(db, tenant_row, template):
+    _message(db, tenant_row, template)
+    parts = service.render_published_parts(
+        db, tenant_row.id, "welcome", "email", VALUES
+    )
+    assert (parts.layout_slug, parts.layout_version, parts.layout_revision_id) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_layout_publish_audit_lists_dependents(db, tenant_row, template, author):
+    from dotmac_template_studio import router as api
+
+    t, _ = _make_layout(db, tenant_row)
+    _message(db, tenant_row, template, layout_slug="brand")
+    v2 = service.create_version(
+        db, tenant_row.id, t.id, body="{content}!", html_body="<div>{content}</div>"
+    )
+    api.publish_version(t.id, v2.version, db, tenant_row, author)
+    from dotmac_kernel.audit import AuditEvent
+    from sqlalchemy import select
+
+    event = (
+        db.execute(
+            select(AuditEvent).where(
+                AuditEvent.action == "template_studio.version.publish"
+            )
+        )
+        .scalars()
+        .all()[-1]
+    )
+    assert event.details["layout_dependents"] == ["welcome/email"]
+    assert service.layout_audit_users(db, tenant_row.id, template.id) == []
+
+
+def test_error_messages_do_not_echo_values_or_exceptions(db, tenant_row):
+    configure_brand(
+        BrandSpec(
+            variables=("brand_name", "logo_url"),
+            url=("logo_url",),
+            resolver=lambda d, t: {
+                "brand_name": "A",
+                "logo_url": "ftp-SECRETSCHEME://x.example.test/",
+            },
+        )
+    )
+    with pytest.raises(LayoutRefusedError) as err:
+        layout.resolve_brand(db, tenant_row.id)
+    assert "SECRETSCHEME" not in str(err.value).upper() and "logo_url" in str(err.value)
+
+    def boom(d, t):
+        raise LayoutRefusedError("leaky-detail")
+
+    configure_brand(BrandSpec(variables=("brand_name",), resolver=boom))
+    with pytest.raises(LayoutRefusedError) as err2:
+        layout.resolve_brand(db, tenant_row.id)
+    assert "leaky" not in str(err2.value) and "RuntimeError" not in str(err2.value)
+
+
+def test_fragment_check_runs_at_save_time_with_a_layout(db, tenant_row, template):
+    _make_layout(db, tenant_row)
+    # the sanitizer accepts this; the fragment rule refuses it for layout use
+    with pytest.raises(BadRequestError) as err:
+        service.create_version(
+            db,
+            tenant_row.id,
+            template.id,
+            body=TEXT,
+            html_body=(
+                "<p>a</p><div>{customer_name} {portal_url}</div>" "<p><div>x</div></p>"
+            ),
+            layout_slug="brand",
+        )
+    assert "cannot be used with a layout" in str(err.value) or "html" in str(err.value)
+    # the same html without a layout still saves where the sanitizer allows it
+    v = service.create_version(
+        db, tenant_row.id, template.id, body=TEXT, html_body=HTML
+    )
+    with pytest.raises(BadRequestError):
+        service.update_version(
+            db,
+            tenant_row.id,
+            template.id,
+            v.version,
+            html_body=(
+                "<table><tbody><tr><td>{customer_name} {portal_url}</td></tr>"
+                "</tbody></table><td>x</td>"
+            ),
+            layout_slug="brand",
+        )
