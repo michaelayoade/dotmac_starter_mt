@@ -744,8 +744,16 @@ outside runners; only the execution boundary produces private evidence.
 `scripts/lane3_offline_result.py` owns the closed public claim and protected
 policy grammars; `scripts/lane3_offline_signature.py` authenticates the original
 claim bytes through fixed, pinned OpenSSH verification and all current bindings.
-`require_rehearsal.py` requires that consumer after its existing selected-run,
-candidate and receipt checks. Public workflow inputs carry only bounded result
+`require_rehearsal.py` acquires the selected run's exact three-member receipt
+artifact with bounded download and ZIP reads. It joins the encrypted member's
+SHA-256 to the parsed receipt before authenticated offline-result verification.
+The existing release evidence upload retains that ciphertext, source status
+and a canonical source-artifact record containing observed API expiry and
+artifact coordinates plus measured ZIP/member sizes and hashes. The observed
+source expiry is not a promise about the new upload's lifetime. No plaintext
+evidence or decryption key enters this path.
+`require_rehearsal.py` requires the authenticated public consumer after its
+selected-run, candidate, receipt and ciphertext checks. Public workflow inputs carry only bounded result
 and signature bytes; they select no trust root, executable or verification time.
 
 The checked-in policy is **unenrolled**, with no key, tool or verifier profile
@@ -2676,6 +2684,7 @@ made concrete — every model has exactly one declared owner.
 | `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |
 | `CommunicationSuppression` | `communication_suppressions` | core | dotmac_sub (`app/models/notification.py::CommunicationSuppression`, tenant-adapted with RLS; canonical channel identity and conflict-safe idempotency added by the kernel) |
 | `CommunicationDelivery` | `communication_deliveries` | core | dotmac_sub (`app/models/notification.py::NotificationDelivery`) for the receipt shape; stable dispatch identity and the bounce/complaint→consent feedback loop are native kernel behavior |
+| `CommunicationDispatch` | `communication_dispatches` | core | native kernel (ADR-0006 § 5g, K-3); product-supplied idempotency key, rendered snapshot, fingerprint and template provenance. Not a queue: the outbox stays the queue and carries only the dispatch id. `outbox_dispatcher` holds no privilege on it |
 | `UserCredential` | `user_credentials` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below). PORT-DELTA (control-plane security Task 2): moved from the `auth` feature to core — atomic tenant provisioning (`tenants` feature) must create the owner credential and features never import each other, so the model joined the other identity models under ADR-0002's placement rule; hashing/verification stays in `dotmac_kernel.security` |
 | `ExternalIdentityBinding` | `external_identity_bindings` | core | dotmac_erp (`app/models/auth.py::FederatedIdentity` — the `issuer`/`subject`/`is_active`/`last_authenticated_at` shape, its written contract and its no-auto-provision refusal) with named dotmac_sub deltas (`app/models/auth.py::AuthenticationBinding`'s binding-as-discriminator → `provider_binding`; its CHECK-forced evidence pair → `bound_by`/`bind_reason`). PORT-DELTA: `tenant_id` + composite uniques + FORCEd RLS, which NEITHER source has — ERP's table has no tenant column so its `(issuer, subject)` uniqueness is global across every organization, and Sub's migration 527 declares `- no NOT NULL, no RLS`. Core under ADR-0002's placement rule: the same cross-feature identity family as `UserCredential`. Sources: `docs/inventories/external-identity-sources.md` |
 | `PlatformAdmin` | `platform_admins` | core | native (control-plane security Task 1, ADR-0004) — platform catalog table: no `tenant_id`, no RLS, GRANT `platform_api`/`app_admin` only, REVOKEd from `app_user` |
