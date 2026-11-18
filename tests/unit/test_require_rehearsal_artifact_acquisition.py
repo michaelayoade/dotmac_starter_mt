@@ -256,9 +256,11 @@ def _members_zip(compression=zipfile.ZIP_STORED, **overrides):
     return bytearray(storage.getvalue())
 
 
-def test_truncated_member_yields_clean_refusal(monkeypatch, capsys):
+def test_sizes_past_archive_end_yield_clean_refusal(monkeypatch, capsys):
     raw = _members_zip(**{"receipt.json": b"x" * 64})
-    # A stored member whose central-directory sizes run past the archive end.
+    # Covers the archive-length / overlapped-entry refusal: central-directory
+    # sizes run past the archive end. The EOFError mapping is covered by the
+    # patched-open test below.
     entry = raw.index(b"PK\x01\x02")
     raw[entry + 20 : entry + 28] = (100_000).to_bytes(4, "little") * 2
     with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
@@ -290,6 +292,9 @@ def test_compressed_size_is_bounded_per_member(monkeypatch):
             infos = super().infolist()
             infos[0].compress_size = claimed
             return infos
+
+        def open(self, *args, **kwargs):
+            pytest.fail("compress_size bound not enforced before open")
 
     monkeypatch.setattr(oracle.zipfile, "ZipFile", Inflated)
     with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
