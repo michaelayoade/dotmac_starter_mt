@@ -55,14 +55,28 @@ def _build(held_subject, **overrides):
     )
 
 
-def _archive(receipt, ciphertext=CIPHERTEXT):
+def _status_for(receipt):
+    """The status document as the runner derives it; synthetic if unparseable."""
+    from dotmac_deployment_foundation.rehearsal import (
+        RehearsalReceiptV2,
+        render_status_document,
+    )
+
+    try:
+        return render_status_document(RehearsalReceiptV2.from_json(receipt)).encode()
+    except Exception:
+        return b"synthetic status\n"
+
+
+def _archive(receipt, ciphertext=CIPHERTEXT, status=None):
+    status = _status_for(receipt) if status is None else status
     storage = io.BytesIO()
     with zipfile.ZipFile(storage, "w") as archive:
         archive.writestr("receipt.json", receipt)
         archive.writestr("evidence-bundle.age", ciphertext)
         archive.writestr(
             "docs/inventories/deployment-exposure-rehearsal-status.md",
-            b"synthetic status\n",
+            status,
         )
     return storage.getvalue()
 
