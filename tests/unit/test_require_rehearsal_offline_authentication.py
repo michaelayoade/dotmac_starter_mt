@@ -202,6 +202,9 @@ def test_release_transport_is_environment_only_and_retains_only_public_files():
         ".rehearsal/offline-result.sshsig",
     }
     assert retained["with"]["if-no-files-found"] == "error"
+    # An `if:` could skip or reorder retention relative to the gate.
+    assert "if" not in retained
+    assert steps.index(gate) < steps.index(retained)
 
 
 def test_result_expiring_during_crypto_is_refused_before_retention(

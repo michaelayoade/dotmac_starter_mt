@@ -20,6 +20,7 @@ from tests.unit.test_require_rehearsal_organization_oracle import (
     _build,
     _main,
     _network,
+    _status_for,
     subject,  # noqa: F401
 )
 from tests.unit.test_require_rehearsal_organization_oracle import (
@@ -195,7 +196,11 @@ def test_retention_joins_actual_source_members(subject, tmp_path, monkeypatch): 
     )
     assert _main(tmp_path, TOPOLOGY) == oracle.EXIT_OK
     assert (tmp_path / "evidence-bundle.age").read_bytes() == CIPHERTEXT
-    assert (tmp_path / "source-status.md").read_bytes() == b"synthetic status\n"
+    assert (tmp_path / "source-status.md").read_bytes() == _status_for(
+        receipt.canonical_bytes()
+    )
+    # Retained receipt bytes are exactly the bytes that were authenticated.
+    assert (tmp_path / "receipt.json").read_bytes() == receipt.canonical_bytes()
     document = json.loads((tmp_path / "source-artifact.json").read_bytes())
     assert document["run_id"] == RUN_ID
     assert document["run_attempt"] == 1
@@ -241,3 +246,142 @@ def test_zip64_locator_cannot_override_bounded_normal_directory(monkeypatch):
     )
     with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
         _acquire(monkeypatch, altered)
+
+
+def _members_zip(compression=zipfile.ZIP_STORED, **overrides):
+    storage = io.BytesIO()
+    with zipfile.ZipFile(storage, "w", compression=compression) as bundle:
+        for name in oracle._MEMBER_LIMITS:
+            bundle.writestr(name, overrides.get(name, b"synthetic"))
+    return bytearray(storage.getvalue())
+
+
+def test_sizes_past_archive_end_yield_clean_refusal(monkeypatch, capsys):
+    raw = _members_zip(**{"receipt.json": b"x" * 64})
+    # Covers the archive-length / overlapped-entry refusal: central-directory
+    # sizes run past the archive end. The EOFError mapping is covered by the
+    # patched-open test below.
+    entry = raw.index(b"PK\x01\x02")
+    raw[entry + 20 : entry + 28] = (100_000).to_bytes(4, "little") * 2
+    with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
+        _acquire(monkeypatch, bytes(raw))
+    assert capsys.readouterr() == ("", "")
+
+
+def test_eof_inside_member_read_is_a_clean_refusal(monkeypatch):
+    raw = bytes(_members_zip())  # build before the patch: writestr uses open()
+
+    def eof(self, *args, **kwargs):
+        raise EOFError("truncated")
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", eof)
+    with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
+        _acquire(monkeypatch, raw)
+
+
+def test_compressed_size_is_bounded_per_member(monkeypatch):
+    real = zipfile.ZipFile
+    limits = {name: 64 for name in oracle._MEMBER_LIMITS}
+    monkeypatch.setattr(oracle, "_MEMBER_LIMITS", limits)
+    raw = bytes(_members_zip())
+    claimed = 64 + (64 >> 8) + 64 + 1  # one past the per-member bound
+    # The archive is larger than the claim, so the archive-length bound alone
+    # would not refuse: only the per-member bound does.
+    assert len(raw) > claimed
+
+    class Inflated(real):
+        def infolist(self):
+            infos = super().infolist()
+            infos[0].compress_size = claimed
+            return infos
+
+        def open(self, *args, **kwargs):
+            pytest.fail("compress_size bound not enforced before open")
+
+    monkeypatch.setattr(oracle.zipfile, "ZipFile", Inflated)
+    with pytest.raises(oracle.RehearsalMissing, match="^rehearsal_artifact_invalid$"):
+        _acquire(monkeypatch, raw)
+
+
+def test_reformatted_receipt_is_refused_before_authentication(
+    subject,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    receipt = _build(subject)
+    canonical = receipt.canonical_bytes()
+    reformatted = json.dumps(json.loads(canonical), indent=2, sort_keys=False).encode()
+    assert reformatted != canonical
+    _network(monkeypatch, canonical)
+    monkeypatch.setattr(oracle, "_download", lambda *a, **k: _archive(reformatted))
+    monkeypatch.setattr(
+        oracle,
+        "_require_authenticated_offline_result",
+        lambda *a: pytest.fail("non-canonical receipt reached authentication"),
+    )
+    assert _main(tmp_path, TOPOLOGY) == oracle.EXIT_REFUSED
+    assert "rehearsal_receipt_binding_invalid" in capsys.readouterr().err
+    assert not (tmp_path / "receipt.json").exists()
+
+
+def test_expiry_is_rechecked_before_retention(subject, tmp_path, monkeypatch):  # noqa: F811
+    receipt = _build(subject)
+    _network(monkeypatch, receipt.canonical_bytes())
+    monkeypatch.setattr(
+        oracle,
+        "_require_authenticated_offline_result",
+        lambda *a: pytest.fail("expired carrier reached authentication"),
+    )
+    real = oracle._future_expiry
+    calls = []
+
+    def expiring(value):
+        calls.append(value)
+        return real(value) and len(calls) < 2  # acquisition passes, recheck fails
+
+    monkeypatch.setattr(oracle, "_future_expiry", expiring)
+    assert _main(tmp_path, TOPOLOGY) == oracle.EXIT_REFUSED
+    assert len(calls) == 2
+    assert not (tmp_path / "receipt.json").exists()
+
+
+def test_nothing_is_retained_when_authentication_refuses(
+    subject,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+):
+    receipt = _build(subject)
+    _network(monkeypatch, receipt.canonical_bytes())
+
+    def refuse(*a):
+        raise oracle.OfflineResultRefused("synthetic")
+
+    monkeypatch.setattr(oracle, "_require_authenticated_offline_result", refuse)
+    assert _main(tmp_path, TOPOLOGY) == oracle.EXIT_REFUSED
+    assert list(tmp_path.glob("*.age")) == []
+    for name in ("receipt.json", "source-status.md", "source-artifact.json"):
+        assert not (tmp_path / name).exists()
+
+
+def test_unauthenticated_status_bytes_are_refused(
+    subject,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    receipt = _build(subject)
+    _network(monkeypatch, receipt.canonical_bytes())
+    monkeypatch.setattr(
+        oracle,
+        "_download",
+        lambda *a, **k: _archive(receipt.canonical_bytes(), status=b"forged\n"),
+    )
+    monkeypatch.setattr(
+        oracle,
+        "_require_authenticated_offline_result",
+        lambda *a: pytest.fail("forged status reached authentication"),
+    )
+    assert _main(tmp_path, TOPOLOGY) == oracle.EXIT_REFUSED
+    assert "rehearsal_status_binding_invalid" in capsys.readouterr().err
+    assert not (tmp_path / "source-status.md").exists()
