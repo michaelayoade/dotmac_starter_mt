@@ -971,3 +971,53 @@ def test_fragment_check_runs_at_save_time_with_a_layout(db, tenant_row, template
             ),
             layout_slug="brand",
         )
+
+
+def test_slot_inside_an_anchor_at_any_depth_is_refused(db, tenant_row):
+    assert layout.slot_parent_problems(
+        "html", '<a href="https://b.example.test/"><div>{content}</div></a>'
+    )
+    t = _new_layout_template(db, tenant_row)
+    with pytest.raises(BadRequestError):
+        service.create_version(
+            db,
+            tenant_row.id,
+            t.id,
+            body="{content}",
+            html_body='<a href="https://b.example.test/"><div>{content}</div></a>',
+        )
+
+
+def test_content_anchor_would_close_a_layout_anchor_under_html5():
+    out = (
+        '<a href="https://b.example.test/"><div>'
+        '<a href="https://e.example.test/">x</a></div></a><p>FOOT</p>'
+    )
+    import nh3
+
+    cleaned = nh3.clean(out, tags={"a", "div", "p"}, attributes={"a": {"href"}})
+    # html5 splits the layout's <a>: the content's anchor is NOT its descendant
+    assert "</a></div></a>" not in cleaned and cleaned.count("<a ") > 2
+
+
+def test_deactivate_allowed_when_only_historical_revisions_use_the_layout(
+    db, tenant_row, template
+):
+    t, _ = _make_layout(db, tenant_row)
+    old = _message(db, tenant_row, template, layout_slug="brand")  # v1 published
+    _message(db, tenant_row, template)  # v2 published without the layout
+    assert service.layout_users(db, tenant_row.id, "brand") == []
+    service.update_template(db, tenant_row.id, t.id, is_active=False)
+    # restoring the old revision is refused while the layout is inactive
+    with pytest.raises(BadRequestError):
+        service.restore_version(db, tenant_row.id, template.id, old.version)
+
+
+def test_current_published_and_drafts_block_with_actionable_message(
+    db, tenant_row, template
+):
+    t, _ = _make_layout(db, tenant_row)
+    _message(db, tenant_row, template, layout_slug="brand")
+    with pytest.raises(ConflictError) as err:
+        service.update_template(db, tenant_row.id, t.id, is_active=False)
+    assert "Publish a revision without the layout" in str(err.value)

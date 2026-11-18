@@ -411,8 +411,10 @@ def _apply_layout(
 
 
 def layout_users(db: Session, tenant_id: UUID, layout_slug: str) -> list[str]:
-    """`slug/channel` of every template with ANY revision (draft or published)
-    that opts in to this layout, sorted."""
+    """`slug/channel` of every template that still depends on this layout: its
+    CURRENT published revision or any unpublished draft opts in. Older published
+    revisions are immutable history, not a dependency (restoring one is
+    re-validated and refused while the layout is unusable)."""
     stmt = (
         select(Template.slug, Template.channel)
         .join(
@@ -423,6 +425,8 @@ def layout_users(db: Session, tenant_id: UUID, layout_slug: str) -> list[str]:
         .where(
             Template.tenant_id == tenant_id,
             TemplateVersion.layout_slug == layout_slug,
+            (TemplateVersion.published_at.is_(None))
+            | (TemplateVersion.version == Template.published_version),
         )
         .distinct()
         .order_by(Template.slug, Template.channel)
@@ -447,7 +451,8 @@ def _refuse_if_layout_in_use(
     if users:
         raise ConflictError(
             f"layout {template.slug!r} cannot be {verb} while these templates "
-            f"opt in to it: {', '.join(users)}. Remove the layout from them first."
+            f"use it: {', '.join(users)}. Publish a revision without the layout "
+            "(and remove it from drafts) first."
         )
 
 

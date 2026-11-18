@@ -214,6 +214,7 @@ class _SlotParent(HTMLParser):
         super().__init__(convert_charrefs=False)
         self.stack: list[str] = []
         self.parents: list[str | None] = []
+        self.in_anchor: list[bool] = []
 
     def handle_starttag(self, tag: str, attrs: Any) -> None:
         if tag not in _VOID:
@@ -227,6 +228,7 @@ class _SlotParent(HTMLParser):
     def handle_data(self, data: str) -> None:
         for _ in _SLOT_TOKEN.finditer(data):
             self.parents.append(self.stack[-1] if self.stack else None)
+            self.in_anchor.append("a" in self.stack)
 
 
 def slot_parent_problems(label: str, source: str) -> list[str]:
@@ -237,12 +239,16 @@ def slot_parent_problems(label: str, source: str) -> list[str]:
         parser.close()
     except Exception:
         return [f"{label}: the layout html could not be parsed"]
-    return [
+    problems = [
         f"{label}: {{{SLOT}}} may only sit at the top level or directly inside "
         f"{', '.join('<' + t + '>' for t in sorted(SLOT_PARENTS))}, not <{parent}>"
         for parent in parser.parents
         if parent is not None and parent not in SLOT_PARENTS
     ]
+    if any(parser.in_anchor):
+        # A content <a> start tag closes ANY open <a>, across element boundaries.
+        problems.append(f"{label}: {{{SLOT}}} may not be inside an <a> at any depth")
+    return problems
 
 
 _VOID = frozenset({"br", "hr", "img"})
@@ -324,8 +330,10 @@ def fragment_problem(html: str) -> str | None:
     HTML5 parsing also closes elements IMPLICITLY, table-part and `<li>` tags
     are allowed only inside a table/list the content itself opened, a block
     element or second `<a>` inside an open `<p>`/`<a>` is refused. Together with
-    the slot-parent rule (`SLOT_PARENTS`) the content cannot close or reopen
-    anything the layout owns.
+    the slot rules (parent in `SLOT_PARENTS`, and no `<a>` anywhere among the
+    slot's ancestors) the content cannot close or reopen anything the layout
+    owns. Not covered: section bodies are not element-balanced on their own, so
+    a section whose body leaves a tag open fails at render, closed (follow-up).
     """
     parser = _Balance()
     try:
