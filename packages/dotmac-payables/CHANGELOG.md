@@ -74,6 +74,10 @@ any new command (Michael, 2026-11-17: maker-checker is optional and off).
   first. Owner invariants at every write: R >= 0, Claimed >= 0, credit tax <= D
   (`deferred_tax_position_negative`). No un-apply. `deferred_tax_credit_exceeds_remaining`
   is removed.
+- An external settlement observation takes the invoice lock and is refused while the
+  invoice still defers tax (`settlement_observation_on_deferred_invoice`), because it
+  lowers the balance without releasing; payments are unaffected. A credit application
+  validates its amount before any release is measured.
 - Review hardening: a historical-credit replay with another credit number, evidence
   reference or admitting actor is a conflict; credit approval refuses deferral tax on
   unproven settled history (`historical_deferral_unproven`); `apply_credit_note` and

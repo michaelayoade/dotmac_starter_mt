@@ -39,6 +39,7 @@ from dotmac_payables.contracts import (
     PayableLineInput,
     PayablesError,
     RecognizeApprovedInvoice,
+    SettlementObservationInput,
     SupplierPaymentStatus,
     SupplierPaymentWithholdingInput,
     deferred_tax_release,
@@ -64,6 +65,7 @@ from dotmac_payables.service import (
     invoice_deferred_tax_position,
     recognize_approved_invoice,
     record_accounting_receipt,
+    record_settlement,
     reverse_supplier_payment,
     submit_credit_note,
     submit_invoice,
@@ -2601,3 +2603,96 @@ def test_the_position_invariants_hold_over_random_event_sequences(
     assert _count(db, models.CreditApplicationTaxRelease) > 3
     assert any(s.released_amount > 0 for s in _splits(db))
     assert any(s.deferred_amount > 0 for s in _splits(db))
+
+
+# --- review round 3: external observations, amount order, messages ---------------
+
+
+def _observe(db: Session, ob, amount: str, *, owner: str = "bank-feed"):
+    n = _n()
+    return record_settlement(
+        db,
+        scope=SCOPE,
+        command=SettlementObservationInput(
+            obligation_id=ob.id,
+            source_owner=owner,
+            source_reference=f"obs:{n}",
+            source_version="1",
+            source_fingerprint="a" * 64,
+            amount=Decimal(amount),
+            occurred_at=NOW,
+            currency_code="NGN",
+        ),
+        idempotency_key=f"a6:obs:{n}",
+        idempotency_expires_at=None,
+        recorded_at=NOW,
+    )
+
+
+def test_an_external_settlement_is_refused_on_an_invoice_that_still_defers_tax(
+    db: Session,
+) -> None:
+    _declare(db)
+    _, (ob,) = _invoice(db)
+    with pytest.raises(InvalidTransition) as caught:
+        _observe(db, ob, "100")
+    assert caught.value.code == "settlement_observation_on_deferred_invoice"
+    assert ob.outstanding_amount == Decimal("1075")
+    assert _count(db, models.SettlementObservation) == 0
+
+
+def test_an_external_settlement_is_allowed_when_nothing_is_deferred(
+    db: Session,
+) -> None:
+    # no deferral tax at all
+    _declare(db)
+    _, (plain,) = _invoice(db, lines=[("1000", "0", None)])
+    _observe(db, plain, "100")
+    assert plain.outstanding_amount == Decimal("900")
+    # tax that is not on a deferral account (folded)
+    _, (folded,) = _invoice(db, lines=[("1000", "75", EXPENSE)])
+    _observe(db, folded, "100")
+    # a deferring invoice whose deferral is already fully released or credited
+    invoice, (ob,) = _invoice(db)
+    _credit(db, invoice=invoice, net="100", tax="75")  # R = 0
+    _observe(db, ob, "100")
+    assert ob.outstanding_amount == Decimal("975")
+    # and without any policy the a5 behaviour is unchanged
+    assert _count(db, models.SettlementObservation) == 3
+
+
+def test_payments_still_settle_through_the_observation_path(db: Session) -> None:
+    _declare(db)
+    _, (ob,) = _invoice(db)
+    payment = _pay(db, [(ob, "1075")])  # source owner is the payment owner
+    assert payment.status == SupplierPaymentStatus.RECORDED
+    assert _count(db, models.SettlementObservation) == 1
+
+
+def test_a_credit_application_validates_the_amount_before_any_release(
+    db: Session,
+) -> None:
+    _declare(db)
+    _, (ob,) = _invoice(db)
+    credit = _cash_credit(db, "2000.00")
+    for amount, match in (("0", "must be positive"), ("1075.01", "outstanding")):
+        with pytest.raises(InvalidAmount, match=match):
+            _apply(db, credit, ob, amount)
+    assert _app_rows(db) == [] and _count(db, models.CreditApplication) == 0
+    assert ob.outstanding_amount == Decimal("1075")
+
+
+def test_refusal_messages_for_reversal_and_invariants(db: Session) -> None:
+    _declare(db)
+    invoice, (ob,) = _invoice(db)
+    payment = _pay(db, [(ob, "1075")])
+    _receipt(db, payment)
+    _credit(db, invoice=invoice)
+    with pytest.raises(InvalidTransition, match="Finance exceptions") as caught:
+        _reverse_payment(db, payment)
+    assert "reverse the credit" not in str(caught.value)
+    line = db.scalars(select(models.SupplierPaymentTaxRelease)).one()
+    line.amount = Decimal("200")  # forge a position that breaks the invariants
+    db.flush()
+    with pytest.raises(InvalidAmount, match="violates its invariants"):
+        invoice_deferred_tax_position(db, TENANT, invoice.id)

@@ -901,6 +901,11 @@ def apply_credit_note(
             )
         if amount > credit.available_amount:
             raise InvalidAmount("amount exceeds available supplier credit")
+        # Validate the amount before any release is measured against it.
+        if amount <= 0:
+            raise InvalidAmount("applied amount must be positive")
+        if amount > obligation.outstanding_amount:
+            raise InvalidAmount("amount exceeds the obligation outstanding balance")
         releases = _credit_application_releases(
             session, credit=credit, invoice=invoice, amount=amount
         )
@@ -989,7 +994,26 @@ def record_settlement(
                 )
             return {"observation_id": str(existing.id)}
         obligation = _obligation(session, tenant_id, command.obligation_id, lock=True)
-        invoice = _invoice(session, tenant_id, obligation.invoice_id)
+        if str(payload["source_owner"]) == PAYMENT_SETTLEMENT_OWNER:
+            # The payment record already holds the invoice lock and has released
+            # the deferred tax for this settlement.
+            invoice = _invoice(session, tenant_id, obligation.invoice_id)
+        else:
+            # An external observation lowers O but releases nothing, so it may not
+            # touch an invoice that still defers tax. Lock order: obligation, invoice.
+            invoice = _invoice(session, tenant_id, obligation.invoice_id, lock=True)
+            if any(
+                position.remaining > 0
+                for position in invoice_deferred_tax_position(
+                    session, tenant_id, invoice.id
+                )
+            ):
+                raise _refuse(
+                    InvalidTransition,
+                    "an external settlement cannot be observed on an invoice that "
+                    "still defers tax",
+                    "settlement_observation_on_deferred_invoice",
+                )
         if obligation.currency_code != str(payload["currency_code"]):
             raise InvalidAmount("settlement currency does not match the obligation")
         _apply_obligation_reduction(obligation, amount)
@@ -2203,7 +2227,7 @@ def invoice_deferred_tax_position(
         if remaining < 0 or claimed < 0 or cdef + crel > deferred:
             raise _refuse(
                 InvalidAmount,
-                "deferred tax position is negative",
+                "deferred tax position violates its invariants",
                 "deferred_tax_position_negative",
             )
         positions.append(
@@ -3119,8 +3143,8 @@ def reverse_supplier_payment(
             if _invoice_has_credit_vat_decision(session, tenant_id, invoice_id):
                 raise _refuse(
                     InvalidTransition,
-                    "a credit has already settled this invoice's VAT; reverse "
-                    "the credit note first",
+                    "a credit has already settled this invoice's VAT; this payment "
+                    "reversal goes to Finance exceptions",
                     "payment_reversal_blocked_by_credit_vat",
                 )
         for allocation in ordered:
