@@ -32,7 +32,7 @@ from sqlalchemy.exc import DBAPIError
 #: revision had to edit all eight. Every use meant 'the kernel head' — the
 #: surrounding comments say so — and none was a historical pin, which is what
 #: makes collapsing them safe rather than merely tidier.
-KERNEL_HEAD = "0031_rate_limit_buckets"
+KERNEL_HEAD = "0032_communication_dispatches"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
     REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
@@ -441,7 +441,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     assert heads == {
         KERNEL_HEAD,
         "a004_backfill_capability_grants",
-        "ts_0004_html_body",
+        "ts_0005_layout_slug",
         "tk_0001_tickets",
     }, f"unexpected head set: {heads}"
 
@@ -458,7 +458,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     ticketing_head = script.get_revision("ticketing@head")
     assert kernel_head.revision == KERNEL_HEAD
     assert assembly_head.revision == "a004_backfill_capability_grants"
-    assert module_head.revision == "ts_0004_html_body"
+    assert module_head.revision == "ts_0005_layout_slug"
     assert ticketing_head.revision == "tk_0001_tickets"
 
 

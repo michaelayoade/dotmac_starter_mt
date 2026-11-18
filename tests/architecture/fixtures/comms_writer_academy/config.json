@@ -1,0 +1,26 @@
+{
+  "product": "academy-fixture",
+  "root": "tree",
+  "families": {
+    "web": [
+      "web"
+    ],
+    "cli": [
+      "cli.py"
+    ],
+    "workers": [
+      "workers"
+    ],
+    "services": [
+      "services"
+    ],
+    "scripts": [
+      "scripts"
+    ],
+    "models": [
+      "models"
+    ]
+  },
+  "allowed": [],
+  "exclude": []
+}

@@ -60,6 +60,15 @@
                        border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                        background:var(--dmui-surface-primary); color:var(--dmui-text-primary);
                        font-family:var(--dmui-font-family-mono);">{{ form.get('html_body', '') }}</textarea>
+      {% if layouts %}
+      <label style="font-size:var(--dmui-font-size-sm);">Email layout (optional)
+        <select name="layout_slug">
+          <option value="">None</option>
+          {% for slug, name in layouts %}
+          <option value="{{ slug }}" {% if form.get('layout_slug') == slug %}selected{% endif %}>{{ name }} ({{ slug }})</option>
+          {% endfor %}
+        </select></label>
+      {% endif %}
       <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
         Single-brace placeholders only. Double braces are rejected when you save —
         they are not substituted at send time and would reach the recipient

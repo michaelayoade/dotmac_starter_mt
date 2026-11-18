@@ -10,6 +10,28 @@ here.
 
 ### Added
 
+- Dispatch identity (ADR-0006 § 5g, K-3): kernel migration
+  `0032_communication_dispatches` (additive; down drops the table only while it
+  is empty and refuses otherwise) and `dotmac_kernel.delivery_dispatch`.
+  `communication_dispatches` holds the product-supplied idempotency key
+  (UNIQUE per tenant), the rendered S6 snapshot, its content fingerprint and
+  template provenance (`template:<key>` or `legacy:<source>`), a status that
+  includes the history-only state for imported legacy keys, `available_at`, and
+  `terminal_at` / `redacted_at` for the later post-terminal body redaction
+  (fingerprint and provenance are kept; the redaction job is not in this
+  change). Tenant RLS with FORCE. `app_user` holds SELECT, INSERT and
+  column-level UPDATE on outcome/redaction columns only (no DELETE);
+  `outbox_dispatcher` and the Academy lab-worker role hold nothing.
+  - `create_dispatch` inserts the identity and enqueues a `delivery.dispatch.v1`
+    outbox event whose payload is only `{"dispatch_id": ...}`, in the caller's
+    transaction. A duplicate `(tenant, key)` returns the existing dispatch and
+    enqueues nothing (`ON CONFLICT DO NOTHING` plus read-back).
+    `find_dispatch_by_key` is the domain lookup. `import_history_key` and
+    `import_pending` are the D7 carry-forward primitives (history-only, never
+    enqueued; pending content kept byte-for-byte with `legacy:` provenance).
+    `load_dispatch` rebuilds the `OutboundMessage` and refuses a fingerprint
+    mismatch, a history-only row or a redacted row. No version is allocated.
+
 - Reserve `money_flows` / `mod_mflows` / `mf` / branch `money_flows` for the
   tenant-plane money-flows composition package before its release. This
   reservation installs no module, moves no data and transfers no writer
