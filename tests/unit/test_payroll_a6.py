@@ -47,7 +47,11 @@ from tests.unit.test_payroll_service import NGN, NOW, _tenant
 ACTOR = uuid4()
 OFFSET = "ledger:unclaimed-salary"
 BANK = "ledger:bank-main"
-LATER = datetime.now(UTC) + timedelta(minutes=5)
+
+
+def _later() -> datetime:
+    """Evaluated per call: sqlite stamps created_at at insert time."""
+    return datetime.now(UTC) + timedelta(minutes=5)
 
 
 @pytest.fixture
@@ -90,7 +94,7 @@ def _adjust(db, tenant, liability, amount="-100", **kw):
         "evidence_ref": "memo:1",
         "offset_account_ref": OFFSET,
         "adjusted_by_id": ACTOR,
-        "adjusted_at": LATER,
+        "adjusted_at": _later(),
     }
     args.update(kw)
     return adjust_liability(db, **args)
@@ -376,7 +380,7 @@ def test_adjustments_zero_amount_check_and_unique_ref(db: Session) -> None:
             evidence_ref="e",
             offset_account_ref=OFFSET,
             adjusted_by_id=ACTOR,
-            adjusted_at=LATER,
+            adjusted_at=_later(),
         )
     )
     with pytest.raises(IntegrityError):
