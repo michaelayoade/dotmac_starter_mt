@@ -15,3 +15,21 @@
   outlasts it. `data_timeout` plus the other step timeouts (about 7 x `timeout`)
   must stay below `stale_lease_seconds`; raise the lease before raising these.
 - Attachments: 10 MiB each, 20 MiB total; TLS 1.2 minimum on caller contexts.
+
+## Governance ADR 0011: recorded transfer (Michael, 2026-11-18)
+
+`provider.py` opens SMTP connections, so the engineering-standards
+`outbound_transport` arm counts it. Michael explicitly approved loosening
+Governance ADR 0011 for this one surface: Starter's
+`.dotmac/standards-profile.json` `external_connector_surface.baselines.outbound_transport`
+moves 0 -> 1, with no conserved exclusion (an exclusion is not viable because
+the module is counted).
+
+- The single counted module is `src/dotmac_delivery_smtp/provider.py`. A second
+  SMTP user anywhere in Starter exceeds the baseline and fails CI.
+- This is a TRANSFER, not new surface: it replaces Academy's direct SMTP sender
+  (`app/email.py`, Academy `fc8d15b`). Academy's own `outbound_transport` count
+  must be lowered with cutover evidence in Academy work package A4.
+- Retirement target: a `dotmac-connector-smtp` distribution run by Academy's
+  companion Integrator (Integrator topology ruling D10, 2026-11-18). Starter's
+  baseline then returns to 0 with cutover evidence (ADR 0011 statement 4).
