@@ -320,7 +320,10 @@ def create_dispatch(
         event.available_at = requested_available_at
         db.flush()
     row = db.get(CommunicationDispatch, dispatch_id)
-    assert row is not None
+    if row is None:
+        raise DispatchIntegrityError(
+            f"dispatch {dispatch_id} was inserted but is not readable"
+        )
     return DispatchResult(
         dispatch_id=dispatch_id,
         status=row.status,
@@ -370,7 +373,10 @@ def import_history_key(
     if not _insert_ignoring_conflict(db, values):
         return _existing(db, tenant_id, idempotency_key, None, "return_existing")
     row = db.get(CommunicationDispatch, dispatch_id)
-    assert row is not None
+    if row is None:
+        raise DispatchIntegrityError(
+            f"dispatch {dispatch_id} was inserted but is not readable"
+        )
     return DispatchResult(
         dispatch_id=dispatch_id,
         status=row.status,
