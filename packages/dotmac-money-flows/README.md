@@ -39,6 +39,17 @@ issues anything, and `attention_required` rows are not touched. A repeat is a
 no-op. The assembly routes `money_flows.funded_charge.terms_recheck.v1` back to
 the same function when the batch cap leaves rows over.
 
+**Start and re-check (N1).** `start_funded_charge` reads the account's contract
+type only after it holds the account lock, so a switch to postpaid that commits
+while a start waits is seen: the start is refused (`not_prepaid`) and leaves no
+pending row. That closes the race, but not a *late start*: a charge due before
+the switch's `at` that is first started after the re-check ran is still prepaid
+at its `due_at`, so the start holds it `pending` and the service off, and the
+re-check that already ran cannot see it. The caller (Sub-thin) must therefore
+re-run `reevaluate_account_terms` for the account whenever a start returns
+`pending` (after the start's transaction commits, with the `at` of the latest
+terms change). The second run withdraws the row and resumes the service.
+
 Changing the tenant default contract type is a runbook event, not code in this
 package: the caller re-checks each prepaid account that falls back to the default
 (no own terms), one account per transaction, with `reevaluate_account_terms`.

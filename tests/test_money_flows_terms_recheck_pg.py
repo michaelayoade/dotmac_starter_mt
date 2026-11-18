@@ -26,6 +26,7 @@ from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_money_flows import (
     AccountTermsChangedV1,
     FundedChargeCursorV1,
+    FundedChargeRefused,
     FundedChargeState,
     FundedChargeStepFailed,
     SettledFundsV1,
@@ -512,3 +513,86 @@ def test_i_a_caller_rollback_leaves_no_change_and_no_event(scratch):
     assert len(_access(scratch, scope)) == access
     with session(scratch, scope) as db:
         assert _count(db, OutboxEvent, OutboxEvent.event_type == RECHECK) == 0
+
+
+# --------------------------------------------------------------------------
+# (j) N1: a start waiting behind a committed switch + re-check must not strand
+# --------------------------------------------------------------------------
+def test_j_a_start_blocked_behind_a_switch_and_recheck_leaves_no_pending_row(scratch):
+    scope, (account,) = _world(scratch)
+    source = FakeChargeSource()
+    ports = make_funded_ports(source)
+    # Due at the switch instant: once the switch commits, the charge is postpaid.
+    key = source.add(scope, account, "renewal-1", due_at=SWITCH)
+    outcome: list = []
+    errors: list[BaseException] = []
+
+    def start() -> None:
+        try:
+            outcome.append(assembly_start(scratch, scope, key, ports))
+        except BaseException as exc:
+            errors.append(exc)
+
+    database = scratch[0].rsplit("/", 1)[1]
+    thread = Thread(target=start)
+    with session(scratch, scope) as holder:
+        holder.execute(
+            text(
+                "SELECT id FROM mod_billing.billing_accounts WHERE id = :i FOR UPDATE"
+            ),
+            {"i": account},
+        )
+        thread.start()
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            waiting, ungranted = _blocked_on_locks(database)
+            if waiting >= 1 and ungranted >= 1:
+                break
+            time.sleep(0.2)
+        waiting, ungranted = _blocked_on_locks(database)
+        assert waiting >= 1 and ungranted >= 1  # the start is queued on the lock
+        # While it waits: the switch commits and the re-check runs (no row yet).
+        seed_customer_terms(
+            holder, scope, account, contract_type="postpaid", effective_from=SWITCH
+        )
+        assert (
+            reevaluate_account_terms(
+                holder, scope=scope, request=_request(account), ports=ports
+            )
+            == ()
+        )
+        holder.commit()
+    thread.join(timeout=120)
+
+    assert outcome == []
+    assert len(errors) == 1 and isinstance(errors[0], FundedChargeRefused)
+    assert errors[0].code == "not_prepaid"
+    assert _rows(scratch, scope) == []  # no stranded pending row
+    assert all(event["active"] for event in _access(scratch, scope))  # service on
+
+
+def test_k_a_late_start_after_the_recheck_is_held_until_the_recheck_runs_again(
+    scratch,
+):
+    """Case 2: due before the switch, started after the re-check ran.
+
+    The terms at ``due_at`` really were prepaid, so the start holds the charge
+    pending and turns the service off; the re-check that already ran cannot see
+    it. That is why the caller re-runs the re-check whenever a start returns
+    pending (README, N1): the second run withdraws the row and resumes service.
+    """
+    scope, (account,) = _world(scratch)
+    source = FakeChargeSource()
+    ports = make_funded_ports(source)
+    key = source.add(scope, account, "renewal-1", due_at=BASE)
+    _postpaid(scratch, scope, account, SWITCH)
+    assert assembly_recheck(scratch, scope, _request(account), ports) == ()
+
+    started = assembly_start(scratch, scope, key, ports)
+    assert started.state is FundedChargeState.PENDING
+    assert [event["active"] for event in _access(scratch, scope)] == [False]
+
+    (outcome,) = assembly_recheck(scratch, scope, _request(account), ports)
+    assert outcome.state is FundedChargeState.WITHDRAWN
+    assert outcome.reason_code == "contract_type_changed"
+    assert [event["active"] for event in _access(scratch, scope)] == [False, True]
