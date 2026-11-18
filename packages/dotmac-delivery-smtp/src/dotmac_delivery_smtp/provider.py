@@ -1,0 +1,352 @@
+"""`SmtpDeliveryProvider`: the kernel `DeliveryProvider` for channel `email`.
+
+Standard library only (`smtplib`, `ssl`, `email`). Extracted product-first from
+Academy's SMTP send (`dotmac_academy_app:app/services/email.py`).
+
+Outcome contract with `dotmac_kernel.delivery_providers.send`:
+
+* A definite verdict is RETURNED as a `ProviderResult` (see `classify`).
+* A failure BEFORE the DATA payload was committed (connect, STARTTLS, EHLO,
+  MAIL, RCPT, DATA command, a TLS verification failure) is `failed`: nothing
+  was accepted, so a retry cannot double-send.
+* Once the DATA payload has been sent, a lost reply (timeout, disconnect) is an
+  UNKNOWN outcome. SMTP does not honour the dispatch idempotency key, so the
+  kernel's rule applies: the adapter RAISES `SmtpOutcomeUnknown` rather than
+  return `failed`.
+* Operator-side faults (unusable configuration, plaintext in production,
+  missing password, authentication rejected, attachment resolver failure) RAISE;
+  they are not verdicts on the recipient and must not become receipts.
+* Never logs or raises with the password, the message body or the recipient.
+"""
+
+from __future__ import annotations
+
+import logging
+import smtplib
+import socket
+import ssl
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from email.message import EmailMessage
+from email.policy import SMTP as SMTP_POLICY
+from email.utils import parseaddr
+from typing import Any
+
+from dotmac_kernel.delivery_models import (
+    DELIVERY_ACCEPTED,
+    DELIVERY_FAILED,
+    DELIVERY_REJECTED,
+)
+from dotmac_kernel.delivery_providers import (
+    ALLOWED_HEADERS,
+    FEATURE_ATTACHMENTS,
+    FEATURE_HTML,
+    AttachmentRef,
+    OutboundMessage,
+    ProviderResult,
+)
+from dotmac_kernel.secret_sources import get_secret
+
+from dotmac_delivery_smtp.classify import (
+    STAGE_DATA,
+    STAGE_MAIL,
+    STAGE_RCPT,
+    STAGE_SESSION,
+    classify_reply,
+)
+from dotmac_delivery_smtp.config import SmtpConfig, SmtpConfigError
+
+logger = logging.getLogger(__name__)
+
+PROVIDER_NAME = "smtp"
+DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+RESPONSE_BODY_LIMIT = 200
+
+CODE_ADMISSION_REFUSED = "admission_refused"
+CODE_CONNECTION_ERROR = "connection_error"
+CODE_STARTTLS_UNAVAILABLE = "starttls_unavailable"
+CODE_TLS_VERIFICATION_FAILED = "tls_verification_failed"
+CODE_TLS_ERROR = "tls_error"
+CODE_NON_ASCII_ADDRESS = "non_ascii_address"
+
+#: Resolves an attachment reference to bytes. The PRODUCT supplies it (tenant
+#: scoped, immutable refs, kernel K-8 contract); this package invents no storage.
+AttachmentResolver = Callable[[AttachmentRef], bytes]
+
+#: Called before any network connection. Return None/True to admit, False or a
+#: short reason string to refuse. It may instead return a context manager (a
+#: lease): it is entered before connecting, its entered value is the decision
+#: above, and it is exited after the send. An exception it raises propagates
+#: (fail closed, nothing is connected).
+AdmissionHook = Callable[[OutboundMessage], Any]
+
+
+class SmtpAdapterError(RuntimeError):
+    """Base for adapter faults that are raised rather than returned."""
+
+
+class SmtpOutcomeUnknown(SmtpAdapterError):
+    """The message may or may not have been accepted (reply lost after DATA)."""
+
+
+class SmtpAuthenticationError(SmtpAdapterError):
+    """The server rejected the credentials. An operator fault, not a verdict."""
+
+
+class SmtpAttachmentError(SmtpAdapterError):
+    """An attachment could not be resolved or is unacceptable. Terminal."""
+
+
+def _result(status: str, code: str, body: str = "") -> ProviderResult:
+    return ProviderResult(
+        status=status,
+        response_code=code,
+        response_body=body[:RESPONSE_BODY_LIMIT] or None,
+    )
+
+
+def _failed(code: str, body: str = "") -> ProviderResult:
+    return _result(DELIVERY_FAILED, code, body)
+
+
+def _reply_text(raw: bytes | str) -> str:
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    return " ".join(text.split())[:RESPONSE_BODY_LIMIT]
+
+
+class SmtpDeliveryProvider:
+    """Sends one `OutboundMessage` over SMTP with required STARTTLS."""
+
+    name = PROVIDER_NAME
+    message_features = frozenset({FEATURE_HTML, FEATURE_ATTACHMENTS})
+    message_headers = frozenset(ALLOWED_HEADERS)
+
+    def __init__(
+        self,
+        *,
+        config: Callable[[], SmtpConfig],
+        password_secret_name: str = "smtp_password",  # noqa: S107 - a NAME, not a value
+        attachment_resolver: AttachmentResolver | None = None,
+        admission: AdmissionHook | None = None,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        ssl_context: ssl.SSLContext | None = None,
+        max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES,
+    ) -> None:
+        self._config = config
+        self._password_secret_name = password_secret_name
+        self._resolver = attachment_resolver
+        self._admission = admission
+        self._timeout = timeout
+        self._max_attachment_bytes = max_attachment_bytes
+        if ssl_context is not None and (
+            ssl_context.verify_mode != ssl.CERT_REQUIRED
+            or not ssl_context.check_hostname
+        ):
+            raise SmtpConfigError("ssl_context must verify certificates and hostnames")
+        self._ssl_context = ssl_context
+
+    def send(self, message: OutboundMessage) -> ProviderResult:
+        cfg = self._config()
+        cfg.validate()
+        password = self._password(cfg)
+        if message.channel.strip().lower() != "email":
+            raise SmtpConfigError("SMTP delivers the email channel only")
+        if not message.address.isascii():
+            return _result(DELIVERY_REJECTED, CODE_NON_ASCII_ADDRESS)
+        lease = self._admission(message) if self._admission is not None else None
+        if isinstance(lease, AbstractContextManager):
+            with lease as decision:
+                return self._admitted_send(message, cfg, password, decision)
+        return self._admitted_send(message, cfg, password, lease)
+
+    def _admitted_send(
+        self,
+        message: OutboundMessage,
+        cfg: SmtpConfig,
+        password: str | None,
+        decision: object,
+    ) -> ProviderResult:
+        if decision is not None and decision is not True:
+            # Not attempted. Closest existing outcome is `failed` (retryable, no
+            # network call). S8 follow-up: kernel DeliveryDeferred (K-4) replaces
+            # this so a deferral leaves no receipt.
+            return _failed(
+                CODE_ADMISSION_REFUSED, decision if isinstance(decision, str) else ""
+            )
+        built = self._build(message, cfg)
+        return self._transmit(cfg, password, message.address, built)
+
+    def _password(self, cfg: SmtpConfig) -> str | None:
+        if not cfg.username:
+            return None
+        value = get_secret(self._password_secret_name)
+        if not value:
+            raise SmtpConfigError(
+                f"SMTP password secret {self._password_secret_name!r} is not held"
+            )
+        return value
+
+    def _build(self, message: OutboundMessage, cfg: SmtpConfig) -> bytes:
+        msg = EmailMessage(policy=SMTP_POLICY)
+        msg["From"] = cfg.from_address
+        msg["To"] = message.address
+        msg["Subject"] = message.subject or ""
+        msg["Message-ID"] = f"<{message.dispatch_id}@{cfg.from_domain}>"
+        allowed = {name.lower(): name for name in self.message_headers}
+        for name, value in (message.headers or {}).items():
+            # The kernel validated these at construction; the adapter enforces
+            # its own declared set again rather than trust the caller.
+            if name.lower() not in allowed:
+                raise SmtpConfigError(f"header {name[:40]!r} is not supported")
+            msg[allowed[name.lower()]] = value
+        text, html = message.text, message.html
+        if text is not None and html is not None:
+            msg.set_content(text)
+            msg.add_alternative(html, subtype="html")
+        elif html is not None:
+            msg.set_content(html, subtype="html")
+        else:
+            msg.set_content(text or "")
+        for ref in message.attachments:
+            data = self._resolve(ref)
+            maintype, _, subtype = ref.content_type.partition("/")
+            msg.add_attachment(
+                data, maintype=maintype, subtype=subtype, filename=ref.filename
+            )
+        return msg.as_bytes()
+
+    def _resolve(self, ref: AttachmentRef) -> bytes:
+        if self._resolver is None:
+            raise SmtpAttachmentError("no attachment resolver is configured")
+        try:
+            data = self._resolver(ref)
+        except Exception as exc:
+            raise SmtpAttachmentError(
+                f"attachment resolver failed: {type(exc).__name__}"
+            ) from None
+        if not isinstance(data, bytes | bytearray) or not data:
+            raise SmtpAttachmentError("attachment resolver returned no bytes")
+        if len(data) > self._max_attachment_bytes:
+            raise SmtpAttachmentError("attachment exceeds the size limit")
+        return bytes(data)
+
+    def _transmit(
+        self, cfg: SmtpConfig, password: str | None, rcpt: str, payload: bytes
+    ) -> ProviderResult:
+        smtp: smtplib.SMTP | None = None
+        try:
+            # Host goes to the constructor so smtplib sets the TLS server_hostname
+            # (certificate hostname verification) from it.
+            smtp = smtplib.SMTP(cfg.host, cfg.port, timeout=self._timeout)
+            return self._session(smtp, cfg, password, rcpt, payload)
+        except smtplib.SMTPConnectError as exc:
+            return self._reply_failure(STAGE_SESSION, exc.smtp_code, exc.smtp_error)
+        except (OSError, smtplib.SMTPException) as exc:
+            return self._connection_failure(exc)
+        finally:
+            if smtp is not None:
+                try:
+                    smtp.close()
+                except Exception:  # pragma: no cover  # noqa: S110 - best effort
+                    pass
+
+    def _session(
+        self,
+        smtp: smtplib.SMTP,
+        cfg: SmtpConfig,
+        password: str | None,
+        rcpt: str,
+        payload: bytes,
+    ) -> ProviderResult:
+        try:
+            code, text = smtp.ehlo()
+            if code != 250:
+                return self._reply_failure(STAGE_SESSION, code, text)
+            if cfg.starttls:
+                if not smtp.has_extn("starttls"):
+                    return _failed(CODE_STARTTLS_UNAVAILABLE)
+                context = self._ssl_context or ssl.create_default_context()
+                code, text = smtp.starttls(context=context)
+                if code != 220:
+                    return self._reply_failure(STAGE_SESSION, code, text)
+                code, text = smtp.ehlo()
+                if code != 250:
+                    return self._reply_failure(STAGE_SESSION, code, text)
+            if cfg.username:
+                try:
+                    smtp.login(cfg.username, password or "")
+                except smtplib.SMTPAuthenticationError as exc:
+                    raise SmtpAuthenticationError(
+                        f"SMTP server rejected the credentials ({exc.smtp_code})"
+                    ) from None
+            code, text = smtp.mail(parseaddr(cfg.from_address)[1])
+            if code != 250:
+                return self._reply_failure(STAGE_MAIL, code, text)
+            code, text = smtp.rcpt(rcpt)
+            if code not in (250, 251):
+                return self._reply_failure(STAGE_RCPT, code, text)
+        except ssl.SSLCertVerificationError:
+            return _failed(CODE_TLS_VERIFICATION_FAILED)
+        except ssl.SSLError:
+            return _failed(CODE_TLS_ERROR)
+        except (OSError, smtplib.SMTPException) as exc:
+            return self._connection_failure(exc)
+        # The payload is about to leave: from here a lost reply is UNKNOWN.
+        try:
+            code, text = smtp.data(payload)
+        except smtplib.SMTPDataError as exc:
+            return self._reply_failure(STAGE_DATA, exc.smtp_code, exc.smtp_error)
+        except (OSError, smtplib.SMTPException) as exc:
+            raise SmtpOutcomeUnknown(
+                f"reply lost after DATA ({type(exc).__name__}); the message may "
+                "have been accepted"
+            ) from None
+        if code != 250:
+            return self._reply_failure(STAGE_DATA, code, text)
+        try:
+            smtp.quit()
+        except Exception:  # pragma: no cover  # noqa: S110 - already accepted
+            pass
+        return ProviderResult(
+            status=DELIVERY_ACCEPTED,
+            response_code=str(code),
+            response_body=_reply_text(text) or None,
+        )
+
+    @staticmethod
+    def _reply_failure(stage: str, code: int, text: bytes | str) -> ProviderResult:
+        decoded = _reply_text(text)
+        return ProviderResult(
+            status=classify_reply(stage, code, decoded),
+            response_code=str(code),
+            response_body=decoded or None,
+        )
+
+    @staticmethod
+    def _connection_failure(exc: BaseException) -> ProviderResult:
+        # smtplib re-raises a socket timeout as SMTPServerDisconnected, so the
+        # original is read from the exception context.
+        timed_out = isinstance(exc, socket.timeout | TimeoutError) or isinstance(
+            exc.__context__, socket.timeout | TimeoutError
+        )
+        reason = "timeout" if timed_out else type(exc).__name__
+        return _failed(CODE_CONNECTION_ERROR, reason)
+
+
+__all__ = [
+    "CODE_ADMISSION_REFUSED",
+    "CODE_CONNECTION_ERROR",
+    "CODE_NON_ASCII_ADDRESS",
+    "CODE_STARTTLS_UNAVAILABLE",
+    "CODE_TLS_ERROR",
+    "CODE_TLS_VERIFICATION_FAILED",
+    "PROVIDER_NAME",
+    "AdmissionHook",
+    "AttachmentResolver",
+    "SmtpAdapterError",
+    "SmtpAttachmentError",
+    "SmtpAuthenticationError",
+    "SmtpDeliveryProvider",
+    "SmtpOutcomeUnknown",
+]

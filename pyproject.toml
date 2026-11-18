@@ -147,6 +147,9 @@ dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = tru
 # Stateless caller-transaction fence for human-triggered delivery resends.
 # Extracted from Academy; owns no tables, adopters inject their own.
 dotmac-delivery-resend = { path = "packages/dotmac-delivery-resend", develop = true }
+# SMTP transport for the kernel delivery-provider seam. Stdlib only; built and
+# proven here, never published, no assembly composes it.
+dotmac-delivery-smtp = { path = "packages/dotmac-delivery-smtp", develop = true }
 dotmac-billing = { path = "packages/dotmac-billing", develop = true }
 dotmac-collections = { path = "packages/dotmac-collections", develop = true }
 # Tenant-plane money-flow composition (instance state only). Built and proven
@@ -359,6 +362,7 @@ module = [
     "dotmac_billing.*",
     "dotmac_collections.*",
     "dotmac_money_flows.*",
+    "dotmac_delivery_smtp.*",
     "dotmac_subscriptions.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -548,6 +552,7 @@ root_packages = [
     "dotmac_learning",
     "dotmac_learning_bank_rules",
     "dotmac_money_flows",
+    "dotmac_delivery_smtp",
 ]
 
 [[tool.importlinter.contracts]]
@@ -724,6 +729,7 @@ source_modules = [
     "dotmac_fulfillment",
     "dotmac_learning",
     "dotmac_money_flows",
+    "dotmac_delivery_smtp",
 ]
 forbidden_modules = ["app"]
 
@@ -1083,6 +1089,7 @@ forbidden_modules = [
     "dotmac_learning",
     "dotmac_learning_bank_rules",
     "dotmac_money_flows",
+    "dotmac_delivery_smtp",
 ]
 
 [[tool.importlinter.contracts]]

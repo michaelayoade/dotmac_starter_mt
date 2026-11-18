@@ -74,6 +74,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-content`](../packages/dotmac-content/README.md) | optional module | [`audit-complete`](../packages/dotmac-content/EXTRACTION.toml) | [tenant · `mod_content`](../packages/dotmac-content/src/dotmac_content/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
 | [`dotmac-customers`](../packages/dotmac-customers/README.md) | optional module | [`audit-complete`](../packages/dotmac-customers/EXTRACTION.toml) | [tenant · `mod_customers`](../packages/dotmac-customers/src/dotmac_customers/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a91` | — | `dotmac_sub` |
 | [`dotmac-delivery-resend`](../packages/dotmac-delivery-resend/README.md) | optional module | [`audit-complete`](../packages/dotmac-delivery-resend/EXTRACTION.toml) | [stateless](../packages/dotmac-delivery-resend/src/dotmac_delivery_resend/manifest.py) | — | — | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a105` | — | `dotmac_academy_v2` |
+| [`dotmac-delivery-smtp`](../packages/dotmac-delivery-smtp/README.md) | optional module | [`audit-complete`](../packages/dotmac-delivery-smtp/EXTRACTION.toml) | [stateless](../packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/manifest.py) | — | — | not allowlisted | `0.1.0a1` | `>=0.1.0a109` | — | `dotmac_academy_app` |
 | [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`adopted`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a77` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-deployment-foundation`](../packages/dotmac-deployment-foundation/README.md) | universal facility | [`adopted`](../packages/dotmac-deployment-foundation/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.4.0a1` | — | `dotmac_erp` | `dotmac_integrator`, `dotmac_starter_mt`, `dotmac_sub` |
 | [`dotmac-device-cli`](../packages/dotmac-device-cli/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-device-cli/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | — | `dotmac_sub` |
@@ -393,6 +394,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-delivery-resend/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_academy_v2`.
+
+### [`dotmac-delivery-smtp`](../packages/dotmac-delivery-smtp/README.md)
+
+- **Owner:** SMTP transport for the kernel delivery-provider seam on channel email: connection settings as typed UI-entered specs, required STARTTLS with certificate verification, MIME construction from OutboundMessage parts, Message-ID derivation from the dispatch id, an injected pre-connect admission hook and the classification of SMTP replies into kernel receipt outcomes
+- **Contract:** Given a product-supplied configuration loader, a password held in the kernel SecretSource, an optional attachment resolver (AttachmentRef to bytes) and an optional admission hook, send one OutboundMessage and return a kernel ProviderResult: RCPT 5.1.x bounced, 5.7.x and other permanent replies rejected, soft RCPT states, 4xx, timeouts and connection errors failed (retryable). Plaintext is refused in production, an offered-but-absent STARTTLS refuses the send, credentials never cross plaintext, only declared headers are written, and a reply lost after DATA raises rather than returning failed. The package owns no tables, no queue, no retry, no consent, no rendering, no attachment storage and no secret path.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-delivery-smtp/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_academy_app`.
 
 ### [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md)
 
