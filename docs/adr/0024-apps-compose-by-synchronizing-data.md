@@ -940,7 +940,8 @@ idempotency therefore remain single-owner, which is what § 6 protected.
 - First-party channels (platform to application, application to application,
   for example Billing to ERP under § 14.6) are not provider connectors. When a
   companion carries one, it obeys every rule above. ERP v2's companion pulls
-  Billing's published facts through Billing's public ordered fact query.
+  Billing's published facts through the resource API exposed by the Sub
+  deployment (D13), where Billing is installed (§ 14.6).
 
 **15.5 WIDENING and gaps (explicit).**
 
@@ -957,6 +958,16 @@ idempotency therefore remain single-owner, which is what § 6 protected.
   the shape is reserved: the companion is the deployment's only egress and would
   pull platform traffic outbound-only.
 
+- **Offline principle (D8, recorded now, implemented later).** A deployment that
+  cannot reach the platform fails static: it keeps its applied licence until
+  expiry plus grace, then switches off licensed capabilities only. It never
+  gates the subscriber data plane (RADIUS authentication, payment receipt,
+  outage handling), and a revocation list has no maximum age by default. The
+  grace length is decided later.
+- **Operator identity (D12).** Each companion keeps the kernel `platform_auth`
+  with a CLI bootstrap per companion: a single operator and no second-person
+  step. Federation to the IdP is later work.
+
 **15.6 Verification.** A connector's cutover is verified by rails, never by a
 shadow, side-by-side or N-day gate: a backtest over recorded data, saved golden
 tests, a one-shot real-record preview, and a guarded enable of one binding with a
@@ -966,5 +977,8 @@ before a binding becomes writable.
 **15.7 S11 clarification.** `dotmac-delivery-smtp` stays in-product. The recorded
 transfer of the `outbound_transport` baseline from 0 to 1 retires to
 `dotmac-connector-smtp`, read as hosted in Academy's companion Integrator, and
-the baseline then returns to 0 with cutover evidence. Governance ADR 0011 (its
+the baseline then returns to 0 with cutover evidence. Academy item A4 must lower
+Academy's own `outbound_transport` count when that connector is activated, with
+deletion or cutover evidence. The Starter S1 condition is not met until the
+Starter baseline is back at 0. Governance ADR 0011 (its
 2026-11-18 amendment) records the same.
