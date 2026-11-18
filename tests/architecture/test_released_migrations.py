@@ -8801,7 +8801,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
     # `0031_rate_limit_buckets` (the shared anonymous-route rate-limit counters)
-    # remains editable until a verified published tag carries it and its digest
+    # and `0032_communication_dispatches` (dispatch identity, K-3) remain editable until a verified published tag carries it and its digest
     # is recorded above.
     "dotmac-kernel": frozenset(),
     "dotmac-accounting": frozenset(),
