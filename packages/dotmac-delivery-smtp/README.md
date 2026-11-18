@@ -7,7 +7,7 @@ SMTP adapter for the kernel delivery-provider seam
   features (`html`, `attachments`) and header names it honours.
 - **Settings** (`delivery_smtp` domain): host, port, starttls, username, from
   address, entered in the settings UI through the kernel settings mechanism.
-  `settings.resolve_config(db, tenant_id, production=...)` builds the
+  `resolve_config(db, tenant_id, production=...)` builds the
   `SmtpConfig`. No env file, no `env_var`.
 - **Password** is not a setting. It is read by NAME from the kernel
   `SecretSource` (`dotmac_kernel.secret_sources`); the product binds its current

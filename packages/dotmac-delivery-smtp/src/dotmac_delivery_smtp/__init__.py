@@ -11,6 +11,7 @@ from dotmac_delivery_smtp.provider import (
     SmtpDeliveryProvider,
     SmtpOutcomeUnknown,
 )
+from dotmac_delivery_smtp.reader import resolve_config
 
 __all__ = [
     "AdmissionHook",
@@ -23,5 +24,6 @@ __all__ = [
     "SmtpDeliveryProvider",
     "SmtpOutcomeUnknown",
     "classify_reply",
+    "resolve_config",
     "enhanced_status",
 ]

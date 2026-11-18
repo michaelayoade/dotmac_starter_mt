@@ -5,14 +5,20 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "SMTP transport for the kernel delivery-provider seam on channel email: connection settings as typed UI-entered specs, required STARTTLS with certificate verification, MIME construction from OutboundMessage parts, Message-ID derivation from the dispatch id, an injected pre-connect admission hook and the classification of SMTP replies into kernel receipt outcomes"
 contract = "Given a product-supplied configuration loader, a password held in the kernel SecretSource, an optional attachment resolver (AttachmentRef to bytes) and an optional admission hook, send one OutboundMessage and return a kernel ProviderResult: RCPT 5.1.x bounced, 5.7.x and other permanent replies rejected, soft RCPT states, 4xx, timeouts and connection errors failed (retryable). Plaintext is refused in production, an offered-but-absent STARTTLS refuses the send, credentials never cross plaintext, only declared headers are written, and a reply lost after DATA raises rather than returning failed. The package owns no tables, no queue, no retry, no consent, no rendering, no attachment storage and no secret path."
-source_repositories = ["dotmac_academy_app"]
-source_revisions = ["dotmac_academy_app:fc8d15b686f6a60905c88ee6fc709fee0b7cf6b9"]
+source_repositories = ["dotmac_academy_app", "dotmac_erp", "dotmac_sub"]
+source_revisions = [
+  "dotmac_academy_app:fc8d15b686f6a60905c88ee6fc709fee0b7cf6b9",
+  "dotmac_erp:74fa788ae562905e4c8a1fcd46616585e4bf7694",
+  "dotmac_sub:c7707880232c9298ef89c24a1aea66d35bd3a1e6",
+]
 source_paths = [
   "dotmac_academy_app:app/services/email.py",
   "dotmac_academy_app:app/config.py",
   "dotmac_academy_app:app/services/settings_store.py",
 ]
-preserved_tests = []
+preserved_tests = [
+  "dotmac_academy_app:tests/services/test_email.py",
+]
 contract_consumers = []
 candidate_consumers = ["dotmac_academy_app"]
 composition_boundary = "The adopter constructs SmtpDeliveryProvider with its own config loader, binds its current password custody to the kernel SecretSource, supplies its attachment resolver and its admission hook (for example its mail-gate lease), and calls dotmac_kernel.delivery_providers.send. Starter names no Academy path. Consent, retries and the outbox stay in the kernel."
@@ -29,4 +35,18 @@ product = "dotmac_academy_app"
 writer_state = "legacy_writer"
 retirement_required = true
 revision = "fc8d15b686f6a60905c88ee6fc709fee0b7cf6b9"
+evidence_paths = ["app/services/email.py"]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "74fa788ae562905e4c8a1fcd46616585e4bf7694"
+evidence_paths = ["app/services/email.py"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "c7707880232c9298ef89c24a1aea66d35bd3a1e6"
 evidence_paths = ["app/services/email.py"]

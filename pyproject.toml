@@ -988,6 +988,7 @@ source_modules = [
     "dotmac_fulfillment",
     "dotmac_learning",
     "dotmac_learning_bank_rules",
+    "dotmac_delivery_smtp",
 ]
 forbidden_modules = ["dotmac_money_flows"]
 

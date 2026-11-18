@@ -10,14 +10,12 @@ custody it has today to that seam; this package adds no secret path.
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from dotmac_kernel.setting_value_types import SettingValueType
 from dotmac_kernel.settings_models import SettingDomain
-from dotmac_kernel.settings_resolver import SettingSpec, register_specs, resolve
-from sqlalchemy.orm import Session
+from dotmac_kernel.settings_resolver import SettingSpec, register_specs
 
-from dotmac_delivery_smtp.config import SmtpConfig, valid_from_address
+from dotmac_delivery_smtp.config import valid_from_address
 
 DELIVERY_SMTP_DOMAIN = SettingDomain("delivery_smtp")
 
@@ -85,24 +83,6 @@ ALL_SPECS: list[SettingSpec[Any]] = [HOST, PORT, STARTTLS, USERNAME, FROM_ADDRES
 register_specs(ALL_SPECS)
 
 
-def resolve_config(
-    db: Session, tenant_id: UUID | None, *, production: bool
-) -> SmtpConfig:
-    """Resolve the five settings into a validated `SmtpConfig`.
-
-    `production` is the product's own environment fact, passed in: this package
-    reads no environment.
-    """
-    return SmtpConfig(
-        host=resolve(db, HOST, tenant_id=tenant_id),
-        port=resolve(db, PORT, tenant_id=tenant_id),
-        starttls=resolve(db, STARTTLS, tenant_id=tenant_id),
-        username=resolve(db, USERNAME, tenant_id=tenant_id),
-        from_address=resolve(db, FROM_ADDRESS, tenant_id=tenant_id),
-        production=production,
-    )
-
-
 __all__ = [
     "ALL_SPECS",
     "DELIVERY_SMTP_DOMAIN",
@@ -111,5 +91,4 @@ __all__ = [
     "PORT",
     "STARTTLS",
     "USERNAME",
-    "resolve_config",
 ]

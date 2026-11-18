@@ -28,3 +28,15 @@ Starter; this package is the first.
 Bounce coverage is synchronous only (reply at RCPT/DATA). Asynchronous DSNs
 are not captured. The not-attempted admission outcome is `failed` until kernel
 `DeliveryDeferred` (K-4, S8) exists.
+
+## ERP and Sub: inventoried, no shared writer
+
+`dotmac_erp@74fa788` and `dotmac_sub@c770788` each hold their own smtplib
+sender in `app/services/email.py` (pooled connections, per-sender settings).
+They were read for shape only; neither is a qualifying source, neither is
+asked to adopt, and nothing is retired there.
+
+## Preserved tests
+
+`dotmac_academy_app:tests/services/test_email.py` is the behaviour reference
+for the Academy send path; the package's own tests use a local SMTP server.
