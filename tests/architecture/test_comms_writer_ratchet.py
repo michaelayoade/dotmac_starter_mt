@@ -35,7 +35,13 @@ FIXTURE = ARCH / "fixtures" / "comms_writer_academy"
 # Findings that exist in an allowed-owner tree and are suppressed ONLY by its
 # `allowed` entry. Pinning them means an owner cannot quietly grow a second
 # writer: a new finding there changes this set and the change is reviewed.
-EXPECTED_EXEMPT_FINDINGS: frozenset[str] = frozenset()
+EXPECTED_EXEMPT_FINDINGS: frozenset[str] = frozenset(
+    {
+        "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py::direct_smtp::import:smtplib#1",
+        "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py::direct_smtp::call:SMTP#1",
+        "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py::direct_smtp::call:starttls#1",
+    }
+)
 
 
 def _scan(sources: dict[str, str]) -> list[str]:
@@ -130,7 +136,7 @@ def test_starter_scan_actually_covers_entry_point_families(
         assert starter.families.get(family, 0) > 0, family
 
 
-def test_starter_exempt_owners_carry_exactly_the_expected_findings(
+def test_starter_exempt_adapters_carry_exactly_the_pinned_findings(
     starter_unallowed: ratchet.Result,
 ) -> None:
     """Scan with the allowed-owner entries removed: what they hide is pinned."""
