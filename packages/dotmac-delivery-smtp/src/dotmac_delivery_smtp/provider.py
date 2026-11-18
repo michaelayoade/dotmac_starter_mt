@@ -29,6 +29,7 @@ Outcome contract with `dotmac_kernel.delivery_providers.send`:
 from __future__ import annotations
 
 import logging
+import math
 import smtplib
 import socket
 import ssl
@@ -67,10 +68,14 @@ logger = logging.getLogger(__name__)
 
 PROVIDER_NAME = "smtp"
 DEFAULT_TIMEOUT_SECONDS = 15.0
-#: Final DATA reply. RFC 5321 allows 10 minutes, but the kernel relay's
+#: Final DATA reply, a PER-OPERATION budget, NOT a wall-clock limit on the whole
+#: attempt. RFC 5321 allows 10 minutes, but the kernel relay's
 #: `stale_lease_seconds` is 300: a second worker may reclaim the lease and
-#: double-send if one attempt outlasts it. 7 command steps x 15 s + 180 s < 300.
-DEFAULT_DATA_TIMEOUT_SECONDS = 180.0
+#: double-send if one attempt outlasts it. Sequential operations that each get
+#: `timeout`: greeting, EHLO, TLS handshake, EHLO, AUTH, MAIL, RCPT, DATA go-ahead
+#: and QUIT = 9; 9 x 15 s + 150 s < 300. A HARD limit needs relay lease renewal
+#: or an attempt watchdog (kernel K-8 follow-up), not a bigger timeout here.
+DEFAULT_DATA_TIMEOUT_SECONDS = 150.0
 #: Per attachment and in total across one message (raised only by a reviewed
 #: change; the total keeps a message under common 25-35 MiB relay limits).
 DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -179,6 +184,7 @@ class SmtpDeliveryProvider:
             if (
                 not isinstance(value, int | float)
                 or isinstance(value, bool)
+                or not math.isfinite(value)
                 or value <= 0
             ):
                 raise SmtpConfigError(f"{label} must be a positive number of seconds")
@@ -360,7 +366,13 @@ class SmtpDeliveryProvider:
         try:
             if smtp.sock is not None:
                 smtp.sock.settimeout(self._data_timeout)
-            code, text = smtp.data(payload)
+            try:
+                code, text = smtp.data(payload)
+            finally:
+                # The long budget covers ONLY the final DATA reply; everything
+                # after it (QUIT) runs under the short per-operation timeout.
+                if smtp.sock is not None:
+                    smtp.sock.settimeout(self._timeout)
         except smtplib.SMTPDataError as exc:
             return self._reply_failure(STAGE_DATA, exc.smtp_code, exc.smtp_error)
         except (OSError, smtplib.SMTPException) as exc:

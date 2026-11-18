@@ -58,6 +58,7 @@ class FakeSmtp:
         self.greeting = "220 fake ESMTP"
         self.replies: dict[str, str] = {}
         self.drop_after_data = False
+        self.quit_stall = 0.0
         self.valid_password = "pw-ok"
         self.messages: list[bytes] = []
         self.commands: list[str] = []
@@ -133,6 +134,10 @@ class FakeSmtp:
                         (self.replies.get("data", "250 2.0.0 queued") + "\r\n").encode()
                     )
                 elif verb == "QUIT":
+                    if self.quit_stall:
+                        import time
+
+                        time.sleep(self.quit_stall)
                     f.write(b"221 bye\r\n")
                     return
                 else:
@@ -657,17 +662,38 @@ def test_total_attachment_size_is_capped(server, trusting) -> None:
     assert server.messages == []
 
 
-@pytest.mark.parametrize("bad", [0, -1, True, "5", None])
+@pytest.mark.parametrize(
+    "bad", [0, -1, True, "5", None, float("nan"), float("inf"), float("-inf")]
+)
 @pytest.mark.parametrize("name", ["timeout", "data_timeout"])
 def test_non_positive_timeouts_are_refused(name: str, bad: object) -> None:
     with pytest.raises(SmtpConfigError):
         SmtpDeliveryProvider(config=lambda: None, **{name: bad})  # type: ignore[arg-type,return-value]
 
 
-def test_default_data_timeout_stays_below_the_relay_lease() -> None:
+def test_default_budget_stays_below_the_relay_lease() -> None:
     from dotmac_delivery_smtp.provider import (
         DEFAULT_DATA_TIMEOUT_SECONDS,
         DEFAULT_TIMEOUT_SECONDS,
     )
+    from dotmac_kernel.messaging.relay import RelayPolicy
 
-    assert DEFAULT_DATA_TIMEOUT_SECONDS + 7 * DEFAULT_TIMEOUT_SECONDS < 300
+    steps = 9  # greeting, EHLO, TLS, EHLO, AUTH, MAIL, RCPT, DATA go-ahead, QUIT
+    budget = DEFAULT_DATA_TIMEOUT_SECONDS + steps * DEFAULT_TIMEOUT_SECONDS
+    assert budget < RelayPolicy().stale_lease_seconds
+
+
+def test_quit_stall_after_acceptance_runs_under_the_short_timeout(
+    server, trusting
+) -> None:
+    import time
+
+    server.quit_stall = 6.0
+    p = SmtpDeliveryProvider(
+        config=lambda: cfg(server), ssl_context=trusting, timeout=0.5, data_timeout=30
+    )
+    started = time.monotonic()
+    result = p.send(msg())
+    elapsed = time.monotonic() - started
+    assert result.status == "accepted"
+    assert elapsed < 4.0  # not held for the 30 s DATA budget by a stalled QUIT

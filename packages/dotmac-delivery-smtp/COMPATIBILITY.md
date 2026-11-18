@@ -9,11 +9,16 @@
 - Standard library only (`smtplib`, `ssl`, `email`). No third-party dependency.
 - STARTTLS submission only (no implicit-TLS port 465 mode in 0.1).
 - SMTP settings are read at platform scope only (see `reader.py`).
-- Timeouts: 15 s connect/command, 180 s for the final DATA reply (both must be
-  > 0). **Lease coupling:** the kernel relay's `RelayPolicy.stale_lease_seconds`
-  is 300; a second worker may reclaim the lease and double-send if one attempt
-  outlasts it. `data_timeout` plus the other step timeouts (about 7 x `timeout`)
-  must stay below `stale_lease_seconds`; raise the lease before raising these.
+- Timeouts (both must be finite and > 0): 15 s per operation, 150 s for the
+  final DATA reply, which is reset to 15 s as soon as DATA returns. These are
+  PER-OPERATION budgets, not a wall-clock limit on the attempt. **Lease
+  coupling:** the kernel relay's `RelayPolicy.stale_lease_seconds` is 300; a
+  second worker may reclaim the lease and double-send if one attempt outlasts
+  it. The sequential operations are greeting, EHLO, TLS handshake, EHLO, AUTH,
+  MAIL, RCPT, DATA go-ahead and QUIT (9 x `timeout`) plus `data_timeout`; that sum
+  must stay below `stale_lease_seconds`. A HARD limit needs relay lease renewal
+  or an attempt watchdog (kernel K-8 follow-up); raise the lease before raising
+  these.
 - Attachments: 10 MiB each, 20 MiB total; TLS 1.2 minimum on caller contexts.
 
 ## Governance ADR 0011: recorded transfer (Michael, 2026-11-18)
@@ -22,8 +27,10 @@
 `outbound_transport` arm counts it. Michael explicitly approved loosening
 Governance ADR 0011 for this one surface: Starter's
 `.dotmac/standards-profile.json` `external_connector_surface.baselines.outbound_transport`
-moves 0 -> 1, with no conserved exclusion (an exclusion is not viable because
-the module is counted).
+moves 0 -> 1, and `provider.py` is counted (it cannot be excluded). Michael also approved,
+on 2026-11-18, one fingerprint-pinned conserved exclusion for the TEST
+`tests/unit/test_delivery_smtp.py::test_data_reply_uses_the_long_timeout`;
+changing that test changes its fingerprint and needs fresh approval.
 
 - The single counted module is `src/dotmac_delivery_smtp/provider.py`. A second
   SMTP user anywhere in Starter exceeds the baseline and fails CI.
