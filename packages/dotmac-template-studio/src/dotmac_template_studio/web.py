@@ -35,7 +35,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from dotmac_template_studio import delivery_seam, service
+from dotmac_template_studio import delivery_seam, layout, service
 from dotmac_template_studio.contexts import registered_contexts
 from dotmac_template_studio.preview import IFRAME_SANDBOX, build_srcdoc
 from dotmac_template_studio.schemas import TemplateRead, VersionRead
@@ -115,7 +115,8 @@ def _render_create_form(
             # The product's registered vocabulary, not a constant of this
             # module — the author picks a real send path and sees the exact
             # variables it can supply.
-            "contexts": registered_contexts(),
+            # plus the reserved layout context (channel `email_layout`).
+            "contexts": (*registered_contexts(), layout.layout_context()),
             "error": error,
             "form": form or {},
         },
@@ -211,6 +212,7 @@ def _detail_context(
         "template": template,
         "versions": _version_views(service.list_versions(db, tenant.id, template_id)),
         "variables": _context_variables(template.context),
+        "layouts": _layout_options(db, tenant, template_record),
         "error": error,
         "notice": notice,
         "form": form or {},
@@ -281,6 +283,7 @@ async def version_create_submit(
     body = str(form_data.get("body", "")).strip()
     subject = str(form_data.get("subject", "")).strip() or None
     html_body = str(form_data.get("html_body", "")).strip() or None
+    layout_slug = str(form_data.get("layout_slug", "")).strip() or None
     error = None
     notice = None
     if not body:
@@ -295,6 +298,7 @@ async def version_create_submit(
                 subject=subject,
                 author_party_id=party.id,
                 html_body=html_body,
+                layout_slug=layout_slug,
             )
         except BadRequestError as exc:
             # Save-time validation. Re-render at 200 with the message rather
@@ -319,7 +323,12 @@ async def version_create_submit(
         error=error,
         notice=notice,
         form=(
-            {"subject": subject or "", "body": body, "html_body": html_body or ""}
+            {
+                "subject": subject or "",
+                "body": body,
+                "html_body": html_body or "",
+                "layout_slug": layout_slug or "",
+            }
             if error
             else None
         ),
@@ -347,6 +356,15 @@ def _test_send_allowed(tenant_id: UUID, party_id: UUID) -> bool:
             return False
         recent.append(now)
         return True
+
+
+def _layout_options(db: Session, tenant: Tenant, template_record: object) -> tuple:
+    """Layout slugs a draft of this template may opt in to (email only)."""
+    if getattr(template_record, "channel", None) != layout.LAYOUT_TARGET_CHANNEL:
+        return ()
+    return tuple(
+        (value.slug, value.name) for value in service.list_layouts(db, tenant.id)
+    )
 
 
 def _workspace_response(
@@ -399,7 +417,9 @@ def _workspace_response(
                 "subject": revision.subject or "",
                 "body": revision.body,
                 "html_body": revision.html_body or "",
+                "layout_slug": revision.layout_slug or "",
             },
+            "layouts": _layout_options(db, tenant, template_record),
             "preview_error": preview_error,
             "preview_subject": preview_subject,
             "preview_text": preview_text,
@@ -441,7 +461,13 @@ async def version_update_submit(
     body = str(form_data.get("body", "")).strip()
     subject = str(form_data.get("subject", "")).strip()
     html_body = str(form_data.get("html_body", "")).strip() or None
-    form = {"subject": subject, "body": body, "html_body": html_body or ""}
+    layout_slug = str(form_data.get("layout_slug", "")).strip() or None
+    form = {
+        "subject": subject,
+        "body": body,
+        "html_body": html_body or "",
+        "layout_slug": layout_slug or "",
+    }
     error = None
     notice = None
     if not body:
@@ -458,6 +484,7 @@ async def version_update_submit(
                 body=body,
                 subject=subject,
                 html_body=html_body,
+                layout_slug=layout_slug,
             )
         except (BadRequestError, ConflictError) as exc:
             error = str(exc)

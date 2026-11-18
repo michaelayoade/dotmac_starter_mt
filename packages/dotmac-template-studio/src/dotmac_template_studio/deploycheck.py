@@ -12,6 +12,11 @@ tenant-scoped), and each tenant's revisions are read inside that tenant's own
 `tenant_session`, so row-level security applies exactly as it does at send time.
 No BYPASSRLS role and no platform session is involved.
 
+Layouts (templates on the `email_layout` channel) are checked like any other
+published revision against the layout context built from the brand spec the
+`--import`ed module configured; a revision that opts in to a layout is also
+dry-run through the assembly with the tenant's brand resolver.
+
 The report names the template slug, channel, revision number and the problems.
 Never the template's content. A problem string that quotes a snippet of markup
 is cut before it is reported.
@@ -108,6 +113,13 @@ def check_tenant(db: Any, tenant_id: UUID) -> tuple[int, list[RevisionFailure]]:
                     text=revision.body,
                     html=revision.html_body,
                 )
+            ]
+            # TS-5: a revision that opts in to a layout must still assemble with
+            # the published layout and the current brand resolver; a layout
+            # itself is validated above against the layout context.
+            problems += [
+                _clean(p)
+                for p in service.layout_problems(db, tenant_id, template, revision)
             ]
         if problems:
             failures.append(

@@ -43,6 +43,7 @@ from dotmac_kernel.exceptions import BadRequestError
 
 from dotmac_template_studio.htmlctx import html_placeholder_problems
 from dotmac_template_studio.htmlsanitize import html_sanitizer_problems
+from dotmac_template_studio.layout import LAYOUT_CONTEXT_NAME, slot_problems
 from dotmac_template_studio.rendering import MAX_TEMPLATE_CHARS, subject_problem
 from dotmac_template_studio.sections import (
     DOUBLE_BRACE_SECTION,
@@ -178,6 +179,11 @@ def validate_revision(
         # sanitizer must not spend time on input the size bound rejected.
         if len(html) <= MAX_TEMPLATE_CHARS:
             problems += [f"html: {p}" for p in html_sanitizer_problems(html)]
+    if getattr(context, "name", None) == LAYOUT_CONTEXT_NAME:
+        # A layout holds exactly one top-level {content} slot per body part.
+        problems += slot_problems("text", text or "")
+        if html is not None and len(html) <= MAX_TEMPLATE_CHARS:
+            problems += slot_problems("html", html)
     return problems
 
 

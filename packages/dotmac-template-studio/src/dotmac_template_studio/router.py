@@ -196,6 +196,7 @@ def create_version(
         subject=payload.subject,
         author_party_id=actor.id,
         html_body=payload.html_body,
+        layout_slug=payload.layout_slug,
     )
     write_audit_event(
         db,
@@ -226,6 +227,8 @@ def update_version(
         if "html_body" in payload.model_fields_set
         else {}
     )
+    if "layout_slug" in payload.model_fields_set:
+        html_args["layout_slug"] = payload.layout_slug
     revision = service.update_version(
         db,
         tenant.id,
