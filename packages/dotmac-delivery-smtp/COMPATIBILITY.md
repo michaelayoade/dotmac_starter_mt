@@ -9,6 +9,11 @@
 - Standard library only (`smtplib`, `ssl`, `email`). No third-party dependency.
 - STARTTLS submission only (no implicit-TLS port 465 mode in 0.1).
 - SMTP settings are read at platform scope only (see `reader.py`).
+- Settings specs are NOT registered on import. The composing product calls
+  `dotmac_delivery_smtp.settings.register()` once at composition (idempotent),
+  alongside installing the module so its `delivery_smtp` setting domain is
+  declared. Importing the package alone leaves process-global settings state
+  untouched.
 - Timeouts (both must be finite and > 0): 15 s per operation and 40 s for
   `data_timeout`, which is reset to 15 s as soon as DATA returns. **Lease
   coupling:** the kernel relay's `RelayPolicy.stale_lease_seconds` is 300; a
