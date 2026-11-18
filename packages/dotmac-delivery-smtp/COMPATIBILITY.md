@@ -9,16 +9,17 @@
 - Standard library only (`smtplib`, `ssl`, `email`). No third-party dependency.
 - STARTTLS submission only (no implicit-TLS port 465 mode in 0.1).
 - SMTP settings are read at platform scope only (see `reader.py`).
-- Timeouts (both must be finite and > 0): 15 s per operation and 50 s for
+- Timeouts (both must be finite and > 0): 15 s per operation and 40 s for
   `data_timeout`, which is reset to 15 s as soon as DATA returns. **Lease
   coupling:** the kernel relay's `RelayPolicy.stale_lease_seconds` is 300; a
   second worker may reclaim the lease and double-send if one attempt outlasts
   it. `data_timeout` is in force for THREE waits inside `smtplib` `data()` (the
-  354 go-ahead, the payload send, the final reply) and nine other operations get
-  `timeout` (greeting, EHLO, TLS handshake, EHLO, AUTH, MAIL, RCPT, the DATA
-  command, QUIT). Worst case: 9 x `timeout` + 3 x `data_timeout`, which must stay
-  below `stale_lease_seconds`; the defaults give 9 x 15 + 3 x 50 = 285.
-  These are per-operation budgets, not a wall-clock limit. A caller that passes
+  354 go-ahead, the payload send, the final reply) and up to 11 other waits get
+  `timeout` (TCP connect, greeting, EHLO, STARTTLS reply, TLS handshake, EHLO,
+  AUTH up to 2 replies, MAIL, RCPT, QUIT). Nominal budget: 11 x `timeout` +
+  3 x `data_timeout`, which must stay below `stale_lease_seconds`; the defaults
+  give 11 x 15 + 3 x 40 = 285. These are per-operation budgets, not a
+  wall-clock limit (a server trickling bytes resets each one). A caller that passes
   explicit timeouts must keep inside that budget; it is NOT enforced here. Hard
   enforcement (a construction-time refusal, or K-8 lease renewal / an attempt
   watchdog) is a follow-up. Raise the lease before raising these.

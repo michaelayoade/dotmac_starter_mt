@@ -52,4 +52,4 @@ re-pointed at this package. The behaviour proof is the package's own suites
 | Any exception swallowed to a bool | yes | DELIBERATELY DIFFERENT: classified outcomes; unknown outcome and operator faults raise |
 | Message-ID | caller-supplied optional | `<dispatch_id@from-domain>` always |
 | Password | env-only `smtp_password` | kernel `SecretSource` by name |
-| Timeout | 15 s whole send | 15 s steps, 180 s final DATA reply |
+| Timeout | 15 s whole send | 15 s per operation, 40 s for each of the three DATA waits |

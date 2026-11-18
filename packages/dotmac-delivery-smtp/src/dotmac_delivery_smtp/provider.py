@@ -69,17 +69,18 @@ logger = logging.getLogger(__name__)
 PROVIDER_NAME = "smtp"
 DEFAULT_TIMEOUT_SECONDS = 15.0
 #: `data_timeout` is in force for THREE waits inside smtplib `data()`: the 354
-#: go-ahead, the payload send and the final reply. The 9 other sequential
-#: operations each get `timeout` (greeting, EHLO, TLS handshake, EHLO, AUTH,
-#: MAIL, RCPT, the DATA command, QUIT). The worst case is therefore
-#: 9 x timeout + 3 x data_timeout: a sum of per-operation budgets, NOT a
-#: wall-clock limit. The kernel relay's `stale_lease_seconds` is 300 and a second
-#: worker may reclaim the lease and double-send if one attempt outlasts it.
-#: The DEFAULTS satisfy 9 x 15 + 3 x 50 = 285 < 300. A caller passing explicit
+#: go-ahead (the DATA command's reply), the payload send and the final reply.
+#: Up to 11 other sequential waits each get `timeout` (TCP connect, greeting,
+#: EHLO, STARTTLS reply, TLS handshake, EHLO, AUTH up to 2 replies, MAIL, RCPT,
+#: QUIT). The NOMINAL budget is therefore 11 x timeout + 3 x data_timeout: a sum
+#: of per-operation budgets, NOT a wall-clock limit (a server trickling bytes
+#: resets each one). The kernel relay's `stale_lease_seconds` is 300 and a
+#: second worker may reclaim the lease and double-send if one attempt outlasts
+#: it. The DEFAULTS satisfy 11 x 15 + 3 x 40 = 285 < 300. A caller passing explicit
 #: timeouts must keep inside that budget; nothing here enforces it. Hard
 #: enforcement (a construction-time refusal, or K-8 lease renewal / an attempt
 #: watchdog) is a follow-up.
-DEFAULT_DATA_TIMEOUT_SECONDS = 50.0
+DEFAULT_DATA_TIMEOUT_SECONDS = 40.0
 #: Per attachment and in total across one message (raised only by a reviewed
 #: change; the total keeps a message under common 25-35 MiB relay limits).
 DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
