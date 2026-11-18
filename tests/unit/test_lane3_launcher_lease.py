@@ -21,6 +21,7 @@ from dotmac_deployment_foundation.lease_release import (  # noqa: E402
 )
 from lane3_lease_store import LeaseStanding  # noqa: E402
 
+from tests.unit.lane3_e10_support import make_receipt  # noqa: E402
 from tests.unit.lane3_store_support import FakeStore, release_for  # noqa: E402
 
 MACHINE = "0123456789abcdef0123456789abcdef"
@@ -59,6 +60,7 @@ def _custody(store, **overrides):
         "authorization_run": "run-1",
         "controller_identity": "fp-launch-key",
         "ttl_seconds": 600,
+        "e10_receipt": make_receipt(),
     }
     arguments.update(overrides)
     return custody.take_custody(**arguments)

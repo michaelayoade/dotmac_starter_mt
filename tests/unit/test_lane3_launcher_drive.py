@@ -81,6 +81,7 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
         authorization_run="run-1",
         controller_identity="SHA256:" + "A" * 43,
         ttl_seconds=600,
+        e10_receipt=e10_support.make_receipt(),
     )
     values: dict[str, Any] = {
         "pin": stage_tests._pin(tmp_path),
@@ -530,6 +531,7 @@ def test_a_store_that_cannot_supply_database_time_sends_nothing(ends, tmp_path) 
         authorization_run="run-1",
         controller_identity="x",
         ttl_seconds=60,
+        e10_receipt=e10_support.make_receipt(),
     )
     result = _run(ends, _inputs(tmp_path, store=store, held=held), script)
     assert seen["no_start"] is True
@@ -660,6 +662,7 @@ def test_a_store_time_outside_the_lease_window_sends_nothing(ends, tmp_path) -> 
         authorization_run="run-1",
         controller_identity="SHA256:" + "A" * 43,
         ttl_seconds=600,
+        e10_receipt=e10_support.make_receipt(),
     )
     future = dataclasses.replace(
         held, acquired_at=store.database_time() + timedelta(hours=1)
@@ -684,6 +687,7 @@ def test_a_store_time_after_the_lease_expired_sends_nothing(ends, tmp_path) -> N
         authorization_run="run-1",
         controller_identity="SHA256:" + "A" * 43,
         ttl_seconds=60,
+        e10_receipt=e10_support.make_receipt(),
     )
     store.advance(120)
     seen: dict[str, Any] = {}
@@ -717,6 +721,7 @@ def _conclude(tmp_path, result, store=None, *, held=None, name="out"):
         authorization_run="run-1",
         controller_identity="SHA256:" + "A" * 43,
         ttl_seconds=600,
+        e10_receipt=e10_support.make_receipt(),
     )
     return launcher.conclude(
         result,
