@@ -677,6 +677,7 @@ def test_manifest_declares_a_tenant_only_money_flows_lineage() -> None:
         "money_flows.funded_charge.attention.v1",
         "money_flows.funded_charge.access.v1",
         "money_flows.funded_charge.reevaluate.v1",
+        "money_flows.funded_charge.terms_recheck.v1",
     }
     assert set(module.requires) == {"module_database_roles.v1", "outbox_relay.v1"}
     assert module.tenant_requires == ("tenant_scope_catalog.v1",)
@@ -714,9 +715,11 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "FUNDED_CHARGE_DEFINITION_VERSION",
         "FUNDED_CHARGE_DISCHARGED_EVENT_TYPE",
         "FUNDED_CHARGE_REEVALUATE_EVENT_TYPE",
+        "FUNDED_CHARGE_TERMS_RECHECK_EVENT_TYPE",
         "FUNDED_CHARGE_TRANSITIONS",
         "SETTLE_ATTENTION_EVENT_TYPE",
         "SETTLE_SETTLED_EVENT_TYPE",
+        "AccountTermsChangedV1",
         "DepositApplication",
         "FundedChargeCursorV1",
         "FundedChargeInstanceV1",
@@ -756,6 +759,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "list_settle_attention",
         "module",
         "on_settlement_settled",
+        "reevaluate_account_terms",
         "record_funded_charge_attention",
         "record_settle_refusal",
         "retry_funded_charge",

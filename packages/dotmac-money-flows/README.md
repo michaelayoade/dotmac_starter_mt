@@ -25,3 +25,20 @@ compose it; the intended consumer is the Sub thin-client deployment.
 
 FundedCharge rows are never pruned: the access signal's `source_version` is a sum
 over a service's rows.
+
+## Terms re-check (F2 D3) and the tenant-default runbook
+
+`reevaluate_account_terms(db, scope=..., request=AccountTermsChangedV1(account,
+at), ports=...)` re-checks one account's pending charges after its contract terms
+changed. `at` is the `effective_from` of the terms version that caused the call;
+it must be timezone-aware, and **the caller must not call before `at` has
+passed** (flows reads no clock and cannot check this). Each pending row is
+checked at `max(due_at, at)`; an account no longer prepaid withdraws the row
+(`contract_type_changed`) and the service resumes. The re-check never pays or
+issues anything, and `attention_required` rows are not touched. A repeat is a
+no-op. The assembly routes `money_flows.funded_charge.terms_recheck.v1` back to
+the same function when the batch cap leaves rows over.
+
+Changing the tenant default contract type is a runbook event, not code in this
+package: the caller re-checks each prepaid account that falls back to the default
+(no own terms), one account per transaction, with `reevaluate_account_terms`.
