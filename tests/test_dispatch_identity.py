@@ -3,6 +3,8 @@
 Requires real Postgres (`make test-db-up` / `make test-integration`).
 """
 
+# ruff: noqa: S608  (SQL interpolates only the module-constant table name)
+
 from __future__ import annotations
 
 import os
@@ -68,16 +70,16 @@ def _retenant(db: Session, tenant_id: uuid.UUID) -> None:
 
 
 def _create(db: Session, tenant_id: uuid.UUID, key: str = "k-1", **kw):
-    args = dict(
-        idempotency_key=key,
-        channel="email",
-        category="transactional",
-        address="jane@example.com",
-        template_provenance="template:password_reset@rev-1",
-        subject="Hello",
-        text="Plain body with token",
-        html="<p>Html body</p>",
-    )
+    args = {
+        "idempotency_key": key,
+        "channel": "email",
+        "category": "transactional",
+        "address": "jane@example.com",
+        "template_provenance": "template:password_reset@rev-1",
+        "subject": "Hello",
+        "text": "Plain body with token",
+        "html": "<p>Html body</p>",
+    }
     args.update(kw)
     return create_dispatch(db, tenant_id, **args)
 
@@ -133,9 +135,7 @@ def test_duplicate_key_returns_existing_and_does_not_enqueue_again(
     assert len(_outbox(admin_session, tenant_a.id)) == 1
 
 
-def test_same_key_in_two_tenants_is_two_dispatches(
-    tenant_a, tenant_b, factory
-) -> None:
+def test_same_key_in_two_tenants_is_two_dispatches(tenant_a, tenant_b, factory) -> None:
     ids = []
     for tenant in (tenant_a, tenant_b):
         db = _as_tenant(factory, tenant.id)
@@ -250,9 +250,7 @@ def test_invalid_content_is_refused_before_anything_is_written(
 # --- load / fingerprint ------------------------------------------------------
 
 
-def test_load_roundtrips_s6_parts_and_verifies_fingerprint(
-    tenant_a, factory
-) -> None:
+def test_load_roundtrips_s6_parts_and_verifies_fingerprint(tenant_a, factory) -> None:
     att = AttachmentRef("document", "doc-1@v3", "invoice.pdf", "application/pdf")
     db = _as_tenant(factory, tenant_a.id)
     try:
@@ -269,7 +267,11 @@ def test_load_roundtrips_s6_parts_and_verifies_fingerprint(
         db.close()
     m = loaded.message
     assert m.dispatch_id == res.dispatch_id
-    assert (m.subject, m.text, m.html) == ("Hello", "Plain body with token", "<p>Html body</p>")
+    assert (m.subject, m.text, m.html) == (
+        "Hello",
+        "Plain body with token",
+        "<p>Html body</p>",
+    )
     assert dict(m.headers) == {"Reply-To": "support@example.com"}
     assert tuple(m.attachments) == (att,)
     assert m.request_fingerprint == loaded.dispatch.content_fingerprint
@@ -449,9 +451,7 @@ def test_pending_import_requires_legacy_provenance(tenant_a, factory) -> None:
 # --- RLS isolation -----------------------------------------------------------
 
 
-def test_tenant_a_cannot_see_tenant_b_dispatches(
-    tenant_a, tenant_b, factory
-) -> None:
+def test_tenant_a_cannot_see_tenant_b_dispatches(tenant_a, tenant_b, factory) -> None:
     db = _as_tenant(factory, tenant_b.id)
     try:
         res = _create(db, tenant_b.id, key="b-only")
@@ -529,8 +529,16 @@ def test_app_user_has_minimal_grants_and_no_delete(
         "TRUNCATE": False,
         "REFERENCES": False,
     }
-    for col in ("idempotency_key", "address", "content_fingerprint", "tenant_id",
-                "template_provenance", "channel", "category", "dispatch_id"):
+    for col in (
+        "idempotency_key",
+        "address",
+        "content_fingerprint",
+        "tenant_id",
+        "template_provenance",
+        "channel",
+        "category",
+        "dispatch_id",
+    ):
         assert not admin_session.execute(
             text("SELECT has_column_privilege('app_user', :t, :c, 'UPDATE')"),
             {"t": f"public.{TABLE}", "c": col},
@@ -567,19 +575,30 @@ def _role_engine(role: str) -> Engine:
 def test_outbox_dispatcher_has_no_privilege_on_the_table(
     admin_session: Session, tenant_a, factory
 ) -> None:
-    for priv in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES",
-                 "TRIGGER"):
+    for priv in (
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "REFERENCES",
+        "TRIGGER",
+    ):
         assert not admin_session.execute(
             text("SELECT has_table_privilege('outbox_dispatcher', :t, :p)"),
             {"t": f"public.{TABLE}", "p": priv},
         ).scalar(), priv
-    cols = admin_session.execute(
-        text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = :t AND table_schema = 'public'"
-        ),
-        {"t": TABLE},
-    ).scalars().all()
+    cols = (
+        admin_session.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = :t AND table_schema = 'public'"
+            ),
+            {"t": TABLE},
+        )
+        .scalars()
+        .all()
+    )
     assert cols
     for col in cols:
         for priv in ("SELECT", "INSERT", "UPDATE", "REFERENCES"):
@@ -602,7 +621,10 @@ def test_outbox_dispatcher_has_no_privilege_on_the_table(
             conn.rollback()
             # What the dispatcher DOES see of the event: the id only.
             claimed = conn.execute(
-                text("SELECT payload, correlation_id FROM claim_outbox_batch('w', 5, 300)")
+                text(
+                    "SELECT payload, correlation_id "
+                    "FROM claim_outbox_batch('w', 5, 300)"
+                )
             ).fetchall()
             conn.rollback()
         assert claimed

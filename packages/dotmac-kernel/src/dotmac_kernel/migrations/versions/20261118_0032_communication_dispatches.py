@@ -133,7 +133,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.execute(sa.text(f"SELECT EXISTS (SELECT 1 FROM {_TABLE})")).scalar():
+    if bind.execute(
+        sa.text(f"SELECT EXISTS (SELECT 1 FROM {_TABLE})")  # noqa: S608
+    ).scalar():
         raise RuntimeError(
             f"refusing to drop non-empty {_TABLE}: it is the only record of "
             "dispatch identities (including imported legacy keys)"

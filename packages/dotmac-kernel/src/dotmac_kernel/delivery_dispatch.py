@@ -187,8 +187,7 @@ def _existing(
         status=row.status,
         dispatch=row,
         created=False,
-        same_content=fingerprint is not None
-        and row.content_fingerprint == fingerprint,
+        same_content=fingerprint is not None and row.content_fingerprint == fingerprint,
     )
 
 

@@ -3,6 +3,8 @@
 Runs on a scratch database as `app_admin` like production. Requires Postgres.
 """
 
+# ruff: noqa: S608  (SQL interpolates only the module-constant table name)
+
 from __future__ import annotations
 
 import uuid
@@ -45,9 +47,7 @@ def test_down_refuses_a_non_empty_table(scratch_db: str) -> None:  # noqa: F811
     try:
         with eng.begin() as conn:
             conn.execute(
-                text(
-                    "INSERT INTO tenants (id, slug, name) VALUES (:i, :s, 'T')"
-                ),
+                text("INSERT INTO tenants (id, slug, name) VALUES (:i, :s, 'T')"),
                 {"i": str(tenant), "s": f"t{tenant.hex[:8]}"},
             )
             conn.execute(
