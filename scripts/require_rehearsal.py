@@ -433,9 +433,9 @@ def _receipt_bytes(
                     or info.compress_type
                     not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
                     or not 0 < info.file_size <= limit
-                    or not 0 < info.compress_size <= min(
-                        _MAX_ARTIFACT_BYTES, len(archive), limit + (limit >> 8) + 64
-                    )
+                    or not 0
+                    < info.compress_size
+                    <= min(_MAX_ARTIFACT_BYTES, len(archive), limit + (limit >> 8) + 64)
                 ):
                     raise ValueError
                 with bundle.open(info) as source:

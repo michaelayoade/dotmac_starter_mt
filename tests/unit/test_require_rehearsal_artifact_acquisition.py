@@ -314,9 +314,7 @@ def test_reformatted_receipt_is_refused_before_authentication(
     reformatted = json.dumps(json.loads(canonical), indent=2, sort_keys=False).encode()
     assert reformatted != canonical
     _network(monkeypatch, canonical)
-    monkeypatch.setattr(
-        oracle, "_download", lambda *a, **k: _archive(reformatted)
-    )
+    monkeypatch.setattr(oracle, "_download", lambda *a, **k: _archive(reformatted))
     monkeypatch.setattr(
         oracle,
         "_require_authenticated_offline_result",
