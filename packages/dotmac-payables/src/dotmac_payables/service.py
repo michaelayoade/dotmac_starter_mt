@@ -968,6 +968,39 @@ def record_settlement(
     idempotency_expires_at: datetime | None,
     recorded_at: datetime,
 ) -> SettlementObservation:
+    """Record an external settlement observation.
+
+    The payment owner string is reserved for ``record_supplier_payment``, which
+    calls the private path; an external caller cannot claim it to skip the
+    deferred-tax guard.
+    """
+    if command.source_owner.strip() == PAYMENT_SETTLEMENT_OWNER:
+        raise _refuse(
+            InvalidTransition,
+            "the supplier-payment settlement owner is reserved",
+            "settlement_owner_reserved",
+        )
+    return _record_settlement(
+        db,
+        scope=scope,
+        command=command,
+        idempotency_key=idempotency_key,
+        idempotency_expires_at=idempotency_expires_at,
+        recorded_at=recorded_at,
+        from_payment=False,
+    )
+
+
+def _record_settlement(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: SettlementObservationInput,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    recorded_at: datetime,
+    from_payment: bool,
+) -> SettlementObservation:
     tenant_id = scope.tenant_id
     payload = command.fingerprint_payload()
     request_fingerprint = fingerprint_of(payload)
@@ -994,7 +1027,7 @@ def record_settlement(
                 )
             return {"observation_id": str(existing.id)}
         obligation = _obligation(session, tenant_id, command.obligation_id, lock=True)
-        if str(payload["source_owner"]) == PAYMENT_SETTLEMENT_OWNER:
+        if from_payment:
             # The payment record already holds the invoice lock and has released
             # the deferred tax for this settlement.
             invoice = _invoice(session, tenant_id, obligation.invoice_id)
@@ -2810,7 +2843,7 @@ def record_supplier_payment(
                     "bank_reference": reference,
                 }
             )
-            record_settlement(
+            _record_settlement(
                 session,
                 scope=scope,
                 command=SettlementObservationInput(
@@ -2828,6 +2861,7 @@ def record_supplier_payment(
                 idempotency_key=f"supplier_payment:{payment.id}:settle:{allocation.line_number}",
                 idempotency_expires_at=None,
                 recorded_at=recorded_at,
+                from_payment=True,
             )
         payment.status = SupplierPaymentStatus.RECORDED
         payment.bank_reference = reference

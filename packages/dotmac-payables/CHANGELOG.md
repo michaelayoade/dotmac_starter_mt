@@ -76,7 +76,7 @@ any new command (Michael, 2026-11-17: maker-checker is optional and off).
   is removed.
 - An external settlement observation takes the invoice lock and is refused while the
   invoice still defers tax (`settlement_observation_on_deferred_invoice`), because it
-  lowers the balance without releasing; payments are unaffected. A credit application
+  lowers the balance without releasing; payments are unaffected. The payment owner string is reserved: the public `record_settlement` refuses it (`settlement_owner_reserved`) and `record_supplier_payment` uses a private path. A credit application
   validates its amount before any release is measured.
 - Review hardening: a historical-credit replay with another credit number, evidence
   reference or admitting actor is a conflict; credit approval refuses deferral tax on

@@ -2696,3 +2696,23 @@ def test_refusal_messages_for_reversal_and_invariants(db: Session) -> None:
     db.flush()
     with pytest.raises(InvalidAmount, match="violates its invariants"):
         invoice_deferred_tax_position(db, TENANT, invoice.id)
+
+
+def test_the_public_settlement_path_refuses_the_reserved_payment_owner(
+    db: Session,
+) -> None:
+    from dotmac_payables.service import PAYMENT_SETTLEMENT_OWNER
+
+    _declare(db)
+    _, (ob,) = _invoice(db)
+    for owner in (PAYMENT_SETTLEMENT_OWNER, f"  {PAYMENT_SETTLEMENT_OWNER} "):
+        with pytest.raises(InvalidTransition) as caught:
+            _observe(db, ob, "100", owner=owner)
+        assert caught.value.code == "settlement_owner_reserved"
+    assert ob.outstanding_amount == Decimal("1075")
+    assert _count(db, models.SettlementObservation) == 0
+    # the payment path still settles the same invoice
+    payment = _pay(db, [(ob, "1075")])
+    assert payment.status == SupplierPaymentStatus.RECORDED
+    assert ob.status == ObligationStatus.SETTLED
+    assert [r.amount for r in _releases(db, payment)] == [Decimal("75")]
