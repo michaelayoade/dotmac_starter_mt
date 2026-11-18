@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-template-studio"
-version = "0.2.0a6"
+version = "0.2.0a6+dev"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -36,6 +36,11 @@ dotmac-kernel = ">=0.1.0a106"
 fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 pydantic = ">=2.7.4,<3.0"
+# The html part's sanitizer (ADR-0006 § 5h). A Rust (ammonia) binding with abi3
+# wheels, MIT-licensed. Bounded below at the version the adversarial corpus was
+# proven against and above at the next minor: 0.x minors may change what is
+# stripped, and a sanitizer that moves under the allowlist must be re-proven.
+nh3 = ">=0.3.7,<0.4"
 
 # Note the absence of `dotmac-ui`. The admin screens author against
 # `var(--dmui-*)` tokens, but they consume them as CSS custom properties the

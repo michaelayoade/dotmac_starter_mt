@@ -42,13 +42,14 @@ from dotmac_kernel.web_surfaces import (
     WebSurfaceContribution,
 )
 
+from dotmac_template_studio import settings as _settings  # registers the spec
 from dotmac_template_studio.router import router as api_router
 from dotmac_template_studio.web import router as web_router
 from dotmac_template_studio.web import template_dir
 
 module = ModuleManifest(
     code="template_studio",
-    version="0.2.0a6",
+    version="0.2.0a6+dev",
     api_routers=[api_router],
     web_surfaces=(
         WebSurfaceContribution(
@@ -74,6 +75,8 @@ module = ModuleManifest(
     migration_prefix="ts",
     migration_branch="template_studio",
     tables=("templates", "template_versions"),
+    # Optional maker-checker setting (default OFF; never compulsory).
+    setting_domains=(_settings.TEMPLATE_STUDIO_DOMAIN.value,),
     # ── Entitlement ─────────────────────────────────────────────────────────
     # The licensable capability code this module owns. A capability code may
     # never be invented outside its owning module's manifest, so an entitlement
@@ -151,6 +154,9 @@ module = ModuleManifest(
         "template_studio.version.create",
         "template_studio.version.update",
         "template_studio.version.publish",
+        "template_studio.version.restore",
+        "template_studio.version.publish_refused",
+        "template_studio.version.test_send",
     ],
     # Deletable: a deployment that authors no templates should not carry the
     # module's surface. Its DATA survives disablement — ADR-0003 is explicit

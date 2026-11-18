@@ -131,7 +131,7 @@ def _messages(report) -> str:
 
 def test_the_real_repo_composes() -> None:
     """The repo's OWN composition — kernel (`0001`…`0029`), assembly
-    (`a001`…`a004`), and the installed MODULE lineages (`ts_0001`…`ts_0003`,
+    (`a001`…`a004`), and the installed MODULE lineages (`ts_0001`…`ts_0004`,
     `tk_0001`) — must pass. The two host lineages are grandfathered (legacy
     revision-id format, tables in `public`); `template_studio` gets the strict
     rules.
@@ -162,7 +162,8 @@ def test_the_real_repo_composes() -> None:
     # The "deliberately" is the point — this number is not maintenance overhead,
     # it is the reason a migration cannot be added without somebody noticing.
     # 38 -> 39 (unreleased): `0031_rate_limit_buckets` on the kernel lineage.
-    assert len(report.revisions) == 39
+    # 39 -> 40 (unreleased): `ts_0004_html_body` on the Template Studio lineage.
+    assert len(report.revisions) == 40
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

@@ -38,6 +38,26 @@ shape as `custom_fields`' `ENTITY_MODELS` registry.
         )
     )
 
+## Context v2 (ADR-0006 § 5h, § 5i)
+
+Everything below is additive: a context that declares only `variables` keeps its
+meaning and its checks unchanged.
+
+    RenderContext(
+        name="password_reset",
+        required=("reset_link",),          # every body part must use these
+        url=("reset_link", "course_url"),  # URL-typed: scheme-checked in html
+        optional=("note",),                # may be absent; usable via {#note}
+        variables=("customer_name",),      # plain scalars (legacy field)
+        lists={"courses": ("title", "course_url")},  # name -> item variables
+        sample={"customer_name": "Ada", "courses": [{"title": "Intro", ...}]},
+    )
+
+`variables` after construction is the union of every scalar the context can
+supply (`variables`, `required`, `optional`), so code that reads
+`context.variables` keeps working. `url` marks names (scalar or item) whose
+values are URLs; it does not add vocabulary by itself.
+
 Re-registering an identical context is a no-op, so an assembly importing a module
 twice is not an error. Re-registering the SAME NAME with different variables
 raises: a context's variable set is a contract with every template already saved
@@ -47,11 +67,47 @@ anyone noticing.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
+import re
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from dotmac_kernel.exceptions import BadRequestError
+
+from dotmac_template_studio.rendering import (
+    HARD_MAX_LIST_ITEMS,
+    MAX_LIST_ITEMS,
+    RenderRefusedError,
+    check_url,
+)
+
+
+class FrozenMap(Mapping):
+    """A read-only, hashable mapping: what a frozen context stores its dicts as."""
+
+    __slots__ = ("_data", "_hash")
+
+    def __init__(self, data: Mapping[str, Any]) -> None:
+        self._data = dict(data)
+        self._hash = hash(frozenset(self._data.items()))
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __hash__(self) -> int:
+        return self._hash
+
+    def __repr__(self) -> str:
+        return f"FrozenMap({self._data!r})"
+
+
+_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
 _VARIABLE_HINT = (
     "a variable name is lowercase alphanumeric with underscores, e.g. "
@@ -87,24 +143,167 @@ class RenderContext:
     name: str
     variables: Collection[str] = field(default_factory=frozenset)
     description: str = ""
+    required: Collection[str] = field(default_factory=frozenset)
+    optional: Collection[str] = field(default_factory=frozenset)
+    url: Collection[str] = field(default_factory=frozenset)
+    lists: Mapping[str, Collection[str]] = field(default_factory=dict)
+    sample: Mapping[str, Any] = field(default_factory=dict)
+    max_list_items: int | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
             raise ValueError("a render context needs a name")
         # Accept any iterable for ergonomics, store the immutable form. This is
         # the documented idiom for normalising a field on a frozen dataclass.
-        object.__setattr__(self, "variables", frozenset(self.variables))
-        if not self.variables:
-            raise ValueError(
-                f"render context {self.name!r} declares no variables — a context "
-                "that can supply nothing would reject every placeholder"
-            )
-        for variable in self.variables:
+        plain = frozenset(self.variables)
+        required = frozenset(self.required)
+        optional = frozenset(self.optional)
+        url = frozenset(self.url)
+        for variable in plain:
             if not variable.replace("_", "").isalnum() or not variable.islower():
                 raise ValueError(
                     f"render context {self.name!r} declares invalid variable "
                     f"{variable!r}: {_VARIABLE_HINT}"
                 )
+        for label, names in (("required", required), ("optional", optional)):
+            for variable in names:
+                self._check_name(label, variable)
+        if required & optional:
+            raise ValueError(
+                f"render context {self.name!r} declares "
+                f"{sorted(required & optional)} as both required and optional"
+            )
+        scalars = plain | required | optional
+
+        lists: dict[str, frozenset[str]] = {}
+        for list_name, item_vars in sorted(dict(self.lists).items()):
+            self._check_name("list", list_name)
+            items = frozenset(item_vars)
+            if not items:
+                raise ValueError(
+                    f"render context {self.name!r}: list {list_name!r} declares "
+                    "no item variables"
+                )
+            for variable in items:
+                self._check_name(f"item of list {list_name!r}", variable)
+            lists[list_name] = items
+        clash = scalars & lists.keys()
+        if clash:
+            raise ValueError(
+                f"render context {self.name!r}: {sorted(clash)} are declared both "
+                "as a list and as a scalar variable"
+            )
+        if not scalars and not lists:
+            raise ValueError(
+                f"render context {self.name!r} declares no variables — a context "
+                "that can supply nothing would reject every placeholder"
+            )
+        item_names = frozenset().union(*lists.values()) if lists else frozenset()
+        shadowed = scalars & item_names
+        if shadowed:
+            raise ValueError(
+                f"render context {self.name!r}: {sorted(shadowed)} are declared "
+                "both as a scalar variable and as a list item variable — a list's "
+                "item variables are never filled from outer values, so give them "
+                "distinct names"
+            )
+        for variable in url:
+            self._check_name("url", variable)
+        stray = url - scalars - item_names
+        if stray:
+            raise ValueError(
+                f"render context {self.name!r}: url variable(s) {sorted(stray)} "
+                "are neither a declared scalar nor a list item variable"
+            )
+        cap = self.max_list_items
+        if cap is not None and (
+            isinstance(cap, bool)
+            or not isinstance(cap, int)
+            or not 1 <= cap <= HARD_MAX_LIST_ITEMS
+        ):
+            raise ValueError(
+                f"render context {self.name!r}: max_list_items must be between 1 "
+                f"and {HARD_MAX_LIST_ITEMS}"
+            )
+        object.__setattr__(self, "variables", scalars)
+        object.__setattr__(self, "required", required)
+        object.__setattr__(self, "optional", optional)
+        object.__setattr__(self, "url", url)
+        object.__setattr__(self, "lists", FrozenMap(lists))
+        object.__setattr__(self, "sample", self._freeze_sample(scalars, lists, url))
+
+    def _check_name(self, label: str, variable: str) -> None:
+        if not isinstance(variable, str) or not _NAME.match(variable):
+            raise ValueError(
+                f"render context {self.name!r} declares invalid {label} name "
+                f"{variable!r}: {_VARIABLE_HINT}"
+            )
+
+    def _freeze_sample(
+        self,
+        scalars: frozenset[str],
+        lists: Mapping[str, frozenset[str]],
+        url: frozenset[str],
+    ) -> Mapping[str, Any]:
+        """Validate sample values against the vocabulary and freeze them.
+
+        A sample is what the preview screen renders with, so a sample the
+        renderer would refuse is a context bug found at registration.
+        """
+        frozen: dict[str, Any] = {}
+        bound = min(self.max_list_items or MAX_LIST_ITEMS, HARD_MAX_LIST_ITEMS)
+        for key, value in dict(self.sample).items():
+            if key in lists:
+                if isinstance(value, str | bytes) or not isinstance(
+                    value, list | tuple
+                ):
+                    raise ValueError(
+                        f"render context {self.name!r}: sample for list {key!r} "
+                        "must be a list of mappings"
+                    )
+                if len(value) > bound:
+                    raise ValueError(
+                        f"render context {self.name!r}: sample for list {key!r} "
+                        f"exceeds {bound} items"
+                    )
+                rows = []
+                for row in value:
+                    if not isinstance(row, Mapping) or set(row) - lists[key]:
+                        raise ValueError(
+                            f"render context {self.name!r}: sample rows of list "
+                            f"{key!r} must use only {sorted(lists[key])}"
+                        )
+                    for item_key, item_value in row.items():
+                        self._check_sample_value(
+                            f"{key}.{item_key}", item_key, item_value, url
+                        )
+                    rows.append(FrozenMap(row))
+                frozen[key] = tuple(rows)
+            elif key in scalars:
+                self._check_sample_value(key, key, value, url)
+                frozen[key] = value
+            else:
+                raise ValueError(
+                    f"render context {self.name!r}: sample names {key!r}, which "
+                    "the context does not declare"
+                )
+        return FrozenMap(frozen)
+
+    def _check_sample_value(
+        self, label: str, name: str, value: Any, url: frozenset[str]
+    ) -> None:
+        if not isinstance(value, str):
+            raise ValueError(
+                f"render context {self.name!r}: sample value for {label!r} must "
+                "be a string"
+            )
+        if name in url:
+            try:
+                check_url(value)
+            except RenderRefusedError as exc:
+                raise ValueError(
+                    f"render context {self.name!r}: sample for {label!r}: {exc}"
+                ) from exc
 
     def sorted_variables(self) -> list[str]:
         """Deterministic order, for messages and for the admin UI's hint list."""
@@ -163,6 +362,7 @@ def _reset_for_tests(contexts: Iterable[RenderContext] | None = None) -> Any:
 
 
 __all__ = [
+    "FrozenMap",
     "RenderContext",
     "RenderContextConflictError",
     "UnknownRenderContextError",

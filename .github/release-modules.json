@@ -516,6 +516,8 @@
           "dotmac_billing/migrations/versions/bi_0015_line_price_version_fk.py",
           "dotmac_billing/migrations/versions/bi_0016_withholding_components.py",
           "dotmac_billing/migrations/versions/bi_0017_open_documents_index.py",
+          "dotmac_billing/migrations/versions/bi_0018_account_terms.py",
+          "dotmac_billing/account_terms.py",
           "dotmac_billing/account_statement.py"
         ],
         "forbidden_prefixes": [
@@ -1697,7 +1699,9 @@
           "dotmac_template_studio/service.py",
           "dotmac_template_studio/templates/admin/template_studio/index.html",
           "dotmac_template_studio/web.py",
-          "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py"
+          "dotmac_template_studio/migrations/versions/ts_0003_tenant_audit.py",
+          "dotmac_template_studio/migrations/versions/ts_0004_html_body.py",
+          "dotmac_template_studio/htmlsanitize.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -1708,6 +1712,7 @@
         "allowed_requires": [
           "dotmac-kernel",
           "fastapi",
+          "nh3",
           "pydantic",
           "sqlalchemy",
           "python"
@@ -2577,6 +2582,7 @@
           "dotmac_payroll/migrations/__init__.py",
           "dotmac_payroll/migrations/versions/py_0001_payroll.py",
           "dotmac_payroll/migrations/versions/py_0002_mode_and_run_cancel.py",
+          "dotmac_payroll/migrations/versions/py_0003_settlement_reversal.py",
           "dotmac_payroll/models.py",
           "dotmac_payroll/service.py"
         ],

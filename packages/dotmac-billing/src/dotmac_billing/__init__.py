@@ -8,6 +8,20 @@ from dotmac_billing.account_statement import (
     compute_account_statement_digest,
     get_account_statement,
 )
+from dotmac_billing.account_terms import (
+    AccountTermsV1,
+    ContractType,
+    EffectiveTermV1,
+    PostpaidBillingTiming,
+    RecordAccountTermsV1,
+    RecordDefaultTermsV1,
+    TermSource,
+    TermsPeriod,
+    TermsVersionRefV1,
+    get_effective_account_terms,
+    record_account_terms,
+    record_default_terms,
+)
 from dotmac_billing.authority import (
     AuthorityBinding,
     BillingPlane,
@@ -392,7 +406,7 @@ from dotmac_billing.service import (
     void_document,
 )
 
-__version__ = "0.1.0a12"
+__version__ = "0.1.0a13"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
@@ -412,6 +426,18 @@ from dotmac_billing.tax_evidence import (
 )
 
 __all__ = [
+    "AccountTermsV1",
+    "ContractType",
+    "EffectiveTermV1",
+    "PostpaidBillingTiming",
+    "RecordAccountTermsV1",
+    "RecordDefaultTermsV1",
+    "TermSource",
+    "TermsPeriod",
+    "TermsVersionRefV1",
+    "get_effective_account_terms",
+    "record_account_terms",
+    "record_default_terms",
     "AllocationCommand",
     "ApplyAvailableCreditCommand",
     "DeallocationCommand",

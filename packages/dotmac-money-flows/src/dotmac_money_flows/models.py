@@ -23,13 +23,20 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    inspect,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 SCHEMA = module_schema("mflows")
+_TENANT_ID = inspect(Tenant).local_table.c.id
 
+SETTLE_TABLE = "settle_instances"
 SETTLE_STATES = ("settled", "refused", "unapplied", "resolved")
 SETTLE_TERMINAL_STATES = ("settled", "resolved")
+
+FUNDED_CHARGE_TABLE = "funded_charge_instances"
+FUNDED_CHARGE_STATES = ("pending", "discharged", "attention_required", "withdrawn")
+FUNDED_CHARGE_TERMINAL_STATES = ("discharged", "withdrawn")
 
 #: Columns every instance table carries (ST-1: instance state only).
 COMMON_COLUMNS = (
@@ -53,7 +60,7 @@ def _states(values: tuple[str, ...]) -> str:
 
 
 class SettleInstance(Base):
-    __tablename__ = "settle_instances"
+    __tablename__ = SETTLE_TABLE
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_settle_instances_tenant_id_id"),
         UniqueConstraint(
@@ -84,7 +91,7 @@ class SettleInstance(Base):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+        Uuid(), ForeignKey(_TENANT_ID, ondelete="CASCADE"), nullable=False
     )
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -111,15 +118,104 @@ class SettleInstance(Base):
     )
 
 
-TENANT_MODELS = (SettleInstance,)
-TENANT_TABLES = tuple(model.__tablename__ for model in TENANT_MODELS)
+class FundedChargeInstance(Base):
+    __tablename__ = FUNDED_CHARGE_TABLE
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_funded_charge_instances_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "charge_ref", name="uq_funded_charge_instances_charge"
+        ),
+        CheckConstraint(
+            f"state IN ({_states(FUNDED_CHARGE_STATES)})",
+            name="ck_funded_charge_instances_state",
+        ),
+        CheckConstraint(
+            "(reason_code IS NOT NULL) = "
+            "(state IN ('attention_required', 'withdrawn'))",
+            name="ck_funded_charge_instances_reason_iff_attention_or_withdrawn",
+        ),
+        CheckConstraint(
+            "deadline_at IS NULL", name="ck_funded_charge_instances_no_deadline"
+        ),
+        CheckConstraint(
+            "resolution_ref IS NULL", name="ck_funded_charge_instances_no_resolution"
+        ),
+        CheckConstraint(
+            "(state = 'discharged' AND obligation_id IS NOT NULL "
+            "AND document_id IS NOT NULL AND credit_draw_id IS NOT NULL) "
+            "OR (state <> 'discharged' AND obligation_id IS NULL "
+            "AND document_id IS NULL AND credit_draw_id IS NULL)",
+            name="ck_funded_charge_instances_discharge_refs",
+        ),
+        CheckConstraint(
+            "octet_length(charge_ref) <= 1024",
+            name="ck_funded_charge_instances_charge_ref_bytes",
+        ),
+        CheckConstraint("version >= 0", name="ck_funded_charge_instances_version"),
+        Index(
+            "ix_funded_charge_instances_account_order",
+            "tenant_id",
+            "billing_account_id",
+            "state",
+            "created_at",
+            "id",
+        ),
+        Index("ix_funded_charge_instances_service", "tenant_id", "service_ref"),
+        Index(
+            "ix_funded_charge_instances_state_order",
+            "tenant_id",
+            "state",
+            "created_at",
+            "id",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(_TENANT_ID, ondelete="CASCADE"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    policy_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    definition_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    actor_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    resolution_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    charge_ref: Mapped[str] = mapped_column(String(700), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    service_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    obligation_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    document_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    credit_draw_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    funding_settlement_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+
+
+TENANT_MODELS = (SettleInstance, FundedChargeInstance)
+TENANT_TABLES = (SETTLE_TABLE, FUNDED_CHARGE_TABLE)
 
 __all__ = [
     "COMMON_COLUMNS",
+    "FUNDED_CHARGE_STATES",
+    "FUNDED_CHARGE_TABLE",
+    "FUNDED_CHARGE_TERMINAL_STATES",
     "SCHEMA",
+    "SETTLE_TABLE",
     "SETTLE_STATES",
     "SETTLE_TERMINAL_STATES",
     "TENANT_MODELS",
     "TENANT_TABLES",
+    "FundedChargeInstance",
     "SettleInstance",
 ]
