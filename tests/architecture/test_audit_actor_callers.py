@@ -153,7 +153,9 @@ def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     # proof as RepairActor.
     # Offline identity bootstrap adds one explicit system actor with its evidence ref.
     # The audited dead-dispatch requeue (K-5) adds one literal-`user` caller.
-    assert len(calls) == 29, "the ratchet must change when the caller set changes"
+    # The suppression-clear operator action (K-7) adds one literal-`user` caller
+    # that names the authenticated Party as both party and id.
+    assert len(calls) == 30, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"

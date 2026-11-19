@@ -7,8 +7,8 @@ This is a thin layer over kernel primitives; it owns no table and adds no
 authority the kernel did not already expose:
 
 - reads: the tenant's `communication_suppressions` (filter by channel, scope,
-  address) and `dotmac_kernel.delivery.receipts_for_address`;
-- the one mutation: `clear_suppression` = `consent.unsuppress` plus ONE
+  address) and `dotmac_kernel.receipts_for_address`;
+- the one mutation: `clear_suppression` = `unsuppress` plus ONE
   `communication.suppression.cleared` audit row in the same transaction.
 
 Every query carries an explicit `tenant_id` predicate on top of RLS, so a bug
@@ -25,13 +25,14 @@ import hashlib
 from dataclasses import dataclass
 from uuid import UUID
 
-from dotmac_kernel import consent, delivery
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.audit_actions import active_audit_actions
+from dotmac_kernel.consent import normalize_address, normalize_channel, unsuppress
 from dotmac_kernel.consent_models import (
     SUPPRESSION_SCOPES,
     CommunicationSuppression,
 )
+from dotmac_kernel.delivery import receipts_for_address
 from dotmac_kernel.delivery_models import CommunicationDelivery
 from dotmac_kernel.exceptions import BadRequestError, NotFoundError
 from sqlalchemy import func, select
@@ -77,9 +78,7 @@ def _filters(
 ) -> list:
     clauses = [CommunicationSuppression.tenant_id == tenant_id]
     if channel:
-        clauses.append(
-            CommunicationSuppression.channel == consent.normalize_channel(channel)
-        )
+        clauses.append(CommunicationSuppression.channel == normalize_channel(channel))
     if scope:
         if scope not in SUPPRESSION_SCOPES:
             raise BadRequestError(f"unknown scope {scope!r}")
@@ -132,13 +131,13 @@ def count_suppressions(
 def get_suppression(
     db: Session, tenant_id: UUID, *, channel: str, address: str
 ) -> SuppressionRow | None:
-    normalized_channel = consent.normalize_channel(channel)
+    normalized_channel = normalize_channel(channel)
     row = db.execute(
         select(CommunicationSuppression).where(
             CommunicationSuppression.tenant_id == tenant_id,
             CommunicationSuppression.channel == normalized_channel,
             CommunicationSuppression.address
-            == consent.normalize_address(normalized_channel, address),
+            == normalize_address(normalized_channel, address),
         )
     ).scalar_one_or_none()
     return None if row is None else _view(row)
@@ -159,7 +158,7 @@ def list_receipts(
     db: Session, tenant_id: UUID, *, channel: str, address: str
 ) -> list[ReceiptRow]:
     """Recent receipts for one address, newest first (no bodies, no payloads)."""
-    rows = delivery.receipts_for_address(
+    rows = receipts_for_address(
         db, tenant_id, channel=channel, address=address, limit=RECEIPTS_LIMIT
     )
     return [_receipt_view(row) for row in rows if row.tenant_id == tenant_id]
@@ -200,8 +199,8 @@ def clear_suppression(
     if len(cleaned) > MAX_REASON_LENGTH:
         raise BadRequestError(f"reason exceeds {MAX_REASON_LENGTH} characters")
 
-    normalized_channel = consent.normalize_channel(channel)
-    normalized = consent.normalize_address(normalized_channel, address)
+    normalized_channel = normalize_channel(channel)
+    normalized = normalize_address(normalized_channel, address)
     existing = (
         db.execute(
             select(CommunicationSuppression)
@@ -225,9 +224,7 @@ def clear_suppression(
         "address_sha256": hashlib.sha256(normalized.encode()).hexdigest()[:16],
     }
     suppression_id = existing.id
-    if not consent.unsuppress(
-        db, tenant_id, channel=normalized_channel, address=normalized
-    ):
+    if not unsuppress(db, tenant_id, channel=normalized_channel, address=normalized):
         raise NotFoundError("suppression disappeared during clear")
     write_audit_event(
         db,

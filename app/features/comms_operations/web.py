@@ -30,6 +30,10 @@ router = APIRouter(prefix="/admin/comms", tags=["web"])
 
 PAGE_SIZE = 20
 LIST_PATH = "/admin/comms/suppressions"
+RECEIPTS_PATH = "/admin/comms/receipts"
+CLEAR_PATH = "/admin/comms/suppressions/clear"
+#: Paths handed to the templates, so no template authors a facet prefix.
+_URLS = {"suppressions": LIST_PATH, "receipts": RECEIPTS_PATH, "clear": CLEAR_PATH}
 _CLEARED_NOTICES = {
     "1": "Suppression cleared.",
     "0": "No such suppression; nothing was cleared.",
@@ -73,6 +77,7 @@ def _render_suppressions(
             "address": address,
             "error": error,
             "notice": notice,
+            "urls": _URLS,
         },
         status_code=status_code,
     )
@@ -145,6 +150,7 @@ def _render_receipts(
             "receipts": receipts,
             "suppression": suppression,
             "error": error,
+            "urls": _URLS,
         },
         status_code=status_code,
     )
@@ -198,7 +204,7 @@ async def suppression_clear(
         )
     if back == "receipts":
         query = urlencode({"channel": channel, "address": address})
-        target = f"/admin/comms/receipts?{query}"
+        target = f"{RECEIPTS_PATH}?{query}"
     else:
         target = f"{LIST_PATH}?cleared={1 if cleared else 0}"
     response = RedirectResponse(url=target, status_code=302)
