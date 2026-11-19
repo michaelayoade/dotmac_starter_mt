@@ -1134,11 +1134,13 @@ This amendment records decisions only. Implementation (CP changes, the S2 and
 S3 tooling, ceremony kit v2) is pending, claims no adoption, and the design's
 open verification items remain open: for example, main's candidate-attestation
 workflow still pins the workflow-URL issuer until S3 lands, and the database
-server certificate's SAN check is outstanding. Michael ruled U3 and U5 on 2026-11-17 (U3 was first ruled as the SSH host-key
+server certificate's SAN check is outstanding.
+
+Michael ruled U3 and U5 on 2026-11-17 (U3 was first ruled as the SSH host-key
 fingerprint and amended to option B, the dedicated incarnation key, the same
 day) and Q1-B, Q3-A (transit custody and per-run destruction) and Q5-B on
-2026-11-18 (debt register v1498). Production custody remains a D3 decision; nothing here grants
-anything for it. ADR-0009 Amendment 1 (transit signing custody) is the
+2026-11-18 (debt register v1498). Production custody remains a D3 decision;
+nothing here grants anything for it. ADR-0009 Amendment 1 (transit signing custody) is the
 precedent for how the keys below are held.
 
 ### What changed against the text above, and why
@@ -1147,7 +1149,7 @@ precedent for how the keys below are held.
 |---|---|---|
 | 2026-09-07 "trusted host provenance v2": installed-host evidence "belongs to a distinct target-local host-attestation workload" | Installed-host evidence is signed by a dedicated off-target incarnation key held in the ceremony's OpenBao transit and destroyed before launch (U3-B) | A target-held private key can be read by whatever runs on the target; the signer never reaches the target |
 | Same amendment: candidate evidence "belongs to the protected Starter release-workflow signer"; 2026-09-22: the workflow signing step is the "ONLY writer" of the receipt binding | Candidate evidence is signed in Michael's ceremony; the workflow only publishes (Q5-B) | The GitHub-secret PEM is retired; no private key remains in GitHub |
-| 2026-09-22: "signer custody, lease" left to later work | The Lane 3 host lease is a row in the Platform CP production database, reached through an attended tunnel (U5, Q1-B). Binding certificate issuance to a Control lease stays undecided (ADR-0073) | The lease needs a store whose clock and lock decide liveness |
+| 2026-09-22, Gate 0 issuer contract: "signer custody, lease" left to later work; that item is not decided here | The Lane 3 host lease is a row in the Platform CP production database, reached through an attended tunnel (U5, Q1-B). Binding certificate issuance to a Control lease stays undecided (ADR-0073) | The lease needs a store whose clock and lock decide liveness |
 
 ### U3-B: off-target incarnation key (Michael, 2026-11-17; custody and destruction per Q3-A, 2026-11-18)
 
@@ -1160,7 +1162,8 @@ precedent for how the keys below are held.
    root (`custody_domain=host_attester`, subject = the Fleet `host_id`);
    Control's enrolment call is unchanged. A rebuild rotates the root while the
    prior one is still current, or enrols afresh (recovery) after a revoke, and
-   the old root is revoked, as the 2026-09-08 amendment already requires.
+   the old root is closed (superseded by rotation, or revoked), as the
+   2026-09-08 amendment already requires.
 3. **One attestation.** It signs the E10 proof-of-possession and at most one
    installed attestation, for exactly one dispatch (`observation_id` = the
    dispatch id); an E11 destroy-only incarnation signs no attestation. The

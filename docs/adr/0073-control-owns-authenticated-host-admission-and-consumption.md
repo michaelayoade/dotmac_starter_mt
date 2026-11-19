@@ -105,8 +105,8 @@ server certificate's SAN check is outstanding. No existing control is relaxed.
   (`rotate_root`) while the prior root is still current, or enrols afresh
   (`enrol_root`, recovery) after a `revoke_root`, because revoking removes the
   current root and rotation would then refuse. After the run, `revoke_root`
-  makes the fingerprint permanently revoked. Every incarnation is therefore single-use in
-  Control's registry as well as in its signing custody. Legacy rows still
+  makes the fingerprint permanently revoked. Every incarnation is therefore
+  single-use in Control's registry as well as in its signing custody. Legacy rows still
   refuse; nothing is patched.
 - **Destruction is not a Control fact.** Control does not learn that the key was
   destroyed. The destruction stamp, the E10 receipt and the order destruction
