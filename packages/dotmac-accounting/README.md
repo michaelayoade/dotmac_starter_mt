@@ -26,7 +26,7 @@ audited with reason and actor in the append-only `account_changes` history, and
 enforced by a database guard (the account `id` never changes; code and flags
 change only with a matching history row of the same transaction). Posted ledger
 lines keep the `account_code` they were posted under; reports follow the
-account by `account_id` and show its current code. Retirement refuses a balance,
+account by `account_id` and show its current code. Callers must always pass the tenant's pinned numeric `code_pattern` to `recode_account`; accounting has no chart-policy store and the pattern is optional only in the type. The guard also refuses any change to `category_id`, `normal_balance`, `parent_id` and `currency_code`, and a kind change away from POSTING is refused once the account has posted ledger lines. Retirement refuses a balance,
 a draft journal line, an active child or attested open subledger items.
 
 `ac_0003_draft_void` adds the governed void of a never-posted DRAFT journal

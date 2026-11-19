@@ -1325,6 +1325,20 @@ def update_account_flags(
             raise InvalidAccount("only a posting account can allow journal posting")
         if allowed and not account.is_active:
             raise InvalidAccount("a retired account cannot allow journal posting")
+        if kind != AccountKind.POSTING and account.kind == AccountKind.POSTING:
+            posted = session.scalar(
+                select(PostedLedgerLine.id)
+                .where(
+                    PostedLedgerLine.tenant_id == tenant_id,
+                    PostedLedgerLine.account_id == account.id,
+                )
+                .limit(1)
+            )
+            if posted is not None:
+                raise InvalidAccount(
+                    "an account with posted ledger lines cannot stop being a "
+                    "posting account"
+                )
         if kind == AccountKind.POSTING:
             has_children = session.scalar(
                 select(Account.id)

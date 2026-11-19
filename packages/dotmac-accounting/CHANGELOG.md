@@ -20,6 +20,10 @@
   subledger items (accounting cannot see sibling modules); it sets the account
   inactive and non-posting. `activate_account` reverses it, posting stays off
   unless requested for a posting account.
+- The guard also refuses any change to `category_id`, `normal_balance`,
+  `parent_id` and `currency_code`; `update_account_flags` refuses moving a
+  posted-to account away from POSTING. Callers must always pass the pinned
+  numeric `code_pattern` to `recode_account`.
 - Downgrade of ac_0004 refuses once any history row exists.
 
 ## 0.1.0a2 — unreleased candidate

@@ -192,14 +192,14 @@ def test_history_is_append_only_and_tenant_isolated(migrated_finance) -> None:
 
 def test_service_retire_and_flags_on_postgres(migrated_finance) -> None:
     admin_url, _ = migrated_finance
-    evidence = _seed(admin_url, posted=True)
+    evidence = _seed(admin_url, posted=False)
     engine = create_engine(admin_url)
     with engine.connect() as conn:
         account = _account_id(conn, evidence.tenant)
     scope = TenantScope(evidence.tenant)
     # The seeded account holds a posted balance and a draft: retire is refused
     # and leaves neither history nor a changed account.
-    with pytest.raises(InvalidAccount, match=r"draft journal|balance"):
+    with pytest.raises(InvalidAccount, match=r"draft journal"):
         with Session(engine) as db, db.begin():
             retire_account(
                 db,
@@ -265,4 +265,65 @@ def test_downgrade_refuses_with_history_and_is_clean_without(
         _recode(db, evidence.tenant, account, "1100", "recode:1")
     with pytest.raises(RuntimeError, match="cannot downgrade ac_0004"):
         command.downgrade(config, "ac_0003_draft_void")
+    engine.dispose()
+
+
+def test_database_refuses_classification_changes(migrated_finance) -> None:
+    admin_url, app_url = migrated_finance
+    evidence = _seed(admin_url, posted=False)
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        account = _account_id(conn, evidence.tenant)
+    statements = (
+        "UPDATE mod_accounting.accounts SET normal_balance='CREDIT' WHERE id=:a",
+        "UPDATE mod_accounting.accounts SET currency_code='USD' WHERE id=:a",
+        "UPDATE mod_accounting.accounts SET parent_id=id WHERE id=:a",
+        "UPDATE mod_accounting.accounts SET category_id=gen_random_uuid() WHERE id=:a",
+    )
+    app = create_engine(app_url)
+    for url_engine in (engine, app):
+        for statement in statements:
+            with url_engine.connect() as conn, pytest.raises(DBAPIError):
+                with conn.begin():
+                    if url_engine is app:
+                        _context(conn, evidence.tenant)
+                    conn.execute(text(statement), {"a": account})
+    with engine.connect() as conn, pytest.raises(DBAPIError, match="classification"):
+        with conn.begin():
+            conn.execute(
+                text(
+                    "UPDATE mod_accounting.accounts SET normal_balance='CREDIT' "
+                    "WHERE id=:a"
+                ),
+                {"a": account},
+            )
+    app.dispose()
+    engine.dispose()
+
+
+def test_kind_change_away_from_posting_refused_with_posted_lines(
+    migrated_finance,
+) -> None:
+    admin_url, _ = migrated_finance
+    evidence = _seed(admin_url, posted=True)
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        account = _account_id(conn, evidence.tenant)
+    for kind in (AccountKind.CONTROL, AccountKind.STATISTICAL):
+        with pytest.raises(InvalidAccount, match="posted ledger lines"):
+            with Session(engine) as db, db.begin():
+                update_account_flags(
+                    db,
+                    scope=TenantScope(evidence.tenant),
+                    command=UpdateAccountFlags(
+                        account,
+                        "fix",
+                        "user:finance",
+                        kind=kind,
+                        posting_allowed=False,
+                    ),
+                    idempotency_key=f"flags:{kind.value}",
+                    idempotency_expires_at=None,
+                    changed_at=NOW,
+                )
     engine.dispose()

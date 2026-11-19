@@ -33,6 +33,12 @@ _GUARD = """
           IF NEW.id<>OLD.id OR NEW.tenant_id<>OLD.tenant_id THEN
             RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='account identity is immutable';
           END IF;
+          IF NEW.category_id<>OLD.category_id
+             OR NEW.normal_balance<>OLD.normal_balance
+             OR NEW.parent_id IS DISTINCT FROM OLD.parent_id
+             OR NEW.currency_code IS DISTINCT FROM OLD.currency_code THEN
+            RAISE EXCEPTION USING ERRCODE='integrity_constraint_violation', MESSAGE='account classification is immutable';
+          END IF;
           IF NEW.code<>OLD.code OR NEW.kind<>OLD.kind
              OR NEW.posting_allowed<>OLD.posting_allowed
              OR NEW.is_active<>OLD.is_active THEN

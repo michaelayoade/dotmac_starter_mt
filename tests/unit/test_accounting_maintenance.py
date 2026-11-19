@@ -393,3 +393,20 @@ def test_negative_or_non_integer_open_item_attestation_is_refused(db) -> None:
         _retire(db, scope, cash, key="n", open_items=-1)
     with pytest.raises(InvalidAccount, match="integer"):
         _retire(db, scope, cash, key="t", open_items=True)
+
+
+def test_kind_change_away_from_posting_refused_once_posted(db) -> None:
+    scope, cash, capital = _setup(db)
+    _post(db, scope, _draft(db, scope, cash, capital, "JNL-1"))
+    for kind in (AccountKind.CONTROL, AccountKind.STATISTICAL):
+        with pytest.raises(InvalidAccount, match="posted ledger lines"):
+            _flags(
+                db,
+                scope,
+                cash,
+                key=f"k:{kind.value}",
+                kind=kind,
+                posting_allowed=False,
+            )
+    assert cash.kind == AccountKind.POSTING
+    assert _history(db, cash) == []
