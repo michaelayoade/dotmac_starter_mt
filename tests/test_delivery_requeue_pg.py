@@ -11,7 +11,13 @@ import uuid
 from collections.abc import Generator
 
 import pytest
-from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel import audit_actions
+from dotmac_kernel.audit_actions import (
+    AuditActionRegistry,
+    AuditActionsNotInstalledError,
+    active_audit_actions,
+    install_audit_actions,
+)
 from dotmac_kernel.delivery_dispatch import DispatchNotFound, create_dispatch
 from dotmac_kernel.delivery_requeue import (
     AUDIT_ACTION_REQUEUED,
@@ -40,8 +46,23 @@ def engine() -> Generator[Engine, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def _audit_registry():
+def _audit_registry() -> Generator[None, None, None]:
+    # Swap in a Kernel-only registry for each test, then put back whatever the
+    # session had: the registry is process-global, and leaking this one makes
+    # later suites' composed actions (role.create, settings.update, ...) read
+    # as undeclared.
+    try:
+        previous: AuditActionRegistry | None = active_audit_actions()
+    except AuditActionsNotInstalledError:
+        previous = None
     install_audit_actions(AuditActionRegistry.from_manifests(()))
+    try:
+        yield
+    finally:
+        if previous is not None:
+            install_audit_actions(previous)
+        else:
+            audit_actions._active_registry = None
 
 
 def _as_tenant(engine: Engine, tenant_id: uuid.UUID) -> Session:
