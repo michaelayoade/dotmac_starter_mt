@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -164,7 +166,10 @@ def test_key_init_never_replaces_a_key(key_path: Path, home: Path) -> None:
 
 
 def test_key_init_refuses_when_not_the_expected_user(home: Path) -> None:
-    _refusal(lambda: ha.key_init(home / "k", owner_uid=UID + 1), "key-init-wrong-user")
+    _refusal(
+        lambda: ha.key_init(home / "k", owner_uid=UID + 1),
+        "owner-uid-not-effective-uid",
+    )
     assert not (home / "k").exists()
 
 
@@ -179,9 +184,7 @@ def test_key_init_refuses_an_unsafe_directory_and_a_relative_path(
         lambda: ha.key_init(home / "missing" / "k", owner_uid=UID),
         "key-directory-unsafe",
     )
-    _refusal(
-        lambda: ha.key_init("relative.key", owner_uid=UID), "key-path-not-absolute"
-    )
+    _refusal(lambda: ha.key_init("relative.key", owner_uid=UID), "key-directory-unsafe")
 
 
 def test_key_init_refuses_a_symlink_at_the_key_path(home: Path) -> None:
@@ -196,7 +199,7 @@ def test_key_init_refuses_a_symlink_at_the_key_path(home: Path) -> None:
 
 
 def test_load_key_refuses_everything_key_init_does_not_leave(
-    home: Path, key_path: Path, monkeypatch: pytest.MonkeyPatch
+    home: Path, key_path: Path
 ) -> None:
     ha.load_key(key_path, owner_uid=UID)
     key_path.chmod(0o440)
@@ -216,8 +219,39 @@ def test_load_key_refuses_everything_key_init_does_not_leave(
     garbage.chmod(0o400)
     _refusal(lambda: ha.load_key(garbage, owner_uid=UID), "key-unreadable")
 
-    monkeypatch.setattr(ha, "_owner_only_dir", lambda *args, **kwargs: None)
-    _refusal(lambda: ha.load_key(key_path, owner_uid=UID + 1), "key-owner-unexpected")
+    _refusal(
+        lambda: ha.load_key(key_path, owner_uid=UID + 1), "owner-uid-not-effective-uid"
+    )
+    _refusal(
+        lambda: ha.load_key(key_path, owner_uid=True), "owner-uid-not-effective-uid"
+    )
+
+
+def test_load_key_refuses_a_key_with_a_second_link(home: Path, key_path: Path) -> None:
+    os.link(key_path, home / "second-name")
+    _refusal(lambda: ha.load_key(key_path, owner_uid=UID), "key-has-extra-links")
+
+
+def test_no_path_component_may_be_a_symlink(
+    tmp_path: Path, home: Path, key_path: Path
+) -> None:
+    link = tmp_path / "link"
+    link.symlink_to(home)
+    _refusal(
+        lambda: ha.key_init(link / "other.key", owner_uid=UID), "key-directory-unsafe"
+    )
+    _refusal(
+        lambda: ha.load_key(link / "presentation.key", owner_uid=UID),
+        "key-directory-unsafe",
+    )
+    _refusal(
+        lambda: _present(home, key_path, out=link / "host-admission.json"),
+        "output-directory-unsafe",
+    )
+    _refusal(
+        lambda: ha.key_init(home / ".." / "home" / "x.key", owner_uid=UID),
+        "key-directory-unsafe",
+    )
 
 
 def test_load_key_refuses_a_key_that_is_not_ed25519(home: Path) -> None:
@@ -765,6 +799,7 @@ def test_cli_end_to_end_and_refusal_output(
                 "--candidate-digest", str(attestation_envelope_digest(candidate)),
                 "--installed-digest", str(attestation_envelope_digest(installed)),
                 "--out", str(unsigned),
+                "--owner-uid", str(UID),
             ]
         )
         == 0
@@ -803,3 +838,234 @@ def test_cli_end_to_end_and_refusal_output(
         json.loads(out.read_text())["presentation"],
         base64.urlsafe_b64decode(public["public_key_b64url"] + "="),
     )
+
+
+# ── fixed vector: CP-5 must check this against real Control a17 ─────────────
+#
+# The seed, digests and instants below are SYNTHETIC. The expected canonical bytes
+# and signature were computed independently (RFC 8032 reference arithmetic, not
+# this module). CP-5 reproduces the statement with Control a17's
+# `HostAdmissionPresentationStatementV1(...).canonical_bytes` and verifies the
+# signature with Control's verifier; any difference is a contract drift.
+
+VECTOR_SEED = bytes(range(97, 129))
+VECTOR_PUBLIC = "iC0Oo7KGTnpYfz5pjOpEWZmDEuZV4F-l6LURnYuqyM0"
+VECTOR_BYTES = (
+    '{"audience":"dotmac.deployment-control",'
+    '"candidate_attestation_envelope_digest":"sha256:' + "1" * 64 + '",'
+    '"dispatch_id":"6f1c2f4e-52a8-4d0e-9a1b-2f0c7e6d9b11",'
+    '"expires_at":"2026-11-19T10:09:58Z",'
+    '"installed_attestation_envelope_digest":"sha256:' + "2" * 64 + '",'
+    '"issued_at":"2026-11-19T10:04:58Z",'
+    '"key_id":"presentation-key-1",'
+    '"presentation_id":"presentation-vector-0001",'
+    '"purpose":"dotmac.control.host-admission-presentation.v1",'
+    '"schema":"dotmac.control.host-admission-presentation",'
+    '"version":1}'
+)
+VECTOR_SIGNATURE = (
+    "MSlN7XT7SIx41-icMqx0C9ghozgZf0Ezc_V52Xu3h9EV7jLAaKqMhjTjDAZyAehLS6FCem3Dnuq9E_"
+    "XddXmADg"
+)
+
+
+def _vector_statement() -> dict[str, Any]:
+    return ha.build_statement(
+        presentation_id="presentation-vector-0001",
+        key_id="presentation-key-1",
+        dispatch_id=support.DISPATCH_ID,
+        candidate_digest="sha256:" + "1" * 64,
+        installed_digest="sha256:" + "2" * 64,
+        store_time=datetime(2026, 11, 19, 10, 5, 0, tzinfo=UTC),
+    )
+
+
+def test_the_fixed_vector_statement_bytes_and_signature() -> None:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    key = Ed25519PrivateKey.from_private_bytes(VECTOR_SEED)
+    assert support.b64url(support.raw_public(key)) == VECTOR_PUBLIC
+    statement = _vector_statement()
+    assert ha._canonical(statement).decode() == VECTOR_BYTES
+    presentation = ha.sign_statement(key, statement)
+    assert presentation == {"statement": statement, "signature": VECTOR_SIGNATURE}
+    raw = base64.urlsafe_b64decode(VECTOR_SIGNATURE + "==")
+    key.public_key().verify(raw, VECTOR_BYTES.encode())
+
+
+# ── the digest-only reader ──────────────────────────────────────────────────
+
+
+def _admission_file(home: Path, key_path: Path) -> tuple[Path, str]:
+    _present(home, key_path)
+    public = ha.load_key(key_path, owner_uid=UID).public_key().public_bytes_raw()
+    return home / "host-admission.json", support.b64url(public)
+
+
+def test_the_reader_returns_digests_after_verifying_the_presentation(
+    home: Path, key_path: Path
+) -> None:
+    path, public = _admission_file(home, key_path)
+    result = ha.read_host_admission(path, presentation_public_key_b64url=public)
+    candidate, installed = _pair()
+    assert result.attempt_id == support.DISPATCH_ID
+    assert result.candidate_attestation_digest == str(
+        attestation_envelope_digest(candidate)
+    )
+    assert result.installed_attestation_digest == str(
+        attestation_envelope_digest(installed)
+    )
+    assert result.file_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert result.presentation_key_id == KEY_ID
+    assert (
+        result.presentation_key_fingerprint
+        == "sha256:"
+        + hashlib.sha256(base64.urlsafe_b64decode(public + "=")).hexdigest()
+    )
+    assert result.issued_at == "2026-11-19T10:04:58Z"
+    assert result.expires_at == "2026-11-19T10:09:58Z"
+    assert not hasattr(result, "candidate") and not hasattr(result, "installed")
+
+
+def _resign(key_path: Path, document: dict[str, Any], **changes: Any) -> bytes:
+    key = ha.load_key(key_path, owner_uid=UID)
+    statement = {**document["presentation"]["statement"], **changes}
+    document = {**document, "presentation": ha.sign_statement(key, statement)}
+    return json.dumps(document).encode()
+
+
+def test_the_reader_refusals(home: Path, key_path: Path) -> None:
+    path, public = _admission_file(home, key_path)
+    document = json.loads(path.read_text())
+
+    def parse(data: bytes, key: str = public) -> Any:
+        return ha.parse_host_admission(data, presentation_public_key_b64url=key)
+
+    _refusal(
+        lambda: parse(
+            path.read_bytes(), support.b64url(support.raw_public(support.OTHER_KEY))
+        ),
+        "presentation-signature-invalid",
+    )
+    _refusal(lambda: parse(path.read_bytes(), "short"), "presentation-key-invalid")
+    _refusal(lambda: parse(b""), "host-admission-unreadable")
+    _refusal(lambda: parse(b"not json"), "host-admission-unreadable")
+    _refusal(lambda: parse(b"[]"), "host-admission-malformed")
+
+    widened = {**document, "extra": 1}
+    _refusal(lambda: parse(json.dumps(widened).encode()), "host-admission-malformed")
+
+    tampered = json.loads(json.dumps(document))
+    tampered["presentation"]["statement"]["key_id"] = "another"
+    _refusal(
+        lambda: parse(json.dumps(tampered).encode()), "presentation-signature-invalid"
+    )
+
+    # a swapped envelope under a still-valid presentation
+    candidate = support.candidate_envelope()
+    other = support.installed_envelope(candidate, host_id="host-b")
+    swapped = {**document, "installed": other.canonical_document()}
+    _refusal(
+        lambda: parse(json.dumps(swapped).encode()), "presentation-digest-mismatch"
+    )
+
+    # validly re-signed, but naming another dispatch or a too-long lifetime
+    _refusal(
+        lambda: parse(_resign(key_path, document, dispatch_id="another-dispatch")),
+        "presentation-dispatch-mismatch",
+    )
+    _refusal(
+        lambda: parse(_resign(key_path, document, expires_at="2026-11-19T10:10:00Z")),
+        "presentation-lifetime-invalid",
+    )
+    _refusal(
+        lambda: parse(_resign(key_path, document, purpose="other")),
+        "presentation-malformed",
+    )
+    _refusal(
+        lambda: parse(_resign(key_path, document, version=True)),
+        "presentation-malformed",
+    )
+
+
+def test_the_reader_never_follows_a_symlink(home: Path, key_path: Path) -> None:
+    path, public = _admission_file(home, key_path)
+    link = home / "link.json"
+    link.symlink_to(path)
+    _refusal(
+        lambda: ha.read_host_admission(link, presentation_public_key_b64url=public),
+        "host-admission-unreadable",
+    )
+
+
+# ── lazy Foundation / Kernel and isolated Python ────────────────────────────
+
+
+def _isolated(*arguments: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Design 2.1: no script directory on sys.path, PYTHON* variables ignored."""
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-P", *arguments],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        timeout=120,
+        check=False,
+    )
+
+
+def test_the_script_runs_under_isolated_python(tmp_path: Path) -> None:
+    result = _isolated(str(SCRIPT), "--help", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "key-init" in result.stdout and "present" in result.stdout
+
+
+def test_the_script_imports_no_neighbouring_script() -> None:
+    tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+    names = {
+        (node.module or "").split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    } | {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert not {name for name in names if name.startswith("lane3_")}
+
+
+_LAZY_PROBE = """
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("probe_ha", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules["probe_ha"] = module
+spec.loader.exec_module(module)
+PREFIXES = ("dotmac_deployment", "dotmac_kernel")
+before = sorted(m for m in sys.modules if m.startswith(PREFIXES))
+module.key_init(sys.argv[2], owner_uid=os.geteuid())
+after = sorted(m for m in sys.modules if m.startswith(PREFIXES))
+print(json.dumps([before, after]))
+"""
+
+
+def test_key_init_needs_neither_foundation_nor_kernel(
+    tmp_path: Path, home: Path
+) -> None:
+    result = _isolated(
+        "-c", _LAZY_PROBE, str(SCRIPT), str(home / "probe.key"), cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [[], []]
+    assert stat.S_IMODE((home / "probe.key").stat().st_mode) == 0o400
+
+
+def test_present_and_the_reader_load_foundation_lazily() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    top_level = [
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+    ]
+    for node in top_level:
+        module = getattr(node, "module", None) or ""
+        assert not module.startswith(("dotmac_deployment", "dotmac_kernel"))

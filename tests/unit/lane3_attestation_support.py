@@ -82,6 +82,7 @@ def root_document(
         "trust_root_version": trust_root_version,
         "not_before": ROOT_NOT_BEFORE,
         "not_after": ROOT_NOT_AFTER,
+        "revoked": False,
     }
     document.update(overrides)
     return document
@@ -196,3 +197,39 @@ def installed_envelope(
 def write_json(path: Path, document: Any) -> Path:
     path.write_text(json.dumps(document), encoding="utf-8")
     return path
+
+
+def receipt_document(**overrides: Any) -> dict[str, Any]:
+    """The E10 receipt row at step 3 (no destruction stamp yet)."""
+    document: dict[str, Any] = {
+        "vm_alias": "vm-alpha",
+        "host_id": HOST_ID,
+        "machine_id": "0123456789abcdef0123456789abcdef",
+        "ssh_host_key_fingerprint": "SHA256:" + "B" * 43,
+        "incarnation_public_key_b64url": b64url(raw_public(INCARNATION_KEY)),
+        "incarnation_fingerprint": fingerprint(INCARNATION_KEY),
+        "enrolment_uuid": ENROLMENT_UUID,
+        "receipt_ref": "e10-0001",
+        "vm_slot": "node1/101",
+    }
+    document.update(overrides)
+    return document
+
+
+def dispatch_document(
+    attempt_id: str = DISPATCH_ID,
+    expires_at: str = AUTH_EXPIRES,
+    dispatch_id: str | None = None,
+) -> dict[str, Any]:
+    """`dispatch-materials.json` as CP `materials_producer` writes it."""
+    return {
+        "attempt_id": attempt_id,
+        "authorization_envelope": {
+            "statement": {"expires_at": expires_at},
+            "signature": "x",
+        },
+        "dispatch_envelope": {
+            "statement": {"dispatch_id": dispatch_id or attempt_id},
+            "signature": "x",
+        },
+    }

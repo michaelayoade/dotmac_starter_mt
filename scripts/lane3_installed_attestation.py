@@ -7,25 +7,47 @@ attended ceremony. This tool is the two halves AROUND that signature:
 
 * ``render``   builds the unsigned installed envelope and writes its
   ``signed_bytes`` (Foundation's own canonical bytes) so the ceremony can sign
-  exactly those bytes. It prints their sha256. It runs in the candidate venv and
-  imports no signing code and reads no key.
+  exactly those bytes. It prints their sha256. It imports no signing code and
+  reads no key.
 * ``assemble`` takes the transit signature, refuses unless it verifies against the
   enrolled public key over exactly the rendered bytes, and writes the signed
   envelope with Foundation's own writer.
 * ``verify``   checks the signed envelope with Foundation's pair verifier against
   Control-enrolled roots, as an offline read-back.
 
-Nothing here signs. The only secret-free inputs are public: envelopes, public
-keys, trust-root descriptors, instants. The clock is never read: every instant is
-an input (the CP database time t0), because store time is the only clock.
+Nothing here signs. The only inputs are public: envelopes, trust-root
+descriptors, the E10 receipt, the controller-side dispatch materials, instants.
+The clock is never read: every instant is an input (the CP database time t0),
+because store time is the only clock.
 
-The installed subject is derived, never typed: package, version and wheel digest
-come from the candidate subject that survived verification, and the candidate
-binding digest is Foundation's `candidate_subject_digest`. No digest of the
-installed bytes can be supplied.
+## Typed, closed inputs
+
+The single-use incarnation key signs whatever `render` produced, so a typo caught
+only at E16 would spend the host. Hence `render` takes no loose host, dispatch,
+key, issuer or expiry flag. It reads:
+
+* Control's installed root (closed member set, ``revoked`` REQUIRED, custody
+  domain pinned to ``host_attester``, purpose pinned, valid at t0, not revoked);
+* the E10 receipt as it exists at step 3 (the receipt row minus the destruction
+  stamp, which does not exist yet; closed member set), cross-checked against the
+  root: fingerprint, enrolment UUID and key bytes must all agree;
+* ``dispatch-materials.json`` (closed member set): the dispatch id is
+  ``attempt_id``, the dispatch envelope must name the same id, and the
+  authorization's ``expires_at`` bounds the attestation.
+
+The candidate root is pinned the same way (``candidate_release_signer``).
+
+## Self-contained
+
+Design 2.1 runs this under ``python -E -P`` (or ``-I``) in the candidate venv, so
+the script directory is NOT on ``sys.path``. This module therefore imports only
+the standard library, ``cryptography`` and ``dotmac_deployment_foundation``; the
+few rules it shares with neighbouring scripts are copied below, each naming its
+source, and ``tests/unit/test_lane3_installed_attestation.py`` asserts the copies
+agree with the originals and that the script runs under ``python -I -P``.
 
 Refusals carry a code. Foundation's own refusals pass through with Foundation's
-code; the codes defined here are named in ``Refused`` call sites.
+code.
 """
 
 from __future__ import annotations
@@ -45,9 +67,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.trusted_host_source import (
     ATTESTATION_SCHEMA,
+    CANDIDATE_ATTESTATION_PURPOSE,
     INSTALLED_OBSERVATION_PURPOSE,
     AttestationEnvelopeV2,
     AttestationTrustPolicy,
@@ -58,22 +83,24 @@ from dotmac_deployment_foundation.trusted_host_source import (
     verify_attestation_pair,
     verify_candidate_attestation,
 )
-from lane3_e10_receipt import ReceiptRefused, _raw_public_key
-from lane3_host_source_admission import EXPECTED_PACKAGE, Ed25519AttestationVerifier
 
 __all__ = [
+    "CANDIDATE_CUSTODY_DOMAIN",
     "HOST_ATTESTER_CUSTODY_DOMAIN",
     "MAX_VALIDITY",
     "Refused",
     "assemble_installed",
+    "load_dispatch_materials",
+    "load_receipt",
+    "load_root",
     "main",
     "render_installed",
     "verify_installed",
 ]
 
-#: Custody domain of the installed-host role. Fixed: the incarnation key is a
-#: host attester and nothing else (design 1.1 E10.5, 2.2 step 3).
+#: Custody domains, pinned (design 1.1 E10.5, 2.5, 2.2 step 3).
 HOST_ATTESTER_CUSTODY_DOMAIN: Final = "host_attester"
+CANDIDATE_CUSTODY_DOMAIN: Final = "candidate_release_signer"
 _ALGORITHM: Final = "ed25519"
 #: `expires_at = min(t0 + 2 h, authorization expiry, root not_after)` (design 2.2).
 MAX_VALIDITY: Final = timedelta(hours=2)
@@ -82,9 +109,19 @@ _TRANSIT_PREFIX: Final = "vault:v1:"
 #: Echoed by Foundation's pair verifier but never consumed offline. Control's
 #: verification context digest only exists at resolve, after the lock.
 OFFLINE_CONTEXT: Final = "offline-readback-not-a-control-context"
+#: COPY of `lane3_host_source_admission.EXPECTED_PACKAGE`.
+EXPECTED_PACKAGE: Final = "dotmac-deployment-foundation"
+
+# COPIES of the field rules in `lane3_e10_receipt` (`_ALIAS`, `_VM_SLOT`,
+# `_MACHINE_ID`, `_OPENSSH_FINGERPRINT`, `_TOKEN`). The test file asserts each
+# pattern equals the original's.
+_ALIAS: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
+_VM_SLOT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}/[1-9][0-9]{0,8}")
+_MACHINE_ID: Final = re.compile(r"[0-9a-f]{32}")
+_OPENSSH_FINGERPRINT: Final = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+_TOKEN: Final = re.compile(r"[\x21-\x7e]{1,256}")
 _INSTANT: Final = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _SHA256_HEX: Final = re.compile(r"[0-9a-f]{64}")
-_TEXT: Final = re.compile(r"[\x21-\x7e]{1,256}")
 _MAX_INPUT: Final = 1024 * 1024
 _ROOT_FIELDS: Final = frozenset(
     {
@@ -101,6 +138,24 @@ _ROOT_FIELDS: Final = frozenset(
         "revoked",
     }
 )
+#: The E10 receipt row at step 3: `E10ReceiptRef` without
+#: `incarnation_key_destroyed_at`, which is stamped only at step 8.
+_RECEIPT_FIELDS: Final = frozenset(
+    {
+        "vm_alias",
+        "host_id",
+        "machine_id",
+        "ssh_host_key_fingerprint",
+        "incarnation_public_key_b64url",
+        "incarnation_fingerprint",
+        "enrolment_uuid",
+        "receipt_ref",
+        "vm_slot",
+    }
+)
+_DISPATCH_FIELDS: Final = frozenset(
+    {"attempt_id", "authorization_envelope", "dispatch_envelope"}
+)
 _ENVELOPE_FIELDS: Final = frozenset(
     field.name for field in dataclasses.fields(AttestationEnvelopeV2) if field.init
 )
@@ -112,6 +167,55 @@ class Refused(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+# ── copied rules ────────────────────────────────────────────────────────────
+
+
+def raw_public_key(value: object) -> bytes:
+    """COPY of `lane3_e10_receipt._raw_public_key` (same rule, own refusal).
+
+    A canonical unpadded base64url 32-byte key, the only spelling Control reads.
+    """
+    if not isinstance(value, str) or not value or "=" in value:
+        raise Refused("incarnation-public-key-invalid")
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (binascii.Error, ValueError):
+        raise Refused("incarnation-public-key-invalid") from None
+    if (
+        len(raw) != 32
+        or base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=") != value
+    ):
+        raise Refused("incarnation-public-key-invalid")
+    return raw
+
+
+class Ed25519Verifier:
+    """COPY of `lane3_host_source_admission.Ed25519AttestationVerifier`.
+
+    Verifies Ed25519 attestation signatures and nothing else; `False` for every
+    malformed key, signature or algorithm.
+    """
+
+    def verify(
+        self, *, public_key: bytes, algorithm: str, message: bytes, signature: str
+    ) -> bool:
+        if algorithm != _ALGORITHM or len(public_key) != 32:
+            return False
+        try:
+            raw_signature = base64.b64decode(signature, validate=True)
+        except (binascii.Error, ValueError):
+            return False
+        if len(raw_signature) != 64:
+            return False
+        try:
+            Ed25519PublicKey.from_public_bytes(public_key).verify(
+                raw_signature, message
+            )
+        except InvalidSignature:
+            return False
+        return True
 
 
 # ── inputs ──────────────────────────────────────────────────────────────────
@@ -152,8 +256,20 @@ def _format(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _text(value: object, code: str) -> str:
-    if not isinstance(value, str) or not _TEXT.fullmatch(value):
+def _token(value: object, code: str) -> str:
+    if not isinstance(value, str) or not _TOKEN.fullmatch(value):
+        raise Refused(code)
+    return value
+
+
+def _canonical_uuid(value: object, code: str) -> str:
+    if not isinstance(value, str):
+        raise Refused(code)
+    try:
+        canonical = str(uuid.UUID(value))
+    except ValueError:
+        raise Refused(code) from None
+    if canonical != value:
         raise Refused(code)
     return value
 
@@ -166,44 +282,104 @@ def load_envelope(path: str | Path, *, code: str) -> AttestationEnvelopeV2:
         raise Refused(code) from None
 
 
-def load_root(path: str | Path, *, code: str) -> AttestationTrustRootV2:
-    """A Control-resolved root descriptor. Closed member set, `revoked` optional."""
-    document = _json_object(path, code)
-    keys = set(document)
-    if not (_ROOT_FIELDS - {"revoked"}) <= keys <= _ROOT_FIELDS:
+_ROLE_PINS: Final = {
+    "installed": (INSTALLED_OBSERVATION_PURPOSE, HOST_ATTESTER_CUSTODY_DOMAIN),
+    "candidate": (CANDIDATE_ATTESTATION_PURPOSE, CANDIDATE_CUSTODY_DOMAIN),
+}
+
+
+def root_from_document(
+    document: Mapping[str, Any], *, role: str, code: str
+) -> AttestationTrustRootV2:
+    """A Control-resolved root. Closed member set: `revoked` is REQUIRED, so an
+    omission is a refusal rather than a silent `False`. Purpose, custody domain
+    and algorithm are pinned to the role."""
+    if set(document) != _ROOT_FIELDS or not isinstance(document["revoked"], bool):
         raise Refused(code)
     try:
-        return AttestationTrustRootV2(**document)
+        root = AttestationTrustRootV2(**document)
     except (SpecError, TypeError):
         raise Refused(code) from None
+    purpose, custody = _ROLE_PINS[role]
+    if (
+        root.purpose != purpose
+        or root.custody_domain != custody
+        or root.algorithm != _ALGORITHM
+    ):
+        raise Refused(f"{role}-root-role-mismatch")
+    return root
 
 
-def _incarnation(public_key_b64url: str, fingerprint: str) -> tuple[bytes, str]:
-    """The raw key and its fingerprint, with the receipt's fingerprint checked."""
-    try:
-        raw = _raw_public_key(public_key_b64url)
-    except ReceiptRefused:
-        raise Refused("incarnation-public-key-invalid") from None
-    derived = "sha256:" + hashlib.sha256(raw).hexdigest()
-    if derived != fingerprint:
+def load_root(path: str | Path, *, role: str) -> AttestationTrustRootV2:
+    return root_from_document(
+        _json_object(path, f"{role}-root-unreadable"),
+        role=role,
+        code=f"{role}-root-malformed",
+    )
+
+
+def load_receipt(path: str | Path) -> dict[str, Any]:
+    """The E10 receipt row at step 3. Closed member set, every field checked
+    against the E10 receipt's own rules (copied above)."""
+    document = _json_object(path, "receipt-unreadable")
+    if set(document) != _RECEIPT_FIELDS:
+        raise Refused("receipt-malformed")
+    for name, pattern in (
+        ("vm_alias", _ALIAS),
+        ("machine_id", _MACHINE_ID),
+        ("ssh_host_key_fingerprint", _OPENSSH_FINGERPRINT),
+    ):
+        value = document[name]
+        if not isinstance(value, str) or not pattern.fullmatch(value):
+            raise Refused("receipt-malformed")
+    slot = document["vm_slot"]
+    if slot is not None and (not isinstance(slot, str) or not _VM_SLOT.fullmatch(slot)):
+        raise Refused("receipt-malformed")
+    _token(document["host_id"], "receipt-malformed")
+    _token(document["receipt_ref"], "receipt-malformed")
+    _canonical_uuid(document["enrolment_uuid"], "receipt-malformed")
+    raw = raw_public_key(document["incarnation_public_key_b64url"])
+    if (
+        document["incarnation_fingerprint"]
+        != "sha256:" + hashlib.sha256(raw).hexdigest()
+    ):
         raise Refused("incarnation-fingerprint-does-not-identify-the-key")
-    return raw, derived
+    return document
 
 
-def _canonical_uuid(value: str) -> str:
+def load_dispatch_materials(path: str | Path) -> tuple[str, datetime]:
+    """`(attempt_id, authorization expires_at)` from `dispatch-materials.json`.
+
+    Closed member set. The dispatch envelope must name the same id as
+    `attempt_id`: the installed attestation's observation id is that dispatch.
+    The expiry is floored to the second.
+    """
+    document = _json_object(path, "dispatch-materials-unreadable")
+    if set(document) != _DISPATCH_FIELDS:
+        raise Refused("dispatch-materials-malformed")
+    attempt_id = _canonical_uuid(document["attempt_id"], "attempt-id-invalid")
+    authorization, dispatch = (
+        document["authorization_envelope"],
+        document["dispatch_envelope"],
+    )
+    if not isinstance(authorization, dict) or not isinstance(dispatch, dict):
+        raise Refused("dispatch-materials-malformed")
+    auth_statement, dispatch_statement = (
+        authorization.get("statement"),
+        dispatch.get("statement"),
+    )
+    if not isinstance(auth_statement, dict) or not isinstance(dispatch_statement, dict):
+        raise Refused("dispatch-materials-malformed")
+    if dispatch_statement.get("dispatch_id") != attempt_id:
+        raise Refused("dispatch-envelope-names-another-dispatch")
+    expires = auth_statement.get("expires_at")
+    if not isinstance(expires, str) or not expires.endswith("Z"):
+        raise Refused("authorization-expiry-invalid")
     try:
-        canonical = str(uuid.UUID(value))
+        parsed = datetime.fromisoformat(expires[:-1] + "+00:00")
     except ValueError:
-        raise Refused("enrolment-uuid-invalid") from None
-    if canonical != value:
-        raise Refused("enrolment-uuid-invalid")
-    return canonical
-
-
-def _foundation(refusal: Exception) -> Exception:
-    """Foundation's refusals keep Foundation's code; anything else is a bug."""
-    code = getattr(refusal, "code", None)
-    return Refused(code) if isinstance(code, str) else refusal
+        raise Refused("authorization-expiry-invalid") from None
+    return attempt_id, parsed.astimezone(UTC).replace(microsecond=0)
 
 
 # ── render ──────────────────────────────────────────────────────────────────
@@ -218,61 +394,61 @@ class Rendered:
     candidate_envelope_digest: str
 
 
+def _foundation(refusal: Exception) -> Exception:
+    """Foundation's refusals keep Foundation's code; anything else is a bug."""
+    code = getattr(refusal, "code", None)
+    return Refused(code) if isinstance(code, str) else refusal
+
+
+def _agree(root: AttestationTrustRootV2, receipt: Mapping[str, Any]) -> None:
+    """The receipt and Control's root must describe one enrolment."""
+    raw = raw_public_key(receipt["incarnation_public_key_b64url"])
+    try:
+        root_key = base64.b64decode(root.public_key_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise Refused("installed-root-malformed") from None
+    if (
+        root_key != raw
+        or root.public_key_fingerprint != receipt["incarnation_fingerprint"]
+    ):
+        raise Refused("receipt-root-key-mismatch")
+    if root.trust_root_version != receipt["enrolment_uuid"]:
+        raise Refused("receipt-root-enrolment-mismatch")
+
+
 def render_installed(
     *,
     candidate: AttestationEnvelopeV2,
     candidate_root: AttestationTrustRootV2,
     candidate_audience: str,
-    host_id: str,
-    observation_id: str,
-    enrolment_uuid: str,
-    key_id: str,
-    issuer: str,
-    incarnation_public_key_b64url: str,
-    incarnation_fingerprint: str,
+    installed_root: AttestationTrustRootV2,
+    receipt: Mapping[str, Any],
+    dispatch_materials: tuple[str, datetime],
     t0: str,
-    authorization_expires_at: str,
-    root_not_after: str,
 ) -> Rendered:
     """Build I(D) unsigned and return the exact bytes the ceremony will sign.
 
-    The candidate is verified here, with Foundation's `verify_candidate_attestation`
-    against the Control-enrolled candidate root at `t0`. The installed role needs a
-    root for Foundation's policy to construct, so one is built from the receipt's
-    own key; the policy's own distinctness checks then also refuse an incarnation
-    key that equals, or shares a custody domain with, the candidate root.
+    The candidate is verified with Foundation's `verify_candidate_attestation`
+    against the Control-enrolled candidate root at `t0`, under a policy that also
+    holds the REAL installed root, so Foundation's own distinctness checks cover
+    both roots.
     """
-    host_id = _text(host_id, "host-id-invalid")
-    observation_id = _text(observation_id, "observation-id-invalid")
-    key_id = _text(key_id, "key-id-invalid")
-    issuer = _text(issuer, "issuer-invalid")
-    candidate_audience = _text(candidate_audience, "candidate-audience-invalid")
-    trust_root_version = _canonical_uuid(enrolment_uuid)
-    raw_key, fingerprint = _incarnation(
-        incarnation_public_key_b64url, incarnation_fingerprint
-    )
+    candidate_audience = _token(candidate_audience, "candidate-audience-invalid")
     issued = _instant(t0, "t0-invalid")
-    authorization_expiry = _instant(
-        authorization_expires_at, "authorization-expiry-invalid"
-    )
-    root_expiry = _instant(root_not_after, "root-not-after-invalid")
-    expires = min(issued + MAX_VALIDITY, authorization_expiry, root_expiry)
+    observation_id, authorization_expiry = dispatch_materials
+    host_id = _token(receipt["host_id"], "host-id-invalid")
+    if installed_root.revoked:
+        raise Refused("installed-root-revoked")
+    _agree(installed_root, receipt)
+    root_start = _instant_of(installed_root.not_before)
+    root_end = _instant_of(installed_root.not_after)
+    if not root_start <= issued < root_end:
+        raise Refused("installed-root-not-valid-at-t0")
+    expires = min(issued + MAX_VALIDITY, authorization_expiry, root_end)
     if expires <= issued:
         raise Refused("installed-expiry-not-after-issue")
 
     try:
-        installed_root = AttestationTrustRootV2(
-            public_key_fingerprint=fingerprint,
-            public_key_base64=base64.b64encode(raw_key).decode("ascii"),
-            issuer=issuer,
-            key_id=key_id,
-            purpose=INSTALLED_OBSERVATION_PURPOSE,
-            custody_domain=HOST_ATTESTER_CUSTODY_DOMAIN,
-            algorithm=_ALGORITHM,
-            trust_root_version=trust_root_version,
-            not_before=_format(issued),
-            not_after=_format(root_expiry),
-        )
         policy = AttestationTrustPolicy(
             candidate_roots=(candidate_root,),
             installed_roots=(installed_root,),
@@ -281,7 +457,7 @@ def render_installed(
         )
         subject = verify_candidate_attestation(
             candidate=candidate,
-            verifier=Ed25519AttestationVerifier(),
+            verifier=Ed25519Verifier(),
             trust_policy=policy,
             now=issued,
         )
@@ -290,31 +466,34 @@ def render_installed(
     if subject.package != EXPECTED_PACKAGE:
         raise Refused("candidate-package-unexpected")
 
-    installed_subject = InstalledHostAttestationSubjectV2(
-        host_id,
-        subject.package,
-        subject.version,
-        subject.wheel_sha256,
-        candidate_subject_digest(subject),
-    )
-    # The signature is a placeholder Foundation's constructor needs; it is not in
-    # `signed_bytes()` and the envelope itself is never written.
-    envelope = AttestationEnvelopeV2(
-        ATTESTATION_SCHEMA,
-        INSTALLED_OBSERVATION_PURPOSE,
-        issuer,
-        key_id,
-        _ALGORITHM,
-        fingerprint,
-        HOST_ATTESTER_CUSTODY_DOMAIN,
-        trust_root_version,
-        _format(issued),
-        _format(expires),
-        host_id,
-        observation_id,
-        installed_subject.canonical_document(),
-        "unsigned",
-    )
+    try:
+        installed_subject = InstalledHostAttestationSubjectV2(
+            host_id,
+            subject.package,
+            subject.version,
+            subject.wheel_sha256,
+            candidate_subject_digest(subject),
+        )
+        # The signature is a placeholder Foundation's constructor needs; it is
+        # not in `signed_bytes()` and the envelope itself is never written.
+        envelope = AttestationEnvelopeV2(
+            ATTESTATION_SCHEMA,
+            INSTALLED_OBSERVATION_PURPOSE,
+            installed_root.issuer,
+            installed_root.key_id,
+            _ALGORITHM,
+            installed_root.public_key_fingerprint,
+            HOST_ATTESTER_CUSTODY_DOMAIN,
+            installed_root.trust_root_version,
+            _format(issued),
+            _format(expires),
+            host_id,
+            observation_id,
+            installed_subject.canonical_document(),
+            "unsigned",
+        )
+    except Exception as refusal:
+        raise _foundation(refusal) from None
     signed = envelope.signed_bytes()
     return Rendered(
         signed_bytes=signed,
@@ -323,6 +502,14 @@ def render_installed(
         expires_at=_format(expires),
         candidate_envelope_digest=str(attestation_envelope_digest(candidate)),
     )
+
+
+def _instant_of(value: str) -> datetime:
+    """A root bound. Foundation already required canonical UTC RFC3339."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        raise Refused("installed-root-malformed") from None
 
 
 # ── assemble ────────────────────────────────────────────────────────────────
@@ -353,15 +540,15 @@ def assemble_installed(
     *,
     signed_bytes: bytes,
     signature: str,
-    incarnation_public_key_b64url: str,
+    installed_root: AttestationTrustRootV2,
     expect_signed_bytes_sha256: str,
 ) -> AttestationEnvelopeV2:
     """Attach the transit signature to the rendered bytes, after verifying it.
 
     Refuses unless the file is exactly the bytes `render` printed the digest of,
-    those bytes are Foundation's canonical form of an installed-host envelope, and
-    the signature verifies under the enrolled key. A bad signature never becomes a
-    file.
+    those bytes are Foundation's canonical form of an installed-host envelope
+    bound to the enrolled root, and the signature verifies under that root's key.
+    A bad signature never becomes a file.
     """
     if not _SHA256_HEX.fullmatch(expect_signed_bytes_sha256):
         raise Refused("signed-bytes-digest-invalid")
@@ -390,17 +577,20 @@ def assemble_installed(
         or envelope.algorithm != _ALGORITHM
     ):
         raise Refused("signed-bytes-not-an-installed-attestation")
-    try:
-        raw_key = _raw_public_key(incarnation_public_key_b64url)
-    except ReceiptRefused:
-        raise Refused("incarnation-public-key-invalid") from None
-    if (
-        "sha256:" + hashlib.sha256(raw_key).hexdigest()
-        != envelope.public_key_fingerprint
-    ):
+    if envelope.public_key_fingerprint != installed_root.public_key_fingerprint:
         raise Refused("signed-bytes-key-differs-from-enrolled-key")
-    if not Ed25519AttestationVerifier().verify(
-        public_key=raw_key,
+    if (
+        envelope.issuer,
+        envelope.key_id,
+        envelope.trust_root_version,
+    ) != (
+        installed_root.issuer,
+        installed_root.key_id,
+        installed_root.trust_root_version,
+    ):
+        raise Refused("signed-bytes-differ-from-installed-root")
+    if not Ed25519Verifier().verify(
+        public_key=base64.b64decode(installed_root.public_key_base64, validate=True),
         algorithm=_ALGORITHM,
         message=signed_bytes,
         signature=signature_b64,
@@ -419,31 +609,38 @@ def verify_installed(
     candidate_root: AttestationTrustRootV2,
     installed_root: AttestationTrustRootV2,
     candidate_audience: str,
+    host_id: str,
+    dispatch_id: str,
     now: str,
 ) -> dict[str, str]:
     """Pair-verify with Foundation: both signatures, bindings, audience, package.
 
-    `now` is the CP database time and is required: there is no wall-clock default.
-    The expected host and dispatch are read from the installed envelope's own
-    audience and observation id and then CHECKED by Foundation against the root
-    policy, so this proves internal agreement, not Control's choice of either.
+    `host_id` and `dispatch_id` are REQUIRED and compared with the envelope, so a
+    read-back proves agreement with what the ceremony meant, not merely internal
+    consistency. `now` is the CP database time; there is no wall-clock default.
     """
     instant = _instant(now, "now-invalid")
+    host_id = _token(host_id, "host-id-invalid")
+    dispatch_id = _token(dispatch_id, "dispatch-id-invalid")
+    if installed.audience != host_id:
+        raise Refused("host-id-mismatch")
+    if installed.observation_id != dispatch_id:
+        raise Refused("dispatch-id-mismatch")
     try:
         result = verify_attestation_pair(
             candidate=candidate,
             installed=installed,
-            verifier=Ed25519AttestationVerifier(),
+            verifier=Ed25519Verifier(),
             trust_policy=AttestationTrustPolicy(
                 candidate_roots=(candidate_root,),
                 installed_roots=(installed_root,),
-                candidate_audience=_text(
+                candidate_audience=_token(
                     candidate_audience, "candidate-audience-invalid"
                 ),
-                installed_audience=installed.audience,
+                installed_audience=host_id,
             ),
-            expected_host_identity=installed.audience,
-            expected_observation_id=installed.observation_id,
+            expected_host_identity=host_id,
+            expected_observation_id=dispatch_id,
             expected_package=EXPECTED_PACKAGE,
             verification_context_digest=OFFLINE_CONTEXT,
             now=instant,
@@ -482,18 +679,12 @@ def _write_new(path: str, data: bytes) -> None:
 def _cmd_render(args: argparse.Namespace) -> dict[str, str]:
     rendered = render_installed(
         candidate=load_envelope(args.candidate, code="candidate-unreadable"),
-        candidate_root=load_root(args.candidate_root, code="candidate-root-unreadable"),
+        candidate_root=load_root(args.candidate_root, role="candidate"),
         candidate_audience=args.candidate_audience,
-        host_id=args.host_id,
-        observation_id=args.observation_id,
-        enrolment_uuid=args.enrolment_uuid,
-        key_id=args.key_id,
-        issuer=args.issuer,
-        incarnation_public_key_b64url=args.incarnation_public_key,
-        incarnation_fingerprint=args.incarnation_fingerprint,
+        installed_root=load_root(args.installed_root, role="installed"),
+        receipt=load_receipt(args.receipt),
+        dispatch_materials=load_dispatch_materials(args.dispatch_materials),
         t0=args.t0,
-        authorization_expires_at=args.authorization_expires_at,
-        root_not_after=args.root_not_after,
     )
     _write_new(args.out_signed_bytes, rendered.signed_bytes)
     return {
@@ -512,7 +703,7 @@ def _cmd_assemble(args: argparse.Namespace) -> dict[str, str]:
     envelope = assemble_installed(
         signed_bytes=_read(args.signed_bytes, "signed-bytes-unreadable"),
         signature=args.signature,
-        incarnation_public_key_b64url=args.incarnation_public_key,
+        installed_root=load_root(args.installed_root, role="installed"),
         expect_signed_bytes_sha256=args.expect_signed_bytes_sha256,
     )
     try:
@@ -526,9 +717,11 @@ def _cmd_verify(args: argparse.Namespace) -> dict[str, str]:
     return verify_installed(
         installed=load_envelope(args.installed, code="installed-unreadable"),
         candidate=load_envelope(args.candidate, code="candidate-unreadable"),
-        candidate_root=load_root(args.candidate_root, code="candidate-root-unreadable"),
-        installed_root=load_root(args.installed_root, code="installed-root-unreadable"),
+        candidate_root=load_root(args.candidate_root, role="candidate"),
+        installed_root=load_root(args.installed_root, role="installed"),
         candidate_audience=args.candidate_audience,
+        host_id=args.host_id,
+        dispatch_id=args.dispatch_id,
         now=args.now,
     )
 
@@ -537,48 +730,48 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    render = sub.add_parser("render", help="build I(D) unsigned; write signed_bytes")
-    render.set_defaults(handler=_cmd_render)
-    for name in (
+    def add(name: str, handler: Any, help_text: str, *required: str) -> None:
+        command = sub.add_parser(name, help=help_text)
+        command.set_defaults(handler=handler)
+        for option in required:
+            command.add_argument(f"--{option}", required=True)
+
+    add(
+        "render",
+        _cmd_render,
+        "build I(D) unsigned; write signed_bytes",
         "candidate",
         "candidate-root",
         "candidate-audience",
-        "host-id",
-        "observation-id",
-        "enrolment-uuid",
-        "key-id",
-        "issuer",
-        "incarnation-public-key",
-        "incarnation-fingerprint",
+        "installed-root",
+        "receipt",
+        "dispatch-materials",
         "t0",
-        "authorization-expires-at",
-        "root-not-after",
         "out-signed-bytes",
-    ):
-        render.add_argument(f"--{name}", required=True)
-
-    assemble = sub.add_parser("assemble", help="attach the transit signature")
-    assemble.set_defaults(handler=_cmd_assemble)
-    for name in (
+    )
+    add(
+        "assemble",
+        _cmd_assemble,
+        "attach the transit signature",
         "signed-bytes",
         "signature",
-        "incarnation-public-key",
+        "installed-root",
         "expect-signed-bytes-sha256",
         "out",
-    ):
-        assemble.add_argument(f"--{name}", required=True)
-
-    verify = sub.add_parser("verify", help="pair-verify with Foundation")
-    verify.set_defaults(handler=_cmd_verify)
-    for name in (
+    )
+    add(
+        "verify",
+        _cmd_verify,
+        "pair-verify with Foundation",
         "installed",
         "candidate",
         "candidate-root",
         "installed-root",
         "candidate-audience",
+        "host-id",
+        "dispatch-id",
         "now",
-    ):
-        verify.add_argument(f"--{name}", required=True)
+    )
     return parser
 
 
