@@ -254,7 +254,7 @@ def _approved_claim(
 
 def _accept(db: Session, tenant_id: uuid.UUID, claim_id: uuid.UUID) -> ClaimLiability:
     claim = db.get(ExpenseClaim, claim_id)
-    return accept_claim_for_reimbursement(
+    liability = accept_claim_for_reimbursement(
         db,
         scope=TenantScope(tenant_id),
         command=AcceptClaimForReimbursement(
@@ -267,6 +267,24 @@ def _accept(db: Session, tenant_id: uuid.UUID, claim_id: uuid.UUID) -> ClaimLiab
         accepted_at=NOW,
         **_key(),
     )
+    # The acceptance must be in the ledger before money moves against it.
+    consequence = build_claim_liability_consequence(
+        db, tenant_id=tenant_id, liability_id=liability.id
+    )
+    record_claim_accounting_receipt(
+        db,
+        scope=TenantScope(tenant_id),
+        command=ClaimAccountingReceiptInput(
+            "expense_claim_liability",
+            liability.id,
+            consequence.fingerprint,
+            "GL-1",
+            "e" * 64,
+        ),
+        recorded_at=NOW,
+        **_key(),
+    )
+    return liability
 
 
 def _settle(db: Session, tenant_id, liability_id, amount: str, ref: str):

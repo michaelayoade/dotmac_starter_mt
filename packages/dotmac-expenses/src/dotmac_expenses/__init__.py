@@ -15,7 +15,6 @@ from dotmac_expenses.consequences import (
 from dotmac_expenses.contracts import (
     CLAIM_INPUT_VAT_DEFAULT,
     CLAIM_INPUT_VAT_SETTING,
-    INPUT_VAT_IMMEDIATE_ACCOUNT_REF,
     AcceptClaimForReimbursement,
     AcceptedClaimLine,
     AddPolicyRule,
@@ -106,7 +105,6 @@ __all__ = [
     "__version__",
     "CLAIM_INPUT_VAT_DEFAULT",
     "CLAIM_INPUT_VAT_SETTING",
-    "INPUT_VAT_IMMEDIATE_ACCOUNT_REF",
     "AcceptClaimForReimbursement",
     "AcceptedClaimLine",
     "ClaimAccountingReceiptInput",

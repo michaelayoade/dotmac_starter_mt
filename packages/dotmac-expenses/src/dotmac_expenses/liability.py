@@ -44,7 +44,6 @@ from dotmac_expenses.consequences import (
     build_claim_settlement_reversal_consequence,
 )
 from dotmac_expenses.contracts import (
-    INPUT_VAT_IMMEDIATE_ACCOUNT_REF,
     AcceptClaimForReimbursement,
     ClaimAccountingReceiptInput,
     ClaimInputVat,
@@ -314,12 +313,6 @@ def accept_claim_for_reimbursement(
                     "(expenses.claim_input_vat is 'none')",
                     RefusalCode.CLAIM_VAT_DISABLED,
                 )
-            if tax_ref != INPUT_VAT_IMMEDIATE_ACCOUNT_REF:
-                raise refuse(
-                    InvalidCommand,
-                    "input VAT must go to the immediate input-VAT account",
-                    RefusalCode.CLAIM_VAT_ACCOUNT_NOT_IMMEDIATE,
-                )
         by_line[item.claim_line_id] = {
             "expense_account_ref": expense,
             "dimension_refs": _dimension_pairs(item.dimension_refs),
@@ -561,6 +554,7 @@ def reverse_claim_acceptance(
                 "only an untouched, accepted, open liability can be reversed",
                 RefusalCode.LIABILITY_NOT_OPEN,
             )
+        _require_acceptance_receipt(session, tenant_id, liability)
         if _as_utc(reversed_at) < _as_utc(liability.accepted_at):
             raise InvalidCommand("acceptance cannot be reversed before it happened")
         row = ClaimLiabilityReversal(
@@ -683,6 +677,7 @@ def record_claim_settlement(
                 )
             return {"settlement_id": str(existing.id)}
         _require_unreversed(liability)
+        _require_acceptance_receipt(session, tenant_id, liability)
         if (
             amount.currency.code != liability.currency_code
             or amount.currency.minor_units != liability.minor_units
@@ -742,6 +737,23 @@ def _receipt_exists(
         ClaimAccountingReceipt.document_kind == document_kind,
         ClaimAccountingReceipt.document_id == document_id,
     )
+
+
+def _require_acceptance_receipt(
+    db: Session, tenant_id: UUID, liability: ClaimLiability
+) -> None:
+    """An accepted liability must be in the ledger before money moves against
+    it or its acceptance is reversed. Historical liabilities are exempt: the
+    legacy ledger already holds them."""
+    if liability.origin == LiabilityOrigin.HISTORICAL.value:
+        return
+    if not _receipt_exists(db, tenant_id, LIABILITY_DOCUMENT_KIND, liability.id):
+        raise refuse(
+            InvalidLifecycle,
+            "the acceptance has no accounting receipt, so the liability is not "
+            "in the ledger",
+            RefusalCode.LIABILITY_NOT_IN_LEDGER,
+        )
 
 
 def reverse_claim_settlement(

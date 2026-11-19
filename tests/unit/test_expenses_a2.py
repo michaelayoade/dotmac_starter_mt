@@ -13,7 +13,6 @@ import pytest
 from dotmac_expenses import (
     CLAIM_INPUT_VAT_DEFAULT,
     CLAIM_INPUT_VAT_SETTING,
-    INPUT_VAT_IMMEDIATE_ACCOUNT_REF,
     AcceptClaimForReimbursement,
     AcceptedClaimLine,
     ApplyDecision,
@@ -92,7 +91,7 @@ EXPENSE = "acct:fuel"
 EXPENSE_2 = "acct:travel"
 OFFSET = "acct:unclaimed"
 BANK = "acct:bank-main"
-VAT = INPUT_VAT_IMMEDIATE_ACCOUNT_REF
+VAT = "acct:input-vat"
 
 
 class _Lcg:
@@ -268,9 +267,21 @@ def _accept(db: Session, claim: ExpenseClaim, **kw: object) -> ClaimLiability:
     )
 
 
-def _liability(db: Session, approved: tuple[str, ...] = ("100.00",), **kw):
+def _post_acceptance(db: Session, liability: ClaimLiability) -> None:
+    consequence = build_claim_liability_consequence(
+        db, tenant_id=TENANT, liability_id=liability.id
+    )
+    _receipt(db, "expense_claim_liability", liability.id, consequence.fingerprint)
+
+
+def _liability(
+    db: Session, approved: tuple[str, ...] = ("100.00",), *, post: bool = True, **kw
+):
     claim = _approved_claim(db, approved=approved, **kw)
-    return claim, _accept(db, claim)
+    liability = _accept(db, claim)
+    if post:
+        _post_acceptance(db, liability)
+    return claim, liability
 
 
 def _settle(db, liability, amount, ref="PAY-1", **kw):
@@ -435,17 +446,6 @@ def test_default_mode_is_none_and_refuses_a_tax_amount(db: Session) -> None:
         _accept(db, claim, command=_command(claim, tax={0: "7.50"}))
     assert _code(exc) == RefusalCode.CLAIM_VAT_DISABLED
     assert "(claim_vat_disabled)" in str(exc.value)
-
-
-def test_immediate_mode_only_reaches_the_immediate_account(db: Session) -> None:
-    claim = _approved_claim(db, approved=("107.50",))
-    command = _command(claim, tax={0: "7.50"}, mode=ClaimInputVat.IMMEDIATE)
-    deferred = replace(
-        command.lines[0], tax_account_ref="1455"
-    )  # the deferral account is never valid
-    with pytest.raises(InvalidCommand) as exc:
-        _accept(db, claim, command=replace(command, lines=(deferred,)))
-    assert _code(exc) == RefusalCode.CLAIM_VAT_ACCOUNT_NOT_IMMEDIATE
 
 
 def test_vat_setting_declaration_and_fail_closed_parse() -> None:
@@ -906,6 +906,7 @@ def test_every_consequence_shape_balance_and_stable_fingerprint(db: Session) -> 
         f"expenses:expense_claim_liability:{TENANT}"
     )
 
+    _post_acceptance(db, liability)
     settlement = _settle(db, liability, "50.00")
     settled = build_claim_settlement_consequence(
         db, tenant_id=TENANT, settlement_id=settlement.id, bank_account_ref=BANK
@@ -1526,3 +1527,45 @@ def test_adjustment_rows_are_not_a_second_status_source(db: Session) -> None:
     row = _adjust(db, liability, "-10.00")
     assert isinstance(row, ClaimLiabilityAdjustment)
     assert not hasattr(row, "status")
+
+
+# --- the acceptance must be in the ledger first ---------------------------------------
+
+
+def test_settlement_and_acceptance_reversal_need_the_acceptance_receipt(
+    db: Session,
+) -> None:
+    _, liability = _liability(db, post=False)
+    with pytest.raises(InvalidLifecycle) as exc:
+        _settle(db, liability, "10.00")
+    assert _code(exc) == RefusalCode.LIABILITY_NOT_IN_LEDGER
+    assert liability.amount_settled == 0
+    reversal_args = {
+        "scope": _scope(),
+        "liability_id": liability.id,
+        "reason": "in error",
+        "evidence_ref": "memo:1",
+        "reversed_by": "finance:one",
+        "reversed_at": _later(),
+    }
+    with pytest.raises(InvalidLifecycle) as exc:
+        reverse_claim_acceptance(db, **reversal_args, **_key())
+    assert _code(exc) == RefusalCode.LIABILITY_NOT_IN_LEDGER
+    assert liability.status == ClaimLiabilityStatus.OPEN.value
+    # Once the acceptance is posted, both proceed.
+    _post_acceptance(db, liability)
+    assert _settle(db, liability, "10.00")
+    _, other = _liability(db, post=False)
+    _post_acceptance(db, other)
+    assert reverse_claim_acceptance(
+        db, **{**reversal_args, "liability_id": other.id}, **_key()
+    )
+
+
+def test_historical_liabilities_are_exempt_from_the_acceptance_receipt(
+    db: Session,
+) -> None:
+    claim = _imported_claim(db)
+    receipt = _admit(db, claim)
+    liability = db.get(ClaimLiability, receipt.liability_id)
+    assert _settle(db, liability, "10.00")

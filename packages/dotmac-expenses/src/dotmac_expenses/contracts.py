@@ -321,8 +321,6 @@ CLAIM_INPUT_VAT_DOMAIN = "expenses"
 CLAIM_INPUT_VAT_KEY = "claim_input_vat"
 CLAIM_INPUT_VAT_SETTING = f"{CLAIM_INPUT_VAT_DOMAIN}.{CLAIM_INPUT_VAT_KEY}"
 CLAIM_INPUT_VAT_DEFAULT = ClaimInputVat.NONE
-# The only account input VAT may reach under ``immediate``.
-INPUT_VAT_IMMEDIATE_ACCOUNT_REF = "1440"
 
 
 class RefusalCode(StrEnum):
@@ -338,9 +336,9 @@ class RefusalCode(StrEnum):
     ACCEPTANCE_LINES_MISMATCH = "acceptance_lines_mismatch"
     ACCEPTANCE_ACCOUNT_CONFLICT = "acceptance_account_conflict"
     CLAIM_VAT_DISABLED = "claim_vat_disabled"
-    CLAIM_VAT_ACCOUNT_NOT_IMMEDIATE = "claim_vat_account_not_immediate"
     LIABILITY_REVERSED = "liability_reversed"
     LIABILITY_NOT_OPEN = "liability_not_open"
+    LIABILITY_NOT_IN_LEDGER = "liability_not_in_ledger"
     SETTLEMENT_EXCEEDS_OUTSTANDING = "settlement_exceeds_outstanding"
     SETTLEMENT_NOT_IN_LEDGER = "settlement_not_in_ledger"
     ADJUSTMENT_EXCEEDS_OUTSTANDING = "adjustment_exceeds_outstanding"
@@ -514,7 +512,6 @@ __all__ = [
     "CLAIM_INPUT_VAT_KEY",
     "CLAIM_INPUT_VAT_SETTING",
     "DIMENSION_REFS",
-    "INPUT_VAT_IMMEDIATE_ACCOUNT_REF",
     "AcceptClaimForReimbursement",
     "AcceptedClaimLine",
     "ClaimAccountingReceiptInput",

@@ -43,8 +43,7 @@ The declared `0.1.0a2` successor adds the staff claim liability lifecycle
   the fingerprint. A settlement can be returned only after its receipt exists.
 - Reads from rows: `claimant_claims_balance`, `claims_payable_total`,
   `open_claim_liabilities`.
-- `expenses.claim_input_vat` (`none` default, `immediate` to the immediate
-  input-VAT account `1440`) is declared by `claim_input_vat_spec()` for the
+- `expenses.claim_input_vat` (`none` default, `immediate`) is declared by `claim_input_vat_spec()` for the
   adopting assembly to register and read; the value is frozen on the liability.
 - `admit_historical_claim_liability` admits a legacy posted, partly
   unreimbursed claim with no GL, through a trusted verifier that runs in an

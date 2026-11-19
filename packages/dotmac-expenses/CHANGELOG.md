@@ -17,7 +17,7 @@ verified release record. This entry is not publication evidence.
 - Add the sealed consequence builders (Dr expense / Cr claims payable on
   acceptance), the per-employee balance and the claims-payable control total.
 - Add the `expenses.claim_input_vat` setting declaration (`none` default,
-  `immediate` to account 1440), frozen on the liability at acceptance.
+  `immediate`; the assembly resolves the account), frozen on the liability at acceptance.
 - Add `admit_historical_claim_liability` (0 GL, verifier-bound).
 - `withdraw_claim_approval` now refuses (`claim_has_liability`) while a live
   liability exists.
