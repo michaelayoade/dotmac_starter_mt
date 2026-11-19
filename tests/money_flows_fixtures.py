@@ -307,10 +307,13 @@ def seed_invoice(
     service_ref: str = "service:example",
     net: str | None = None,
     due_at=None,
+    issued_at=None,
 ):
     """An issued invoice; ``net`` (VAT 20% on top) and ``due_at`` are optional.
 
-    The default is a 120.00 invoice due on the fixture date.
+    The default is a 120.00 invoice due on the fixture date. ``issued_at`` moves
+    the issue instant (GAP-3 reads account terms at it); ``due_at`` then
+    defaults to 30 days after it.
     """
     command = replace(
         b._obligation_command(
@@ -341,7 +344,15 @@ def seed_invoice(
         db, scope=scope, command=b._draft_command(obligation.id)
     )
     issue = b._issue_command(draft.id)
-    if due_at is not None:
+    if issued_at is not None:
+        issue = replace(
+            issue,
+            due_at=due_at or issued_at + timedelta(days=30),
+            due_date_basis=replace(
+                issue.due_date_basis, issued_at=issued_at, effective_at=issued_at
+            ),
+        )
+    elif due_at is not None:
         issue = replace(issue, due_at=due_at)
     return issue_document(db, scope=scope, command=issue, numbering=b.NUMBERING)
 
