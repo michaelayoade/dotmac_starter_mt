@@ -48,6 +48,7 @@ def test_registry_declares_and_owns_actions() -> None:
     assert reg.actions() == {
         "identity.history_imported",
         "credential.password.assigned",
+        "communication.dispatch.requeued",
         "role.create",
         "role.grant",
         "invoice.issue",
@@ -61,6 +62,7 @@ def test_empty_manifests_compose_the_kernel_action() -> None:
     assert reg.actions() == {
         "identity.history_imported",
         "credential.password.assigned",
+        "communication.dispatch.requeued",
     }
     assert reg.owner("credential.password.assigned") == "kernel"
     reg.require("credential.password.assigned")

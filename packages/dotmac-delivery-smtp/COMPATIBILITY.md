@@ -5,7 +5,11 @@
   receipt statuses. The REAL floor is the first kernel release containing S6
   (`c968075a`) and K-2 (`2ebfc761`); the workspace kernel is `0.1.0a109+dev`, so
   a higher floor would break the lock today. It MUST be raised in the kernel
-  allocation PR before S12 (release).
+  allocation PR before S12 (release). S8 (K-4) adds one more: `SmtpAdmissionRefused`
+  subclasses `dotmac_kernel.delivery.DeliveryDeferred`, which exists only from
+  the first kernel release containing S8 (migration `0033_receipts_append_only`);
+  the declared floor is deliberately NOT raised in S8 (a later step raises it),
+  so installing this package against an older kernel fails at import.
 - Standard library only (`smtplib`, `ssl`, `email`). No third-party dependency.
 - STARTTLS submission only (no implicit-TLS port 465 mode in 0.1).
 - SMTP settings are read at platform scope only (see `reader.py`).

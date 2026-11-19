@@ -165,7 +165,8 @@ def test_the_real_repo_composes() -> None:
     # 39 -> 40 (unreleased): `ts_0004_html_body` on the Template Studio lineage.
     # 40 -> 41 (unreleased): `ts_0005_layout_slug` on the Template Studio lineage.
     # 41 -> 42 (unreleased): `0032_communication_dispatches` on the kernel lineage.
-    assert len(report.revisions) == 42
+    # 42 -> 43 (unreleased): `0033_receipts_append_only` on the kernel lineage.
+    assert len(report.revisions) == 43
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 
