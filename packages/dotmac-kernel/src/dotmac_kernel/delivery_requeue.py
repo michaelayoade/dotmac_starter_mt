@@ -12,8 +12,10 @@ the one door back in, and it is deliberately narrow:
 - **Tenant-scoped.** The row is read and written only under the caller's tenant
   RLS context, by `(tenant_id, dispatch_id)`; another tenant's id is "not found".
 - **Audited.** One `communication.dispatch.requeued` audit row in the same
-  transaction names the actor, the reason, the dispatch and the new outbox
-  event. The audit details never carry the address, subject or body.
+  transaction names the operator (`actor_type="user"`, a literal, as the audit
+  actor ratchet requires; `actor_id` is mandatory), the reason, the dispatch
+  and the new outbox event. The audit details never carry the address,
+  subject or body.
 - **Idempotent.** The dead -> pending transition is taken under a row lock, so
   two concurrent or repeated calls produce exactly one requeue, one audit row
   and one outbox event; the others return `requeued=False`.
@@ -84,11 +86,9 @@ def requeue_dead_dispatch(
     tenant_id: UUID,
     *,
     dispatch_id: UUID,
-    actor_type: str,
-    actor_id: str | None,
+    actor_id: str,
     reason: str,
     source_application: str | None = None,
-    actor_party_id: UUID | None = None,
 ) -> RequeueResult:
     """Requeue one dead dispatch. See the module docstring for the contract.
 
@@ -100,9 +100,7 @@ def requeue_dead_dispatch(
     # Validate the actor and the declared action up front, so a bad call changes
     # nothing (the audit writer would raise the same errors, but only after the
     # state change; the audit table is append-only so it cannot be amended).
-    resolve_audit_actor(
-        actor_type=actor_type, actor_id=actor_id, actor_party_id=actor_party_id
-    )
+    resolve_audit_actor(actor_type="user", actor_id=actor_id, actor_party_id=None)
     resolve_event_attribution(source_application)
     active_audit_actions().require(AUDIT_ACTION_REQUEUED)
     cleaned = (reason or "").strip()
@@ -173,8 +171,7 @@ def requeue_dead_dispatch(
     write_audit_event(
         db,
         tenant_id=tenant_id,
-        actor_party_id=actor_party_id,
-        actor_type=actor_type,
+        actor_type="user",
         actor_id=actor_id,
         source_application=source_application,
         action=AUDIT_ACTION_REQUEUED,

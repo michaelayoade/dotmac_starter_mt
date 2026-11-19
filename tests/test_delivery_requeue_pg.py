@@ -23,7 +23,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 KW = {
-    "actor_type": "user",
     "actor_id": "operator-1",
     "source_application": "dotmac_starter_mt",
     "reason": "gate lifted",

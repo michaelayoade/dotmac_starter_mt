@@ -35,7 +35,7 @@ from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_kernel.models import Tenant
 from sqlalchemy import select
 
-ACTOR = {"actor_type": "user", "actor_id": "operator-1"}
+ACTOR = {"actor_id": "operator-1"}
 SOURCE = "dotmac_starter_mt"
 
 
@@ -439,8 +439,7 @@ def test_requeue_refuses_non_dead_redacted_and_bad_input(db, tenant) -> None:
             tenant.id,
             dispatch_id=did,
             reason="r",
-            actor_type="user",
-            actor_id=None,
+            actor_id="  ",
             source_application=SOURCE,
         )
     assert db.get(CommunicationDispatch, did).status == DISPATCH_DEAD

@@ -94,6 +94,7 @@ def test_kernel_declaration_is_an_actual_feature_manifest(
     assert manifest.audit_actions == (
         "identity.history_imported",
         "credential.password.assigned",
+        "communication.dispatch.requeued",
     )
     assert reg.actions() == set(manifest.audit_actions)
     assert reg.owner("identity.history_imported") == manifest.name
@@ -115,6 +116,7 @@ def test_composition_derives_ownership_and_reservation_from_the_manifest(
         assert audit_actions == (
             "identity.history_imported",
             "credential.password.assigned",
+            "communication.dispatch.requeued",
         )
         return declaration
 
@@ -132,6 +134,7 @@ def test_generator_manifests_compose_kernel_and_ordinary_owners() -> None:
     assert reg.actions() == {
         "identity.history_imported",
         "credential.password.assigned",
+        "communication.dispatch.requeued",
         "academy.event",
     }
     assert reg.owner("identity.history_imported") == "kernel"

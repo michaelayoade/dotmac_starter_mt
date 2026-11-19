@@ -63,7 +63,6 @@ def main(argv: list[str] | None = None) -> int:
                 db,
                 args.tenant_id,
                 dispatch_id=args.dispatch_id,
-                actor_type="user",
                 actor_id=args.actor_id,
                 source_application=args.source_application,
                 reason=args.reason,
