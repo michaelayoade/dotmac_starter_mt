@@ -517,6 +517,7 @@
           "dotmac_billing/migrations/versions/bi_0016_withholding_components.py",
           "dotmac_billing/migrations/versions/bi_0017_open_documents_index.py",
           "dotmac_billing/migrations/versions/bi_0018_account_terms.py",
+          "dotmac_billing/migrations/versions/bi_0019_opening_dual_control.py",
           "dotmac_billing/account_terms.py",
           "dotmac_billing/account_statement.py"
         ],
