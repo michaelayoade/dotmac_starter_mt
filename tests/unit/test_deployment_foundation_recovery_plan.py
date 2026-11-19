@@ -745,6 +745,11 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # every handoff digest, is owned by that protocol module, and is written to
     # no Foundation store; it is not a host-lease release record.
     "lane3_handoff_protocol.py": 1,
+    # ADR-0073 HostAdmissionPresentationStatementV1 signing bytes: Control's
+    # wire contract, owned here by lane3_host_admission._canonical and pinned
+    # by its fixed signature vector. Also encodes the named presentation file;
+    # neither Foundation execution plans nor attestation envelopes are rebuilt.
+    "lane3_host_admission.py": 1,
     # Public offline-verification result and protected signer policy share
     # one canonical JSON codec, owned by lane3_offline_result. Neither writes
     # a Foundation grant or persistent store.

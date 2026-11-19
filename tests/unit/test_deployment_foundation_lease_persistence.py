@@ -619,12 +619,145 @@ def _runner_uses_private_download_destinations(source: str) -> bool:
     )
 
 
+def _host_admission_output_premise(source: str) -> bool:
+    """One presentation publisher, reached only through the named CLI output.
+
+    This is a source/call-site premise, not a sandbox for arbitrary --out values.
+    It expires if the writer, its callers or its lease-store independence moves.
+    """
+    tree = ast.parse(source)
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    writer = functions.get("_write_output")
+    links = _os_link_calls(tree)
+    if writer is None or len(links) != 1 or links[0] not in ast.walk(writer):
+        return False
+    forbidden = {
+        "lease",
+        "release_path",
+        "_lease_path",
+        "lease_store",
+        "write_store_record",
+        "write_store_record_once",
+        "DEFAULT_LEASE_DIR",
+        "DOTMAC_LEASE_DIR",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Name, ast.Attribute)) and (
+            node.id if isinstance(node, ast.Name) else node.attr
+        ) in forbidden:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if any(
+                marker in node.value
+                for marker in (
+                    ".release.json",
+                    "lease_store",
+                    ".dotmac-leases",
+                    "/var/lib/dotmac-deployment-control/leases",
+                    "DOTMAC_LEASE_DIR",
+                )
+            ):
+                return False
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [alias.name for alias in node.names]
+            if isinstance(node, ast.ImportFrom):
+                names.append(node.module or "")
+            if any("lease" in name or name in forbidden for name in names):
+                return False
+
+    def matches(node: ast.AST, expression: str) -> bool:
+        return ast.dump(node) == ast.dump(ast.parse(expression, mode="eval").body)
+
+    def one_binding(function: ast.FunctionDef, name: str, expression: str) -> bool:
+        stores = [
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Name)
+            and node.id == name
+            and isinstance(node.ctx, ast.Store)
+        ]
+        bindings = [
+            statement
+            for statement in function.body
+            if isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and statement.targets[0].id == name
+        ]
+        return (
+            len(stores) == len(bindings) == 1
+            and matches(bindings[0].value, expression)
+        )
+
+    if not (
+        one_binding(
+            writer,
+            "directory",
+            "_safe_dir(path.parent, uid, 'output-directory-unsafe')",
+        )
+        and one_binding(writer, "name", "_leaf(path, 'output-not-creatable')")
+        and not any(
+            isinstance(node, ast.Name)
+            and node.id == "path"
+            and isinstance(node.ctx, ast.Store)
+            for node in ast.walk(writer)
+        )
+        and matches(
+            links[0],
+            "os.link(partial, name, src_dir_fd=directory, "
+            "dst_dir_fd=directory, follow_symlinks=False)",
+        )
+    ):
+        return False
+    expected = {
+        "present": (
+            "out_path",
+            "Path(out)",
+            "_write_output(out_path, data, uid=uid, replace=refresh)",
+        ),
+        "_cmd_assemble": (
+            "out",
+            "Path(args.out)",
+            "_write_output(out, data, uid=_require_uid(args.owner_uid), replace=False)",
+        ),
+    }
+    all_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) == "_write_output"
+    ]
+    if len(all_calls) != len(expected):
+        return False
+    for name, (output, binding, call) in expected.items():
+        function = functions.get(name)
+        if function is None or not one_binding(function, output, binding):
+            return False
+        calls = [node for node in all_calls if node in ast.walk(function)]
+        if len(calls) != 1 or not matches(calls[0], call):
+            return False
+    present_command = functions.get("_cmd_present")
+    return present_command is not None and any(
+        isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) == "present"
+        and any(
+            kw.arg == "out" and matches(kw.value, "args.out") for kw in node.keywords
+        )
+        for node in ast.walk(present_command)
+    )
+
+
 def _publish_sites() -> set[str]:
-    """Inventory every `os.link`; allow only the lease writer and downloader.
+    """Inventory every `os.link`; each non-lease publisher has a checked premise.
 
     The downloader's one link is a verified-artifact tempfile publication, not
     lease-store persistence. Its AST premise below proves that distinction and
     that its current direct runner caller targets private temporary filenames;
+    host admission's one link publishes its explicit --out via directory fds,
+    with create and refresh semantics distinct from the lease store's writer.
+    Its source/call-site premise must also hold; neither is a bare path exemption.
     future aliases or dynamic callers are unmonitored by this static region.
     """
     found: set[str] = set()
@@ -637,7 +770,7 @@ def _publish_sites() -> set[str]:
 
 
 def test_only_the_lease_writer_publishes_into_this_store() -> None:
-    """`lease.py` owns store persistence; downloader has a proven separate role.
+    """`lease.py` owns the store; other publishers prove their separate roles.
 
     Independent of the canonicalization ratchet on purpose: that one watches the
     BYTES, this one watches the PUBLISH. A second writer that shared the bytes
@@ -646,14 +779,21 @@ def test_only_the_lease_writer_publishes_into_this_store() -> None:
     """
     downloader = SCRIPTS / "bundle_artifact_download.py"
     runner = SCRIPTS / "run_bundle_action.py"
-    assert _publish_sites() == {"bundle_artifact_download.py", "lease.py"}, (
+    admission = SCRIPTS / "lane3_host_admission.py"
+    assert _publish_sites() == {
+        "bundle_artifact_download.py",
+        "lane3_host_admission.py",
+        "lease.py",
+    }, (
         f"{sorted(_publish_sites())} publish with os.link. "
-        "only the leased-store writer and verified downloader are inventoried"
+        "only the lease writer and premise-checked artifact/presentation "
+        "publishers are inventoried"
     )
     assert _bundle_downloader_premise(downloader.read_text(encoding="utf-8"))
     assert _runner_uses_private_download_destinations(
         runner.read_text(encoding="utf-8")
     )
+    assert _host_admission_output_premise(admission.read_text(encoding="utf-8"))
 
 
 def test_the_publish_sweep_would_see_a_second_writer(tmp_path: Path) -> None:
@@ -671,6 +811,37 @@ def test_downloader_premise_rejects_a_second_link_or_lease_reference() -> None:
     source = (SCRIPTS / "bundle_artifact_download.py").read_text(encoding="utf-8")
     assert not _bundle_downloader_premise(source + "\nos.link(a, b)\n")
     assert not _bundle_downloader_premise(source + "\nrelease_path = object()\n")
+
+
+def test_host_admission_premise_rejects_a_second_link_or_lease_reference() -> None:
+    source = (SCRIPTS / "lane3_host_admission.py").read_text(encoding="utf-8")
+    assert _host_admission_output_premise(source)
+    for plant in (
+        "\nos.link(a, b)\n",
+        "\nrelease_path = object()\n",
+        "\nfrom dotmac_deployment_foundation import lease as store\n",
+        "\nstore_path = '/tmp/target.release.json'\n",
+        "\nstore_path = '.dotmac-leases/target.json'\n",
+        "\nstore_path = '/var/lib/dotmac-deployment-control/leases/target.json'\n",
+        "\nstore_path = os.environ['DOTMAC_LEASE_DIR']\n",
+    ):
+        assert not _host_admission_output_premise(source + plant)
+
+
+def test_host_admission_premise_rejects_a_repointed_output() -> None:
+    source = (SCRIPTS / "lane3_host_admission.py").read_text(encoding="utf-8")
+    for before, after in (
+        ("out_path = Path(out)", "out_path = Path('/tmp/other')"),
+        ("out = Path(args.out)", "out = Path('/tmp/other')"),
+        ("out=args.out,", "out=args.key_path,"),
+        (
+            "dst_dir_fd=directory,\n                        follow_symlinks=False,",
+            "dst_dir_fd=other,\n                        follow_symlinks=False,",
+        ),
+        ("name = _leaf(path,", "name = _leaf(other,"),
+    ):
+        assert before in source
+        assert not _host_admission_output_premise(source.replace(before, after, 1))
 
 
 def test_runner_destination_premise_rejects_a_later_reassignment() -> None:
