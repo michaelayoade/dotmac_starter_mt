@@ -29,10 +29,12 @@ from typing import Protocol
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from dotmac_kernel.delivery import DeliveryDeferred
 from dotmac_kernel.messaging.relay import (
     ClaimedEvent,
     RelayPolicy,
     claim_batch,
+    record_deferral,
     record_failure,
     record_success,
 )
@@ -44,8 +46,9 @@ SessionFactory = Callable[[], Session]
 
 class DeliveryTransport(Protocol):
     """Delivers one outbox event to its destination. Raises on failure (the
-    worker then backs off / dead-letters). `tenant_db` is a tenant-scoped session
-    already RLS-restored to `event.tenant_id` — use it for any product read the
+    worker then backs off / dead-letters); raises `DeliveryDeferred` for a hold,
+    which reschedules without charging an attempt. `tenant_db` is a tenant-scoped
+    session already RLS-restored to `event.tenant_id` — use it for any product read the
     delivery needs; most transports deliver the payload and ignore it."""
 
     def deliver(self, event: ClaimedEvent, tenant_db: Session) -> None: ...
@@ -80,6 +83,22 @@ def _deliver_one(
         transport.deliver(event, tenant_db)
         tenant_db.commit()
         delivered = True
+    except DeliveryDeferred as hold:
+        # A hold (e.g. a mail gate), not a failure: reschedule without charging
+        # a relay attempt, bounded by `policy.max_deferrals` (K-4).
+        tenant_db.rollback()
+        logger.info("relay delivery deferred for %s", event.id)
+        record_deferral(
+            dispatcher_db,
+            event_id=event.id,
+            worker_id=worker_id,
+            attempts=event.attempts,
+            deferrals=event.deferrals,
+            reason=hold.reason,
+            retry_after=hold.retry_after,
+            policy=policy,
+        )
+        dispatcher_db.commit()
     except Exception as exc:  # any delivery failure retries / dead-letters
         tenant_db.rollback()
         logger.warning("relay delivery failed for %s: %r", event.id, exc)
