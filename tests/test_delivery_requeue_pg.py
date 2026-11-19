@@ -220,4 +220,49 @@ def test_cli_is_a_dry_run_unless_apply(
     assert status() == "pending"
 
     code, out = _cli(monkeypatch, capsys, did, tenant_a, "--apply")
-    assert code == 0 and "already pending" in out
+    assert code == 3 and "not dead" in out and "nothing requeued" in out
+
+
+def test_concurrent_requeues_produce_exactly_one_requeue(
+    engine, admin_session, tenant_a, _cleanup
+) -> None:
+    import threading
+
+    did = _dead_dispatch(engine, admin_session, tenant_a)
+    barrier = threading.Barrier(2)
+    results: list[bool] = []
+    errors: list[BaseException] = []
+
+    def attempt() -> None:
+        db = _as_tenant(engine, tenant_a.id)
+        try:
+            barrier.wait(timeout=10)
+            res = requeue_dead_dispatch(db, tenant_a.id, dispatch_id=did, **KW)
+            db.commit()
+            results.append(res.requeued)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=attempt) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not errors, errors
+    assert sorted(results) == [False, True]
+    admin_session.rollback()
+    audits = admin_session.execute(
+        text("SELECT count(*) FROM audit_events WHERE tenant_id = :t AND action = :a"),
+        {"t": str(tenant_a.id), "a": AUDIT_ACTION_REQUEUED},
+    ).scalar()
+    new_events = admin_session.execute(
+        text(
+            "SELECT count(*) FROM outbox_events WHERE tenant_id = :t "
+            "AND payload->>'dispatch_id' = :d"
+        ),
+        {"t": str(tenant_a.id), "d": str(did)},
+    ).scalar()
+    assert audits == 1
+    assert new_events == 2  # the creation event plus exactly one requeue event

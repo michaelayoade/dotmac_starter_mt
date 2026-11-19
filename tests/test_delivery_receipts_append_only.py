@@ -67,6 +67,7 @@ def _insert(session: Session, tenant_id: uuid.UUID) -> uuid.UUID:
 
 
 def _privileges(session: Session) -> dict[str, bool]:
+    assert session.execute(text("SELECT current_user")).scalar() == "app_user"
     return {
         priv: bool(
             session.execute(

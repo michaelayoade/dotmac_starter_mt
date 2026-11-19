@@ -9,8 +9,9 @@ audit row naming the actor and reason, and one new `delivery.dispatch.v1` event.
 Connects as the RLS-enforced `app_user` role (`DATABASE_URL`), with the tenant
 context set to `--tenant-id`: another tenant's dispatch is "not found". It never
 clears a suppression and never requeues a dispatch that already has a final
-receipt (`dotmac_kernel.delivery_requeue`). Output carries ids and a status
-only, never an address, subject or body.
+receipt (`dotmac_kernel.delivery_requeue`). Exit codes: 0 done (or dry run),
+1 refused, 2 usage, 3 not requeued (the dispatch was pending, not dead).
+Output carries ids and a status only, never an address, subject or body.
 
 Usage:
   DATABASE_URL=postgresql+psycopg://app_user:...@host/db \
@@ -32,14 +33,27 @@ from dotmac_kernel.delivery_requeue import requeue_dead_dispatch
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+#: The dispatch was not dead (already pending): nothing was requeued.
+EXIT_NOT_REQUEUED = 3
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--tenant-id", type=UUID, required=True)
     parser.add_argument("--dispatch-id", type=UUID, required=True)
-    parser.add_argument("--actor-id", required=True, help="the operator's identity")
+    parser.add_argument(
+        "--actor-id",
+        required=True,
+        help="the operator's identity. SELF-ASSERTED: nothing here verifies it; "
+        "the K-7/K-9 operator surface must bind it to the logged-in user",
+    )
     parser.add_argument("--source-application", required=True)
-    parser.add_argument("--reason", required=True)
+    parser.add_argument(
+        "--reason",
+        required=True,
+        help="why; stored in the audit row. Do NOT put addresses or other "
+        "personal data in it",
+    )
     parser.add_argument(
         "--apply", action="store_true", help="commit (default is a dry run)"
     )
@@ -71,19 +85,25 @@ def main(argv: list[str] | None = None) -> int:
             db.rollback()
             print(f"refused: {type(exc).__name__}: {exc}", file=sys.stderr)
             return 1
+        if not result.requeued:
+            # Nothing moved: the dispatch was not dead. Never report success.
+            db.rollback()
+            print(
+                f"dispatch {result.dispatch_id} is pending, not dead: nothing "
+                "requeued; the outbox event may be dead-lettered (see K-8)",
+                file=sys.stderr,
+            )
+            return EXIT_NOT_REQUEUED
         if not args.apply:
             db.rollback()
             print(
-                f"dry run: dispatch {result.dispatch_id} "
-                f"{'would be requeued' if result.requeued else 'is already pending'}"
-                "; nothing changed (pass --apply)"
+                f"dry run: dispatch {result.dispatch_id} would be requeued; "
+                "nothing changed (pass --apply)"
             )
             return 0
         db.commit()
         print(
-            f"dispatch {result.dispatch_id}: "
-            f"{'requeued' if result.requeued else 'already pending, no change'}"
-            + (f" (event {result.outbox_event_id})" if result.outbox_event_id else "")
+            f"dispatch {result.dispatch_id}: requeued (event {result.outbox_event_id})"
         )
         return 0
     finally:

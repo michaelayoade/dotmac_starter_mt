@@ -29,11 +29,16 @@ here.
     gains `last_error` and a `deferrals` property; `claim_batch` selects
     `last_error`. `dotmac-delivery-smtp`'s `SmtpAdmissionRefused` is now a
     `DeliveryDeferred` (it needs this kernel release; the declared floor is not
-    raised here).
+    raised here). Operator notes: a hold longer than `max_deferrals` x delay
+    (about 24 h at the defaults) still dead-letters held mail, so an adopter's
+    runbook must size `max_deferrals` to its longest planned hold; and an
+    admission hook must RETURN a hold reason (so the provider raises
+    `DeliveryDeferred`), not raise: a raise is charged as a failure.
   - K-5 `dotmac_kernel.delivery_requeue.requeue_dead_dispatch(db, tenant_id, *,
-    dispatch_id, actor_type, actor_id, reason, ...)` and
+    dispatch_id, actor_id, reason, ...)` (audit `actor_type` is the literal `user`) and
     `scripts/requeue_dead_dispatch.py` (dry run by default, `--apply` to
-    commit). One dispatch, tenant-scoped, idempotent (dead -> pending under a
+    commit; a still-pending dispatch exits 3 and is never reported as
+    success). One dispatch, tenant-scoped, idempotent (dead -> pending under a
     row lock; a repeat returns `requeued=False`), with one
     `communication.dispatch.requeued` audit row (a new kernel-owned audit
     action) naming actor and reason and never the address or body, and a new

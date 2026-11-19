@@ -444,3 +444,70 @@ def test_requeue_refuses_non_dead_redacted_and_bad_input(db, tenant) -> None:
         )
     assert db.get(CommunicationDispatch, did).status == DISPATCH_DEAD
     assert _audits(db, tenant) == []
+
+
+def _run_cli(monkeypatch, capsys, requeued: bool, *extra: str) -> tuple[int, str]:
+    import importlib.util
+    from pathlib import Path
+
+    from dotmac_kernel.delivery_requeue import RequeueResult
+
+    spec = importlib.util.spec_from_file_location(
+        "requeue_cli_unit",
+        Path(__file__).resolve().parents[2] / "scripts" / "requeue_dead_dispatch.py",
+    )
+    cli = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(cli)  # type: ignore[union-attr]
+
+    class _Session:
+        def execute(self, *a, **k): ...
+        def rollback(self): ...
+        def commit(self): ...
+        def close(self): ...
+
+    class _Engine:
+        def dispose(self): ...
+
+    did = uuid4()
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u@h/d")
+    monkeypatch.setattr(cli, "create_engine", lambda *a, **k: _Engine())
+    monkeypatch.setattr(cli, "sessionmaker", lambda **k: lambda: _Session())
+    monkeypatch.setattr(
+        cli,
+        "requeue_dead_dispatch",
+        lambda *a, **k: RequeueResult(
+            did,
+            requeued,
+            DISPATCH_PENDING,
+            uuid4() if requeued else None,
+        ),
+    )
+    code = cli.main(
+        [
+            "--tenant-id", str(uuid4()),
+            "--dispatch-id", str(did),
+            "--actor-id", "op",
+            "--source-application", SOURCE,
+            "--reason", "r",
+            *extra,
+        ]
+    )  # fmt: skip
+    cap = capsys.readouterr()
+    return code, cap.out + cap.err
+
+
+def test_cli_does_not_report_success_for_a_pending_dispatch(
+    monkeypatch, capsys
+) -> None:
+    for extra in ((), ("--apply",)):
+        code, out = _run_cli(monkeypatch, capsys, False, *extra)
+        assert code == 3
+        assert "pending, not dead" in out and "nothing requeued" in out
+        assert "K-8" in out
+
+
+def test_cli_success_paths_exit_zero(monkeypatch, capsys) -> None:
+    code, out = _run_cli(monkeypatch, capsys, True)
+    assert code == 0 and "would be requeued" in out
+    code, out = _run_cli(monkeypatch, capsys, True, "--apply")
+    assert code == 0 and "requeued (event" in out
