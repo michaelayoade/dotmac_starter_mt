@@ -1112,10 +1112,29 @@ build, and production activation follows publication.
 ## Amendment — 2026-11-18: Gate 2 a2 custody, lease and candidate-signing rulings
 
 The text above is preserved as written. Where a sentence above says otherwise,
-the rulings below (U3-B, U5, Q1-B, Q3-A and Q5-B) supersede that sentence for the Gate 2 a2 rehearsal
-only, in the way the 2026-09-25 amendments supersede earlier claims. They
-relax no control: each one either moves a key off a more exposed holder or
-adds a refusal. Michael ruled U3 and U5 on 2026-11-17 (U3 was first ruled as the SSH host-key
+the rulings below (U3-B, U5, Q1-B, Q3-A and Q5-B) supersede that sentence for
+the a2 candidate, its rehearsal and its publication, in the way the 2026-09-25
+amendments supersede earlier claims. A later candidate needs this ceremony or a
+new decision; this amendment does not decide which. No existing control is
+relaxed; these new exposures are accepted:
+
+- the attended data path through the operator's Mac, which needs CP sshd local
+  TCP forwarding and a loopback listener on the runner reachable by any local
+  process there (it still needs the lease role's password, TLS and a live run
+  binding); the database's client-source check now sees the CP side of the
+  tunnel and so no longer identifies the launcher (W1b, W12);
+- per-incarnation transit mounts, one candidate mount and single-use sign
+  tokens (W8);
+- a presentation key on the target, reachable from Foundation's execution path
+  (W9);
+- `SECURITY DEFINER` functions in the CP production database (W10);
+- ceremony and E10 writes to Control's trust registry (W11).
+
+This amendment records decisions only. Implementation (CP changes, the S2 and
+S3 tooling, ceremony kit v2) is pending, claims no adoption, and the design's
+open verification items remain open: for example, main's candidate-attestation
+workflow still pins the workflow-URL issuer until S3 lands, and the database
+server certificate's SAN check is outstanding. Michael ruled U3 and U5 on 2026-11-17 (U3 was first ruled as the SSH host-key
 fingerprint and amended to option B, the dedicated incarnation key, the same
 day) and Q1-B, Q3-A (transit custody and per-run destruction) and Q5-B on
 2026-11-18 (debt register v1498). Production custody remains a D3 decision; nothing here grants
@@ -1128,7 +1147,7 @@ precedent for how the keys below are held.
 |---|---|---|
 | 2026-09-07 "trusted host provenance v2": installed-host evidence "belongs to a distinct target-local host-attestation workload" | Installed-host evidence is signed by a dedicated off-target incarnation key held in the ceremony's OpenBao transit and destroyed before launch (U3-B) | A target-held private key can be read by whatever runs on the target; the signer never reaches the target |
 | Same amendment: candidate evidence "belongs to the protected Starter release-workflow signer"; 2026-09-22: the workflow signing step is the "ONLY writer" of the receipt binding | Candidate evidence is signed in Michael's ceremony; the workflow only publishes (Q5-B) | The GitHub-secret PEM is retired; no private key remains in GitHub |
-| 2026-10-05: "binding certificate issuance to a Control lease" and signer custody/lease "not decided here" | The lease is a row in the Platform CP production database, reached through an attended tunnel (U5, Q1-B) | The lease needs a store whose clock and lock decide liveness |
+| 2026-09-22: "signer custody, lease" left to later work | The Lane 3 host lease is a row in the Platform CP production database, reached through an attended tunnel (U5, Q1-B). Binding certificate issuance to a Control lease stays undecided (ADR-0073) | The lease needs a store whose clock and lock decide liveness |
 
 ### U3-B: off-target incarnation key (Michael, 2026-11-17; custody and destruction per Q3-A, 2026-11-18)
 
@@ -1136,20 +1155,25 @@ precedent for how the keys below are held.
    generated inside OpenBao transit on its own mount: non-exportable, plaintext
    backup off, not derived, never rotated, deletion by mount disable only. It is
    never on the target, the CP host, the launcher runner or the Mac disk.
-2. **Enrolled in Control.** A proof-of-possession over a Control-issued nonce
-   precedes enrolment as the host-attester root (`custody_domain=host_attester`,
-   subject = the Fleet `host_id`). A rebuild enrols a successor and revokes the
-   old root, as the 2026-09-08 amendment already requires.
-3. **Signs once.** It signs exactly one installed attestation, for exactly one
-   dispatch (`observation_id` = the dispatch id), from a 1-use, minutes-long,
+2. **Enrolled in Control.** The nonce comes from CP, and a CP command (not yet
+   built) verifies the proof of possession before enrolment as the host-attester
+   root (`custody_domain=host_attester`, subject = the Fleet `host_id`);
+   Control's enrolment call is unchanged. A rebuild rotates the root while the
+   prior one is still current, or enrols afresh (recovery) after a revoke, and
+   the old root is revoked, as the 2026-09-08 amendment already requires.
+3. **One attestation.** It signs the E10 proof-of-possession and at most one
+   installed attestation, for exactly one dispatch (`observation_id` = the
+   dispatch id); an E11 destroy-only incarnation signs no attestation. The
+   attestation is signed from a 1-use, minutes-long,
    sign-only token that is revoked at once. The envelope is rendered and
    verified by Foundation code that holds no key; the signing process imports
    no Foundation.
 4. **Destroyed before launch.** The mount is disabled, absence is read back, and
    the audit log is scanned (no export, backup or config write). CP stamps
    `destroyed_at` from its database clock. Platform CP's lease acquisition
-   refuses unless destruction is stamped at or before acquisition. Every run,
-   including a re-run, needs a fresh incarnation, root and receipt.
+   refuses unless destruction is stamped at or before acquisition. A well-formed
+   verify mismatch also disables the mount. Every run, including a re-run,
+   needs a fresh incarnation, root and receipt.
 5. **SSH host key pinned separately.** The VM's SSH Ed25519 host-key
    fingerprint is read from the provider console, never scanned, and pinned for
    the controller's SSH. It is a distinct key with a distinct purpose from the
@@ -1159,6 +1183,9 @@ precedent for how the keys below are held.
    incarnation public key and its fingerprint, the enrolment UUID and the
    custody pointer. A separate append-only destruction row completes it. A
    receipt without a destruction row is incomplete and the launcher refuses it.
+   Per Q2-A (2026-11-18) these append-only CP rows, written only by the
+   ceremony session and verified by CP joins against Control's enrolment
+   registry, are the receipt authority; no new key is introduced for them.
 
 **Semantic shift, stated plainly.** The installed attestation used to mean "a
 workload on host H, holding H's key, observed that it installed candidate C".
@@ -1227,6 +1254,8 @@ published by this amendment and no gate closes.
 - Availability depends on the attended session (Q1-B).
 - The lease store adds write functions to the CP production database; they are
   confined to their own schema and role.
+- The exposures listed in this amendment's introduction (W1b, W8 to W12) are
+  accepted, not removed.
 
 References: ADR-0073 Amendment 2026-11-18 (the Control-side facts), ADR-0009
 Amendment 1, and the Gate 2 exit list items E8, E10, E11, E15 and E16.

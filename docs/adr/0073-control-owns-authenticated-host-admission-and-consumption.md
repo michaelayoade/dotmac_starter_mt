@@ -81,21 +81,31 @@ and Control's ownership, atomicity and refusal rules are unchanged. It records
 the Control-side consequences of the rulings U3-B, U5, Q1-B, Q3-A and Q5-B: U3-B and U5 (2026-11-17; U3 amended
 to B the same day) and Q1-B, Q3-A and Q5-B (2026-11-18, register v1498)
 (Platform CP carries the storage; ADR-0070's 2026-11-18 amendment section records
-the architecture and the semantic shift).
+the architecture, the semantic shift and the accepted new exposures). This
+amendment records decisions only. Implementation (CP changes, the S2 and S3
+tooling, ceremony kit v2) is pending, claims no adoption, and the design's open
+verification items remain open: for example, main's candidate-attestation
+workflow still pins the workflow-URL issuer until S3 lands, and the database
+server certificate's SAN check is outstanding. No existing control is relaxed.
 
 ### What changes, and why
 
 - **Who signs the installed attestation (U3-B).** The installed-host root is
   still enrolled as `custody_domain=host_attester` with subject = the current
   Fleet `host_id`, and `public_key_fingerprint` is still the incarnation. The
-  key now lives in OpenBao transit off the target and signs once, for one
-  dispatch, in Michael's ceremony; it is destroyed before launch. Enrolment is
-  unchanged in form: canonical unpadded base64url, a 32-byte key, proof of
-  possession over a Control nonce, and the complete descriptor. The change is
-  the holder, not the contract.
-- **One incarnation per run (Q3-A).** A rebuild or re-run enrols a successor
-  (`rotate_root`) and, after the run, Control `revoke_root` makes the
-  fingerprint permanently revoked. Every incarnation is therefore single-use in
+  key now lives in OpenBao transit off the target and signs the E10
+  proof-of-possession and at most one installed attestation (for one dispatch)
+  in Michael's ceremony; it is destroyed before launch. Control's enrolment
+  call (`enrol_root`, `rotate_root`) is unchanged: it takes no proof of
+  possession and no nonce. The nonce comes from CP, and a CP command (not yet
+  built) verifies the proof before calling Control. The key form is canonical
+  unpadded base64url, 32 bytes, with the complete descriptor. The change is the
+  holder, not the contract.
+- **One incarnation per run (Q3-A).** A rebuild or re-run rotates the root
+  (`rotate_root`) while the prior root is still current, or enrols afresh
+  (`enrol_root`, recovery) after a `revoke_root`, because revoking removes the
+  current root and rotation would then refuse. After the run, `revoke_root`
+  makes the fingerprint permanently revoked. Every incarnation is therefore single-use in
   Control's registry as well as in its signing custody. Legacy rows still
   refuse; nothing is patched.
 - **Destruction is not a Control fact.** Control does not learn that the key was
@@ -129,5 +139,10 @@ caller-supplied root, verifier or standing.
 - The Control registry cannot distinguish a target-held key from an off-target
   one; the custody pointer and ceremony read-backs carry that, as for ADR-0009
   Amendment 1.
+- W9: the presentation key lives on the target, reachable from Foundation's
+  execution path. It authenticates presentation only and signs no attestation.
+- W11: the E10 and ceremony enrolments write to Control's trust registry in the
+  Platform CP production database. Under Q2-A (2026-11-18) append-only CP
+  receipt rows verified against that registry are the receipt authority.
 - Control's revocation is the backstop for a surviving copy of an incarnation
   key, because destruction can be witnessed but not proven.
