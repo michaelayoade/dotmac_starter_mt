@@ -653,6 +653,62 @@ def _name_guard_comes_first(function: ast.FunctionDef) -> bool:
     )
 
 
+_LINK_ATTRIBUTES = frozenset(
+    {
+        "link",
+        "replace",
+        "rename",
+        "renames",
+        "symlink",
+        "symlink_to",
+        "hardlink_to",
+        "link_to",
+        "move",
+    }
+)
+
+
+def _no_other_route_to_link(
+    tree: ast.Module, held_link: ast.Call, held_replaces: list[ast.Call]
+) -> bool:
+    """Beyond the held `os.link` and `os.replace`, no route to link or move.
+
+    `os` is only ever used as `os.<attribute>` (never aliased, rebound or passed),
+    `shutil` and `importlib` are not imported, and no link/move/rename attribute
+    is touched on anything else (`Path.hardlink_to`, `.rename`, `.replace`, ...).
+    The script has no other `.replace` or `.rename`, including `str.replace`.
+    """
+    held = {id(held_link.func)} | {id(call.func) for call in held_replaces}
+    attribute_values = {
+        id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            roots = (
+                [(node.module or "").split(".")[0]]
+                if isinstance(node, ast.ImportFrom)
+                else [alias.name.split(".")[0] for alias in node.names]
+            )
+            if {"shutil", "importlib"} & set(roots):
+                return False
+            if isinstance(node, ast.Import) and any(
+                alias.name == "os" and alias.asname for alias in node.names
+            ):
+                return False
+        if isinstance(node, ast.Name) and node.id == "os":
+            if not isinstance(node.ctx, ast.Load) or id(node) not in attribute_values:
+                return False
+        if isinstance(node, ast.arg) and node.arg == "os":
+            return False
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr in _LINK_ATTRIBUTES
+            and id(node) not in held
+        ):
+            return False
+    return True
+
+
 def _host_admission_premise(source: str) -> bool:
     """Prove `lane3_host_admission.py` publishes only a per-run file, not a lease.
 
@@ -778,12 +834,24 @@ def _host_admission_premise(source: str) -> bool:
         ):
             return False
 
+    if not _no_other_route_to_link(tree, links[0], replaces):
+        return False
+
     forbidden = {"release_path", "lease_store", "write_store_record_once"}
     names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     attributes = {
         node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
     }
     if (names | attributes) & forbidden:
+        return False
+    if any("lease" in identifier.lower() for identifier in names | attributes):
+        return False
+    if any(
+        "lease" in (alias.name + (alias.asname or "")).lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+    ):
         return False
     return not any(
         isinstance(node, ast.ImportFrom)
@@ -1030,6 +1098,25 @@ def test_the_host_admission_premise_rejects_every_plant() -> None:
         '\n_x = "a-lease-store"\n',
         '\n_x = "Lease"\n',
         "\nfrom dotmac_deployment_foundation.lease import write_lease\n",
+        "\nimport os as o2\no2.link('a', 'b')\n",
+        "\n_os = os\n_os.link('a', 'b')\n",
+        "\nimport shutil\nshutil.move('a', 'b')\n",
+        "\nimport importlib\nimportlib.import_module('x')\n",
+        "\nfrom importlib import import_module\n",
+        "\nPath('a').hardlink_to('b')\n",
+        "\nPath('a').rename('b')\n",
+        "\nPath('a').replace('b')\n",
+        "\nPath('a').symlink_to('b')\n",
+        "\nPath('a').link_to('b')\n",
+        "\n_x = 'a'.replace('b', 'c')\n",
+        "\nos.symlink('a', 'b')\n",
+        "\nos.renames('a', 'b')\n",
+        "\nos = 1\n",
+        "\ndef _f(os):\n    return os\n",
+        "\nfrom dotmac_deployment_foundation import lease as _l\n_l.write_lease()\n",
+        "\n_x = foo.write_lease\n",
+        "\nlease_x = 1\n",
+        "\nimport dotmac_deployment_foundation.lease\n",
         "\nfrom dotmac_deployment_foundation import lease\n",
         "\n_x = write_store_record_once\n",
     ):
