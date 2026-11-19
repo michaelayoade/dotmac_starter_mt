@@ -302,7 +302,7 @@ def migrate(admin, receipt: dict) -> None:
     from alembic.script import ScriptDirectory
 
     bindings = tuple(
-        PrerequisiteBinding(name, "0032_communication_dispatches", "kernel")
+        PrerequisiteBinding(name, "0033_receipts_append_only", "kernel")
         for name in module.requires
     )
     install_module_plane_selections(())
@@ -327,7 +327,7 @@ def migrate(admin, receipt: dict) -> None:
             scripts = ScriptDirectory.from_config(cfg)
             require(
                 set(scripts.get_heads())
-                == {"0032_communication_dispatches", "lr_0012_completion_capability"},
+                == {"0033_receipts_append_only", "lr_0012_completion_capability"},
                 "Installed pair graph head differs",
             )
 
@@ -364,7 +364,7 @@ def migrate(admin, receipt: dict) -> None:
                     "Pair database must be empty",
                 )
                 cfg.attributes["connection"] = connection
-                command.upgrade(cfg, "0032_communication_dispatches")
+                command.upgrade(cfg, "0033_receipts_append_only")
                 command.upgrade(cfg, "lr_0012_completion_capability")
                 require_prerequisites(connection, module.requires)
                 require(
