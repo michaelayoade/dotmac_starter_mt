@@ -24,9 +24,11 @@ import dataclasses
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Final
+
+from lane3_host_source_admission import Ed25519AttestationVerifier
 
 __all__ = [
     "EXPORT_SCHEMA",
@@ -40,8 +42,15 @@ __all__ = [
     "ReceiptBlock",
     "ReleaseBlock",
     "RootBlock",
-    "dispatch_id_from_signed_bytes",
+    "CONSUME_SCOPE",
+    "CONSUME_STATUS",
+    "DISPATCH_PURPOSE",
+    "DispatchStatement",
+    "PinnedIdentity",
+    "dispatch_envelope_digest",
+    "ledger_fingerprint",
     "ledger_key_for",
+    "verify_dispatch",
     "parse_cp6_export",
     "raw_public_key",
     "receipt_digest",
@@ -69,45 +78,184 @@ def _refuse(code: str) -> None:
 # --- the schema: every definition the final CP-6 pin may change ---------------
 
 
-def ledger_key_for(dispatch_id: str) -> str:
-    """The Control ledger key a consumed dispatch is recorded under.
+# CP-6 PIN (Control a17 `dispatch_envelope.py`, `digests.py`): the dispatch
+# envelope is `{statement, signature}`; the statement is signed over
+# `canonical_json(statement)`; the envelope digest is `sha256:` + sha256 over
+# `canonical_json({statement, signature})`; signatures and keys are unpadded
+# base64url; a ledger row's fingerprint is bare hex.
+DISPATCH_PURPOSE: Final = "deployment_dispatch"
+CONSUME_SCOPE: Final = "deployment.consume_dispatch_challenge.v1"
+CONSUME_STATUS: Final = "executed"
+_STATEMENT_KEYS: Final = {
+    "schema",
+    "version",
+    "purpose",
+    "dispatch_id",
+    "authorization_id",
+    "authorization_plan_id",
+    "authorization_control_version",
+    "authorization_key_id",
+    "authorization_public_key_fingerprint",
+    "authorization_envelope_digest",
+    "execution_sequence",
+    "attempt_no",
+    "rollout_ref",
+    "target_id",
+    "target_ref",
+    "product_code",
+    "environment",
+    "operation",
+    "release_ref",
+    "authorized_images",
+    "plan_digest",
+    "descriptor_digest",
+    "execution_plan_digest",
+    "issued_at",
+    "control_version",
+    "key_id",
+    "algorithm",
+    "public_key_fingerprint",
+}
+_BARE_HEX: Final = re.compile(r"[0-9a-f]{64}")
 
-    CP-6 PIN: the design (S8a row) says "ledger key = dispatch id", while the
-    committed-consumption reference reads `control-dispatch:<dispatch_id>`.
-    Which spelling the Kernel ledger stores is not settled here; this is the
-    one place to change it.
-    """
+
+def canonical_json(payload: Mapping[str, Any]) -> bytes:
+    """Control's `canonical_json`: sorted, compact, UTF-8, no trailing newline."""
+    return json.dumps(dict(payload), sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+
+
+def ledger_key_for(dispatch_id: str) -> str:
+    """The Control ledger key: the bare dispatch id (scope `CONSUME_SCOPE`)."""
     return dispatch_id
 
 
-def dispatch_id_from_signed_bytes(signed: bytes) -> str:
-    """The dispatch id a signed dispatch envelope names.
+def dispatch_envelope_digest(statement: Mapping[str, Any], signature: str) -> str:
+    """Control `DispatchEnvelopeDigestV1.over_bytes(envelope.canonical_bytes)`."""
+    raw = canonical_json({"statement": statement, "signature": signature})
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
-    CP-6 PIN: Control owns the dispatch envelope's wire form. Provisional
-    reading: the signed message is a JSON object with a string `dispatch_id`.
-    """
+
+def ledger_fingerprint(
+    *,
+    dispatch_envelope_digest: str,
+    candidate_attestation_envelope_digest: str,
+    installed_attestation_envelope_digest: str,
+) -> str:
+    """Control `compute_host_admission_consumption_fingerprint`: bare hex."""
+    payload = {
+        "schema": "dotmac.control.host-admission-consumption",
+        "version": 1,
+        "dispatch_envelope_digest": dispatch_envelope_digest,
+        "candidate_attestation_envelope_digest": candidate_attestation_envelope_digest,
+        "installed_attestation_envelope_digest": installed_attestation_envelope_digest,
+    }
+    return hashlib.sha256(canonical_json(payload)).hexdigest()
+
+
+def _unb64url(value: Any, *, length: int | None = None) -> bytes:
+    if type(value) is not str or not value or "=" in value:
+        _refuse("field")
     try:
-        document = json.loads(signed.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        _refuse("dispatch-unreadable")
-    if not isinstance(document, dict):
-        _refuse("dispatch-unreadable")
-    value = document.get("dispatch_id")
-    if not isinstance(value, str) or not _TOKEN.fullmatch(value):
-        _refuse("dispatch-unreadable")
-    return value
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (binascii.Error, ValueError):
+        _refuse("field")
+    if base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=") != value or (
+        length is not None and len(raw) != length
+    ):
+        _refuse("field")
+    return raw
 
 
-def dispatch_envelope_digest(signed: bytes) -> str:
-    """CP-6 PIN: provisional rule, sha256 over the exact signed bytes."""
-    return "sha256:" + hashlib.sha256(signed).hexdigest()
+@dataclasses.dataclass(frozen=True, slots=True)
+class PinnedIdentity:
+    """A CP signing identity pinned independently of the export."""
+
+    key_id: str
+    algorithm: str
+    public_key_b64url: str
+
+    @property
+    def raw(self) -> bytes:
+        try:
+            return raw_public_key(self.public_key_b64url)
+        except Cp6ExportRefused:
+            raise Cp6ExportRefused("cp6-export-pinned-identity-invalid") from None
+
+    @property
+    def fingerprint(self) -> str:
+        return "sha256:" + hashlib.sha256(self.raw).hexdigest()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DispatchStatement:
+    """The typed, signed dispatch statement (the fields the joins consume)."""
+
+    dispatch_id: str
+    execution_sequence: int
+    attempt_no: int
+    target_id: str
+    target_ref: str
+    execution_plan_digest: str
+    purpose: str
+    key_id: str
+    algorithm: str
+    public_key_fingerprint: str
+
+
+def verify_dispatch(
+    block: DispatchBlock, pinned: Sequence[PinnedIdentity]
+) -> DispatchStatement:
+    """Verify the dispatch envelope against pinned CP identities; type it.
+
+    Refuses: wrong purpose, signer not pinned (key id, algorithm and the key
+    fingerprint the statement itself names), a bad signature over the exact
+    signed statement bytes, and an envelope digest the export mis-states.
+    """
+    statement = block.statement
+    if statement["purpose"] != DISPATCH_PURPOSE:
+        _refuse("dispatch-purpose")
+    matches = [
+        item
+        for item in pinned
+        if item.key_id == statement["key_id"]
+        and item.algorithm == statement["algorithm"]
+        and item.fingerprint == statement["public_key_fingerprint"]
+    ]
+    if not matches:
+        _refuse("dispatch-signer-unpinned")
+    raw_signature = _unb64url(block.signature, length=64)
+    if not Ed25519AttestationVerifier().verify(
+        public_key=matches[0].raw,
+        algorithm=statement["algorithm"],
+        message=canonical_json(statement),
+        signature=base64.b64encode(raw_signature).decode("ascii"),
+    ):
+        _refuse("dispatch-signature-invalid")
+    if block.envelope_digest != dispatch_envelope_digest(statement, block.signature):
+        _refuse("dispatch-digest-mismatch")
+    return DispatchStatement(
+        dispatch_id=statement["dispatch_id"],
+        execution_sequence=statement["execution_sequence"],
+        attempt_no=statement["attempt_no"],
+        target_id=statement["target_id"],
+        target_ref=statement["target_ref"],
+        execution_plan_digest=statement["execution_plan_digest"],
+        purpose=statement["purpose"],
+        key_id=statement["key_id"],
+        algorithm=statement["algorithm"],
+        public_key_fingerprint=statement["public_key_fingerprint"],
+    )
 
 
 def receipt_digest(document: Mapping[str, Any]) -> str:
     """The second-channel digest of the E10 receipt row (Gate 2 record).
 
-    CP-6 PIN: provisional rule, sha256 over the canonical JSON of the receipt
-    row exactly as exported (see `_canonical`).
+    CP-6 PIN: THE one rule. CP's `enrol-incarnation` (which prints the digest)
+    and `lane3_record export` (which carries it) must both call an equivalent
+    of this function; the offline orchestrator recomputes it and refuses a
+    differing exported value. Provisional: sha256 over `_canonical` of the row.
     """
     return "sha256:" + hashlib.sha256(_canonical(dict(document))).hexdigest()
 
@@ -122,16 +270,11 @@ def _canonical(document: Any) -> bytes:
 # CP-6 PIN: closed key sets of every block.
 _TOP: Final = {"schema", "dispatch_id", "host_id", "control", "cp_lane3"}
 _CONTROL: Final = {"dispatch", "ledger"}
-_DISPATCH: Final = {
-    "signed_bytes_b64",
-    "signature_b64",
-    "key_id",
-    "algorithm",
-    "public_key_fingerprint",
-    "envelope_digest",
-}
+_DISPATCH: Final = {"statement", "signature", "envelope_digest"}
 _LEDGER: Final = {
     "key",
+    "scope",
+    "status",
     "fingerprint",
     "created_at",
     "execution_sequence",
@@ -139,6 +282,7 @@ _LEDGER: Final = {
 }
 _CP_LANE3: Final = {
     "e10_receipt",
+    "e10_receipt_digest",
     "destruction",
     "lease",
     "release",
@@ -197,18 +341,19 @@ _ROOT: Final = {
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DispatchBlock:
-    signed_bytes: bytes
+    #: The signed statement exactly as exported (unverified until `verify_dispatch`).
+    statement: Mapping[str, Any]
+    #: Unpadded base64url, as Control stores it.
     signature: str
-    key_id: str
-    algorithm: str
-    public_key_fingerprint: str
     envelope_digest: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class LedgerBlock:
     key: str
-    #: Carried and recorded, not interpreted: what it fingerprints is not pinned.
+    scope: str
+    status: str
+    #: Bare hex, as Control stores it: `ledger_fingerprint(...)`.
     fingerprint: str
     created_at: datetime
     execution_sequence: int
@@ -292,6 +437,8 @@ class Cp6Export:
     destruction: DestructionBlock
     lease: LeaseBlock
     release: ReleaseBlock | None
+    #: The digest CP exported for the receipt row (checked by the orchestrator).
+    e10_receipt_digest: str
     candidate_root: RootBlock
     installed_root: RootBlock
     #: sha256 of the exact export bytes, for the report.
@@ -341,23 +488,23 @@ def _positive(value: Any) -> int:
     return value
 
 
-def _b64(value: Any, *, length: int | None = None) -> bytes:
-    if type(value) is not str or not value:
-        _refuse("field")
-    try:
-        raw = base64.b64decode(value.encode("ascii"), validate=True)
-    except (binascii.Error, ValueError):
-        _refuse("field")
-    if base64.b64encode(raw).decode("ascii") != value or (
-        length is not None and len(raw) != length
+def _statement(value: Any) -> dict[str, Any]:
+    """A closed dispatch statement with the typed fields the joins consume."""
+    block = _object(value, set(_STATEMENT_KEYS))
+    for name in (
+        "purpose",
+        "dispatch_id",
+        "target_id",
+        "target_ref",
+        "key_id",
+        "algorithm",
     ):
-        _refuse("field")
-    return raw
-
-
-def _signature(value: Any) -> str:
-    _b64(value, length=64)
-    return value
+        _token(block[name])
+    _digest(block["execution_plan_digest"])
+    _digest(block["public_key_fingerprint"])
+    _positive(block["execution_sequence"])
+    _positive(block["attempt_no"])
+    return block
 
 
 def raw_public_key(value: Any) -> bytes:
@@ -435,18 +582,21 @@ def parse_cp6_export(payload: bytes) -> Cp6Export:
     cp = _object(top["cp_lane3"], _CP_LANE3)
 
     raw_dispatch = _object(control["dispatch"], _DISPATCH)
+    _unb64url(raw_dispatch["signature"], length=64)
     dispatch = DispatchBlock(
-        signed_bytes=_b64(raw_dispatch["signed_bytes_b64"]),
-        signature=_signature(raw_dispatch["signature_b64"]),
-        key_id=_token(raw_dispatch["key_id"]),
-        algorithm=_token(raw_dispatch["algorithm"]),
-        public_key_fingerprint=_digest(raw_dispatch["public_key_fingerprint"]),
+        statement=_statement(raw_dispatch["statement"]),
+        signature=raw_dispatch["signature"],
         envelope_digest=_digest(raw_dispatch["envelope_digest"]),
     )
     raw_ledger = _object(control["ledger"], _LEDGER)
+    fingerprint = raw_ledger["fingerprint"]
+    if type(fingerprint) is not str or not _BARE_HEX.fullmatch(fingerprint):
+        _refuse("field")
     ledger = LedgerBlock(
         key=_token(raw_ledger["key"]),
-        fingerprint=_token(raw_ledger["fingerprint"]),
+        scope=_token(raw_ledger["scope"]),
+        status=_token(raw_ledger["status"]),
+        fingerprint=fingerprint,
         created_at=_time(raw_ledger["created_at"]),
         execution_sequence=_positive(raw_ledger["execution_sequence"]),
         attempt_no=_positive(raw_ledger["attempt_no"]),
@@ -519,6 +669,7 @@ def parse_cp6_export(payload: bytes) -> Cp6Export:
         destruction=destruction,
         lease=lease,
         release=release,
+        e10_receipt_digest=_digest(cp["e10_receipt_digest"]),
         candidate_root=_root(cp["candidate_root"]),
         installed_root=_root(cp["installed_root"]),
         export_digest="sha256:" + hashlib.sha256(payload).hexdigest(),

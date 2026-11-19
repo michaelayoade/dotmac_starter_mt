@@ -63,6 +63,7 @@ from dotmac_deployment_foundation.trusted_host_source import (
     AttestationEnvelopeV2,
     AttestationTrustPolicy,
     AttestationTrustRootV2,
+    CandidateAttestationSubjectV2,
     attestation_envelope_digest,
     verify_attestation_pair,
 )
@@ -71,15 +72,17 @@ from lane3_bundle_verification import (
     require_plaintext_exposure_bundle,
 )
 from lane3_cp6_export import (
+    CONSUME_SCOPE,
+    CONSUME_STATUS,
     Cp6Export,
     Cp6ExportRefused,
+    PinnedIdentity,
     RootBlock,
-    dispatch_envelope_digest,
-    dispatch_id_from_signed_bytes,
+    ledger_fingerprint,
     ledger_key_for,
     parse_cp6_export,
-    raw_public_key,
     receipt_digest,
+    verify_dispatch,
 )
 from lane3_e10_receipt import E10ReceiptRef, ReceiptRefused
 from lane3_evidence_finalization import (
@@ -99,11 +102,12 @@ from lane3_offline_result import (
     RESULT_SCHEMA,
     OfflineResultCoordinates,
     OfflineResultRefused,
+    OfflineResultUnavailable,
     VerificationPolicy,
     parse_result,
     require_result_bindings,
 )
-from lane3_offline_signature import require_authenticated_result
+from lane3_offline_signature import _require_tool, require_authenticated_result
 from lane3_receipt_v2 import evidence_bundle_digest
 
 __all__ = [
@@ -122,6 +126,9 @@ __all__ = [
 CANDIDATE_AUDIENCE: Final = "dotmac-deployment-foundation"
 _DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _SSH_KEYGEN: Final = "/usr/bin/ssh-keygen"
+_CANDIDATE_CUSTODY: Final = "candidate_release_signer"
+_INSTALLED_CUSTODY: Final = "host_attester"
+_PAIR_CODE: Final = re.compile(r"trusted-host-source-([a-z-]{1,60})")
 _MAX_TOOL_BYTES: Final = 64 * 1024 * 1024
 _AGE_HEADER: Final = b"age-encryption.org/v1\n"
 
@@ -132,26 +139,6 @@ class JoinRefused(ValueError):
 
 def _refuse(code: str) -> None:
     raise JoinRefused(f"offline-join-{code}")
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class PinnedIdentity:
-    """A CP signing identity pinned independently of the export."""
-
-    key_id: str
-    algorithm: str
-    public_key_b64url: str
-
-    @property
-    def raw(self) -> bytes:
-        try:
-            return raw_public_key(self.public_key_b64url)
-        except Cp6ExportRefused:
-            raise JoinRefused("offline-join-pinned-identity-invalid") from None
-
-    @property
-    def fingerprint(self) -> str:
-        return "sha256:" + hashlib.sha256(self.raw).hexdigest()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -275,8 +262,8 @@ def _envelope(payload: bytes, code: str) -> AttestationEnvelopeV2:
 
 
 def _root(block: RootBlock) -> AttestationTrustRootV2:
-    # Revocation is judged by the E10 join on recorded times, never here: the
-    # signature must be checked as of the consumption instant.
+    # Revocation is judged by the callers on RECORDED times (as of the
+    # consumption instant), so the signature is checked as of that instant.
     try:
         return AttestationTrustRootV2(
             public_key_fingerprint=block.fingerprint,
@@ -330,54 +317,66 @@ def _join_receipt(
         _refuse("receipt-host-mismatch")
 
 
+def _bare(digest: str) -> str:
+    return digest.removeprefix("sha256:")
+
+
 def _join_control(
     export: Cp6Export,
     *,
     receipt: RehearsalReceiptV2,
+    plan: FoundationExecutionPlanV3,
     pinned: Sequence[PinnedIdentity],
-) -> datetime:
-    """Control join. Returns the ledger `created_at` for the later joins."""
+    admission: HostAdmissionFacts,
+) -> None:
+    """Control join: signed dispatch, ledger row, lease bracket."""
     dispatch = receipt.content["control_dispatch"]
     wanted = dispatch["dispatch_id"]
     if export.dispatch_id != wanted:
         _refuse("export-dispatch-mismatch")
-    block = export.dispatch
-    matches = [
-        item
-        for item in pinned
-        if item.key_id == block.key_id
-        and item.algorithm == block.algorithm
-        and item.fingerprint == block.public_key_fingerprint
-    ]
-    if not matches:
-        _refuse("dispatch-signer-unpinned")
-    verified = Ed25519AttestationVerifier().verify(
-        public_key=matches[0].raw,
-        algorithm=block.algorithm,
-        message=block.signed_bytes,
-        signature=block.signature,
-    )
-    if not verified:
-        _refuse("dispatch-signature-invalid")
     try:
-        signed_id = dispatch_id_from_signed_bytes(block.signed_bytes)
-    except Cp6ExportRefused:
-        _refuse("dispatch-unreadable")
-    if signed_id != wanted:
+        statement = verify_dispatch(export.dispatch, pinned)
+    except Cp6ExportRefused as exc:
+        raise JoinRefused(
+            "offline-join-" + str(exc).removeprefix("cp6-export-")
+        ) from None
+    # Everything below is read from the SIGNED statement, never export fields.
+    if statement.dispatch_id != wanted:
         _refuse("dispatch-id-mismatch")
-    if block.envelope_digest != dispatch_envelope_digest(block.signed_bytes):
-        _refuse("dispatch-digest-mismatch")
-    ledger = export.ledger
-    if ledger.key != ledger_key_for(wanted):
-        _refuse("ledger-key-mismatch")
-    if (ledger.execution_sequence, ledger.attempt_no) != (
+    if _bare(statement.execution_plan_digest) != _bare(plan.digest()):
+        _refuse("dispatch-plan-mismatch")
+    if statement.target_id != plan.target_id or statement.target_ref != plan.target:
+        _refuse("dispatch-target-mismatch")
+    if (statement.execution_sequence, statement.attempt_no) != (
         dispatch["execution_sequence"],
         dispatch["attempt_no"],
     ):
+        _refuse("dispatch-coordinate-mismatch")
+    if admission.attempt_id != wanted:
+        _refuse("host-admission-attempt-mismatch")
+
+    ledger = export.ledger
+    if ledger.key != ledger_key_for(wanted):
+        _refuse("ledger-key-mismatch")
+    if ledger.scope != CONSUME_SCOPE or ledger.status != CONSUME_STATUS:
+        _refuse("ledger-row-mismatch")
+    if (ledger.execution_sequence, ledger.attempt_no) != (
+        statement.execution_sequence,
+        statement.attempt_no,
+    ):
         _refuse("ledger-coordinate-mismatch")
+    expected_fingerprint = ledger_fingerprint(
+        dispatch_envelope_digest=export.dispatch.envelope_digest,
+        candidate_attestation_envelope_digest=admission.candidate_digest,
+        installed_attestation_envelope_digest=admission.installed_digest,
+    )
+    if ledger.fingerprint != expected_fingerprint:
+        _refuse("ledger-fingerprint-mismatch")
+
     lease = export.lease
+    # The receipt's `lease_id` is the launcher's authorization run id.
     if (
-        lease.lease_id != receipt.content["lease_id"]
+        lease.authorization_run != receipt.content["lease_id"]
         or lease.host_id != receipt.content["host_id"]
         or export.host_id != lease.host_id
         or (export.release is not None and export.release.lease_id != lease.lease_id)
@@ -385,13 +384,18 @@ def _join_control(
         _refuse("lease-mismatch")
     if lease.expires_at <= lease.acquired_at:
         _refuse("lease-mismatch")
-    if export.release is not None and not export.release.host_mutated:
+    if export.release is None:
+        # Foundation `covers` treats now >= expires_at as expired.
+        if not lease.acquired_at <= ledger.created_at < lease.expires_at:
+            _refuse("ledger-outside-bracket")
+        return
+    if not export.release.host_mutated:
         # The launcher forces host_mutated once the target reported ready.
         _refuse("release-not-mutated")
-    end = export.release.released_at if export.release else lease.expires_at
-    if not lease.acquired_at <= ledger.created_at <= end:
+    if export.release.released_at > lease.expires_at:
+        _refuse("release-after-expiry")
+    if not lease.acquired_at <= ledger.created_at <= export.release.released_at:
         _refuse("ledger-outside-bracket")
-    return ledger.created_at
 
 
 def _join_e10(
@@ -402,7 +406,10 @@ def _join_e10(
     admission: HostAdmissionFacts,
 ) -> None:
     row = export.receipt
-    if receipt_digest(row.document) != expected_receipt_digest:
+    recomputed = receipt_digest(row.document)
+    if export.e10_receipt_digest != recomputed:
+        _refuse("e10-receipt-export-digest-mismatch")
+    if recomputed != expected_receipt_digest:
         _refuse("e10-receipt-digest-mismatch")
     destruction, lease, ledger = export.destruction, export.lease, export.ledger
     if destruction.receipt_ref != row.receipt_ref or (
@@ -438,23 +445,32 @@ def _join_e10(
         or destruction.installed_attestation_digest is None
     ):
         _refuse("e10-destruction-dispatch-mismatch")
+    root = export.installed_root
+    # enrolment <= destruction <= lease acquired <= ledger created_at
+    if root.enrolled_at > destruction.destroyed_at:
+        _refuse("e10-enrolled-after-destruction")
     if destruction.destroyed_at > lease.acquired_at:
         _refuse("e10-destroyed-after-acquire")
     if lease.acquired_at > ledger.created_at:
         _refuse("e10-acquired-after-ledger")
     if destruction.installed_attestation_digest != admission.installed_digest:
         _refuse("e10-installed-digest-mismatch")
-    root = export.installed_root
     if (
         root.fingerprint != row.incarnation_fingerprint
         or root.enrolment_uuid != row.enrolment_uuid
         or root.purpose != INSTALLED_OBSERVATION_PURPOSE
+        or root.custody_domain != _INSTALLED_CUSTODY
     ):
         _refuse("e10-root-mismatch")
     if root.revoked_at is None:
         _refuse("e10-root-not-revoked")
     if root.revoked_at <= ledger.created_at:
         _refuse("e10-root-revoked-before-ledger")
+
+
+def _pair_code(exc: BaseException) -> str:
+    match = _PAIR_CODE.fullmatch(str(getattr(exc, "code", "")))
+    return "pair-" + match[1] if match else "pair-refused"
 
 
 def _join_candidate(
@@ -474,6 +490,12 @@ def _join_candidate(
         or root.purpose != CANDIDATE_ATTESTATION_PURPOSE
     ):
         _refuse("candidate-root-unpinned")
+    if root.custody_domain != _CANDIDATE_CUSTODY:
+        _refuse("candidate-root-custody")
+    if root.enrolled_at > export.ledger.created_at:
+        _refuse("candidate-root-enrolled-late")
+    if root.revoked_at is not None and root.revoked_at <= export.ledger.created_at:
+        _refuse("candidate-root-revoked")
     candidate = _envelope(candidate_bytes, "candidate-envelope-invalid")
     installed = _envelope(installed_bytes, "installed-envelope-invalid")
     if (
@@ -482,12 +504,23 @@ def _join_candidate(
     ):
         _refuse("host-admission-digest-mismatch")
     try:
+        subject = CandidateAttestationSubjectV2.from_mapping(
+            candidate.subject_mapping()
+        )
+    except SpecError:
+        _refuse("candidate-envelope-invalid")
+    if str(subject.wheel_sha256) != plan.candidate_wheel_digest:
+        _refuse("candidate-wheel-mismatch")
+    try:
         policy = AttestationTrustPolicy(
             candidate_roots=(_root(root),),
             installed_roots=(_root(export.installed_root),),
             candidate_audience=candidate_audience,
             installed_audience=plan.host_id,
         )
+    except SpecError:
+        _refuse("pair-policy-invalid")
+    try:
         verify_attestation_pair(
             candidate=candidate,
             installed=installed,
@@ -500,13 +533,9 @@ def _join_candidate(
             verification_context_digest=export.dispatch.envelope_digest,
             now=export.ledger.created_at,
         )
-    except (SpecError, ValueError) as exc:
-        if isinstance(exc, JoinRefused):
-            raise
-        _refuse("attestation-pair-refused")
-    except Exception:
-        # PreconditionFailed et al: codes only, never the refusal text.
-        _refuse("attestation-pair-refused")
+    except Exception as exc:
+        # Codes only, never the refusal text.
+        raise JoinRefused("offline-join-" + _pair_code(exc)) from None
 
 
 def _iso(moment: datetime) -> str:
@@ -619,7 +648,13 @@ def verify_offline(
     except Cp6ExportRefused:
         _refuse("export-invalid")
     admission = read_host_admission(host_admission_bytes)
-    _join_control(export, receipt=receipt, pinned=pinned_cp_identities)
+    _join_control(
+        export,
+        receipt=receipt,
+        plan=execution_plan,
+        pinned=pinned_cp_identities,
+        admission=admission,
+    )
     _join_e10(
         export,
         plan=execution_plan,
@@ -671,21 +706,43 @@ def verify_offline(
 
 
 def sign_result(
-    payload: bytes,
+    verification: OfflineVerification,
     *,
     key_path: pathlib.Path,
-    expected: OfflineResultCoordinates,
     policy: VerificationPolicy,
     now: datetime,
 ) -> bytes:
-    """SSHSIG-sign `payload` (`ssh-keygen -Y sign`, the consumer's namespace).
+    """SSHSIG-sign a result `verify_offline` produced (`ssh-keygen -Y sign`).
 
-    The key is named by path (or held by an agent); its bytes are never read
-    here. The signature is checked with the consumer's own
-    `require_authenticated_result` before it is returned.
+    Only an `OfflineVerification` is accepted, never arbitrary bytes. Order:
+    parse and bind the result, hash-check `ssh-keygen` against the policy pin,
+    and only THEN let the custody key be used. The key is named by path (or
+    held by an agent); its bytes are never read here. The signature is checked
+    with the consumer's own `require_authenticated_result` before it returns.
+    (The tool is hash-checked before use and again at self-check; a swap in
+    between is bounded by the root-owned, non-writable tool path.)
     """
-    if not isinstance(key_path, pathlib.Path):
-        raise JoinRefused("offline-join-sign-key-invalid")
+    if type(verification) is not OfflineVerification or not isinstance(
+        key_path, pathlib.Path
+    ):
+        raise JoinRefused("offline-join-sign-input-invalid")
+    try:
+        require_result_bindings(
+            parse_result(verification.result_bytes),
+            expected=verification.coordinates,
+            policy=policy,
+            now=now,
+        )
+        if policy.ssh_keygen_sha256 is None:
+            raise JoinRefused("offline-join-sign-tool-refused")
+        _require_tool(policy.ssh_keygen_sha256)
+    except OfflineResultUnavailable:
+        raise JoinRefused("offline-join-sign-unavailable") from None
+    except OfflineResultRefused as exc:
+        if str(exc).startswith("offline-tool"):
+            raise JoinRefused("offline-join-sign-tool-refused") from None
+        raise JoinRefused("offline-join-sign-self-check") from None
+    payload = verification.result_bytes
     environment = {"LC_ALL": "C", "PATH": "/usr/bin:/bin", "TZ": "UTC"}
     if os.environ.get("SSH_AUTH_SOCK"):
         environment["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
@@ -724,8 +781,14 @@ def sign_result(
         raise JoinRefused("offline-join-sign-failed")
     try:
         require_authenticated_result(
-            payload, signature, expected=expected, policy=policy, now=now
+            payload,
+            signature,
+            expected=verification.coordinates,
+            policy=policy,
+            now=now,
         )
+    except OfflineResultUnavailable:
+        raise JoinRefused("offline-join-sign-unavailable") from None
     except OfflineResultRefused:
         raise JoinRefused("offline-join-sign-self-check") from None
     return signature
