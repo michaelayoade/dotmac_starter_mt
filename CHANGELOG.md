@@ -28,6 +28,20 @@
 
 ### Added
 
+- Consent and receipt operator surface (ADR-0006 § 5c/5g, K-7): the new
+  `comms_operations` assembly feature adds `/admin/comms/suppressions` (the
+  tenant's consent ledger, filter by address, channel and scope) and
+  `/admin/comms/receipts` (what providers reported for one address, plus its
+  suppression state), and `POST /admin/comms/suppressions/clear`, which clears
+  one suppression on an operator's stated reason and writes one
+  `communication.suppression.cleared` audit row (actor, reason, scope, a short
+  address digest; never the address). A bounce or complaint suppression blocks
+  every message including password resets, so this is where it becomes visible
+  and clearable. Declares `comms.suppressions.read`, `comms.receipts.read` and
+  `comms.suppressions.manage`, granted to `admin` in the `starter.admin`
+  profile. Additive: no table, no new write path beyond the kernel's own
+  `consent.unsuppress`; revert is a plain revert.
+
 - A pure, storage-neutral permission provisioning contract separates
   module-owned `PermissionDefinition`s from assembly-owned `RoleDefinition`s
   and versioned `RoleGrantProfile`s. `create_app` attaches the digest-addressed

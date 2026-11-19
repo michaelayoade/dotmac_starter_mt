@@ -10,6 +10,14 @@ here.
 
 ### Added
 
+- K-6 follow-up: kernel migration `0034_receipts_platform_ro` revokes UPDATE and
+  DELETE on `communication_deliveries` from `platform_api` (the `app_user` side
+  was `0033`). Privilege tightening only; down restores the grant. Nothing
+  running as `platform_api` reads or writes the table (the platform relay worker
+  uses that session for outbox delivery but never touches receipts); tenant
+  deletion still cascades through the foreign key. Receipts are now append-only
+  for both application roles.
+
 - Delivery deferral, audited dead-dispatch requeue and append-only receipts
   (ADR-0006 § 5g, K-4, K-5, K-6). Kernel migration `0033_receipts_append_only`
   (privilege tightening only; down restores the 0020 grant).

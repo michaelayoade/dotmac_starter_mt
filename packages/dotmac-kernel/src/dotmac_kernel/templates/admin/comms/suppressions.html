@@ -1,0 +1,112 @@
+{#
+  Suppressions (K-7) — the tenant's consent ledger, with a filter and a
+  clear-with-reason action per row, at `/admin/comms/suppressions`.
+
+  Context: `rows` (list[SuppressionRow]), `page`, `total`, `total_pages`,
+  `channel`/`scope`/`address` (current filters), `error`, `notice`.
+  A bounce or complaint suppression (scope `all`) blocks transactional mail,
+  including password resets, until an operator clears it here.
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/table_macros.html" import table_header %}
+{% from "dotmac_ui/components/empty_state.html" import empty_state %}
+
+{% block admin_content %}
+<div id="comms-content">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Suppressions</h1>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Addresses we will not send to. A bounce or complaint blocks every message, including password resets, until cleared.</p>
+        </div>
+        <a href="/admin/comms/receipts" class="px-3 py-2 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Delivery receipts</a>
+    </div>
+
+    {% if error %}
+    <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">{{ error }}</div>
+    {% endif %}
+    {% if notice %}
+    <div class="mb-4 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm" role="status">{{ notice }}</div>
+    {% endif %}
+
+    <form method="get" action="/admin/comms/suppressions" class="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+            <label for="f-address" class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Address contains</label>
+            <input type="search" id="f-address" name="address" value="{{ address }}"
+                   class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm" />
+        </div>
+        <div>
+            <label for="f-channel" class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Channel</label>
+            <input type="text" id="f-channel" name="channel" value="{{ channel }}" placeholder="email"
+                   class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm" />
+        </div>
+        <div>
+            <label for="f-scope" class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Scope</label>
+            <select id="f-scope" name="scope"
+                    class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm">
+                <option value="" {% if not scope %}selected{% endif %}>Any</option>
+                <option value="all" {% if scope == "all" %}selected{% endif %}>all (blocks everything)</option>
+                <option value="marketing" {% if scope == "marketing" %}selected{% endif %}>marketing only</option>
+            </select>
+        </div>
+        <button type="submit" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Filter</button>
+    </form>
+
+    <div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+        <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+            {{ table_header([
+                {"label": "Address"},
+                {"label": "Channel"},
+                {"label": "Scope"},
+                {"label": "Reason"},
+                {"label": "Since"},
+                {"label": "Clear"},
+            ]) }}
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+                {% for row in rows %}
+                <tr>
+                    <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">
+                        <a href="/admin/comms/receipts?channel={{ row.channel | urlencode }}&amp;address={{ row.address | urlencode }}" class="hover:underline">{{ row.address }}</a>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ row.channel }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ row.scope }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ row.reason }}{% if row.note %} — {{ row.note }}{% endif %}</td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ row.created_at | local_datetime }}</td>
+                    <td class="px-4 py-3 text-sm">
+                        <form hx-post="/admin/comms/suppressions/clear" class="flex items-center gap-2">
+                            <input type="hidden" name="channel" value="{{ row.channel }}" />
+                            <input type="hidden" name="address" value="{{ row.address }}" />
+                            <input type="text" name="reason" required maxlength="500" placeholder="Reason"
+                                   aria-label="Reason for clearing {{ row.address }}"
+                                   class="px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm" />
+                            <button type="submit" class="px-3 py-1 rounded-lg text-sm border border-red-300 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">Clear</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6">
+                        {{ empty_state(title="No suppressions found") }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if total_pages > 1 %}
+        <div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+            <p class="text-sm text-slate-500 dark:text-slate-400">Page {{ page }} of {{ total_pages }} ({{ total }} total)</p>
+            <div class="flex items-center gap-2">
+                {% if page > 1 %}
+                <a href="/admin/comms/suppressions?page={{ page - 1 }}&amp;channel={{ channel | urlencode }}&amp;scope={{ scope | urlencode }}&amp;address={{ address | urlencode }}"
+                   class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300">Previous</a>
+                {% endif %}
+                {% if page < total_pages %}
+                <a href="/admin/comms/suppressions?page={{ page + 1 }}&amp;channel={{ channel | urlencode }}&amp;scope={{ scope | urlencode }}&amp;address={{ address | urlencode }}"
+                   class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300">Next</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
