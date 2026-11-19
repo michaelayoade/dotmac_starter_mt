@@ -13,6 +13,8 @@
   never dereferenced), ADR-0018 (a guard exemption states an enforceable
   premise), ADR-0023 (dual-plane modules), `packages/dotmac-deployment-control`
   (desired deployment state), `packages/dotmac-platform-health`
+- Amended: 2026-11-18 (Gate 2 a2 custody, lease and candidate-signing rulings;
+  last section. ADR-0073 carries the Control side)
 
 ## Context
 
@@ -1106,3 +1108,124 @@ publication oracle continues refusing until the equivalent adopted-path
 implementation and admission evidence are accepted. Source readiness remains
 candidate-independent; exact-candidate rehearsal follows the one recorded
 build, and production activation follows publication.
+
+## Amendment — 2026-11-18: Gate 2 a2 custody, lease and candidate-signing rulings
+
+The text above is preserved as written. Where a sentence above says otherwise,
+the four rulings below supersede that sentence for the Gate 2 a2 rehearsal
+only, in the way the 2026-09-25 amendments supersede earlier claims. They
+relax no control: each one either moves a key off a more exposed holder or
+adds a refusal. Michael ruled all four on 2026-11-18 (debt register v1498; U3
+and U5 were set earlier in the same pre-E11 sequence and are recorded here
+with them). Production custody remains a D3 decision; nothing here grants
+anything for it. ADR-0009 Amendment 1 (transit signing custody) is the
+precedent for how the keys below are held.
+
+### What changed against the text above, and why
+
+| Original text | Now | Why |
+|---|---|---|
+| 2026-09-07 "trusted host provenance v2": installed-host evidence "belongs to a distinct target-local host-attestation workload" | Installed-host evidence is signed by a dedicated off-target incarnation key held in the ceremony's OpenBao transit and destroyed before launch (U3-B) | A target-held private key can be read by whatever runs on the target; the signer never reaches the target |
+| Same amendment: candidate evidence "belongs to the protected Starter release-workflow signer"; 2026-09-22: the workflow signing step is the "ONLY writer" of the receipt binding | Candidate evidence is signed in Michael's ceremony; the workflow only publishes (Q5-B) | The GitHub-secret PEM is retired; no private key remains in GitHub |
+| 2026-10-05: "binding certificate issuance to a Control lease" and signer custody/lease "not decided here" | The lease is a row in the Platform CP production database, reached through an attended tunnel (U5, Q1-B) | The lease needs a store whose clock and lock decide liveness |
+
+### U3-B: off-target incarnation key (Michael, 2026-11-18)
+
+1. **Key.** At E10, one dedicated Ed25519 incarnation key per VM incarnation is
+   generated inside OpenBao transit on its own mount: non-exportable, plaintext
+   backup off, not derived, never rotated, deletion by mount disable only. It is
+   never on the target, the CP host, the launcher runner or the Mac disk.
+2. **Enrolled in Control.** A proof-of-possession over a Control-issued nonce
+   precedes enrolment as the host-attester root (`custody_domain=host_attester`,
+   subject = the Fleet `host_id`). A rebuild enrols a successor and revokes the
+   old root, as the 2026-09-08 amendment already requires.
+3. **Signs once.** It signs exactly one installed attestation, for exactly one
+   dispatch (`observation_id` = the dispatch id), from a 1-use, minutes-long,
+   sign-only token that is revoked at once. The envelope is rendered and
+   verified by Foundation code that holds no key; the signing process imports
+   no Foundation.
+4. **Destroyed before launch.** The mount is disabled, absence is read back, and
+   the audit log is scanned (no export, backup or config write). CP stamps
+   `destroyed_at` from its database clock. Platform CP's lease acquisition
+   refuses unless destruction is stamped at or before acquisition. Every run,
+   including a re-run, needs a fresh incarnation, root and receipt.
+5. **SSH host key pinned separately.** The VM's SSH Ed25519 host-key
+   fingerprint is read from the provider console, never scanned, and pinned for
+   the controller's SSH. It is a distinct key with a distinct purpose from the
+   incarnation key and is never used to sign an attestation.
+6. **Per-VM E10 receipt links them.** An append-only CP receipt per incarnation
+   records the VM alias and slot, machine id, the SSH host-key fingerprint, the
+   incarnation public key and its fingerprint, the enrolment UUID and the
+   custody pointer. A separate append-only destruction row completes it. A
+   receipt without a destruction row is incomplete and the launcher refuses it.
+
+**Semantic shift, stated plainly.** The installed attestation used to mean "a
+workload on host H, holding H's key, observed that it installed candidate C".
+Under U3-B it means "the holder of the incarnation key, Michael's ceremony,
+admits host H to run candidate C for dispatch D". That H actually installed C is
+still checked on the target by Foundation's in-process self-check (PEP 610
+`archive_info`), which is target-reported and bounded by provisioning trust. The
+amendment therefore moves who signs, not what the target proves about itself.
+Against forgery the signature is stronger than one from a target-held key.
+
+**Destruction is a witnessed claim, not a proof.** Proven: born non-exportable,
+no export or backup in the audit log, mount and key absent, database-stamped
+time. Not provable: that no OpenBao storage snapshot taken during the mount's
+life still holds the encrypted key. The backstop is Control `revoke_root` after
+the run, which makes the fingerprint permanently revoked, and the single-use
+dispatch. The window between destruction and revocation is kept to one run.
+
+### U5: lease rows in the CP production database (Michael)
+
+The Lane 3 lease store is a set of tables and `SECURITY DEFINER` functions in
+the Platform CP production database, in a schema no runtime role can use. A
+per-run scoped role, bound to one host and run, holds `EXECUTE` on the lease
+functions and nothing else. Acquisition takes an exclusive row lock; every
+timestamp is the database clock, never a runner's. A dead runner cannot release:
+the lease expires on database time and the host then **counts as mutated**
+(EXPIRED_MUTATED), so a failed or abandoned run spends the host and re-use needs
+a new incarnation. The target's consumption role has no privilege on the lease
+schema.
+
+### Q1-B: attended lease path through the ceremony session (Michael, 2026-11-18)
+
+The launcher reaches the lease store only through an SSH-forwarded path inside
+Michael's live ceremony session (a tunnel the Mac initiates to the CP host and
+to the protected runner), with TLS to the Postgres server end to end
+(verify-full, channel binding). There is no firewall or DNAT change for it. If
+the session drops, the path ceases to exist and the run fails closed: before
+acquisition nothing is launched; after it, the lease expires as mutated. This is
+an accepted availability cost. **The path is rehearsal-only: D3 removes it.**
+The target's own consumption connection keeps its separate, earlier-ruled path.
+
+### Q5-B: ceremony-signed candidate attestation, publish-only workflow (Michael, 2026-11-18)
+
+The candidate-release signer is a non-exportable Ed25519 key in OpenBao transit,
+on its own mount and under a policy that no incarnation or cp-a2 token carries.
+It is enrolled in Control as the `candidate_release_signer` root with the
+truthful ceremony issuer, and signs the candidate attestation in Michael's
+ceremony after the one recorded build and the committed `CandidateArtifact.v1`
+record. The release-ordering decisions of 2026-09-08 (freeze, allocate, build
+once, sign exact bytes, commit receipt, rehearse, publish) are unchanged; only
+the signer moves. The workflow takes the signed envelope as input, verifies its
+signature against the pinned public identity and its subject against the
+committed record, and publishes. It holds no signing key. This removes a private
+key from GitHub.
+
+### Unchanged
+
+Foundation stays stateless and imports no store client. Control still owns
+standing and atomic consumption. The same-key refusal, the audience, purpose and
+package checks, the ordering above, the single-use dispatch, and the refusal of
+editable installs are untouched. No version is allocated, built, signed or
+published by this amendment and no gate closes.
+
+### Residuals, named
+
+- The destruction claim cannot exclude a storage snapshot (above).
+- Availability depends on the attended session (Q1-B).
+- The lease store adds write functions to the CP production database; they are
+  confined to their own schema and role.
+
+References: ADR-0073 Amendment 2026-11-18 (the Control-side facts), ADR-0009
+Amendment 1, and the Gate 2 exit list items E8, E10, E11, E15 and E16.

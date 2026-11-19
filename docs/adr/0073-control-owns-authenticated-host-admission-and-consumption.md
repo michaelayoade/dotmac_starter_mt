@@ -4,6 +4,7 @@
 - Date: 2026-09-21
 - Decider: Michael
 - Related: ADR-0070; `docs/DISPATCH_CONSUMPTION.md`; `docs/HOST_ATTESTER_ENROLMENT.md`
+- Amended: 2026-11-18 (Amendment 1: Gate 2 a2 incarnation, lease and candidate-signer rulings)
 
 ## Context
 
@@ -72,3 +73,60 @@ ADR acceptance is a prerequisite, not Gate 1. This ADR does not close Gate 1 and
 - Accept caller-supplied roots, verifier, standing or trusted boolean.
 - Keep the v2 observation unbound to its dispatch challenge.
 - Give old incomplete rows blanket defaults.
+
+## Amendment 1 (2026-11-18): Gate 2 a2 incarnation, lease and candidate-signer rulings
+
+The text above is preserved as written. This amendment narrows nothing in it,
+and Control's ownership, atomicity and refusal rules are unchanged. It records
+the Control-side consequences of four rulings Michael made on 2026-11-18
+(Platform CP carries the storage; ADR-0070's amendment of the same date records
+the architecture and the semantic shift).
+
+### What changes, and why
+
+- **Who signs the installed attestation (U3-B).** The installed-host root is
+  still enrolled as `custody_domain=host_attester` with subject = the current
+  Fleet `host_id`, and `public_key_fingerprint` is still the incarnation. The
+  key now lives in OpenBao transit off the target and signs once, for one
+  dispatch, in Michael's ceremony; it is destroyed before launch. Enrolment is
+  unchanged in form: canonical unpadded base64url, a 32-byte key, proof of
+  possession over a Control nonce, and the complete descriptor. The change is
+  the holder, not the contract.
+- **One incarnation per run.** A rebuild or re-run enrols a successor
+  (`rotate_root`) and, after the run, Control `revoke_root` makes the
+  fingerprint permanently revoked. Every incarnation is therefore single-use in
+  Control's registry as well as in its signing custody. Legacy rows still
+  refuse; nothing is patched.
+- **Destruction is not a Control fact.** Control does not learn that the key was
+  destroyed. The destruction stamp, the E10 receipt and the order destruction
+  `<=` lease acquisition `<=` consumption are Platform CP evidence, joined to
+  Control's consumption ledger offline. Control's standing checks neither relax
+  nor depend on them.
+- **Candidate root (Q5-B).** The candidate root is enrolled as
+  `custody_domain=candidate_release_signer` with a transit custody pointer that
+  names where the key truly lives, the evidence purpose
+  `dotmac.foundation.candidate-artifact.v2`, and the truthful ceremony issuer.
+  The descriptor issuer and the envelope issuer must be identical, as already
+  required. The workflow-URL issuer is no longer the signer's identity.
+  `set_target_admission_policy` still names the candidate-root subject and
+  audience.
+- **Lease store is not Control (U5, Q1-B).** Lease rows, the per-run role and the
+  attended tunnel belong to Platform CP and ADR-0070. Control gains no lease
+  state and no new consumption path. The 2026-10-05 statement that binding
+  certificate issuance to a Control lease is undecided stays undecided for
+  production (D3); the attended path is rehearsal-only.
+
+### Unchanged
+
+The presentation contract, the host derivation, target policy, subject locks,
+prepare/finalize, the evidence coordinate, the consumption fingerprint, the
+refusal families and the rejected alternatives. No second replay ledger, and no
+caller-supplied root, verifier or standing.
+
+### Consequences
+
+- The Control registry cannot distinguish a target-held key from an off-target
+  one; the custody pointer and ceremony read-backs carry that, as for ADR-0009
+  Amendment 1.
+- Control's revocation is the backstop for a surviving copy of an incarnation
+  key, because destruction can be witnessed but not proven.
