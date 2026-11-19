@@ -89,27 +89,27 @@ def root_document(
 
 
 def candidate_root(**overrides: Any) -> dict[str, Any]:
-    return root_document(
-        CANDIDATE_KEY,
-        purpose=CANDIDATE_ATTESTATION_PURPOSE,
-        custody_domain="candidate_release_signer",
-        issuer=CANDIDATE_ISSUER,
-        key_id=CANDIDATE_KEY_ID,
-        trust_root_version=CANDIDATE_ENROLMENT,
-        **overrides,
-    )
+    values: dict[str, Any] = {
+        "purpose": CANDIDATE_ATTESTATION_PURPOSE,
+        "custody_domain": "candidate_release_signer",
+        "issuer": CANDIDATE_ISSUER,
+        "key_id": CANDIDATE_KEY_ID,
+        "trust_root_version": CANDIDATE_ENROLMENT,
+    }
+    values.update(overrides)
+    return root_document(CANDIDATE_KEY, **values)
 
 
 def installed_root(**overrides: Any) -> dict[str, Any]:
-    return root_document(
-        INCARNATION_KEY,
-        purpose=INSTALLED_OBSERVATION_PURPOSE,
-        custody_domain="host_attester",
-        issuer=INSTALLED_ISSUER,
-        key_id=INSTALLED_KEY_ID,
-        trust_root_version=ENROLMENT_UUID,
-        **overrides,
-    )
+    values: dict[str, Any] = {
+        "purpose": INSTALLED_OBSERVATION_PURPOSE,
+        "custody_domain": "host_attester",
+        "issuer": INSTALLED_ISSUER,
+        "key_id": INSTALLED_KEY_ID,
+        "trust_root_version": ENROLMENT_UUID,
+    }
+    values.update(overrides)
+    return root_document(INCARNATION_KEY, **values)
 
 
 def candidate_subject(**overrides: Any) -> CandidateAttestationSubjectV2:
