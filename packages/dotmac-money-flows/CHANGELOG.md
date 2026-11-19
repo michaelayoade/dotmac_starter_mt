@@ -109,6 +109,15 @@ Source only; not published, not composed into any assembly.
 - `funded_charge_instances` rows are never pruned: the access `source_version`
   is a sum over a service's rows, so deleting or archiving rows would lower it.
 
+- F2 D3: `reevaluate_account_terms` and `AccountTermsChangedV1`, a per-account
+  terms re-check. Each pending row of the account is gated at `max(due_at, at)`:
+  no longer prepaid is `withdrawn/contract_type_changed` (service resumes), a
+  vanished charge is `charge_withdrawn`, a key or account mismatch is attention.
+  It never pays or issues, leaves `attention_required` rows alone, is idempotent,
+  takes locks in the `on_settlement_settled` order and continues over the batch
+  cap with the new `money_flows.funded_charge.terms_recheck.v1` event. No
+  migration, no new table; `funded_charge.v1` is unchanged.
+
 ### Release gates (F2)
 
 - Billing `0.1.0a13` must be published before money-flows `0.1.0a1`. This joins

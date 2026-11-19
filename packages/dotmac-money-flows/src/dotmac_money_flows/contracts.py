@@ -386,6 +386,21 @@ class SettledFundsV1:
 
 
 @dataclass(frozen=True, slots=True)
+class AccountTermsChangedV1:
+    """An account's contract terms changed: re-check its pending charges.
+
+    ``at`` is the instant the re-check stands for: the ``effective_from`` of the
+    terms version that caused the call. It must be timezone-aware, and the caller
+    must not call before ``at`` has passed (flows reads no clock). ``after`` is
+    set only on a continuation event.
+    """
+
+    billing_account_id: UUID
+    at: datetime
+    after: FundedChargeCursorV1 | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FundedChargeOutcomeV1:
     """What a call decided. References only."""
 
@@ -451,6 +466,7 @@ class FundedChargeStepFailed(Exception):
 
 
 __all__ = [
+    "AccountTermsChangedV1",
     "DEFAULT_ACCEPTED_SOURCES",
     "FUNDED_CHARGE_DEFINITION_VERSION",
     "FUNDED_CHARGE_INSERT_STATES",

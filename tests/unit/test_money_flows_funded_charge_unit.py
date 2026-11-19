@@ -19,6 +19,7 @@ from dotmac_billing import BillingRuleViolation
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Currency, Money
 from dotmac_money_flows import (
+    AccountTermsChangedV1,
     FundedChargeCursorV1,
     FundedChargePolicyV1,
     FundedChargePorts,
@@ -857,3 +858,299 @@ def test_a_charge_source_failure_on_one_row_is_a_step_failure_for_that_row(
         flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE))
     assert failed.value.instance_id == row.id
     assert failed.value.code == "charge_source_error"
+
+
+# --------------------------------------------------------------------------
+# Per-account terms re-check (D3)
+# --------------------------------------------------------------------------
+AT = DUE + timedelta(days=3)
+
+
+def _recheck(
+    monkeypatch,
+    rows,
+    *,
+    cap=20,
+    prepaid=lambda *a, **k: False,
+    at=AT,
+    after=None,
+    charges=None,
+):
+    """Run ``reevaluate_account_terms`` over fake rows; return what happened."""
+    if charges is None:
+        charges = _Charges(*(charge for _, charge in rows))
+    written, events, prepaid_at, signals = [], [], [], []
+
+    def write(ctx, row, **kw):
+        written.append(
+            (row, kw["state"], kw["reason_code"], kw.get("funding_settlement_id"))
+        )
+        row.state, row.reason_code, row.version = (
+            kw["state"].value,
+            kw["reason_code"],
+            1,
+        )
+        row.document_id = None
+        return row
+
+    def is_prepaid(db, scope, account_id, instant):
+        prepaid_at.append(instant)
+        return prepaid(db, scope, account_id, instant)
+
+    monkeypatch.setattr(flows, "_write", write)
+    monkeypatch.setattr(flows, "_is_prepaid", is_prepaid)
+    monkeypatch.setattr(
+        flows, "_signal", lambda ctx, row, was, at_: signals.append(at_)
+    )
+    monkeypatch.setattr(flows, "_begin_service", lambda *a, **k: False)
+    monkeypatch.setattr(flows, "get_funding_availability", lambda *a, **k: None)
+    for name in (
+        "_fits",
+        "_discharge",
+        "get_confirmed_settlement",
+        "issue_rated_invoice",
+        "apply_available_credit",
+    ):
+        monkeypatch.setattr(flows, name, _boom)
+    monkeypatch.setattr(
+        flows, "_enqueue_terms_recheck", lambda *args: events.append(args)
+    )
+    outcomes = flows.reevaluate_account_terms(
+        _Rows([row for row, _ in rows]),
+        scope=SCOPE,
+        request=AccountTermsChangedV1(ACCOUNT, at, after),
+        ports=_ports(charges, cap),
+    )
+    return outcomes, written, events, prepaid_at, signals, charges
+
+
+def test_a_switch_to_postpaid_withdraws_every_pending_row_and_calls_no_owner(
+    monkeypatch,
+):
+    rows = [_pending("1.00", i) for i in range(1, 4)]
+    outcomes, written, events, _, _, charges = _recheck(monkeypatch, rows)
+    assert [(w[1], w[2], w[3]) for w in written] == [
+        (FundedChargeState.WITHDRAWN, "contract_type_changed", None)
+    ] * 3
+    assert len(outcomes) == 3 and events == [] and charges.issues == []
+    assert all(not o.replayed for o in outcomes)
+
+
+def test_a_row_that_is_still_prepaid_is_left_unchanged_with_no_owner_write(
+    monkeypatch,
+):
+    rows = [_pending("1.00", 1)]
+    outcomes, written, events, _, signals, charges = _recheck(
+        monkeypatch, rows, prepaid=lambda *a, **k: True
+    )
+    assert outcomes == () and written == [] and events == [] and signals == []
+    assert charges.issues == []
+
+
+@pytest.mark.parametrize(
+    "days, expected", [(-2, DUE), (0, DUE), (3, DUE + timedelta(days=3))]
+)
+def test_the_terms_are_read_at_the_later_of_due_and_at(monkeypatch, days, expected):
+    rows = [_pending("1.00", 1)]
+    _, _, _, prepaid_at, signals, _ = _recheck(
+        monkeypatch, rows, at=DUE + timedelta(days=days)
+    )
+    assert prepaid_at == [expected]
+    assert signals == [expected]  # the withdrawal is dated when the service resumes
+
+
+def test_a_charge_the_source_no_longer_holds_is_withdrawn(monkeypatch):
+    rows = [_pending("1.00", 1)]
+    _, written, _, prepaid_at, _, _ = _recheck(monkeypatch, rows, charges=_Charges())
+    assert [(w[1], w[2]) for w in written] == [
+        (FundedChargeState.WITHDRAWN, "charge_withdrawn")
+    ]
+    assert prepaid_at == []
+
+
+def test_a_source_failure_is_a_step_failure_for_that_row(monkeypatch):
+    class Broken(_Charges):
+        def read(self, db, *, scope, key):
+            raise RuntimeError("source down")
+
+    rows = [_pending("1.00", 1)]
+    with pytest.raises(FundedChargeStepFailed) as failed:
+        _recheck(monkeypatch, rows, charges=Broken())
+    assert failed.value.instance_id == rows[0][0].id
+    assert failed.value.code == "charge_source_error"
+
+
+def test_a_billing_refusal_is_a_step_failure_with_its_code(monkeypatch):
+    rows = [_pending("1.00", 1), _pending("1.00", 2)]
+
+    def refuse(*args, **kwargs):
+        raise BillingRuleViolation("terms_unreadable", "bad")
+
+    with pytest.raises(FundedChargeStepFailed) as failed:
+        _recheck(monkeypatch, rows, prepaid=refuse)
+    assert failed.value.instance_id == rows[0][0].id
+    assert failed.value.code == "billing.terms_unreadable"
+    assert isinstance(failed.value.__cause__, BillingRuleViolation)
+
+
+def test_an_idempotency_conflict_is_a_step_failure(monkeypatch):
+    from dotmac_kernel.idempotency import IdempotencyConflict
+
+    def conflict(*args, **kwargs):
+        raise IdempotencyConflict("x")
+
+    rows = [_pending("1.00", 1)]
+    with pytest.raises(FundedChargeStepFailed) as failed:
+        _recheck(monkeypatch, rows, prepaid=conflict)
+    assert failed.value.code == "idempotency_conflict"
+
+
+@pytest.mark.parametrize("other", ["account", "key"])
+def test_a_mismatch_is_attention_with_no_funding_settlement(monkeypatch, other):
+    if other == "account":
+        charge = RatedChargeV1(KEY, uuid4(), "service:one", _money("1.00"), DUE)
+        row = _pending_row()
+        charges = _Charges(charge)
+    else:
+        row_key = RatedChargeKeyV1("src", "kind", "fact-2", "1")
+        row = _pending_row(charge_ref=flows.charge_ref_for(row_key))
+        charges = _Charges(_charge())
+        charges.charges[row_key] = _charge()
+    _, written, _, prepaid_at, _, _ = _recheck(
+        monkeypatch, [(row, None)], charges=charges
+    )
+    assert [(w[1], w[2], w[3]) for w in written] == [
+        (FundedChargeState.ATTENTION_REQUIRED, "charge_command_mismatch", None)
+    ]
+    assert prepaid_at == []
+
+
+def test_a_terms_recheck_cap_bounds_the_batch_and_the_continuation_resumes(
+    monkeypatch,
+):
+    rows = [_pending("1.00", i) for i in range(1, 6)]
+    outcomes, _, events, _, _, _ = _recheck(monkeypatch, rows, cap=2)
+    assert len(outcomes) == 2
+    ((_, tenant, account, at, after),) = events
+    assert (tenant, account, at) == (SCOPE.tenant_id, ACCOUNT, AT)
+    assert after == FundedChargeCursorV1(rows[1][0].created_at, rows[1][0].id)
+
+
+def test_a_cap_equal_to_the_rows_enqueues_nothing(monkeypatch):
+    rows = [_pending("1.00", i) for i in range(1, 3)]
+    outcomes, _, events, _, _, _ = _recheck(monkeypatch, rows, cap=2)
+    assert len(outcomes) == 2 and events == []
+
+
+def test_a_cap_below_one_is_refused_before_any_owner_call(monkeypatch):
+    monkeypatch.setattr(flows, "get_funding_availability", _boom)
+    with pytest.raises(ValueError):
+        flows.reevaluate_account_terms(
+            None,
+            scope=SCOPE,
+            request=AccountTermsChangedV1(ACCOUNT, AT),
+            ports=_ports(_Charges(), 0),
+        )
+
+
+def test_a_repeat_with_no_pending_rows_returns_nothing_and_emits_nothing(
+    monkeypatch,
+):
+    outcomes, written, events, prepaid_at, signals, charges = _recheck(monkeypatch, [])
+    assert outcomes == () and written == [] and events == []
+    assert prepaid_at == [] and signals == [] and charges.reads == []
+
+
+def test_a_naive_at_is_refused_before_any_read(monkeypatch):
+    monkeypatch.setattr(flows, "get_funding_availability", _boom)
+    ports = _ports(_Charges())
+    with pytest.raises(FundedChargeRefused) as refused:
+        flows.reevaluate_account_terms(
+            None,
+            scope=SCOPE,
+            request=AccountTermsChangedV1(ACCOUNT, datetime(2026, 11, 20)),
+            ports=ports,
+        )
+    assert refused.value.code == "at_not_timezone_aware"
+    assert ports.policy.reads == 0
+
+
+def test_the_query_selects_only_pending_rows_of_this_account():
+    seen = []
+
+    class Capture(_Rows):
+        def execute(self, statement):
+            seen.append(
+                " ".join(
+                    str(
+                        statement.compile(compile_kwargs={"literal_binds": True})
+                    ).split()
+                )
+            )
+            return self
+
+    import dotmac_money_flows.funded_charge as module
+
+    original = module.get_funding_availability
+    module.get_funding_availability = lambda *a, **k: None
+    try:
+        flows.reevaluate_account_terms(
+            Capture([]),
+            scope=SCOPE,
+            request=AccountTermsChangedV1(ACCOUNT, AT),
+            ports=_ports(_Charges()),
+        )
+    finally:
+        module.get_funding_availability = original
+    (sql,) = seen
+    assert "state = 'pending'" in sql and str(ACCOUNT).replace("-", "") in sql.replace(
+        "-", ""
+    )
+    assert "FOR UPDATE" in sql and "ORDER BY" in sql
+
+
+def test_another_pending_row_on_the_same_service_keeps_it_off(db, monkeypatch):
+    sent = []
+    monkeypatch.setattr(flows, "enqueue_event", lambda db, **kw: sent.append(kw))
+    first = _instance(db, "pending")
+    _instance(db, "pending")  # a second pending charge on the same service
+    ctx = _signal_ctx(db)
+    first.state, first.reason_code, first.version = (
+        "withdrawn",
+        "contract_type_changed",
+        1,
+    )
+    db.flush()
+    flows._signal(ctx, first, True, AT)  # still off: no signal
+    assert sent == []
+
+
+@pytest.mark.parametrize("with_cursor", [False, True])
+def test_the_continuation_cursor_clause_is_in_the_query_only_when_set(
+    monkeypatch, with_cursor
+):
+    seen = []
+
+    class Capture(_Rows):
+        def execute(self, statement):
+            seen.append(
+                " ".join(
+                    str(
+                        statement.compile(compile_kwargs={"literal_binds": True})
+                    ).split()
+                )
+            )
+            return self
+
+    monkeypatch.setattr(flows, "get_funding_availability", lambda *a, **k: None)
+    after = FundedChargeCursorV1(DUE + timedelta(minutes=7), uuid4())
+    flows.reevaluate_account_terms(
+        Capture([]),
+        scope=SCOPE,
+        request=AccountTermsChangedV1(ACCOUNT, AT, after if with_cursor else None),
+        ports=_ports(_Charges()),
+    )
+    (sql,) = seen
+    marker = str(after.id).replace("-", "")
+    assert (marker in sql.replace("-", "")) is with_cursor
+    assert ("created_at >" in sql) is with_cursor
