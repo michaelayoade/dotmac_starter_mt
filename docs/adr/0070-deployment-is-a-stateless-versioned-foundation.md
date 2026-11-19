@@ -1115,9 +1115,10 @@ The text above is preserved as written. Where a sentence above says otherwise,
 the four rulings below supersede that sentence for the Gate 2 a2 rehearsal
 only, in the way the 2026-09-25 amendments supersede earlier claims. They
 relax no control: each one either moves a key off a more exposed holder or
-adds a refusal. Michael ruled all four on 2026-11-18 (debt register v1498; U3
-and U5 were set earlier in the same pre-E11 sequence and are recorded here
-with them). Production custody remains a D3 decision; nothing here grants
+adds a refusal. Michael ruled U3 and U5 on 2026-11-17 (U3 was first ruled as the SSH host-key
+fingerprint and amended to option B, the dedicated incarnation key, the same
+day) and Q1-B, Q3-A (transit custody and per-run destruction) and Q5-B on
+2026-11-18 (debt register v1498). Production custody remains a D3 decision; nothing here grants
 anything for it. ADR-0009 Amendment 1 (transit signing custody) is the
 precedent for how the keys below are held.
 
@@ -1129,7 +1130,7 @@ precedent for how the keys below are held.
 | Same amendment: candidate evidence "belongs to the protected Starter release-workflow signer"; 2026-09-22: the workflow signing step is the "ONLY writer" of the receipt binding | Candidate evidence is signed in Michael's ceremony; the workflow only publishes (Q5-B) | The GitHub-secret PEM is retired; no private key remains in GitHub |
 | 2026-10-05: "binding certificate issuance to a Control lease" and signer custody/lease "not decided here" | The lease is a row in the Platform CP production database, reached through an attended tunnel (U5, Q1-B) | The lease needs a store whose clock and lock decide liveness |
 
-### U3-B: off-target incarnation key (Michael, 2026-11-18)
+### U3-B: off-target incarnation key (Michael, 2026-11-17; custody and destruction per Q3-A, 2026-11-18)
 
 1. **Key.** At E10, one dedicated Ed25519 incarnation key per VM incarnation is
    generated inside OpenBao transit on its own mount: non-exportable, plaintext
@@ -1175,7 +1176,7 @@ life still holds the encrypted key. The backstop is Control `revoke_root` after
 the run, which makes the fingerprint permanently revoked, and the single-use
 dispatch. The window between destruction and revocation is kept to one run.
 
-### U5: lease rows in the CP production database (Michael)
+### U5: lease rows in the CP production database (Michael, 2026-11-17)
 
 The Lane 3 lease store is a set of tables and `SECURITY DEFINER` functions in
 the Platform CP production database, in a schema no runtime role can use. A

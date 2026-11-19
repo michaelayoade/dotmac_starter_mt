@@ -78,7 +78,8 @@ ADR acceptance is a prerequisite, not Gate 1. This ADR does not close Gate 1 and
 
 The text above is preserved as written. This amendment narrows nothing in it,
 and Control's ownership, atomicity and refusal rules are unchanged. It records
-the Control-side consequences of four rulings Michael made on 2026-11-18
+the Control-side consequences of four rulings: U3-B and U5 (2026-11-17; U3 amended
+to B the same day) and Q1-B, Q3-A and Q5-B (2026-11-18, register v1498)
 (Platform CP carries the storage; ADR-0070's amendment of the same date records
 the architecture and the semantic shift).
 
