@@ -1,0 +1,932 @@
+"""E9 offline orchestrator joins, with synthetic keys only (hosted CI).
+
+Every join refusal has a planted case. No production key, host or address.
+"""
+
+from __future__ import annotations
+
+import base64
+import dataclasses
+import hashlib
+import json
+import pathlib
+import struct
+import subprocess
+import sys
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from dotmac_deployment_foundation.engine.plan import build_plan
+from dotmac_deployment_foundation.engine.run import DeploymentOutcome
+from dotmac_deployment_foundation.execution_plan import (
+    HostPrestateV1,
+    render_execution_plan,
+)
+from dotmac_deployment_foundation.execution_plan_v2 import render_execution_plan_v2
+from dotmac_deployment_foundation.execution_plan_v3 import render_execution_plan_v3
+from dotmac_deployment_foundation.policy import build_firewall_plan
+from dotmac_deployment_foundation.rehearsal import (
+    REQUIRED_ITEMS,
+    ExecutionRunBindingV1,
+    RequirementResult,
+    RequirementStatus,
+    build_receipt_v2,
+)
+from dotmac_deployment_foundation.spec import ProductDeploymentSpec
+from dotmac_deployment_foundation.trusted_host_source import (
+    ATTESTATION_SCHEMA,
+    CANDIDATE_ATTESTATION_PURPOSE,
+    INSTALLED_OBSERVATION_PURPOSE,
+    AttestationEnvelopeV2,
+    CandidateAttestationSubjectV2,
+    attestation_envelope_digest,
+    candidate_subject_digest,
+)
+
+from tests.unit.foundation_v3_support import CONTROLLER, WHEEL, grant_for_plan
+from tests.unit.lane3_e10_support import MACHINE_ID, SSH_FINGERPRINT
+from tests.unit.test_lane3_exposure_evidence import _observation
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
+
+import lane3_cp6_export as cp6  # noqa: E402
+import lane3_offline_orchestrator as orchestrator  # noqa: E402
+from lane3_evidence_finalization import _archive  # noqa: E402
+from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
+from lane3_exposure_recording import ExposureCallRecord  # noqa: E402
+from lane3_offline_result import (  # noqa: E402
+    NAMESPACE,
+    PRINCIPAL,
+    parse_policy,
+    parse_result,
+)
+from lane3_plan_v3 import exposure_reconciliations_for_spec  # noqa: E402
+
+REVISION = "c" * 40
+HOST_ID = "fleet-host-1"
+ENROL = "6f1c2f4e-52a8-4d0e-9a1b-2f0c7e6d9b11"
+CAND_ENROL = "0b6c7d0e-3a41-4f7e-8d2e-6a5a0e6a7c22"
+RUN = ExecutionRunBindingV1(repository_id=1397614141, run_id=4242, run_attempt=1)
+EXPECTED_PACKAGE = "dotmac-deployment-foundation"
+T = datetime(2026, 11, 19, 10, 0, 0, tzinfo=UTC)
+FAKE_CIPHERTEXT = b"age-encryption.org/v1\n" + b"synthetic ciphertext"
+
+
+def digest(raw: bytes) -> str:
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def ts(moment: datetime) -> str:
+    text = moment.strftime("%Y-%m-%dT%H:%M:%S")
+    if moment.microsecond:
+        text += f".{moment.microsecond:06d}"
+    return text + "Z"
+
+
+def b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def canonical(document: Any) -> bytes:
+    return (
+        json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode()
+
+
+def public_raw(key: Ed25519PrivateKey) -> bytes:
+    return key.public_key().public_bytes_raw()
+
+
+def sign_envelope(
+    key: Ed25519PrivateKey, **fields: Any
+) -> tuple[AttestationEnvelopeV2, bytes]:
+    unsigned = AttestationEnvelopeV2(
+        schema=ATTESTATION_SCHEMA,
+        algorithm="ed25519",
+        public_key_fingerprint=digest(public_raw(key)),
+        signature="unsigned",
+        **fields,
+    )
+    signature = base64.b64encode(key.sign(unsigned.signed_bytes())).decode()
+    envelope = dataclasses.replace(unsigned, signature=signature)
+    return envelope, json.dumps(envelope.canonical_document()).encode()
+
+
+def ssh_public_blob(key: Ed25519PrivateKey) -> str:
+    raw = public_raw(key)
+    blob = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + raw
+    return base64.b64encode(blob).decode()
+
+
+def make_policy(now: datetime):
+    after, before = now - timedelta(days=1), now + timedelta(days=1)
+    options = (
+        f'namespaces="{NAMESPACE}",valid-after="{after:%Y%m%d%H%M%SZ}",'
+        f'valid-before="{before:%Y%m%d%H%M%SZ}"'
+    )
+    signers = (
+        f"{PRINCIPAL} {options} ssh-ed25519 "
+        f"{ssh_public_blob(Ed25519PrivateKey.generate())}\n"
+    ).encode()
+    document = {
+        "schema": "lane3.offline-verifier-policy.v1",
+        "state": "enrolled",
+        "namespace": NAMESPACE,
+        "principal": PRINCIPAL,
+        "audience": "dotmac.foundation.publication",
+        "ssh_keygen_sha256": digest(b"tool"),
+        "verifier_source_revision": "b" * 40,
+        "verifier_profile_digest": digest(b"profile"),
+        "allowed_signers_digest": digest(signers),
+        "revoked_keys_digest": digest(b""),
+        "max_result_age_seconds": 86400,
+        "future_clock_tolerance_seconds": 300,
+    }
+    return parse_policy(canonical(document), signers, b"")
+
+
+class World:
+    """One consistent rehearsal; tests mutate one piece and call `run()`."""
+
+    def __init__(self) -> None:
+        self.cp_key = Ed25519PrivateKey.generate()
+        self.cand_key = Ed25519PrivateKey.generate()
+        self.inst_key = Ed25519PrivateKey.generate()
+        self.now = datetime.now(UTC).replace(microsecond=0)
+        self.policy = make_policy(self.now)
+
+        spec = ProductDeploymentSpec.loads(
+            (REPO / "scripts/exposure-rehearsal/product.toml").read_text("utf-8"),
+            source="<orchestrator-fixture>",
+        )
+        self.spec = spec
+        descriptor_digest = str(spec.to_canonical_document().sha256_digest())
+        base = render_execution_plan(
+            spec,
+            build_plan(spec),
+            target="rehearsal-target",
+            operation="deploy",
+            descriptor_digest=descriptor_digest,
+            prestate=HostPrestateV1.first_deploy(),
+            application_profile_digest="",
+        )
+        self.inst_fp = digest(public_raw(self.inst_key))
+        self.plan = render_execution_plan_v3(
+            render_execution_plan_v2(
+                base, exposure_reconciliations=exposure_reconciliations_for_spec(spec)
+            ),
+            candidate_wheel_digest=WHEEL,
+            target_id="target-1",
+            controller_ssh_fingerprint=CONTROLLER,
+            host_id=HOST_ID,
+            host_incarnation=self.inst_fp,
+            host_enrolment_ref=ENROL,
+        )
+        records = [ExposureCallRecord(0, "observe", observation=_observation())]
+        for item in self.plan.exposure_reconciliations:
+            records.append(
+                ExposureCallRecord(
+                    len(records),
+                    "replace_rules",
+                    family=item.family,
+                    chain=item.chain,
+                    rules=tuple(
+                        rule
+                        for rule in build_firewall_plan(spec)
+                        if rule.family == item.family
+                    ),
+                )
+            )
+        self.archive = _archive(
+            b'{"probe":"synthetic"}', serialize_exposure_calls(records)
+        )
+        self.ciphertext = FAKE_CIPHERTEXT
+        self.decrypt = lambda _ciphertext: self.archive
+
+        grant = grant_for_plan(spec, self.plan)
+        outcome = DeploymentOutcome(
+            plan=build_plan(spec),
+            succeeded=True,
+            execution_plan_digest=self.plan.digest(),
+            descriptor_digest=descriptor_digest,
+            execution_sequence=grant.execution_sequence,
+            attempt_no=grant.attempt_no,
+        )
+        self.receipt = build_receipt_v2(
+            foundation_revision=REVISION,
+            foundation_artifact_digest=WHEEL,
+            descriptor_digest=descriptor_digest,
+            execution_plan=self.plan,
+            grant=grant,
+            execution_outcome=outcome,
+            fixture_digest="sha256:" + "d" * 64,
+            evidence_bundle_digest=digest(self.ciphertext),
+            controller_identity=CONTROLLER,
+            lease_id="lease-1",
+            probe_vantage_ref="inside-vantage@7",
+            execution_run=RUN,
+            started_at="2026-11-19T10:02:00+00:00",
+            finished_at="2026-11-19T10:09:00+00:00",
+            results=[
+                RequirementResult(
+                    code=item.code,
+                    status=RequirementStatus.EXECUTED_PASSED,
+                    detail=f"{item.title} - measured",
+                    evidence=(f"bundle:{item.code}",),
+                )
+                for item in REQUIRED_ITEMS
+            ],
+        )
+        self.dispatch_id = self.receipt.content["control_dispatch"]["dispatch_id"]
+        coordinate = self.receipt.content["control_dispatch"]
+
+        subject = {
+            "package": EXPECTED_PACKAGE,
+            "version": "0.4.0a2",
+            "wheel_sha256": WHEEL,
+            "source_revision": REVISION,
+            "repository": "example-org/example-repo",
+            "run_id": "1",
+            "artifact_id": "2",
+        }
+        candidate, self.candidate_bytes = sign_envelope(
+            self.cand_key,
+            purpose=CANDIDATE_ATTESTATION_PURPOSE,
+            issuer="urn:example:candidate-ceremony",
+            key_id="cand-key",
+            custody_domain="candidate_release_signer",
+            trust_root_version=CAND_ENROL,
+            issued_at="2026-11-18T00:00:00Z",
+            expires_at="2026-12-31T00:00:00Z",
+            audience=orchestrator.CANDIDATE_AUDIENCE,
+            observation_id="candidate-1",
+            subject=subject,
+        )
+        installed, self.installed_bytes = sign_envelope(
+            self.inst_key,
+            purpose=INSTALLED_OBSERVATION_PURPOSE,
+            issuer="urn:example:installed-ceremony",
+            key_id="inst-key",
+            custody_domain="host_attester",
+            trust_root_version=ENROL,
+            issued_at="2026-11-19T09:59:00Z",
+            expires_at="2026-11-19T12:00:00Z",
+            audience=HOST_ID,
+            observation_id=self.dispatch_id,
+            subject={
+                "host_identity": HOST_ID,
+                "package": EXPECTED_PACKAGE,
+                "version": "0.4.0a2",
+                "wheel_sha256": WHEEL,
+                "candidate_subject_digest": str(
+                    candidate_subject_digest(
+                        CandidateAttestationSubjectV2.from_mapping(subject)
+                    )
+                ),
+            },
+        )
+        self.installed_digest = str(attestation_envelope_digest(installed))
+        self.candidate_digest = str(attestation_envelope_digest(candidate))
+        self.admission = {
+            "attempt_id": "attempt-1",
+            "presentation": {"opaque": True},
+            "candidate": self.candidate_digest,
+            "installed": installed.canonical_document(),
+        }
+
+        signed = canonical({"dispatch_id": self.dispatch_id, "kind": "dispatch"})
+        self.cp_identity = orchestrator.PinnedIdentity(
+            "cp-dispatch-key", "ed25519", b64url(public_raw(self.cp_key))
+        )
+        root_common = {
+            "algorithm": "ed25519",
+            "not_before": "2026-11-01T00:00:00Z",
+            "not_after": "2027-01-01T00:00:00Z",
+            "enrolled_at": "2026-11-18T00:00:00Z",
+        }
+        self.export: dict[str, Any] = {
+            "schema": cp6.EXPORT_SCHEMA,
+            "dispatch_id": self.dispatch_id,
+            "host_id": HOST_ID,
+            "control": {
+                "dispatch": {
+                    "signed_bytes_b64": base64.b64encode(signed).decode(),
+                    "signature_b64": base64.b64encode(
+                        self.cp_key.sign(signed)
+                    ).decode(),
+                    "key_id": "cp-dispatch-key",
+                    "algorithm": "ed25519",
+                    "public_key_fingerprint": self.cp_identity.fingerprint,
+                    "envelope_digest": digest(signed),
+                },
+                "ledger": {
+                    "key": self.dispatch_id,
+                    "fingerprint": "ledger-fp-1",
+                    "created_at": ts(T + timedelta(minutes=5, microseconds=123456)),
+                    "execution_sequence": coordinate["execution_sequence"],
+                    "attempt_no": coordinate["attempt_no"],
+                },
+            },
+            "cp_lane3": {
+                "e10_receipt": {
+                    "receipt_ref": "e10-0001",
+                    "vm_alias": "vm-a",
+                    "host_id": HOST_ID,
+                    "machine_id": MACHINE_ID,
+                    "ssh_host_key_fingerprint": SSH_FINGERPRINT,
+                    "vm_slot": None,
+                    "incarnation_public_key_b64url": b64url(public_raw(self.inst_key)),
+                    "incarnation_fingerprint": self.inst_fp,
+                    "enrolment_uuid": ENROL,
+                    "key_custody_pointer": "bao://transit-a2-hi-vm-a-1/keys/incarnation",
+                    "recorded_by": "ceremony",
+                    "recorded_at": ts(T - timedelta(minutes=30)),
+                    "seq": 1,
+                },
+                "destruction": {
+                    "receipt_ref": "e10-0001",
+                    "destroyed_at": ts(T),
+                    "route": "transit_mount_disabled",
+                    "dispatch_id": self.dispatch_id,
+                    "installed_attestation_digest": self.installed_digest,
+                    "evidence_digest": digest(b"evidence"),
+                    "recorded_by": "ceremony",
+                },
+                "lease": {
+                    "lease_id": "lease-1",
+                    "host_id": HOST_ID,
+                    "authorization_run": "run-1",
+                    "e10_receipt_ref": "e10-0001",
+                    "acquired_at": ts(T + timedelta(minutes=1)),
+                    "expires_at": ts(T + timedelta(minutes=61)),
+                },
+                "release": {
+                    "lease_id": "lease-1",
+                    "released_at": ts(T + timedelta(minutes=10)),
+                    "host_mutated": True,
+                },
+                "candidate_root": {
+                    **root_common,
+                    "enrolment_uuid": CAND_ENROL,
+                    "custody_domain": "candidate_release_signer",
+                    "issuer": "urn:example:candidate-ceremony",
+                    "key_id": "cand-key",
+                    "purpose": CANDIDATE_ATTESTATION_PURPOSE,
+                    "public_key_b64url": b64url(public_raw(self.cand_key)),
+                    "revoked_at": None,
+                },
+                "installed_root": {
+                    **root_common,
+                    "enrolment_uuid": ENROL,
+                    "custody_domain": "host_attester",
+                    "issuer": "urn:example:installed-ceremony",
+                    "key_id": "inst-key",
+                    "purpose": INSTALLED_OBSERVATION_PURPOSE,
+                    "public_key_b64url": b64url(public_raw(self.inst_key)),
+                    "revoked_at": ts(T + timedelta(minutes=11)),
+                },
+            },
+        }
+        self.kwargs: dict[str, Any] = {}
+
+    # -- accessors for planted mutations
+    @property
+    def cp(self) -> dict[str, Any]:
+        return self.export["cp_lane3"]
+
+    def run(self, **overrides: Any):
+        row = self.cp["e10_receipt"]
+        values: dict[str, Any] = {
+            "receipt_bytes": self.receipt.canonical_bytes(),
+            "ciphertext": self.ciphertext,
+            "decrypt": self.decrypt,
+            "run": RUN,
+            "release_revision": REVISION,
+            "candidate_artifact_digest": WHEEL,
+            "execution_plan": self.plan,
+            "descriptor": self.spec,
+            "export_bytes": canonical(self.export),
+            "expected_e10_receipt_digest": cp6.receipt_digest(row),
+            "pinned_cp_identities": [self.cp_identity],
+            "pinned_candidate_root_fingerprint": digest(public_raw(self.cand_key)),
+            "candidate_envelope_bytes": self.candidate_bytes,
+            "installed_envelope_bytes": self.installed_bytes,
+            "host_admission_bytes": json.dumps(self.admission).encode(),
+            "policy": self.policy,
+            "now": self.now,
+        }
+        values.update(self.kwargs)
+        values.update(overrides)
+        return orchestrator.verify_offline(**values)
+
+
+@pytest.fixture
+def world() -> World:
+    return World()
+
+
+def refused(world: World, code: str, **overrides: Any) -> None:
+    with pytest.raises(orchestrator.JoinRefused) as caught:
+        world.run(**overrides)
+    assert str(caught.value) == f"offline-join-{code}"
+
+
+# --- the positive path and the emitted result ---------------------------------
+
+
+def test_every_join_passes_and_emits_a_result_the_consumer_parses(world: World) -> None:
+    outcome = world.run()
+    parsed = parse_result(outcome.result_bytes)
+    assert parsed.coordinates == outcome.coordinates
+    assert outcome.coordinates.repository_id == RUN.repository_id
+    assert outcome.coordinates.run_id == RUN.run_id
+    assert outcome.coordinates.run_attempt == RUN.run_attempt
+    assert outcome.coordinates.receipt_digest == world.receipt.sha256_digest()
+    assert (
+        outcome.coordinates.ciphertext_digest
+        == world.receipt.content["evidence_bundle_digest"]
+    )
+    assert outcome.coordinates.candidate_artifact_digest == WHEEL
+    assert outcome.coordinates.release_revision == REVISION
+    assert parsed.policy_digest == world.policy.sha256_digest()
+    assert outcome.result_bytes.endswith(b"\n")
+    assert set(outcome.input_digests) >= {"cp6_export", "receipt", "ciphertext"}
+
+
+def test_an_unreleased_lease_uses_its_expiry_as_the_bracket_end(world: World) -> None:
+    world.cp["release"] = None
+    world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(minutes=50))
+    world.cp["installed_root"]["revoked_at"] = ts(T + timedelta(minutes=55))
+    world.run()
+
+
+def test_the_result_is_unsigned_and_unenrolled_policy_refuses(world: World) -> None:
+    unenrolled = parse_policy(
+        canonical(
+            {
+                "schema": "lane3.offline-verifier-policy.v1",
+                "state": "unenrolled",
+                "namespace": NAMESPACE,
+                "principal": PRINCIPAL,
+                "audience": "dotmac.foundation.publication",
+                "ssh_keygen_sha256": None,
+                "verifier_source_revision": None,
+                "verifier_profile_digest": None,
+                "allowed_signers_digest": digest(b""),
+                "revoked_keys_digest": digest(b""),
+                "max_result_age_seconds": 86400,
+                "future_clock_tolerance_seconds": 300,
+            }
+        ),
+        b"",
+        b"",
+    )
+    refused(world, "policy-unenrolled", policy=unenrolled)
+
+
+# --- receipt and ciphertext ---------------------------------------------------
+
+
+def test_wrong_run_is_refused(world: World) -> None:
+    refused(
+        world,
+        "receipt-run-mismatch",
+        run=ExecutionRunBindingV1(RUN.repository_id, RUN.run_id + 1, 1),
+    )
+
+
+def test_wrong_revision_is_refused(world: World) -> None:
+    refused(world, "receipt-not-published", release_revision="e" * 40)
+
+
+def test_wrong_artifact_digest_is_refused(world: World) -> None:
+    refused(
+        world,
+        "receipt-artifact-mismatch",
+        candidate_artifact_digest="sha256:" + "1" * 64,
+    )
+
+
+def test_a_receipt_that_is_not_v2_is_refused(world: World) -> None:
+    refused(world, "receipt-invalid", receipt_bytes=b'{"schema":"nope"}')
+
+
+def test_ciphertext_digest_mismatch_is_refused_before_decrypt(world: World) -> None:
+    called = []
+    refused(
+        world,
+        "ciphertext-digest-mismatch",
+        ciphertext=FAKE_CIPHERTEXT + b"x",
+        decrypt=lambda c: called.append(c) or world.archive,
+    )
+    assert called == []
+
+
+def test_a_plaintext_ciphertext_is_refused(world: World) -> None:
+    refused(world, "ciphertext-invalid", ciphertext=b"plain")
+
+
+def test_a_failing_decryptor_is_refused(world: World) -> None:
+    def boom(_c: bytes) -> bytes:
+        raise RuntimeError("private text must not surface")
+
+    refused(world, "decrypt-failed", decrypt=boom)
+
+
+def test_a_tampered_archive_fails_the_bundle_join(world: World) -> None:
+    refused(world, "bundle-inconsistent", decrypt=lambda _c: world.archive[:-1] + b"x")
+
+
+def test_a_wrong_plan_is_refused(world: World) -> None:
+    other = render_execution_plan_v3(
+        world.plan.base,
+        candidate_wheel_digest=WHEEL,
+        target_id="target-2",
+        controller_ssh_fingerprint=CONTROLLER,
+        host_id=HOST_ID,
+        host_incarnation=world.inst_fp,
+        host_enrolment_ref=ENROL,
+    )
+    refused(world, "receipt-plan-mismatch", execution_plan=other)
+
+
+# --- Control join -------------------------------------------------------------
+
+
+def test_unpinned_dispatch_signer_is_refused(world: World) -> None:
+    stranger = orchestrator.PinnedIdentity(
+        "cp-dispatch-key", "ed25519", b64url(public_raw(Ed25519PrivateKey.generate()))
+    )
+    refused(world, "dispatch-signer-unpinned", pinned_cp_identities=[stranger])
+    refused(world, "dispatch-signer-unpinned", pinned_cp_identities=[])
+
+
+def test_wrong_dispatch_signer_key_is_refused(world: World) -> None:
+    # The export names the pinned identity but the signature is another key's.
+    signed = base64.b64decode(world.export["control"]["dispatch"]["signed_bytes_b64"])
+    forged = Ed25519PrivateKey.generate().sign(signed)
+    world.export["control"]["dispatch"]["signature_b64"] = base64.b64encode(
+        forged
+    ).decode()
+    refused(world, "dispatch-signature-invalid")
+
+
+def test_tampered_signed_dispatch_bytes_are_refused(world: World) -> None:
+    other = canonical({"dispatch_id": world.dispatch_id, "kind": "other"})
+    world.export["control"]["dispatch"]["signed_bytes_b64"] = base64.b64encode(
+        other
+    ).decode()
+    refused(world, "dispatch-signature-invalid")
+
+
+def test_dispatch_naming_another_id_is_refused(world: World) -> None:
+    other = canonical({"dispatch_id": "dispatch-other", "kind": "dispatch"})
+    dispatch = world.export["control"]["dispatch"]
+    dispatch["signed_bytes_b64"] = base64.b64encode(other).decode()
+    dispatch["signature_b64"] = base64.b64encode(world.cp_key.sign(other)).decode()
+    dispatch["envelope_digest"] = digest(other)
+    refused(world, "dispatch-id-mismatch")
+
+
+def test_export_for_another_dispatch_is_refused(world: World) -> None:
+    world.export["dispatch_id"] = "dispatch-other"
+    refused(world, "export-dispatch-mismatch")
+
+
+def test_dispatch_envelope_digest_mismatch_is_refused(world: World) -> None:
+    world.export["control"]["dispatch"]["envelope_digest"] = digest(b"other")
+    refused(world, "dispatch-digest-mismatch")
+
+
+def test_ledger_key_not_the_dispatch_id_is_refused(world: World) -> None:
+    world.export["control"]["ledger"]["key"] = "dispatch-other"
+    refused(world, "ledger-key-mismatch")
+
+
+def test_ledger_coordinates_must_match_the_receipt(world: World) -> None:
+    world.export["control"]["ledger"]["attempt_no"] = 9
+    refused(world, "ledger-coordinate-mismatch")
+
+
+@pytest.mark.parametrize(
+    "created",
+    [
+        T + timedelta(minutes=1) - timedelta(seconds=1),  # before acquisition
+        T + timedelta(minutes=10, seconds=1),  # after release
+    ],
+)
+def test_ledger_time_outside_the_bracket_is_refused(world: World, created) -> None:
+    world.export["control"]["ledger"]["created_at"] = ts(created)
+    refused(world, "ledger-outside-bracket")
+
+
+def test_ledger_time_after_expiry_without_release_is_refused(world: World) -> None:
+    world.cp["release"] = None
+    world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(minutes=62))
+    refused(world, "ledger-outside-bracket")
+
+
+def test_bracket_bounds_are_inclusive(world: World) -> None:
+    world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(minutes=1))
+    world.cp["destruction"]["destroyed_at"] = ts(T + timedelta(minutes=1))
+    world.run()
+
+
+def test_lease_for_another_receipt_lease_is_refused(world: World) -> None:
+    world.cp["lease"]["lease_id"] = "lease-other"
+    world.cp["release"]["lease_id"] = "lease-other"
+    refused(world, "lease-mismatch")
+
+
+def test_a_release_that_did_not_mutate_is_refused(world: World) -> None:
+    world.cp["release"]["host_mutated"] = False
+    refused(world, "release-not-mutated")
+
+
+# --- E10 join -----------------------------------------------------------------
+
+
+def test_destruction_after_acquire_is_refused(world: World) -> None:
+    world.cp["destruction"]["destroyed_at"] = ts(T + timedelta(minutes=2))
+    refused(world, "e10-destroyed-after-acquire")
+
+
+def test_acquire_after_ledger_is_refused() -> None:
+    # Unreachable through the bracket (acquired_at <= created_at is part of it),
+    # so assert the bracket refuses first and no later code path is relied on.
+    world = World()
+    world.cp["lease"]["acquired_at"] = ts(T + timedelta(minutes=6))
+    refused(world, "ledger-outside-bracket")
+
+
+def test_installed_digest_mismatch_with_host_admission_is_refused(world: World) -> None:
+    world.admission["installed"] = digest(b"another installed envelope")
+    refused(world, "e10-installed-digest-mismatch")
+
+
+def test_destruction_digest_not_the_admission_digest_is_refused(world: World) -> None:
+    world.cp["destruction"]["installed_attestation_digest"] = digest(b"other")
+    refused(world, "e10-installed-digest-mismatch")
+
+
+def test_root_not_revoked_is_refused(world: World) -> None:
+    world.cp["installed_root"]["revoked_at"] = None
+    refused(world, "e10-root-not-revoked")
+
+
+@pytest.mark.parametrize("offset", [timedelta(minutes=-1), timedelta(0)])
+def test_root_revoked_before_or_at_the_ledger_is_refused(world: World, offset) -> None:
+    ledger = datetime.fromisoformat(
+        world.export["control"]["ledger"]["created_at"][:-1] + "+00:00"
+    )
+    world.cp["installed_root"]["revoked_at"] = ts(ledger + offset)
+    refused(world, "e10-root-revoked-before-ledger")
+
+
+def test_e10_receipt_digest_mismatch_is_refused(world: World) -> None:
+    refused(
+        world, "e10-receipt-digest-mismatch", expected_e10_receipt_digest=digest(b"x")
+    )
+
+
+def test_e10_receipt_row_edited_after_the_pin_is_refused(world: World) -> None:
+    pinned = cp6.receipt_digest(world.cp["e10_receipt"])
+    world.cp["e10_receipt"]["vm_alias"] = "vm-b"
+    refused(world, "e10-receipt-digest-mismatch", expected_e10_receipt_digest=pinned)
+
+
+def test_destruction_for_another_receipt_is_refused(world: World) -> None:
+    world.cp["destruction"]["receipt_ref"] = "e10-0002"
+    refused(world, "e10-receipt-ref-mismatch")
+
+
+def test_destruction_for_another_dispatch_is_refused(world: World) -> None:
+    world.cp["destruction"]["dispatch_id"] = "dispatch-other"
+    refused(world, "e10-destruction-dispatch-mismatch")
+
+
+def test_a_destroy_only_incarnation_is_refused(world: World) -> None:
+    world.cp["destruction"]["dispatch_id"] = None
+    world.cp["destruction"]["installed_attestation_digest"] = None
+    refused(world, "e10-destruction-dispatch-mismatch")
+
+
+def test_wrong_destruction_route_is_refused(world: World) -> None:
+    world.cp["destruction"]["route"] = "claimed"
+    refused(world, "e10-destruction-route")
+
+
+def test_plan_not_bound_to_the_receipt_incarnation_is_refused(world: World) -> None:
+    other = Ed25519PrivateKey.generate()
+    row = world.cp["e10_receipt"]
+    row["incarnation_public_key_b64url"] = b64url(public_raw(other))
+    row["incarnation_fingerprint"] = digest(public_raw(other))
+    refused(world, "e10-plan-binding-mismatch")
+
+
+def test_installed_root_for_another_key_is_refused(world: World) -> None:
+    world.cp["installed_root"]["public_key_b64url"] = b64url(
+        public_raw(Ed25519PrivateKey.generate())
+    )
+    refused(world, "e10-root-mismatch")
+
+
+# --- candidate join -----------------------------------------------------------
+
+
+def test_candidate_root_not_the_pinned_one_is_refused(world: World) -> None:
+    refused(
+        world,
+        "candidate-root-unpinned",
+        pinned_candidate_root_fingerprint=digest(b"another root"),
+    )
+
+
+def test_candidate_envelope_signed_by_another_key_is_refused(world: World) -> None:
+    forged, forged_bytes = sign_envelope(
+        Ed25519PrivateKey.generate(),
+        **{
+            name: getattr(
+                AttestationEnvelopeV2.from_mapping(json.loads(world.candidate_bytes)),
+                name,
+            )
+            for name in (
+                "purpose",
+                "issuer",
+                "key_id",
+                "custody_domain",
+                "trust_root_version",
+                "issued_at",
+                "expires_at",
+                "audience",
+                "observation_id",
+                "subject",
+            )
+        },
+    )
+    world.admission["candidate"] = str(attestation_envelope_digest(forged))
+    refused(world, "attestation-pair-refused", candidate_envelope_bytes=forged_bytes)
+
+
+def test_candidate_envelope_not_the_admitted_one_is_refused(world: World) -> None:
+    world.admission["candidate"] = digest(b"other candidate")
+    refused(world, "host-admission-digest-mismatch")
+
+
+def test_installed_envelope_with_a_corrupted_signature_is_refused(world: World) -> None:
+    document = json.loads(world.installed_bytes)
+    signature = bytearray(base64.b64decode(document["signature"]))
+    signature[0] ^= 1
+    document["signature"] = base64.b64encode(bytes(signature)).decode()
+    corrupted = json.dumps(document).encode()
+    envelope = AttestationEnvelopeV2.from_mapping(document)
+    world.admission["installed"] = str(attestation_envelope_digest(envelope))
+    world.cp["destruction"]["installed_attestation_digest"] = world.admission[
+        "installed"
+    ]
+    refused(world, "attestation-pair-refused", installed_envelope_bytes=corrupted)
+
+
+def test_installed_envelope_for_another_dispatch_is_refused(world: World) -> None:
+    envelope, raw = sign_envelope(
+        world.inst_key,
+        purpose=INSTALLED_OBSERVATION_PURPOSE,
+        issuer="urn:example:installed-ceremony",
+        key_id="inst-key",
+        custody_domain="host_attester",
+        trust_root_version=ENROL,
+        issued_at="2026-11-19T09:59:00Z",
+        expires_at="2026-11-19T12:00:00Z",
+        audience=HOST_ID,
+        observation_id="dispatch-other",
+        subject=AttestationEnvelopeV2.from_mapping(
+            json.loads(world.installed_bytes)
+        ).subject,
+    )
+    world.admission["installed"] = str(attestation_envelope_digest(envelope))
+    world.cp["destruction"]["installed_attestation_digest"] = world.admission[
+        "installed"
+    ]
+    refused(world, "attestation-pair-refused", installed_envelope_bytes=raw)
+
+
+# --- export and host-admission parsing ---------------------------------------
+
+
+def test_a_noncanonical_export_is_refused(world: World) -> None:
+    refused(
+        world,
+        "export-invalid",
+        export_bytes=json.dumps(world.export, indent=1).encode(),
+    )
+
+
+def test_an_export_with_an_unknown_member_is_refused(world: World) -> None:
+    world.export["extra"] = 1
+    refused(world, "export-invalid")
+
+
+def test_an_export_with_duplicate_keys_is_refused(world: World) -> None:
+    raw = canonical(world.export).replace(
+        b'"host_id":"fleet-host-1"', b'"host_id":"x","host_id":"fleet-host-1"', 1
+    )
+    refused(world, "export-invalid", export_bytes=raw)
+
+
+def test_a_float_in_the_export_is_refused(world: World) -> None:
+    world.cp["e10_receipt"]["seq"] = 1.5
+    with pytest.raises(cp6.Cp6ExportRefused):
+        cp6.parse_cp6_export(canonical(world.export))
+
+
+def test_a_non_utc_time_is_refused(world: World) -> None:
+    world.cp["destruction"]["destroyed_at"] = "2026-11-19T10:00:00+01:00"
+    refused(world, "export-invalid")
+
+
+def test_null_together_rule_for_destruction(world: World) -> None:
+    world.cp["destruction"]["dispatch_id"] = None
+    refused(world, "export-invalid")
+
+
+def test_host_admission_must_be_closed(world: World) -> None:
+    world.admission["extra"] = 1
+    refused(world, "host-admission-invalid")
+
+
+def test_host_admission_digest_must_be_canonical(world: World) -> None:
+    world.admission["candidate"] = "sha256:XYZ"
+    refused(world, "host-admission-invalid")
+
+
+def test_age_decryptor_refuses_a_pin_mismatch_and_a_missing_tool(tmp_path) -> None:
+    tool = tmp_path / "age"
+    tool.write_bytes(b"#!/bin/sh\n")
+    decrypt = orchestrator.age_decryptor(
+        identity_path=tmp_path / "id", age_path=str(tool), age_sha256=digest(b"other")
+    )
+    with pytest.raises(orchestrator.JoinRefused) as caught:
+        decrypt(FAKE_CIPHERTEXT)
+    assert str(caught.value) == "offline-join-age-pin-mismatch"
+    missing = orchestrator.age_decryptor(
+        identity_path=tmp_path / "id",
+        age_path=str(tmp_path / "absent"),
+        age_sha256=digest(b"x"),
+    )
+    with pytest.raises(orchestrator.JoinRefused) as caught:
+        missing(FAKE_CIPHERTEXT)
+    assert str(caught.value) == "offline-join-age-unavailable"
+
+
+# --- the emitted result is authenticated by the consumer's own code ----------
+
+
+def test_signed_result_authenticates_with_the_consumers_verifier(tmp_path) -> None:
+    ssh_keygen = pathlib.Path("/usr/bin/ssh-keygen")
+    if not ssh_keygen.is_file():
+        pytest.skip("OpenSSH is required for the signature round trip")
+    key = tmp_path / "synthetic"
+    subprocess.run(  # noqa: S603 -- CI-only synthetic key
+        [str(ssh_keygen), "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+        check=True,
+        timeout=20,
+    )
+    public = key.with_suffix(".pub").read_bytes().split()
+    world = World()
+    after, before = world.now - timedelta(days=1), world.now + timedelta(days=1)
+    signers = (
+        (
+            f'{PRINCIPAL} namespaces="{NAMESPACE}",valid-after="{after:%Y%m%d%H%M%SZ}",'
+            f'valid-before="{before:%Y%m%d%H%M%SZ}" '
+        ).encode()
+        + b" ".join(public[:2])
+        + b"\n"
+    )
+    document = {
+        "schema": "lane3.offline-verifier-policy.v1",
+        "state": "enrolled",
+        "namespace": NAMESPACE,
+        "principal": PRINCIPAL,
+        "audience": "dotmac.foundation.publication",
+        "ssh_keygen_sha256": digest(ssh_keygen.read_bytes()),
+        "verifier_source_revision": "b" * 40,
+        "verifier_profile_digest": digest(b"profile"),
+        "allowed_signers_digest": digest(signers),
+        "revoked_keys_digest": digest(b""),
+        "max_result_age_seconds": 86400,
+        "future_clock_tolerance_seconds": 300,
+    }
+    policy = parse_policy(canonical(document), signers, b"")
+    outcome = world.run(policy=policy)
+    signature = orchestrator.sign_result(
+        outcome.result_bytes,
+        key_path=key,
+        expected=outcome.coordinates,
+        policy=policy,
+        now=world.now,
+    )
+    assert signature.startswith(b"-----BEGIN SSH SIGNATURE-----")
