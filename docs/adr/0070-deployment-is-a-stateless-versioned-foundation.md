@@ -1112,7 +1112,7 @@ build, and production activation follows publication.
 ## Amendment — 2026-11-18: Gate 2 a2 custody, lease and candidate-signing rulings
 
 The text above is preserved as written. Where a sentence above says otherwise,
-the four rulings below supersede that sentence for the Gate 2 a2 rehearsal
+the rulings below (U3-B, U5, Q1-B, Q3-A and Q5-B) supersede that sentence for the Gate 2 a2 rehearsal
 only, in the way the 2026-09-25 amendments supersede earlier claims. They
 relax no control: each one either moves a key off a more exposed holder or
 adds a refusal. Michael ruled U3 and U5 on 2026-11-17 (U3 was first ruled as the SSH host-key

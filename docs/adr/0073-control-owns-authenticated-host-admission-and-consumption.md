@@ -78,9 +78,9 @@ ADR acceptance is a prerequisite, not Gate 1. This ADR does not close Gate 1 and
 
 The text above is preserved as written. This amendment narrows nothing in it,
 and Control's ownership, atomicity and refusal rules are unchanged. It records
-the Control-side consequences of four rulings: U3-B and U5 (2026-11-17; U3 amended
+the Control-side consequences of the rulings U3-B, U5, Q1-B, Q3-A and Q5-B: U3-B and U5 (2026-11-17; U3 amended
 to B the same day) and Q1-B, Q3-A and Q5-B (2026-11-18, register v1498)
-(Platform CP carries the storage; ADR-0070's amendment of the same date records
+(Platform CP carries the storage; ADR-0070's 2026-11-18 amendment section records
 the architecture and the semantic shift).
 
 ### What changes, and why
@@ -93,7 +93,7 @@ the architecture and the semantic shift).
   unchanged in form: canonical unpadded base64url, a 32-byte key, proof of
   possession over a Control nonce, and the complete descriptor. The change is
   the holder, not the contract.
-- **One incarnation per run.** A rebuild or re-run enrols a successor
+- **One incarnation per run (Q3-A).** A rebuild or re-run enrols a successor
   (`rotate_root`) and, after the run, Control `revoke_root` makes the
   fingerprint permanently revoked. Every incarnation is therefore single-use in
   Control's registry as well as in its signing custody. Legacy rows still
