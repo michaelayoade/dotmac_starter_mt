@@ -11,6 +11,9 @@ here, in Python — the SQL functions stay mechanical):
 - `record_success` — settle a delivered event to `sent`.
 - `record_failure` — increment attempts and either back off (`pending`, future
   `available_at`) or dead-letter (`dead`, retained) at `max_attempts`.
+- `record_deferral` — a `DeliveryDeferred` hold (K-4): reschedule (`pending`,
+  future `available_at`) WITHOUT charging an attempt, bounded by
+  `RelayPolicy.max_deferrals`, after which the event is dead-lettered.
 
 Transaction-authority contract (kernel `db.py`): every function RECEIVES a
 `Session` (bound to the *dispatcher-role* connection) and only executes — it never
@@ -32,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 _ERR_MAX = 500  # last_error column width
+_DEFER_PREFIX = "deferred:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +49,19 @@ class RelayPolicy:
     base_backoff_seconds: float = 2.0
     max_backoff_seconds: float = 3600.0
     stale_lease_seconds: int = 300
+    #: Deferral (K-4). A `DeliveryDeferred` does not charge `max_attempts`, so it
+    #: needs its own bound or a gate held forever would reschedule forever,
+    #: silently. 288 deferrals at the 300 s default delay is 24 h: a mail-gate
+    #: hold is an operational event measured in hours, and a day of it should
+    #: surface as a dead-lettered (alertable, audited-requeue) event rather than
+    #: a row that quietly never moves. A longer `retry_after` from the holder
+    #: stretches that wall-clock window, never the count.
+    max_deferrals: int = 288
+    default_defer_seconds: float = 300.0
+    #: A holder's `retry_after` is clamped into [min, max] so a hostile or buggy
+    #: value cannot hot-loop the relay nor park an event for weeks.
+    min_defer_seconds: float = 30.0
+    max_defer_seconds: float = 3600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +76,27 @@ class ClaimedEvent:
     payload: dict[str, object]
     attempts: int
     correlation_id: str | None
+    #: The row's `last_error` at claim time. It carries the deferral count
+    #: (`deferrals`); no schema column exists for it, by design (K-4 is additive
+    #: and the outbox prerequisite contract is unchanged).
+    last_error: str | None = None
+
+    @property
+    def deferrals(self) -> int:
+        """Consecutive deferrals recorded since the last failure or success."""
+        return _parse_deferrals(self.last_error)
+
+
+@dataclass(frozen=True, slots=True)
+class DeferralOutcome:
+    """Result of `record_deferral`. `dead_lettered` True means the deferral bound
+    was exceeded and the event is retained as `dead`; otherwise `retry_at` is when
+    it becomes claimable again. `attempts` is unchanged by a deferral."""
+
+    event_id: UUID
+    deferrals: int
+    dead_lettered: bool
+    retry_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +120,8 @@ def claim_batch(
     rows = (
         db.execute(
             text(
-                "SELECT id, tenant_id, event_type, payload, attempts, correlation_id "
+                "SELECT id, tenant_id, event_type, payload, attempts, "
+                "correlation_id, last_error "
                 "FROM claim_outbox_batch(:w, :b, :s)"
             ),
             {
@@ -102,6 +141,7 @@ def claim_batch(
             payload=dict(r["payload"] or {}),
             attempts=r["attempts"],
             correlation_id=r["correlation_id"],
+            last_error=r["last_error"],
         )
         for r in rows
     ]
@@ -158,11 +198,74 @@ def record_failure(
     return FailureOutcome(event_id, next_attempts, False, retry_at)
 
 
+def _parse_deferrals(last_error: str | None) -> int:
+    """The deferral count from a `deferred:<n>: ...` marker; 0 for anything else
+    (a failure overwrites `last_error`, which correctly resets the run)."""
+    if not last_error or not last_error.startswith(_DEFER_PREFIX):
+        return 0
+    head = last_error[len(_DEFER_PREFIX) :].split(":", 1)[0]
+    return int(head) if head.isascii() and head.isdigit() else 0
+
+
+def record_deferral(
+    db: Session,
+    *,
+    event_id: UUID,
+    worker_id: str,
+    attempts: int,
+    deferrals: int,
+    reason: str,
+    retry_after: float | None = None,
+    policy: RelayPolicy = RelayPolicy(),
+) -> DeferralOutcome:
+    """Record a `DeliveryDeferred` hold: reschedule WITHOUT charging an attempt.
+
+    `attempts` and `deferrals` are the event's claimed values
+    (`ClaimedEvent.attempts` / `.deferrals`); `attempts` is passed back to the
+    settle function unchanged, which is what "does not charge" means (the
+    dispatcher role cannot read the table, so it cannot look the count up). The
+    next run length is stored in `last_error` as `deferred:<n>: <reason>`. Once it
+    would exceed `policy.max_deferrals` the event is dead-lettered (`dead`,
+    retained, attempts unchanged) so a permanent hold surfaces instead of
+    looping silently; the audited requeue is the way back in.
+    """
+    next_deferrals = deferrals + 1
+    trimmed_reason = reason[: _ERR_MAX - 40]
+    if next_deferrals > policy.max_deferrals:
+        error = f"deferral bound exceeded ({policy.max_deferrals}): {trimmed_reason}"
+        db.execute(
+            text("SELECT settle_outbox_event(:id, :w, 'dead', NULL, :a, :e)"),
+            {
+                "id": str(event_id),
+                "w": worker_id,
+                "a": attempts,
+                "e": error[:_ERR_MAX],
+            },
+        )
+        return DeferralOutcome(event_id, deferrals, True, None)
+    delay = policy.default_defer_seconds if retry_after is None else retry_after
+    delay = min(max(delay, policy.min_defer_seconds), policy.max_defer_seconds)
+    retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+    db.execute(
+        text("SELECT settle_outbox_event(:id, :w, 'pending', :ts, :a, :e)"),
+        {
+            "id": str(event_id),
+            "w": worker_id,
+            "ts": retry_at,
+            "a": attempts,
+            "e": f"{_DEFER_PREFIX}{next_deferrals}: {trimmed_reason}"[:_ERR_MAX],
+        },
+    )
+    return DeferralOutcome(event_id, next_deferrals, False, retry_at)
+
+
 __all__ = [
     "ClaimedEvent",
+    "DeferralOutcome",
     "FailureOutcome",
     "RelayPolicy",
     "claim_batch",
+    "record_deferral",
     "record_failure",
     "record_success",
 ]
