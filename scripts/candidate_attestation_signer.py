@@ -317,10 +317,20 @@ def verify_published_envelope(
     return subject
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate JSON object key")
+    return dict(pairs)
+
+
 def _load_envelope(path: str) -> AttestationEnvelopeV2:
     try:
         return AttestationEnvelopeV2.from_mapping(
-            json.loads(Path(path).read_text(encoding="utf-8"))
+            json.loads(
+                Path(path).read_text(encoding="utf-8"),
+                object_pairs_hook=_no_duplicate_keys,
+            )
         )
     except (ValueError, DeploymentFoundationError) as exc:
         raise Refused(f"{path}: not a well-formed attestation envelope") from exc
@@ -378,6 +388,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
         trust_root_version=args.trust_root_version,
         now=now,
     )
+    if args.out:
+        # Published bytes are the package's canonical record of the VERIFIED
+        # envelope, never the raw input text.
+        write_attestation_record(Path(args.out), envelope)
     print(
         f"verified {envelope.purpose} for {subject.package} {subject.version} "
         f"(fingerprint {envelope.public_key_fingerprint})"
@@ -432,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--key-id", required=True)
     verify.add_argument("--public-key-fingerprint", required=True)
     verify.add_argument("--trust-root-version", required=True)
+    verify.add_argument("--out", default="")
     verify.add_argument("--now", default="")
     verify.add_argument("--summary", default="")
     return parser

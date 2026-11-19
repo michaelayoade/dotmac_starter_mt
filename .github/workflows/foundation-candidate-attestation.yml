@@ -44,8 +44,10 @@
 # separate reviewed change. Verifying and publishing does not admit anything
 # (ADR-0070, 2026-09-08 amendment, decision 5).
 #
-# The `foundation-candidate-signing` environment is kept as an approval gate
-# only; it no longer holds any secret that this workflow reads.
+# The `environment: foundation-candidate-signing` reference is kept. That
+# environment does not exist yet and holds no secret this workflow reads; it
+# must be created (main-only branch policy) before the first dispatch, and the
+# three pinned variables set from Control's enrolment read-back.
 
 name: Foundation candidate attestation
 defaults:
@@ -120,18 +122,23 @@ jobs:
         run: poetry install --with dev --no-interaction
 
       - name: Resolve the allowlisted facility
+        env:
+          FACILITY: ${{ inputs.facility }}
         run: |
-          python scripts/release_facility.py resolve "${{ inputs.facility }}"
+          python scripts/release_facility.py resolve "${FACILITY}"
 
       # THE CANDIDATE'S COORDINATES, READ FROM THE COMMITTED RECEIPT — never
       # from a dispatch input naming a run or artifact id directly. Identical
       # idiom to `release-facility.yml`'s publish job.
       - name: Resolve the committed candidate receipt
         id: candidate
+        env:
+          FACILITY: ${{ inputs.facility }}
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           python scripts/release_facility.py resolve-candidate \
-            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            "${FACILITY}" --version "${VERSION}" \
             | tee -a "${GITHUB_OUTPUT}"
 
       # Fetch by run + artifact ID, never by "latest".
@@ -152,9 +159,12 @@ jobs:
       # THE DIGEST GATE, before the envelope is verified or published. A
       # mismatched artifact must fail here.
       - name: Refuse anything that is not the recorded candidate
+        env:
+          FACILITY: ${{ inputs.facility }}
+          VERSION: ${{ inputs.version }}
         run: |
           python scripts/release_facility.py verify-candidate \
-            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            "${FACILITY}" --version "${VERSION}" \
             --dist candidate-dist
 
       # Authenticate the ceremony-signed envelope against the pinned public
@@ -176,9 +186,12 @@ jobs:
               exit 1
             fi
           done
-          printf '%s' "${ENVELOPE_JSON}" > candidate-attestation.json
+          # The raw dispatch text is parse input only; what is uploaded is the
+          # canonical record `verify --out` writes after verification succeeds.
+          printf '%s' "${ENVELOPE_JSON}" > "${RUNNER_TEMP}/candidate-envelope-input.json"
           python scripts/candidate_attestation_signer.py verify \
-            --envelope candidate-attestation.json \
+            --envelope "${RUNNER_TEMP}/candidate-envelope-input.json" \
+            --out candidate-attestation.json \
             --receipt "${RECEIPT}" \
             --public-key-base64 "${PUBLIC_KEY_BASE64}" \
             --key-id "${KEY_ID}" \

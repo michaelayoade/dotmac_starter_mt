@@ -609,6 +609,10 @@ KEY_PATH_IDENTIFIERS = (
     "private_key",
     "sign",
     "private_bytes",
+    "load_ssh_private_key",
+    "subprocess",
+    "urllib",
+    "http",
 )
 
 
@@ -625,8 +629,22 @@ def _identifiers(source: str) -> set[str]:
         elif isinstance(node, ast.FunctionDef):
             found.add(node.name)
         elif isinstance(node, ast.Import | ast.ImportFrom):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                found.add(node.module.split(".")[0])
             for alias in node.names:
                 found.add(alias.name.rsplit(".", 1)[-1])
+                found.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.Call):
+            # getattr(x, "sign") reaches an attribute without naming it.
+            func = node.func
+            if (
+                isinstance(func, ast.Name)
+                and func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                found.add(node.args[1].value)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             if node.value.startswith("--"):
                 found.add(node.value)
@@ -658,6 +676,13 @@ def test_the_key_path_sweep_is_observed_failing_on_planted_code() -> None:
     assert _key_path_violations(
         real + "\nparser.add_argument('--private-key-file')\n"
     ) == ["--private-key-file"]
+    assert _key_path_violations(real + "\nimport subprocess\n") == ["subprocess"]
+    assert _key_path_violations(real + "\nimport urllib.request\n") == ["urllib"]
+    assert _key_path_violations(real + "\nfrom http import client\n") == ["http"]
+    assert _key_path_violations(real + "\nfrom x import load_ssh_private_key\n") == [
+        "load_ssh_private_key"
+    ]
+    assert _key_path_violations(real + '\ngetattr(k, "sign")\n') == ["sign"]
     # Near miss: whole identifiers only.
     assert _key_path_violations(real + "\nsignature_bytes = 1\n") == []
 
@@ -855,7 +880,9 @@ def test_verify_refuses_a_public_key_that_is_not_the_pinned_fingerprint() -> Non
     key = Ed25519PrivateKey.generate()
     other = Ed25519PrivateKey.generate()
     envelope = _sign_candidate(_receipt(), key, now=now)
-    with pytest.raises(SystemExit, match="pinned fingerprint"):
+    with pytest.raises(
+        SystemExit, match="public key does not match the pinned fingerprint"
+    ):
         _verify(
             envelope,
             _receipt(),
@@ -870,7 +897,9 @@ def test_verify_refuses_an_envelope_fingerprint_that_is_not_the_pin() -> None:
     key = Ed25519PrivateKey.generate()
     other = Ed25519PrivateKey.generate()
     envelope = _sign_candidate(_receipt(), key, now=now)
-    with pytest.raises(SystemExit, match="pinned fingerprint"):
+    with pytest.raises(
+        SystemExit, match="envelope fingerprint differs from the pinned"
+    ):
         _verify(
             envelope,
             _receipt(),
@@ -1136,3 +1165,81 @@ def test_the_workflow_verifies_before_it_uploads() -> None:
     upload_indexes = [i for i, n in enumerate(names) if n.startswith("Upload")]
     refuse_index = next(i for i, n in enumerate(names) if n.startswith("Refuse"))
     assert upload_indexes and refuse_index < verify_index < min(upload_indexes)
+    verify_step = steps[verify_index]
+    assert "if" not in verify_step, "the verify step must run unconditionally"
+    assert "continue-on-error" not in verify_step
+    # Only the file `verify --out` wrote is uploaded.
+    upload = steps[upload_indexes[0]]
+    assert upload["with"]["path"] == "candidate-attestation.json"
+    assert "--out candidate-attestation.json" in verify_step["run"]
+
+
+def test_the_workflow_interpolates_no_input_into_run_scripts() -> None:
+    for script in _run_scripts(_workflow_document()):
+        assert "${{ inputs." not in script and "${{inputs." not in script
+
+
+def _verify_cli(tmp_path: Path, envelope_text: str, key, out: Path | None):
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(_receipt()), encoding="utf-8")
+    env_path = tmp_path / "in.json"
+    env_path.write_text(envelope_text, encoding="utf-8")
+    pin = _pin(key)
+    argv = [
+        "verify",
+        "--envelope",
+        str(env_path),
+        "--receipt",
+        str(receipt_path),
+        "--public-key-base64",
+        pin["public_key_b64"],
+        "--key-id",
+        pin["key_id"],
+        "--public-key-fingerprint",
+        pin["pinned_fingerprint"],
+        "--trust-root-version",
+        ENROLMENT_UUID,
+    ]
+    if out is not None:
+        argv += ["--out", str(out)]
+    return SIGNER.main(argv)
+
+
+def test_verify_out_publishes_the_canonical_verified_record_not_the_input(
+    tmp_path: Path,
+) -> None:
+    key = Ed25519PrivateKey.generate()
+    envelope = _sign_candidate(_receipt(), key, now=datetime.now(UTC))
+    # Same envelope, pretty-printed with extra whitespace: different raw bytes.
+    raw = json.dumps(attestation_envelope_document(envelope), indent=4)
+    out = tmp_path / "published.json"
+    assert _verify_cli(tmp_path, raw, key, out) == 0
+    assert out.read_bytes() != raw.encode()
+    assert json.loads(out.read_text(encoding="utf-8")) == (
+        attestation_envelope_document(envelope)
+    )
+
+
+def test_verify_refuses_duplicate_keys_and_publishes_nothing(tmp_path: Path) -> None:
+    key = Ed25519PrivateKey.generate()
+    envelope = _sign_candidate(_receipt(), key, now=datetime.now(UTC))
+    raw = json.dumps(attestation_envelope_document(envelope))
+    # A decoy: the same key twice, the verified value last.
+    decoy = raw.replace('{"schema"', '{"audience": "decoy", "schema"', 1)
+    assert decoy != raw
+    out = tmp_path / "published.json"
+    with pytest.raises(SystemExit, match="well-formed"):
+        _verify_cli(tmp_path, decoy, key, out)
+    assert not out.exists()
+
+
+def test_verify_publishes_nothing_when_verification_fails(tmp_path: Path) -> None:
+    key = Ed25519PrivateKey.generate()
+    other = Ed25519PrivateKey.generate()
+    envelope = _sign_candidate(_receipt(), other, now=datetime.now(UTC))
+    out = tmp_path / "published.json"
+    with pytest.raises(SystemExit):
+        _verify_cli(
+            tmp_path, json.dumps(attestation_envelope_document(envelope)), key, out
+        )
+    assert not out.exists()
