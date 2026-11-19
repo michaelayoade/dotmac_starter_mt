@@ -109,9 +109,14 @@ DEFAULT_DENY_OWNERS = frozenset(
     }
 )
 ANY_MODULE = frozenset({"*"})
-# D2: the one module that funds a prepaid charge from account credit. It alone
-# reads the account terms and the funding availability, and issues the invoice.
+# D2: the one module that funds a prepaid charge from account credit and issues
+# its invoice. The account terms and funding availability reads are shared with
+# Settle (see FUNDED_CHARGE_AND_SETTLE below).
 FUNDED_CHARGE_ONLY = frozenset({"funded_charge.py"})
+# GAP-3: Settle also takes the account lock (get_funding_availability) and reads
+# the account terms and the balance to pay a new postpaid invoice. Read-only
+# names; the single widening beyond FundedCharge.
+FUNDED_CHARGE_AND_SETTLE = frozenset({"funded_charge.py", "settle.py"})
 # The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
 # narrow this to modules; PR E adds the F3/F5 modules to the restricted names.
 OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
@@ -135,10 +140,10 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "AccessSignal": FUNDED_CHARGE_ONLY,
     # F2 FundedCharge (D2) reads these and nothing else beyond the restricted
     # commands below. Each is a deliberate, single-module entry.
-    "get_effective_account_terms": FUNDED_CHARGE_ONLY,
-    "AccountTermsV1": FUNDED_CHARGE_ONLY,
-    "get_funding_availability": FUNDED_CHARGE_ONLY,
-    "GetFundingAvailabilityV1": FUNDED_CHARGE_ONLY,
+    "get_effective_account_terms": FUNDED_CHARGE_AND_SETTLE,
+    "AccountTermsV1": FUNDED_CHARGE_AND_SETTLE,
+    "get_funding_availability": FUNDED_CHARGE_AND_SETTLE,
+    "GetFundingAvailabilityV1": FUNDED_CHARGE_AND_SETTLE,
     "get_confirmed_settlement": FUNDED_CHARGE_ONLY,
     "GetConfirmedSettlementV1": FUNDED_CHARGE_ONLY,
     "IssueRatedInvoiceV3": FUNDED_CHARGE_ONLY,
@@ -1227,8 +1232,10 @@ def test_the_rated_invoice_issue_is_accepted_in_funded_charge_only() -> None:
     [
         ("from dotmac_billing import issue_rated_invoice", "settle.py"),
         ("from dotmac_billing import apply_available_credit", "adjust.py"),
-        ("from dotmac_billing import get_effective_account_terms", "settle.py"),
-        ("from dotmac_billing import get_funding_availability", "settle.py"),
+        ("from dotmac_billing import get_effective_account_terms", "adjust.py"),
+        ("from dotmac_billing import get_funding_availability", "adjust.py"),
+        ("from dotmac_billing import AccountTermsV1", "adjust.py"),
+        ("from dotmac_billing import GetFundingAvailabilityV1", "adjust.py"),
         ("from dotmac_billing import get_confirmed_settlement", "settle.py"),
         ("from dotmac_billing import IssueRatedInvoiceV3", "settle.py"),
         ("from dotmac_service_access_policy import AccessSignal", "settle.py"),
@@ -1241,6 +1248,20 @@ def test_funded_charge_only_names_are_refused_in_other_modules(
     assert forbidden_call_violations(source, relative), source
     if relative != "funded_charge.py" and "apply_available_credit" not in source:
         assert forbidden_call_violations(source, "funded_charge.py") == [], source
+
+
+def test_terms_and_availability_reads_are_settle_and_funded_charge_only() -> None:
+    names = (
+        "get_effective_account_terms",
+        "AccountTermsV1",
+        "get_funding_availability",
+        "GetFundingAvailabilityV1",
+    )
+    for name in names:
+        source = f"from dotmac_billing import {name}\n"
+        assert forbidden_call_violations(source, "settle.py") == [], name
+        assert forbidden_call_violations(source, "funded_charge.py") == [], name
+        assert forbidden_call_violations(source, "adjust.py"), name
 
 
 def test_the_listed_owner_calls_are_accepted() -> None:
