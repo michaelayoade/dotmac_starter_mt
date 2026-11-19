@@ -395,6 +395,57 @@ def test_a_charge_that_is_not_prepaid_is_refused_with_no_row(monkeypatch):
     assert ports.policy.reads == 0
 
 
+def test_the_terms_are_read_again_after_the_account_lock_and_gate_the_start(
+    monkeypatch,
+):
+    calls = []
+    answers = iter([True, False])  # prepaid before the lock, postpaid after it
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_fits", lambda *a, **k: calls.append("lock") or False)
+    monkeypatch.setattr(
+        flows, "_is_prepaid", lambda *a, **k: calls.append("terms") or next(answers)
+    )
+    monkeypatch.setattr(flows, "_write", _boom)
+    monkeypatch.setattr(flows, "_begin_service", _boom)
+    with pytest.raises(FundedChargeRefused) as refused:
+        flows.start_funded_charge(
+            None,
+            scope=SCOPE,
+            command=StartFundedChargeV1(KEY),
+            ports=_ports(_Charges(_charge())),
+        )
+    assert refused.value.code == "not_prepaid"
+    assert calls == ["terms", "lock", "terms"]  # authoritative read under the lock
+
+
+def test_a_duplicate_that_won_the_lock_is_replayed_without_the_post_lock_terms_read(
+    monkeypatch,
+):
+    winner = SimpleNamespace(
+        id=uuid4(),
+        state="pending",
+        reason_code=None,
+        version=0,
+        billing_account_id=ACCOUNT,
+        document_id=None,
+    )
+    finds = iter([None, winner])
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: next(finds))
+    monkeypatch.setattr(flows, "_fits", lambda *a, **k: False)
+    reads = []
+    monkeypatch.setattr(
+        flows, "_is_prepaid", lambda *a, **k: reads.append("terms") or True
+    )
+    outcome = flows.start_funded_charge(
+        None,
+        scope=SCOPE,
+        command=StartFundedChargeV1(KEY),
+        ports=_ports(_Charges(_charge())),
+    )
+    assert outcome.replayed
+    assert reads == ["terms"]  # the fast path only; none after the lock
+
+
 def test_a_re_evaluated_row_that_is_no_longer_prepaid_is_withdrawn_unposted(
     monkeypatch,
 ):

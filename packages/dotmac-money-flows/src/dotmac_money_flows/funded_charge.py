@@ -712,8 +712,9 @@ def start_funded_charge(
     """Start one charge at its due time, in the caller's transaction.
 
     See the module docstring: replay first, no row for an unknown or non-prepaid
-    charge, the balance covering the whole charge discharges it at ``due_at``,
-    otherwise it is held ``pending``. An owner exception propagates.
+    charge (the contract type is read again after the account lock is taken), the
+    balance covering the whole charge discharges it at ``due_at``, otherwise it is
+    held ``pending``. An owner exception propagates.
     """
     tenant_id = _tenant(scope)
     charge_ref = charge_ref_for(command.key)
@@ -723,6 +724,8 @@ def start_funded_charge(
     charge = ports.charges.read(db, scope=scope, key=command.key)
     if charge is None:
         raise FundedChargeRefused("charge_not_found")
+    # Fast path, no lock and no funds read for a postpaid account; the check
+    # under the lock below is the authoritative one.
     if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
         raise FundedChargeRefused("not_prepaid")
     ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope).version)
@@ -731,6 +734,11 @@ def start_funded_charge(
     if winner is not None:
         # A duplicate that won the race has committed: its row is the answer.
         return _outcome(winner, replayed=True)
+    # The terms are read only now, under the account lock: a terms switch (and
+    # its re-check) that committed while this start waited is seen, so a pending
+    # row is never inserted behind a re-check that has already run.
+    if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
+        raise FundedChargeRefused("not_prepaid")
     was_active = _begin_service(ctx, charge.service_ref)
     if funded:
         row = _discharge(
