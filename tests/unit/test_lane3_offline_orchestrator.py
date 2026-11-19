@@ -66,6 +66,8 @@ from lane3_offline_result import (  # noqa: E402
 from lane3_plan_v3 import exposure_reconciliations_for_spec  # noqa: E402
 
 REVISION = "c" * 40
+TARGET_ID = "3f2b8c1e-7a44-4d0b-9c55-0e1d2a3b4c5d"
+DISPATCH_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
 HOST_ID = "fleet-host-1"
 ENROL = "6f1c2f4e-52a8-4d0e-9a1b-2f0c7e6d9b11"
 CAND_ENROL = "0b6c7d0e-3a41-4f7e-8d2e-6a5a0e6a7c22"
@@ -180,7 +182,7 @@ class World:
                 base, exposure_reconciliations=exposure_reconciliations_for_spec(spec)
             ),
             candidate_wheel_digest=WHEEL,
-            target_id="target-1",
+            target_id=TARGET_ID,
             controller_ssh_fingerprint=CONTROLLER,
             host_id=HOST_ID,
             host_incarnation=self.inst_fp,
@@ -207,7 +209,9 @@ class World:
         self.ciphertext = FAKE_CIPHERTEXT
         self.decrypt = lambda _ciphertext: self.archive
 
-        grant = grant_for_plan(spec, self.plan)
+        grant = grant_for_plan(
+            spec, self.plan, receipt_overrides={"dispatch_id": DISPATCH_ID}
+        )
         outcome = DeploymentOutcome(
             plan=build_plan(spec),
             succeeded=True,
@@ -642,7 +646,7 @@ def test_a_standard_base64_signature_is_not_the_wire_form(world: World) -> None:
 
 
 def test_dispatch_naming_another_id_is_refused(world: World) -> None:
-    world.resign(dispatch_id="dispatch-other")
+    world.resign(dispatch_id="11111111-2222-4333-8444-555555555555")
     refused(world, "dispatch-id-mismatch")
 
 
@@ -653,7 +657,13 @@ def test_dispatch_for_another_plan_is_refused(world: World) -> None:
 
 @pytest.mark.parametrize("field", ["target_id", "target_ref"])
 def test_dispatch_for_another_target_is_refused(world: World, field: str) -> None:
-    world.resign(**{field: "other-target"})
+    world.resign(
+        **{
+            field: "other-target"
+            if field == "target_ref"
+            else "11111111-2222-4333-8444-555555555555"
+        }
+    )
     refused(world, "dispatch-target-mismatch")
 
 
@@ -679,7 +689,7 @@ def test_a_statement_naming_another_key_fingerprint_is_refused(world: World) -> 
 
 
 def test_export_for_another_dispatch_is_refused(world: World) -> None:
-    world.export["dispatch_id"] = "dispatch-other"
+    world.export["dispatch_id"] = "11111111-2222-4333-8444-555555555555"
     refused(world, "export-dispatch-mismatch")
 
 
@@ -781,7 +791,7 @@ def test_release_for_another_lease_row_is_refused(world: World) -> None:
 
 
 def test_host_admission_attempt_must_be_the_dispatch_id(world: World) -> None:
-    world.admission["attempt_id"] = "attempt-other"
+    world.admission["attempt_id"] = "11111111-2222-4333-8444-555555555555"
     refused(world, "host-admission-attempt-mismatch")
 
 
@@ -1184,3 +1194,24 @@ def test_sign_result_refuses_a_result_that_no_longer_binds(tmp_path) -> None:
             outcome, key_path=tmp_path / "k", policy=world.policy, now=stale
         )
     assert str(caught.value) == "offline-join-sign-self-check"
+
+
+@pytest.mark.parametrize("field", ["dispatch_id", "target_id"])
+def test_statement_ids_must_be_canonical_uuids(world: World, field: str) -> None:
+    world.resign(**{field: "not-a-uuid"})
+    refused(world, "export-invalid")
+
+
+def test_top_level_dispatch_id_must_be_a_canonical_uuid(world: World) -> None:
+    world.export["dispatch_id"] = world.dispatch_id.upper()
+    refused(world, "export-invalid")
+
+
+def test_host_admission_attempt_id_must_be_a_canonical_uuid(world: World) -> None:
+    world.admission["attempt_id"] = "attempt-1"
+    refused(world, "host-admission-invalid")
+
+
+def test_plan_digest_is_compared_exactly(world: World) -> None:
+    world.resign(execution_plan_digest=str(world.plan.digest()).removeprefix("sha256:"))
+    refused(world, "export-invalid")

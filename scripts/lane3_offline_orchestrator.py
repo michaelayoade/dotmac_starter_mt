@@ -41,6 +41,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -174,6 +175,13 @@ def _member_digest(value: Any) -> str:
     raise AssertionError  # pragma: no cover
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
 def read_host_admission(payload: bytes) -> HostAdmissionFacts:
     """S2 INTERFACE: parse `host-admission.json` for its two digests only.
 
@@ -190,7 +198,7 @@ def read_host_admission(payload: bytes) -> HostAdmissionFacts:
         not isinstance(document, dict)
         or set(document) != {"attempt_id", "presentation", "candidate", "installed"}
         or not isinstance(document["attempt_id"], str)
-        or not document["attempt_id"]
+        or not _is_uuid(document["attempt_id"])
     ):
         _refuse("host-admission-invalid")
     return HostAdmissionFacts(
@@ -317,10 +325,6 @@ def _join_receipt(
         _refuse("receipt-host-mismatch")
 
 
-def _bare(digest: str) -> str:
-    return digest.removeprefix("sha256:")
-
-
 def _join_control(
     export: Cp6Export,
     *,
@@ -343,7 +347,7 @@ def _join_control(
     # Everything below is read from the SIGNED statement, never export fields.
     if statement.dispatch_id != wanted:
         _refuse("dispatch-id-mismatch")
-    if _bare(statement.execution_plan_digest) != _bare(plan.digest()):
+    if statement.execution_plan_digest != str(plan.digest()):
         _refuse("dispatch-plan-mismatch")
     if statement.target_id != plan.target_id or statement.target_ref != plan.target:
         _refuse("dispatch-target-mismatch")

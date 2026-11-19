@@ -24,6 +24,7 @@ import dataclasses
 import hashlib
 import json
 import re
+import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -488,18 +489,30 @@ def _positive(value: Any) -> int:
     return value
 
 
+def _uuid(value: Any) -> str:
+    """A canonical lower-case UUID, as Control mints dispatch and target ids."""
+    if type(value) is not str:
+        _refuse("field")
+    try:
+        if str(uuid.UUID(value)) != value:
+            _refuse("field")
+    except ValueError:
+        _refuse("field")
+    return value
+
+
 def _statement(value: Any) -> dict[str, Any]:
     """A closed dispatch statement with the typed fields the joins consume."""
     block = _object(value, set(_STATEMENT_KEYS))
     for name in (
         "purpose",
-        "dispatch_id",
-        "target_id",
         "target_ref",
         "key_id",
         "algorithm",
     ):
         _token(block[name])
+    _uuid(block["dispatch_id"])
+    _uuid(block["target_id"])
     _digest(block["execution_plan_digest"])
     _digest(block["public_key_fingerprint"])
     _positive(block["execution_sequence"])
@@ -661,7 +674,7 @@ def parse_cp6_export(payload: bytes) -> Cp6Export:
         )
 
     return Cp6Export(
-        dispatch_id=_token(top["dispatch_id"]),
+        dispatch_id=_uuid(top["dispatch_id"]),
         host_id=_token(top["host_id"]),
         dispatch=dispatch,
         ledger=ledger,
