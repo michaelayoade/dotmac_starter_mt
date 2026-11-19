@@ -989,7 +989,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Refused as refusal:
         print(f"refused: {refusal.code}", file=sys.stderr)
         return 2
-    print(json.dumps(dict(result), sort_keys=True))
+    print(json.dumps(dict(result)))
     return 0
 
 

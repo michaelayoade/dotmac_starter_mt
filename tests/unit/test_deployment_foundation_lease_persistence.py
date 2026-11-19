@@ -523,6 +523,73 @@ def _bundle_downloader_premise(source: str) -> bool:
     )
 
 
+def _host_admission_premise(source: str) -> bool:
+    """Prove `lane3_host_admission.py` publishes only a per-run file, not a lease.
+
+    The module's one `os.link` creates `host-admission.json` (or its unsigned
+    precursor) create-only in an owner-only per-run directory. Strictly: it
+    never imports the lease module or names its store; it has exactly one
+    `os.link`, inside `_write_output`, relative to a directory fd and without
+    following symlinks, and `_write_output` obtains that fd from `_safe_dir`.
+    """
+    tree = ast.parse(source)
+    links = _os_link_calls(tree)
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    write_output = functions.get("_write_output")
+    if (
+        write_output is None
+        or len(links) != 1
+        or links[0] not in ast.walk(write_output)
+    ):
+        return False
+    keywords = {kw.arg: kw.value for kw in links[0].keywords}
+    if not (
+        isinstance(keywords.get("src_dir_fd"), ast.Name)
+        and keywords["src_dir_fd"].id == "directory"
+        and isinstance(keywords.get("dst_dir_fd"), ast.Name)
+        and keywords["dst_dir_fd"].id == "directory"
+        and isinstance(keywords.get("follow_symlinks"), ast.Constant)
+        and keywords["follow_symlinks"].value is False
+    ):
+        return False
+    directory_sources = [
+        node
+        for node in ast.walk(write_output)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "directory" for t in node.targets)
+        and isinstance(node.value, ast.Call)
+        and getattr(node.value.func, "id", None) == "_safe_dir"
+    ]
+    if len(directory_sources) != 1:
+        return False
+    forbidden = {"release_path", "lease_store", "write_store_record_once"}
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    attributes = {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+    if (names | attributes) & forbidden:
+        return False
+    if any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and ".release.json" in node.value
+        for node in ast.walk(tree)
+    ):
+        return False
+    return not any(
+        isinstance(node, ast.ImportFrom)
+        and (
+            "lease" in (node.module or "")
+            or any(alias.name in forbidden for alias in node.names)
+        )
+        or isinstance(node, ast.Import)
+        and any("lease" in alias.name for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
 def _runner_uses_private_download_destinations(source: str) -> bool:
     """Require this runner's direct downloader calls to use its temp directory."""
     tree = ast.parse(source)
@@ -646,13 +713,47 @@ def test_only_the_lease_writer_publishes_into_this_store() -> None:
     """
     downloader = SCRIPTS / "bundle_artifact_download.py"
     runner = SCRIPTS / "run_bundle_action.py"
-    assert _publish_sites() == {"bundle_artifact_download.py", "lease.py"}, (
-        f"{sorted(_publish_sites())} publish with os.link. "
-        "only the leased-store writer and verified downloader are inventoried"
+    admission = SCRIPTS / "lane3_host_admission.py"
+    assert _publish_sites() == {
+        "bundle_artifact_download.py",
+        "lane3_host_admission.py",
+        "lease.py",
+    }, (
+        f"{sorted(_publish_sites())} publish with os.link. only the leased-store "
+        "writer, the verified downloader and the per-run host-admission file "
+        "are inventoried"
     )
     assert _bundle_downloader_premise(downloader.read_text(encoding="utf-8"))
+    assert _host_admission_premise(admission.read_text(encoding="utf-8"))
     assert _runner_uses_private_download_destinations(
         runner.read_text(encoding="utf-8")
+    )
+
+
+def test_the_host_admission_premise_rejects_a_stray_or_unsafe_link() -> None:
+    """Sensitivity: a second `os.link`, one outside `_write_output`, or one that
+    drops `dir_fd` or `follow_symlinks=False` must fail the premise."""
+    source = (SCRIPTS / "lane3_host_admission.py").read_text(encoding="utf-8")
+    assert _host_admission_premise(source)
+    stray = source + "\n\ndef _stray(a, b):\n    os.link(a, b)\n"
+    assert not _host_admission_premise(stray)
+    outside = source.replace("os.link(", "_noop(", 1) + (
+        "\n\ndef _outside(a, b):\n    os.link(a, b, src_dir_fd=1, dst_dir_fd=1,"
+        " follow_symlinks=False)\n"
+    )
+    assert not _host_admission_premise(outside)
+    assert not _host_admission_premise(
+        source.replace("follow_symlinks=False,", "follow_symlinks=True,", 1)
+    )
+    assert not _host_admission_premise(
+        source.replace("                        src_dir_fd=directory,\n", "", 1)
+    )
+    assert not _host_admission_premise(
+        source + "\nfrom dotmac_deployment_foundation.lease import write_lease\n"
+    )
+    assert not _host_admission_premise(
+        source + "\nfrom dotmac_deployment_foundation import lease\n"
+        "x = write_store_record_once\n"
     )
 
 
