@@ -134,3 +134,14 @@ Source only; not published, not composed into any assembly.
 - Not covered by a test here: an opening-lot credit funding a charge (Billing
   admits opening lots through a sealed window under a restricted role, which the
   scratch fixture does not provision).
+
+- GAP-3: `apply_balance_on_invoice_issued` runs the C2a pass when Billing issues a
+  postpaid invoice (account lock first; gates read after it; prepaid and
+  `deposit_application=none` are no-ops). No row, event or attention item; owner
+  failures raise and a replay posts nothing. Settle may now read account terms and
+  funding availability (allowlist widened from FundedCharge only), and the
+  account statement (Settle only). Applications are dated the latest of the two
+  invoice dates and the newest cash received since (spent or not); the source
+  reference carries the document's Billing `source_version`; faults raise the
+  new `BalancePassFailed`. An overflowing statement window is split (newer half
+  first) rather than failing.
