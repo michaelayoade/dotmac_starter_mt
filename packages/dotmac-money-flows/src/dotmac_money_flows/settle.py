@@ -18,6 +18,9 @@ credit. The balance then pays WHOLE invoices only, through Billing's
   full if the balance covers what remains, else nothing is applied. The
   instance is ``settled`` either way (cash accepted, remainder as balance);
   ``unapplied`` is only for a bound document that is not collectible.
+* Invoice issue (GAP-3, ``apply_balance_on_invoice_issued``): the same pass runs
+  when Billing issues a postpaid invoice, so the balance pays it (and any older
+  open invoice first). Quiet no-ops return an outcome; failures raise.
 * Excess after a paid bound invoice, and every deposit: other open documents,
   oldest due first, whole only, skipping any that does not fit. Gated by the
   ``deposit_application`` policy. No contract-type branching here: prepaid
@@ -59,6 +62,7 @@ Assembly order and permissions:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -68,12 +72,15 @@ from dotmac_billing import (
     AcceptWithholdingDischarge,
     ApplyAvailableCreditCommand,
     BillingRuleViolation,
+    GetFundingAvailabilityV1,
     OpenReceivableDocumentV1,
     SettlementFundingLane,
     accept_settlement,
     accept_withholding_discharge,
     apply_available_credit,
     get_document_exposure,
+    get_effective_account_terms,
+    get_funding_availability,
     list_open_receivable_documents,
 )
 from dotmac_kernel.cache import TenantScope
@@ -92,7 +99,9 @@ from sqlalchemy.orm import Session
 from dotmac_money_flows.contracts import (
     SETTLE_DEFINITION_VERSION,
     WITHHOLDING_SOURCE,
+    BalanceAppliedOutcomeV1,
     DepositApplication,
+    InvoiceIssuedV1,
     SettleAttentionCursorV1,
     SettleConfirmationV1,
     SettleInstanceV1,
@@ -138,6 +147,7 @@ _SHORT_BALANCE = "billing.credit_insufficient_backing"
 _DOES_NOT_FIT = frozenset(
     {_SHORT_BALANCE, "billing.credit_exceeds_non_withholding_room"}
 )
+_POSTPAID = "postpaid"
 _CODE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 
 
@@ -399,6 +409,33 @@ def _walk_open_documents(
         return None
 
 
+def _pay_in_order(
+    documents: list[OpenReceivableDocumentV1],
+    pay_whole: Callable[[OpenReceivableDocumentV1], str | None],
+    *,
+    skip: UUID | None = None,
+) -> None:
+    """The one whole-only pass shared by deposits and invoice issue (GAP-3).
+
+    Oldest due first, whole only, skipping any that does not fit. A refusal for
+    lack of balance (the balance only shrinks here) bounds every amount at or
+    above it, so those are skipped without another owner call. A
+    withholding-room refusal is per document: no bound.
+    """
+    ceiling: Money | None = None
+    for document in order_open_documents(documents):
+        if document.document_id == skip:
+            continue
+        outstanding = document.collectible_receivable
+        if not outstanding.is_positive:
+            continue
+        if ceiling is not None and outstanding >= ceiling:
+            continue
+        code = pay_whole(document)
+        if code == _SHORT_BALANCE and (ceiling is None or outstanding < ceiling):
+            ceiling = outstanding
+
+
 def _execute(
     db: Session,
     scope: TenantScope,
@@ -524,24 +561,11 @@ def _execute(
         if documents is None:
             state, reason = SettleState.UNAPPLIED, "open_documents_unreadable"
         else:
-            # Oldest due first, whole only, skipping any that does not fit. A
-            # refusal for lack of balance (the balance only shrinks here) bounds
-            # every amount at or above it, so those are skipped without another
-            # owner call. A withholding-room refusal is per document: no bound.
-            ceiling: Money | None = None
-            for document in order_open_documents(documents):
-                if document.document_id == bound_id:
-                    continue
-                outstanding = document.collectible_receivable
-                if not outstanding.is_positive:
-                    continue
-                if ceiling is not None and outstanding >= ceiling:
-                    continue
-                code = pay_whole(document.document_id, outstanding)
-                if code == _SHORT_BALANCE and (
-                    ceiling is None or outstanding < ceiling
-                ):
-                    ceiling = outstanding
+            _pay_in_order(
+                documents,
+                lambda d: pay_whole(d.document_id, d.collectible_receivable),
+                skip=bound_id,
+            )
     return _Result(state, reason, settlement.id, discharge_ref, tuple(applied))
 
 
@@ -789,6 +813,93 @@ def retry_settle(
     return _outcome(row, replayed=False, applied=result.applied)
 
 
+def apply_balance_on_invoice_issued(
+    db: Session,
+    *,
+    scope: TenantScope,
+    request: InvoiceIssuedV1,
+    ports: SettlePorts,
+) -> BalanceAppliedOutcomeV1:
+    """GAP-3: the balance pays whole open invoices when a postpaid invoice issues.
+
+    Runs the same pass as a deposit (``_pay_in_order``: every open invoice of the
+    account, oldest due first, whole only, misfits skipped) in the caller's
+    transaction. Order: read the account from the invoice, take the Billing
+    account lock first (``get_funding_availability``, as F2 does), then read every
+    gate fresh. A business no-op posts nothing and returns a quiet outcome whose
+    ``reason_code`` names it. A technical or owner failure RAISES and writes
+    nothing: no attention row, no event. The caller rolls back and its event
+    delivery retries; the deterministic source references make a retry, or the
+    next invoice or deposit pass, complete the work without paying twice.
+
+    Applications are dated the later of this invoice's issue date and the paid
+    invoice's issue date; flows reads no clock.
+    """
+    _tenant(scope)
+    trigger = request.document_id
+    account_id = get_document_exposure(
+        db, scope=scope, document_id=trigger
+    ).billing_account_id  # immutable, so this read before the lock is safe
+    availability = get_funding_availability(
+        db, scope=scope, request=GetFundingAvailabilityV1(scope, account_id)
+    )  # account lock
+
+    def done(
+        reason: str | None, applied: tuple[UUID, ...] = ()
+    ) -> BalanceAppliedOutcomeV1:
+        return BalanceAppliedOutcomeV1(account_id, applied, reason)
+
+    policy = ports.policy.read(db, scope=scope)
+    if policy.deposit_application is not DepositApplication.OLDEST_DUE_FIRST:
+        return done("deposit_application_off")
+    exposure = get_document_exposure(db, scope=scope, document_id=trigger)
+    if exposure.billing_account_id != account_id:
+        raise SettleRefused("document_account_mismatch")
+    if not exposure.collectible_receivable.is_positive:
+        return done("invoice_not_open")
+    if not availability.unrestricted.is_positive:
+        return done("no_balance")
+    currency = exposure.collectible_receivable.currency
+    documents = _walk_open_documents(db, scope, account_id, currency)
+    if documents is None:
+        raise SettleRefused("open_documents_unreadable")
+    issued = {d.document_id: d.issued_at for d in documents}
+    if trigger not in issued:
+        return done("invoice_not_open")
+    terms = get_effective_account_terms(
+        db, scope=scope, account_id=account_id, at=issued[trigger]
+    )
+    if terms.contract_type.value != _POSTPAID:
+        return done("account_not_postpaid")
+
+    applied: list[UUID] = []
+
+    def pay(document: OpenReceivableDocumentV1) -> str | None:
+        try:
+            apply_available_credit(
+                db,
+                scope=scope,
+                command=ApplyAvailableCreditCommand(
+                    billing_account_id=account_id,
+                    document_id=document.document_id,
+                    amount=document.collectible_receivable,
+                    occurred_at=max(issued[trigger], document.issued_at),
+                    source_ref=(
+                        f"money-flows:settle:issue:{trigger}:{document.document_id}"
+                    ),
+                ),
+            )
+        except BillingRuleViolation as exc:
+            if exc.code not in _DOES_NOT_FIT:
+                raise
+            return exc.code
+        applied.append(document.document_id)
+        return None
+
+    _pay_in_order(documents, pay)
+    return done(None if applied else "no_invoice_fits", tuple(applied))
+
+
 def get_settle_instance(
     db: Session,
     *,
@@ -848,6 +959,7 @@ def list_settle_attention(
 
 
 __all__ = [
+    "apply_balance_on_invoice_issued",
     "CONFIRMATION_UNIQUE_CONSTRAINT",
     "REPLAY_CONSTRAINTS",
     "get_settle_instance",

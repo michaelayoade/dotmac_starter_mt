@@ -57,3 +57,42 @@ and resumes the service.
 Changing the tenant default contract type is a runbook event, not code in this
 package: the caller re-checks each prepaid account that falls back to the default
 (no own terms), one account per transaction, with `reevaluate_account_terms`.
+
+## Balance pays new postpaid invoices (GAP-3)
+
+`apply_balance_on_invoice_issued(db, scope=..., request=InvoiceIssuedV1(document_id),
+ports=SettlePorts)` runs the deposit pass when Billing issues an invoice: every open
+invoice of the account, oldest due first, whole invoices only, skipping any that do
+not fit. It takes the Billing account lock first (the same order as F2 and Settle),
+then reads each gate fresh: `deposit_application` is not `none` (the one setting for
+"the balance pays invoices"; there is no separate switch), the new invoice is still
+open, the balance is positive, and the account is postpaid at the invoice's issue
+date (a prepaid account is an explicit no-op). It creates no flows row, no
+attention item and no event; Billing's own allocation facts are the record.
+
+A business no-op posts nothing and returns `BalanceAppliedOutcomeV1` with an empty
+`applied_document_ids` and a `reason_code` (`deposit_application_off`,
+`invoice_not_open`, `no_balance`, `account_not_postpaid`, `no_invoice_fits`). A
+technical or owner failure (Billing refusal, unreadable open-document list,
+database error) **raises**; nothing is written. Source references are
+deterministic (`money-flows:settle:issue:{trigger}:{document}`), so a retry never
+pays twice and the next invoice or deposit pass completes any missed work.
+
+Duties of the caller (Sub-thin):
+
+- Route each Billing invoice-issued document fact (`billing.invoice.document.fact`
+  v1/v2/v3 with `document_kind=invoice`, `document_state=issued`, `fact_version=1`)
+  to this command, in its own transaction per event.
+- Let a failure propagate so the transport rolls back and its event delivery
+  retries automatically. A persistent failure (retries exhausted) is a technical
+  ops alert, never a billing staff queue.
+- Date postpaid invoices at the real issue instant. An application is dated the
+  later of the new invoice's issue date and the paid invoice's issue date and
+  flows reads no clock, so a back-dated `issued_at` (for example a period-end
+  date set by a later run) would apply cash before it was received.
+- Postpaid timing (advance or arrears) is the Billing account-terms setting
+  (`postpaid_billing_timing`), not fixed here; this command only needs the
+  contract type, read at the invoice's issue date.
+
+Credit-note excess and reversals trigger no pass of their own; the next invoice
+issue or deposit picks them up.

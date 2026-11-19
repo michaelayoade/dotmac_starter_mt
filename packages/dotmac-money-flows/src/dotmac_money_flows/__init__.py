@@ -12,6 +12,7 @@ from dotmac_money_flows.contracts import (
     FUNDED_CHARGE_DEFINITION_VERSION,
     FUNDED_CHARGE_TRANSITIONS,
     AccountTermsChangedV1,
+    BalanceAppliedOutcomeV1,
     DepositApplication,
     FundedChargeCursorV1,
     FundedChargeInstanceV1,
@@ -22,6 +23,7 @@ from dotmac_money_flows.contracts import (
     FundedChargeRefused,
     FundedChargeState,
     FundedChargeStepFailed,
+    InvoiceIssuedV1,
     RatedChargeKeyV1,
     RatedChargeSource,
     RatedChargeV1,
@@ -65,6 +67,7 @@ from dotmac_money_flows.funded_charge import (
 from dotmac_money_flows.manifest import module
 from dotmac_money_flows.migrations import versions_dir
 from dotmac_money_flows.settle import (
+    apply_balance_on_invoice_issued,
     get_settle_instance,
     is_settle_replay_conflict,
     list_settle_attention,
@@ -87,6 +90,7 @@ __all__ = [
     "SETTLE_ATTENTION_EVENT_TYPE",
     "SETTLE_SETTLED_EVENT_TYPE",
     "AccountTermsChangedV1",
+    "BalanceAppliedOutcomeV1",
     "DepositApplication",
     "FundedChargeCursorV1",
     "FundedChargeInstanceV1",
@@ -97,6 +101,7 @@ __all__ = [
     "FundedChargeRefused",
     "FundedChargeState",
     "FundedChargeStepFailed",
+    "InvoiceIssuedV1",
     "RatedChargeKeyV1",
     "RatedChargeSource",
     "RatedChargeV1",
@@ -115,6 +120,7 @@ __all__ = [
     "SettlementTargetV1",
     "StartFundedChargeV1",
     "__version__",
+    "apply_balance_on_invoice_issued",
     "charge_ref_for",
     "get_funded_charge_instance",
     "get_settle_instance",
