@@ -22,6 +22,7 @@ from dotmac_expenses.contracts import (
     AddPolicyRule,
     ApplyDecision,
     AttachReceipt,
+    ClaimLiabilityStatus,
     ClaimLineDraft,
     ClaimStatus,
     Conflict,
@@ -42,13 +43,16 @@ from dotmac_expenses.contracts import (
     PolicyStatus,
     PolicyTarget,
     ReceiptVerificationStatus,
+    RefusalCode,
     ReimbursementEligibility,
     RequestStatus,
     ReviseClaim,
     ReviseRequest,
     SubmissionOutcome,
+    refuse,
 )
 from dotmac_expenses.models import (
+    ClaimLiability,
     ExpenseCategory,
     ExpenseClaim,
     ExpenseClaimLine,
@@ -1714,6 +1718,25 @@ def withdraw_claim_approval(
         return claim
     if claim.status != ClaimStatus.APPROVED:
         raise InvalidLifecycle("only an approved claim can have approval withdrawn")
+    if (
+        db.scalar(
+            select(ClaimLiability.id)
+            .where(
+                ClaimLiability.tenant_id == scope.tenant_id,
+                ClaimLiability.claim_id == claim.id,
+                ClaimLiability.status != ClaimLiabilityStatus.REVERSED.value,
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        # a2 tightening: an accepted claim owes the claimant; reverse the
+        # acceptance first.
+        raise refuse(
+            InvalidLifecycle,
+            "a claim with a live liability cannot have its approval withdrawn",
+            RefusalCode.CLAIM_HAS_LIABILITY,
+        )
     old = claim.status
     claim.status = ClaimStatus.APPROVAL_WITHDRAWN
     claim.decision_reference = _text(
