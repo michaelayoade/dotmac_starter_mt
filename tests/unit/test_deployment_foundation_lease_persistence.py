@@ -530,7 +530,9 @@ def _host_admission_premise(source: str) -> bool:
     precursor) create-only in an owner-only per-run directory. Strictly: it
     never imports the lease module or names its store; it has exactly one
     `os.link`, inside `_write_output`, relative to a directory fd and without
-    following symlinks, and `_write_output` obtains that fd from `_safe_dir`.
+    following symlinks, and `_write_output` binds that fd once from the output
+    path's parent via `_safe_dir`. This proves source independence, not a
+    sandbox against arbitrary caller-provided output paths.
     """
     tree = ast.parse(source)
     links = _os_link_calls(tree)
@@ -556,15 +558,29 @@ def _host_admission_premise(source: str) -> bool:
         return False
     directory_sources = [
         node
-        for node in ast.walk(write_output)
+        for node in write_output.body
         if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "directory" for t in node.targets)
-        and isinstance(node.value, ast.Call)
-        and getattr(node.value.func, "id", None) == "_safe_dir"
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "directory"
     ]
-    if len(directory_sources) != 1:
+    directory_stores = [
+        node
+        for node in ast.walk(write_output)
+        if isinstance(node, ast.Name)
+        and node.id == "directory"
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+    ]
+    expected_directory = ast.parse(
+        "_safe_dir(path.parent, uid, 'output-directory-unsafe')", mode="eval"
+    ).body
+    if (
+        len(directory_sources) != 1
+        or len(directory_stores) != 1
+        or ast.dump(directory_sources[0].value) != ast.dump(expected_directory)
+    ):
         return False
-    forbidden = {"release_path", "lease_store", "write_store_record_once"}
+    forbidden = {"lease", "release_path", "lease_store", "write_store_record_once"}
     names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     attributes = {
         node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
@@ -748,13 +764,36 @@ def test_the_host_admission_premise_rejects_a_stray_or_unsafe_link() -> None:
     assert not _host_admission_premise(
         source.replace("                        src_dir_fd=directory,\n", "", 1)
     )
-    assert not _host_admission_premise(
-        source + "\nfrom dotmac_deployment_foundation.lease import write_lease\n"
-    )
-    assert not _host_admission_premise(
-        source + "\nfrom dotmac_deployment_foundation import lease\n"
-        "x = write_store_record_once\n"
-    )
+
+
+def test_host_admission_rejects_lease_imports_and_writer_references() -> None:
+    """Each import alone must refuse, without a writer reference masking it."""
+    source = (SCRIPTS / "lane3_host_admission.py").read_text(encoding="utf-8")
+    for plant in (
+        "from dotmac_deployment_foundation.lease import write_lease",
+        "from dotmac_deployment_foundation import lease",
+        "from dotmac_deployment_foundation import lease as store",
+        "x = write_store_record_once",
+    ):
+        assert not _host_admission_premise(source + "\n" + plant + "\n")
+
+
+def test_the_host_admission_premise_rejects_a_repointed_or_rebound_directory() -> None:
+    source = (SCRIPTS / "lane3_host_admission.py").read_text(encoding="utf-8")
+    binding = '    directory = _safe_dir(path.parent, uid, "output-directory-unsafe")\n'
+    assert binding in source
+    store = "Path('/var/lib/dotmac-deployment-control/leases')"
+    repointed = binding.replace("path.parent", store)
+    assert not _host_admission_premise(source.replace(binding, repointed, 1))
+    for reassignment in (
+        f"    directory = _safe_dir({store}, uid, 'output-directory-unsafe')\n",
+        f"    directory: int = os.open({store}, os.O_RDONLY)\n",
+        "    directory += 1\n",
+        f"    if (directory := os.open({store}, os.O_RDONLY)):\n        pass\n",
+    ):
+        assert not _host_admission_premise(
+            source.replace(binding, binding + reassignment, 1)
+        )
 
 
 def test_the_publish_sweep_would_see_a_second_writer(tmp_path: Path) -> None:
