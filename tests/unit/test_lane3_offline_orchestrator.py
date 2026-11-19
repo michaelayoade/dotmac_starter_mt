@@ -54,6 +54,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import lane3_cp6_export as cp6  # noqa: E402
 import lane3_offline_orchestrator as orchestrator  # noqa: E402
+import lane3_offline_result as result_codec  # noqa: E402
 from lane3_evidence_finalization import _archive  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
 from lane3_exposure_recording import ExposureCallRecord  # noqa: E402
@@ -494,6 +495,40 @@ def refused(world: World, code: str, **overrides: Any) -> None:
 
 
 # --- the positive path and the emitted result ---------------------------------
+
+
+def test_producer_and_parser_delegate_to_the_result_codec(
+    world: World, monkeypatch
+) -> None:
+    encode = result_codec.canonical_json_bytes
+    documents = []
+
+    def tracked(document):
+        documents.append(document)
+        return encode(document)
+
+    monkeypatch.setattr(result_codec, "canonical_json_bytes", tracked)
+    outcome = world.run()
+    # One producer call and one consumer self-check; either private copy loses
+    # a call even when its bytes happen to agree with the owner today.
+    assert len(documents) == 2
+    assert documents[0] == documents[1]
+    parsed = parse_result(outcome.result_bytes)
+    assert len(documents) == 3
+    assert parsed.canonical_bytes == outcome.result_bytes == canonical(documents[0])
+    assert encode(json.loads(parsed.canonical_bytes)) == outcome.result_bytes
+    assert digest(parsed.canonical_bytes) == parsed.sha256_digest()
+
+
+def test_parser_refuses_when_the_owner_encoder_disagrees(
+    world: World, monkeypatch
+) -> None:
+    outcome = world.run()
+    monkeypatch.setattr(result_codec, "canonical_json_bytes", lambda _: b"wrong\n")
+    with pytest.raises(
+        result_codec.OfflineResultRefused, match="^offline_result.noncanonical$"
+    ):
+        parse_result(outcome.result_bytes)
 
 
 def test_every_join_passes_and_emits_a_result_the_consumer_parses(world: World) -> None:

@@ -48,6 +48,7 @@ from typing import Any, Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import lane3_offline_result as result_codec
 from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.execution_plan_v3 import FoundationExecutionPlanV3
 from dotmac_deployment_foundation.rehearsal import (
@@ -564,10 +565,7 @@ def _result_bytes(
         ),
         "conclusion": "verified",
     }
-    return (
-        json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-        + "\n"
-    ).encode("ascii")
+    return result_codec.canonical_json_bytes(document)
 
 
 def verify_offline(

@@ -95,6 +95,18 @@ def _refuse(scope: str, reason: str) -> None:
     raise OfflineResultRefused(f"offline_{scope}.{reason}")
 
 
+def canonical_json_bytes(document: dict) -> bytes:
+    """Encode offline result/policy JSON; parsing separately validates claims.
+
+    Producers and readers share this byte contract, including its final newline.
+    Encoding alone never authenticates or authorizes the document.
+    """
+    return (
+        json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("ascii")
+
+
 def _json(payload: bytes, limit: int, scope: str) -> dict:
     if type(payload) is not bytes or not 0 < len(payload) <= limit:
         _refuse(scope, "size")
@@ -119,12 +131,7 @@ def _json(payload: bytes, limit: int, scope: str) -> dict:
         )
         if type(document) is not dict:
             _refuse(scope, "schema")
-        canonical = (
-            json.dumps(
-                document, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-            )
-            + "\n"
-        ).encode("ascii")
+        canonical = canonical_json_bytes(document)
         if canonical != payload:
             _refuse(scope, "noncanonical")
     except (
