@@ -117,6 +117,14 @@ Source only; not published, not composed into any assembly.
   takes locks in the `on_settlement_settled` order and continues over the batch
   cap with the new `money_flows.funded_charge.terms_recheck.v1` event. No
   migration, no new table; `funded_charge.v1` is unchanged.
+- F2 N1: `start_funded_charge` reads the account's contract type after taking the
+  account lock, not before, so a terms switch committed while a start waited is
+  refused (`not_prepaid`) instead of leaving a pending row after the re-check.
+  Lock order unchanged; no migration. A start after the re-check for a charge due
+  before the switch still holds pending: the caller re-runs the re-check whenever
+  a start returns pending (replays included), with `at` = the latest terms
+  version already in effect, never a future one (README). A postpaid start is
+  still refused before any lock.
 
 ### Release gates (F2)
 
