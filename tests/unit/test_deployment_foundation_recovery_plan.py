@@ -730,6 +730,10 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "foundation_candidate.py": 1,
     "foundation_disposition.py": 1,
     "kernel_release_authorization.py": 1,
+    # Control DispatchEnvelopeV1 owns the signed statement/envelope wire form.
+    # PRE-E11-DESIGN section 5 owns the CP-6 export/E10 receipt row form.
+    # These two codecs are not Foundation documents or Foundation store writers.
+    "lane3_cp6_export.py": 2,
     # The private `lane3.evidence-bundle-manifest.v1` document listing a
     # Lane 3 bundle's members by digest; owned by
     # `lane3_evidence_bundle.py`, carried inside the encrypted bundle it
