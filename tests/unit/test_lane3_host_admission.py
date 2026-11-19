@@ -788,7 +788,7 @@ def test_cli_end_to_end_and_refusal_output(
     }
     for name, document in files.items():
         support.write_json(home / name, document)
-    unsigned = home / "unsigned.json"
+    unsigned = home / "host-admission-unsigned.json"
     assert (
         ha.main(
             [
@@ -1069,3 +1069,50 @@ def test_present_and_the_reader_load_foundation_lazily() -> None:
     for node in top_level:
         module = getattr(node, "module", None) or ""
         assert not module.startswith(("dotmac_deployment", "dotmac_kernel"))
+
+
+# ── the writer refuses any name but the two host-admission files ────────────
+
+
+def test_the_writer_refuses_a_name_outside_the_allowed_pair(
+    home: Path, key_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert ha._OUTPUT_NAMES == {"host-admission.json", "host-admission-unsigned.json"}
+    candidate, installed = _pair()
+    for name, document in {
+        "dispatch.json": {"attempt_id": support.DISPATCH_ID},
+        "candidate.json": candidate.canonical_document(),
+        "installed.json": installed.canonical_document(),
+    }.items():
+        support.write_json(home / name, document)
+    unsigned = _unsigned(home)
+    before = sorted(os.listdir(home))
+    bad_names = (
+        "target.release.json",
+        "host-admission.json.release.json",
+        "Host-Admission.json",
+        "host-admission.json ",
+        "other.json",
+    )
+    for bad in bad_names:
+        _refusal(
+            lambda bad=bad: _present(home, key_path, out=home / bad),
+            "output-name-not-allowed",
+        )
+        argv = [
+            "assemble",
+            "--dispatch-materials", str(home / "dispatch.json"),
+            "--candidate", str(home / "candidate.json"),
+            "--installed", str(home / "installed.json"),
+            "--candidate-digest", str(attestation_envelope_digest(candidate)),
+            "--installed-digest", str(attestation_envelope_digest(installed)),
+            "--out", str(home / bad),
+            "--owner-uid", str(UID),
+        ]  # fmt: skip
+        assert ha.main(argv) == 2
+        assert "refused: output-name-not-allowed" in capsys.readouterr().err
+    assert sorted(os.listdir(home)) == before, "nothing may be written"
+    assert unsigned.exists()
+    # and both allowed names still work
+    _present(home, key_path)
+    assert (home / "host-admission.json").exists()

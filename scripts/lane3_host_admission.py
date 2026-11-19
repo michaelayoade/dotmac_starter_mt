@@ -369,12 +369,23 @@ def _json_object(path: str | Path, code: str) -> dict[str, Any]:
     return document
 
 
+#: The only names `_write_output` will create: the per-run host-admission document
+#: and its unsigned precursor. Fail-closed on anything else, so this writer can
+#: never be pointed at a store record. The publish ratchet asserts this set.
+_OUTPUT_NAMES: Final = frozenset(
+    {"host-admission.json", "host-admission-unsigned.json"}
+)
+
+
 def _write_output(path: Path, data: bytes, *, uid: int, replace: bool) -> None:
     """Atomic 0600 write in an owner-only directory, relative to a directory fd.
 
     Create-only unless `replace`. Never follows a symlink; the directory is
-    fsynced afterwards so the name survives a crash.
+    fsynced afterwards so the name survives a crash. Refuses, before any file
+    operation, a leaf name outside `_OUTPUT_NAMES`.
     """
+    if path.name not in _OUTPUT_NAMES:
+        raise Refused("output-name-not-allowed")
     directory = _safe_dir(path.parent, uid, "output-directory-unsafe")
     name = _leaf(path, "output-not-creatable")
     partial = f".{name}.{os.getpid()}.partial"

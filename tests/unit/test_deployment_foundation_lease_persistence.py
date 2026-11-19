@@ -523,60 +523,267 @@ def _bundle_downloader_premise(source: str) -> bool:
     )
 
 
+_HOST_ADMISSION_NAMES = {"host-admission.json", "host-admission-unsigned.json"}
+
+
+def _bindings_of(function: ast.AST, name: str) -> list[ast.AST]:
+    """Every node inside `function` that binds `name`, in any form.
+
+    Plain, annotated and augmented assignment, walrus, for/with/comprehension
+    targets, `except ... as`, imports, match captures, global/nonlocal, function
+    and class names, and parameters of the function itself, of nested defs and of
+    lambdas.
+    """
+    found: list[ast.AST] = []
+    for node in ast.walk(function):
+        if isinstance(node, ast.Name) and node.id == name:
+            if isinstance(node.ctx, ast.Store | ast.Del):
+                found.append(node)
+        elif isinstance(node, ast.arg) and node.arg == name:
+            found.append(node)
+        elif (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+            and node.name == name
+        ):
+            found.append(node)
+        elif isinstance(node, ast.ExceptHandler) and node.name == name:
+            found.append(node)
+        elif isinstance(node, ast.alias) and (node.asname or node.name) == name:
+            found.append(node)
+        elif isinstance(node, ast.Global | ast.Nonlocal) and name in node.names:
+            found.append(node)
+        elif isinstance(node, ast.MatchAs | ast.MatchStar) and node.name == name:
+            found.append(node)
+        elif isinstance(node, ast.MatchMapping) and node.rest == name:
+            found.append(node)
+    return found
+
+
+def _is_os_call(node: ast.AST, attribute: str) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == attribute
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+    )
+
+
+def _fds_are_directory(call: ast.Call) -> bool:
+    keywords = {kw.arg: kw.value for kw in call.keywords}
+    for key in ("src_dir_fd", "dst_dir_fd"):
+        value = keywords.get(key)
+        if not (isinstance(value, ast.Name) and value.id == "directory"):
+            return False
+    return True
+
+
+def _output_names_are_exact(tree: ast.Module) -> bool:
+    """`_OUTPUT_NAMES` is a module-level frozenset of exactly the two names."""
+    assigns = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign | ast.Assign)
+        and "_OUTPUT_NAMES"
+        in {
+            getattr(target, "id", None)
+            for target in (
+                [node.target] if isinstance(node, ast.AnnAssign) else node.targets
+            )
+        }
+    ]
+    if len(assigns) != 1 or assigns[0].value is None:
+        return False
+    value = assigns[0].value
+    if not (
+        isinstance(value, ast.Call)
+        and getattr(value.func, "id", None) == "frozenset"
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Set)
+        and not value.keywords
+    ):
+        return False
+    members = value.args[0].elts
+    texts = [
+        m.value
+        for m in members
+        if isinstance(m, ast.Constant) and isinstance(m.value, str)
+    ]
+    return (
+        len(texts) == len(members)
+        and len(texts) == len(set(texts))
+        and set(texts) == _HOST_ADMISSION_NAMES
+        and not any(t.endswith(".release.json") or "lease" in t for t in texts)
+    )
+
+
+def _name_guard_comes_first(function: ast.FunctionDef) -> bool:
+    """The first real statement refuses a leaf outside `_OUTPUT_NAMES`."""
+    body = list(function.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    if not body or not isinstance(body[0], ast.If):
+        return False
+    guard = body[0]
+    test = guard.test
+    return (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Attribute)
+        and test.left.attr == "name"
+        and isinstance(test.left.value, ast.Name)
+        and test.left.value.id == "path"
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.NotIn)
+        and len(test.comparators) == 1
+        and isinstance(test.comparators[0], ast.Name)
+        and test.comparators[0].id == "_OUTPUT_NAMES"
+        and not guard.orelse
+        and len(guard.body) == 1
+        and isinstance(guard.body[0], ast.Raise)
+        and isinstance(guard.body[0].exc, ast.Call)
+        and getattr(guard.body[0].exc.func, "id", None) == "Refused"
+        and len(guard.body[0].exc.args) == 1
+        and isinstance(guard.body[0].exc.args[0], ast.Constant)
+        and guard.body[0].exc.args[0].value == "output-name-not-allowed"
+    )
+
+
 def _host_admission_premise(source: str) -> bool:
     """Prove `lane3_host_admission.py` publishes only a per-run file, not a lease.
 
     The module's one `os.link` creates `host-admission.json` (or its unsigned
-    precursor) create-only in an owner-only per-run directory. Strictly: it
-    never imports the lease module or names its store; it has exactly one
-    `os.link`, inside `_write_output`, relative to a directory fd and without
-    following symlinks, and `_write_output` obtains that fd from `_safe_dir`.
+    precursor) create-only in an owner-only per-run directory. Strictly:
+    * `_write_output` refuses, first, any leaf name outside `_OUTPUT_NAMES`, a
+      frozenset of exactly the two names (neither ending `.release.json` nor
+      containing "lease");
+    * `directory` has exactly ONE binding in `_write_output`, in any form: the
+      `_safe_dir(path.parent, ...)` call, and it sits after the guard;
+    * exactly one `os.link`, inside `_write_output` after that, and every
+      `os.replace` likewise, each with `src_dir_fd`/`dst_dir_fd` = `directory`;
+      the link also passes `follow_symlinks=False`;
+    * no other route to link or rename (`from os import ...`, `posix`,
+      `getattr(os, ...)`, `vars(os)`, `os.__dict__`, `os.rename`);
+    * it never imports a lease module, names a lease store, or carries any
+      string constant containing "lease".
     """
     tree = ast.parse(source)
-    links = _os_link_calls(tree)
-    functions = {
-        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
-    }
-    write_output = functions.get("_write_output")
-    if (
-        write_output is None
-        or len(links) != 1
-        or links[0] not in ast.walk(write_output)
-    ):
+    write_output = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_write_output"
+        ),
+        None,
+    )
+    if write_output is None or not _output_names_are_exact(tree):
         return False
-    keywords = {kw.arg: kw.value for kw in links[0].keywords}
-    if not (
-        isinstance(keywords.get("src_dir_fd"), ast.Name)
-        and keywords["src_dir_fd"].id == "directory"
-        and isinstance(keywords.get("dst_dir_fd"), ast.Name)
-        and keywords["dst_dir_fd"].id == "directory"
-        and isinstance(keywords.get("follow_symlinks"), ast.Constant)
-        and keywords["follow_symlinks"].value is False
-    ):
+    if not _name_guard_comes_first(write_output):
         return False
-    directory_sources = [
+
+    # directory: one binding, the _safe_dir(path.parent, ...) call, after the guard
+    bindings = _bindings_of(write_output, "directory")
+    safe_dir = [
         node
         for node in ast.walk(write_output)
         if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "directory" for t in node.targets)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "directory"
         and isinstance(node.value, ast.Call)
         and getattr(node.value.func, "id", None) == "_safe_dir"
+        and node.value.args
+        and isinstance(node.value.args[0], ast.Attribute)
+        and node.value.args[0].attr == "parent"
+        and isinstance(node.value.args[0].value, ast.Name)
+        and node.value.args[0].value.id == "path"
     ]
-    if len(directory_sources) != 1:
+    if (
+        len(bindings) != 1
+        or len(safe_dir) != 1
+        or bindings[0] is not safe_dir[0].targets[0]
+    ):
         return False
+    guard_line = (
+        write_output.body[1].lineno
+        if isinstance(write_output.body[0], ast.Expr)
+        else write_output.body[0].lineno
+    )
+    if safe_dir[0].lineno <= guard_line:
+        return False
+
+    links = _os_link_calls(tree)
+    replaces = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _is_os_call(node, "replace")
+    ]
+    if len(links) != 1 or links[0] not in ast.walk(write_output):
+        return False
+    if links[0].lineno <= safe_dir[0].lineno:
+        return False
+    keywords = {kw.arg: kw.value for kw in links[0].keywords}
+    follow = keywords.get("follow_symlinks")
+    if not (
+        _fds_are_directory(links[0])
+        and isinstance(follow, ast.Constant)
+        and follow.value is False
+    ):
+        return False
+    for call in replaces:
+        if call not in ast.walk(write_output) or call.lineno <= safe_dir[0].lineno:
+            return False
+        if not _fds_are_directory(call):
+            return False
+    if any(_is_os_call(node, "rename") for node in ast.walk(tree)):
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in {
+            "os",
+            "posix",
+            "nt",
+            "shutil",
+        }:
+            return False
+        if isinstance(node, ast.Import) and any(
+            alias.name.split(".")[0] in {"posix", "nt"} for alias in node.names
+        ):
+            return False
+        if (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) in {"getattr", "vars", "__import__"}
+            and node.args
+            and (
+                getattr(node.func, "id", None) == "__import__"
+                or (isinstance(node.args[0], ast.Name) and node.args[0].id == "os")
+            )
+        ):
+            return False
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "__dict__"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "os"
+        ):
+            return False
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and "lease" in node.value.lower()
+        ):
+            return False
+
     forbidden = {"release_path", "lease_store", "write_store_record_once"}
     names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     attributes = {
         node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
     }
     if (names | attributes) & forbidden:
-        return False
-    if any(
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and ".release.json" in node.value
-        for node in ast.walk(tree)
-    ):
         return False
     return not any(
         isinstance(node, ast.ImportFrom)
@@ -730,31 +937,103 @@ def test_only_the_lease_writer_publishes_into_this_store() -> None:
     )
 
 
-def test_the_host_admission_premise_rejects_a_stray_or_unsafe_link() -> None:
-    """Sensitivity: a second `os.link`, one outside `_write_output`, or one that
-    drops `dir_fd` or `follow_symlinks=False` must fail the premise."""
+def test_the_host_admission_premise_rejects_every_plant() -> None:
+    """Sensitivity: each plant breaks one clause of the premise and must fail."""
     source = (SCRIPTS / "lane3_host_admission.py").read_text(encoding="utf-8")
     assert _host_admission_premise(source)
-    stray = source + "\n\ndef _stray(a, b):\n    os.link(a, b)\n"
-    assert not _host_admission_premise(stray)
-    outside = source.replace("os.link(", "_noop(", 1) + (
-        "\n\ndef _outside(a, b):\n    os.link(a, b, src_dir_fd=1, dst_dir_fd=1,"
+
+    anchor = '    partial = f".{name}.{os.getpid()}.partial"\n'
+    assert anchor in source
+
+    def after_anchor(extra: str) -> str:
+        return source.replace(anchor, anchor + extra, 1)
+
+    # a second os.link, outside _write_output / with the real one moved
+    assert not _host_admission_premise(
+        source + "\n\ndef _s(a, b):\n    os.link(a, b)\n"
+    )
+    moved = source.replace("os.link(", "_noop(", 1) + (
+        "\n\ndef _o(a, b):\n    os.link(a, b, src_dir_fd=1, dst_dir_fd=1,"
         " follow_symlinks=False)\n"
     )
-    assert not _host_admission_premise(outside)
+    assert not _host_admission_premise(moved)
+    # the link's own clauses
     assert not _host_admission_premise(
         source.replace("follow_symlinks=False,", "follow_symlinks=True,", 1)
     )
     assert not _host_admission_premise(
         source.replace("                        src_dir_fd=directory,\n", "", 1)
     )
+    # the refresh path is held to the same rule
     assert not _host_admission_premise(
-        source + "\nfrom dotmac_deployment_foundation.lease import write_lease\n"
+        source.replace("dst_dir_fd=directory)", "dst_dir_fd=1)", 1)
+    )
+    assert not _host_admission_premise(source + "\nos.replace('a', 'b')\n")
+
+    # every way to rebind `directory` inside _write_output
+    for rebind in (
+        '    directory = os.open("/", 0)\n',
+        "    directory += 1\n",
+        "    directory: int = 3\n",
+        "    (directory := 3)\n",
+        "    for directory in (1,):\n        pass\n",
+        "    with open('x') as directory:\n        pass\n",
+        "    def inner(directory):\n        pass\n",
+        "    def directory():\n        pass\n",
+        "    global directory\n",
+        "    import os as directory\n",
+        "    [0 for directory in (1,)]\n",
+        "    try:\n        pass\n    except OSError as directory:\n        pass\n",
+        "    f = lambda directory: 0\n",
+    ):
+        assert not _host_admission_premise(after_anchor(rebind)), rebind
+    # ... and the directory not coming from _safe_dir(path.parent, ...)
+    assert not _host_admission_premise(
+        source.replace(
+            "directory = _safe_dir(path.parent,", "directory = _safe_dir(path,", 1
+        )
+    )
+
+    # the name guard
+    assert not _host_admission_premise(
+        source.replace("path.name not in _OUTPUT_NAMES", "False", 1)
     )
     assert not _host_admission_premise(
-        source + "\nfrom dotmac_deployment_foundation import lease\n"
-        "x = write_store_record_once\n"
+        source.replace(
+            '"host-admission-unsigned.json"}',
+            '"host-admission-unsigned.json", "x.json"}',
+            1,
+        )
     )
+    assert not _host_admission_premise(
+        source.replace('"host-admission.json",', '"target.release.json",', 1)
+    )
+    assert not _host_admission_premise(
+        source.replace(
+            '"host-admission.json",', '"host-admission.json", "a-lease.json",', 1
+        )
+    )
+    assert not _host_admission_premise(
+        source.replace('raise Refused("output-name-not-allowed")', "pass", 1)
+    )
+
+    # other routes to link, and any "lease"
+    for extra in (
+        "\nfrom os import link\n",
+        "\nfrom os import *\n",
+        "\nimport posix\n",
+        '\n_x = getattr(os, "link")\n',
+        "\n_x = vars(os)\n",
+        '\n_x = os.__dict__["link"]\n',
+        '\n_x = __import__("os")\n',
+        "\nos.rename('a', 'b')\n",
+        '\n_x = "a-lease-store"\n',
+        '\n_x = "Lease"\n',
+        "\nfrom dotmac_deployment_foundation.lease import write_lease\n",
+        "\nfrom dotmac_deployment_foundation import lease\n",
+        "\n_x = write_store_record_once\n",
+    ):
+        assert not _host_admission_premise(source + extra), extra
 
 
 def test_the_publish_sweep_would_see_a_second_writer(tmp_path: Path) -> None:
