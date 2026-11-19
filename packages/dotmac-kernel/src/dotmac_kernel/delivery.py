@@ -52,6 +52,7 @@ a recorded bounce with no suppression behind it.
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -76,6 +77,40 @@ from dotmac_kernel.delivery_models import (
 
 class DeliveryError(ValueError):
     """A malformed receipt — never a delivery outcome."""
+
+
+class DeliveryDeferred(Exception):
+    """The send was HELD, not attempted and not failed (ADR-0006 § 5, K-4).
+
+    Raised by a provider (or its admission hook) when something outside the
+    message says "not now": a mail gate holding sends, a maintenance window. It
+    is the third outcome beside a receipt and a failure:
+
+    - NO receipt is written (nothing was said by any provider, and a permanent
+      `failed` row for a hold would be a lie);
+    - the relay reschedules the outbox event WITHOUT charging a relay attempt
+      (`dotmac_kernel.messaging.relay.record_deferral`), so a long hold does not
+      burn the retry budget and dead-letter a message that never failed;
+    - deferral is BOUNDED (`RelayPolicy.max_deferrals`): past the bound the
+      event is dead-lettered loudly, retaining it for the audited requeue.
+
+    Deliberately NOT a `DeliveryError` (a terminal, malformed-input class) and
+    not a `ValueError`. `reason` and `retry_after` are operator-facing and are
+    stored on the outbox row: never put an address, body or secret in `reason`.
+    """
+
+    def __init__(self, reason: str, *, retry_after: float | None = None) -> None:
+        super().__init__(reason)
+        if retry_after is not None and (
+            isinstance(retry_after, bool)
+            or not isinstance(retry_after, int | float)
+            or not math.isfinite(retry_after)
+            or retry_after < 0
+        ):
+            raise ValueError("retry_after must be a finite number of seconds >= 0")
+        self.reason = reason
+        #: Seconds the holder suggests waiting; the relay clamps it to its policy.
+        self.retry_after = retry_after
 
 
 #: Which suppression reason a suppressing verdict records.
@@ -334,6 +369,7 @@ def receipts_for_address(
 
 
 __all__ = [
+    "DeliveryDeferred",
     "DeliveryError",
     "latest_receipt_for_dispatch",
     "receipts_for_address",
