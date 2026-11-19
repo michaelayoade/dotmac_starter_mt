@@ -706,7 +706,7 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
 #: than re-implementing it, and gives `TrustedHostAttestation.v2` its own
 #: declared writer. The script now calls it and carries no canonicalizing
 #: `json.dumps` of its own —
-#: `test_cmd_sign_writes_through_the_package_owned_writer_not_its_own_json_dumps`
+#: `test_script_writes_through_the_package_owned_writer_not_its_own_json_dumps`
 #: in `test_candidate_attestation_signer.py` asserts the AST contains none.
 SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "audit_kernel_surface.py": 1,
