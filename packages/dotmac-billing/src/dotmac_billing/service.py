@@ -167,6 +167,7 @@ from dotmac_billing.opening_hold_contracts import (
     opening_hold_content_digest,
     opening_hold_subject_id,
     require_hold_maker_checker,
+    require_hold_no_approval,
 )
 from dotmac_billing.opening_queries import (
     _scoped,
@@ -2460,7 +2461,7 @@ def _post_group(
                 cast(Any, variance_fact.resolved_state),
                 cast(Any, variance_fact.gl_target_class),
                 variance_fact.corrected_by_posting_group_id,
-                cast(UUID, variance_fact.approval_request_id),
+                variance_fact.approval_request_id,
                 cast(str, variance_fact.maker_ref),
                 variance_fact.approver_refs,
             )
@@ -7344,7 +7345,7 @@ def _variance_resolution_approval(
     primitive: str,
     apply_on_issue: bool,
     primitive_fingerprint: str,
-) -> OpeningVarianceApprovalV1 | None:
+) -> ApprovalEvidence | None:
     """Findings 1 and Q2: a primitive that resolves a variance needs the approvals
     port and a lane-effect-capable variance BEFORE it posts anything."""
     if ref is None:
@@ -7356,7 +7357,7 @@ def _variance_resolution_approval(
         primitive=primitive,
         apply_on_issue=apply_on_issue,
     )
-    return _require_variance_approval(
+    return _variance_approval_evidence(
         session,
         scope=scope,
         approvals=approvals,
@@ -7378,7 +7379,7 @@ def _resolve_by_posting_group(
     *,
     scope: Scope,
     ref: OpeningVarianceResolutionRefV1 | None,
-    approval: OpeningVarianceApprovalV1,
+    approval: ApprovalEvidence,
     group_id: UUID,
     occurred_at: datetime,
 ) -> None:
@@ -7398,13 +7399,58 @@ def _resolve_by_posting_group(
         variance_id=ref.variance_id,
         resolution_kind="position_corrected",
         amount_minor=ref.amount_minor,
-        approval=ApprovalEvidence(
-            approval.request_id, ref.maker_ref, approval.approver_refs
-        ),
+        approval=approval,
         occurred_at=occurred_at,
         posting_group_id=group_id,
         emit=lambda request: _post_variance_fact(session, scope=scope, request=request),
     )
+
+
+def _variance_approval_evidence(
+    db: Session,
+    *,
+    scope: Scope,
+    approvals: OpeningVarianceApprovalPort | None,
+    request_id: UUID | None,
+    variance_id: UUID,
+    content_digest: str,
+    maker_ref: str,
+) -> ApprovalEvidence:
+    """Resolve the approval evidence under the window's bound two-person policy.
+
+    The policy is read only from the immutable opening window (never from the
+    caller). "on" (also a window that predates bi_0019, and a missing window) is
+    the compulsory Approvals maker-checker path exactly as before. "off" keeps
+    every other control, calls no approvals port and refuses a supplied approval
+    rather than ignoring it; the database independently enforces both.
+    """
+    window = get_opening_window(db, scope=scope)
+    if window is not None and window.dual_control == "off":
+        if request_id is not None:
+            raise BillingRuleViolation(
+                "opening_variance_approval_not_applicable",
+                "this opening window binds no two-person variance approval",
+            )
+        if not maker_ref.strip():
+            raise BillingRuleViolation(
+                "opening_variance_maker_missing", "a resolution names its maker"
+            )
+        return ApprovalEvidence(None, maker_ref, ())
+    if request_id is None:
+        raise BillingRuleViolation(
+            "opening_variance_approval_missing",
+            "variance resolution requires a standing Approvals decision",
+        )
+    held = _require_variance_approval(
+        db,
+        scope=scope,
+        approvals=approvals,
+        request_id=request_id,
+        variance_id=variance_id,
+        content_digest=content_digest,
+        maker_ref=maker_ref,
+    )
+    return ApprovalEvidence(held.request_id, maker_ref, held.approver_refs)
 
 
 def _require_variance_approval(
@@ -7487,7 +7533,7 @@ def recognise_opening_variance(
 
     def operation(session: Session) -> dict[str, object]:
         require_recognisable(session, scope=scope, variance_id=command.variance_id)
-        held = _require_variance_approval(
+        held = _variance_approval_evidence(
             session,
             scope=scope,
             approvals=approvals,
@@ -7502,9 +7548,7 @@ def recognise_opening_variance(
             variance_id=command.variance_id,
             resolution_kind="recognised",
             amount_minor=command.amount_minor,
-            approval=ApprovalEvidence(
-                held.request_id, command.maker_ref, held.approver_refs
-            ),
+            approval=held,
             occurred_at=command.occurred_at,
             gl_target_class=command.gl_target_class,
             emit=lambda request: _post_variance_fact(
@@ -7546,7 +7590,7 @@ def confirm_opening_variance_evidence(
     )
 
     def operation(session: Session) -> dict[str, object]:
-        held = _require_variance_approval(
+        held = _variance_approval_evidence(
             session,
             scope=scope,
             approvals=approvals,
@@ -7561,9 +7605,7 @@ def confirm_opening_variance_evidence(
             variance_id=command.variance_id,
             resolution_kind="evidence_confirmed",
             amount_minor=command.amount_minor,
-            approval=ApprovalEvidence(
-                held.request_id, command.maker_ref, held.approver_refs
-            ),
+            approval=held,
             occurred_at=command.occurred_at,
             evidence_ref=command.evidence_ref,
         )
@@ -9498,16 +9540,21 @@ def admit_held_opening_account_v2(
 
     Reuses the V2 import validators, verifier and writer. Additionally requires:
     the partition is on the hold list recorded in the seal; no activity since
-    the seal; a reviewed disposition digest; and a standing Approvals decision
-    whose maker is not a checker. The database independently refuses any
-    post-seal opening write for an account that is not held and unadmitted.
+    the seal; a reviewed disposition digest; and, unless the window binds
+    ``dual_control`` "off" (D-9), a standing Approvals decision whose maker is
+    not a checker (under "off" none may be supplied). The database
+    independently refuses any post-seal opening write for an account that is
+    not held and unadmitted.
     """
     if type(command) is not AdmitHeldOpeningAccountV2:
         raise BillingRuleViolation(
             "opening_command_invalid", "expected AdmitHeldOpeningAccountV2"
         )
     _require_scope_matches(routed=scope, declared=command.scope)
-    if approvals is None:
+    bound_window = get_opening_window(db, scope=scope)
+    if approvals is None and (
+        bound_window is None or bound_window.dual_control == "on"
+    ):
         raise BillingRuleViolation(
             "opening_verifier_unavailable", "trusted approvals port is required"
         )
@@ -9517,10 +9564,13 @@ def admit_held_opening_account_v2(
         {
             "domain": "billing.opening.hold.admit.v1",
             "content_digest": content_digest,
-            "approval_request_id": str(command.approval_request_id),
+            "approval_request_id": None
+            if command.approval_request_id is None
+            else str(command.approval_request_id),
         }
     )
     standing: list[HeldOpeningHoldApprovalV1] = []
+    policy: list[str] = []
 
     def admit(session: Session, verified: OpeningImportVerificationV2) -> None:
         window = get_opening_window(session, scope=scope)
@@ -9561,6 +9611,22 @@ def admit_held_opening_account_v2(
                 "opening_hold_post_seal_activity",
                 "held account has activity since the seal",
             ) from exc
+        # The policy comes only from the immutable window binding, never from the
+        # caller. "on" is the previous behaviour exactly; "off" keeps every check
+        # above and below except the Approvals decision.
+        policy.append(window.dual_control)
+        if window.dual_control == "off":
+            require_hold_no_approval(command)
+            return
+        if approvals is None:
+            raise BillingRuleViolation(
+                "opening_verifier_unavailable", "trusted approvals port is required"
+            )
+        if command.approval_request_id is None:
+            raise BillingRuleViolation(
+                "opening_hold_approval_missing",
+                "hold admission requires a standing Approvals decision",
+            )
         try:
             held = approvals.hold_approval(
                 session,
@@ -9587,10 +9653,14 @@ def admit_held_opening_account_v2(
             content_digest,
             command.disposition,
             command.maker_ref,
-            standing[0],
+            standing[0] if standing else None,
             datetime.now(UTC),
+            cast(Any, policy[0]),
         )
         evidence = _jsonable(admission)
+        if admission.dual_control == "on":
+            # Byte-identical to a pre-bi_0019 record: the key marks only "off".
+            evidence.pop("dual_control")
         values = {
             "id": admission.admission_id,
             "window_id": admission.window_id,
@@ -9599,7 +9669,7 @@ def admit_held_opening_account_v2(
             "disposition_digest": command.disposition.disposition_digest,
             "maker_ref": command.maker_ref,
             "approval_request_id": command.approval_request_id,
-            "approver_refs": list(standing[0].approver_refs),
+            "approver_refs": list(standing[0].approver_refs) if standing else [],
             "evidence": evidence,
             "evidence_digest": fingerprint_of(evidence),
         }

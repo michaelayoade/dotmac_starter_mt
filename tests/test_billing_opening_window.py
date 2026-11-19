@@ -994,3 +994,126 @@ def test_seal_first_blocks_new_historyless_account_and_preserves_observer_state(
                 assert (
                     get_opening_window_seal(observer, scope=scope) is not None
                 ) == commit_seal
+
+
+# --- D-9: the two-person policy is bound into the window (bi_0019) -------------
+
+
+def _provision_with_key(scratch, scope, principal, command, monkeypatch, key):
+    """Provision through the real service with a doctored policy key.
+
+    ``key`` of None removes the field; any other value replaces it. The command
+    digest is computed from the same doctored evidence, so only the database
+    guard can refuse.
+    """
+    original = s._jsonable
+
+    def doctored(value):
+        encoded = original(value)
+        window = encoded.get("window")
+        if isinstance(window, dict):
+            if key is None:
+                window.pop("dual_control", None)
+            else:
+                window["dual_control"] = key
+        return encoded
+
+    monkeypatch.setattr(s, "_jsonable", doctored)
+    return _provision(scratch, scope, principal, command)
+
+
+@pytest.mark.parametrize("key", [None, "maybe", "ON", ""])
+def test_provision_without_or_with_a_bad_dual_control_is_refused(
+    scratch, monkeypatch, key
+):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with b._session(url, scope) as session:
+        account = cash._new_account(session, scope)
+        command = cash._command(session, scope, account)
+    with _principal(scratch, "tenant") as principal:
+        with pytest.raises(DBAPIError) as refused:
+            _provision_with_key(scratch, scope, principal, command, monkeypatch, key)
+        assert refused.value.orig.sqlstate == "42501"
+
+
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_the_policy_round_trips_and_its_key_cannot_be_updated(scratch, value):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with b._session(url, scope) as session:
+        account = cash._new_account(session, scope)
+        command = cash._command(session, scope, account)
+    with _principal(scratch, "tenant") as principal:
+        window = _provision(scratch, scope, principal, command, value)
+        other = "off" if value == "on" else "on"
+        with b._session(scratch[1], scope) as session:
+            assert get_opening_window(session, scope=scope).dual_control == value
+        with b._session(scratch[0], scope) as session:
+            with pytest.raises(DBAPIError):
+                session.execute(
+                    text(
+                        "UPDATE mod_billing.opening_windows SET evidence = "
+                        "jsonb_set(evidence::jsonb, '{window,dual_control}', "
+                        "to_jsonb(CAST(:v AS text)))::json"
+                    ),
+                    {"v": other},
+                )
+            session.rollback()
+        with _restricted_session(scratch, scope, principal) as session:
+            with pytest.raises(DBAPIError):  # the principal may update generation only
+                session.execute(
+                    text(
+                        "UPDATE mod_billing.opening_windows SET evidence = "
+                        "jsonb_set(evidence::jsonb, '{window,dual_control}', "
+                        "to_jsonb(CAST(:v AS text)))::json"
+                    ),
+                    {"v": other},
+                )
+            session.rollback()
+        with b._session(scratch[1], scope) as session:
+            assert get_opening_window(session, scope=scope).dual_control == value
+    assert window.dual_control == value
+
+
+def test_a_window_stored_before_bi_0019_reads_as_on(scratch):
+    """The upgrade canary's read half: a stored window with no key means "on"."""
+    from dotmac_kernel.fingerprints import fingerprint_of
+
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with b._session(url, scope) as session:
+        account = cash._new_account(session, scope)
+        command = cash._command(session, scope, account)
+    with _principal(scratch, "tenant") as principal:
+        window = _provision(scratch, scope, principal, command, "on")
+    # Rewrite the stored evidence exactly as a pre-bi_0019 provision stored it.
+    engine = create_engine(
+        b._url_for(b._superuser_url(), make_url(scratch[1]).database)
+    )
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("SET session_replication_role = replica"))
+            evidence = connection.execute(
+                text("SELECT evidence FROM mod_billing.opening_windows")
+            ).scalar_one()
+            evidence["window"].pop("dual_control")
+            evidence["verification"]["command_digest"] = fingerprint_of(
+                {
+                    "domain": "billing.opening.window.provision.v1",
+                    "command": {"window": evidence["window"]},
+                }
+            )
+            connection.execute(
+                text(
+                    "UPDATE mod_billing.opening_windows SET "
+                    "evidence = CAST(:e AS json), evidence_digest = :d"
+                ),
+                {
+                    "e": __import__("json").dumps(evidence),
+                    "d": fingerprint_of(evidence),
+                },
+            )
+    finally:
+        engine.dispose()
+    with b._session(scratch[1], scope) as session:
+        stored = get_opening_window(session, scope=scope)
+        assert stored.dual_control == "on"
+        assert stored.window_id == window.window_id
