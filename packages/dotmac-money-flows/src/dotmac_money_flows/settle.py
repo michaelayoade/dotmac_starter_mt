@@ -821,6 +821,50 @@ def retry_settle(
     return _outcome(row, replayed=False, applied=result.applied)
 
 
+_STATEMENT_TOO_LARGE = "billing.statement_too_large"
+
+
+def _newest_cash(
+    db: Session,
+    scope: TenantScope,
+    account_id: UUID,
+    currency: Any,
+    start: datetime,
+    end: datetime,
+) -> datetime | None:
+    """Instant of the newest cash accepted in ``[start, end)``, or None.
+
+    Cash is a ``settlement_accepted`` statement line that adds credit. Billing
+    caps one statement; when the window overflows (``statement_too_large``) it
+    is split at its midpoint and the NEWER half is searched first, so the newest
+    cash wins and the older half is read only if the newer holds none. The
+    reads are deterministic and bounded by the windows that overflow. A window
+    that cannot be split (one microsecond) raises ``BalancePassFailed``.
+    """
+    try:
+        statement = get_account_statement(
+            db,
+            scope=scope,
+            request=GetAccountStatementV1(scope, account_id, currency, start, end),
+        )
+    except BillingRuleViolation as exc:
+        if exc.code != _STATEMENT_TOO_LARGE:
+            raise
+        middle = start + (end - start) / 2
+        if not start < middle < end:
+            raise BalancePassFailed("statement_unsplittable") from exc
+        newer = _newest_cash(db, scope, account_id, currency, middle, end)
+        if newer is not None:
+            return newer
+        return _newest_cash(db, scope, account_id, currency, start, middle)
+    found = [
+        line.occurred_at
+        for line in statement.lines
+        if line.group_kind == _CASH_ACCEPTED and line.delta.available_credit.is_positive
+    ]
+    return max(found) if found else None
+
+
 def apply_balance_on_invoice_issued(
     db: Session,
     *,
@@ -891,19 +935,9 @@ def apply_balance_on_invoice_issued(
     # at or after the newest cash received since then, spent or not. The window
     # opens at the earliest base; opening lots post no ``settlement_accepted``.
     bases = {d.document_id: max(issued[trigger], d.issued_at) for d in documents}
-    statement = get_account_statement(
-        db,
-        scope=scope,
-        request=GetAccountStatementV1(
-            scope, account_id, currency, min(bases.values()), _FAR_FUTURE
-        ),
+    newest_cash = _newest_cash(
+        db, scope, account_id, currency, min(bases.values()), _FAR_FUTURE
     )
-    cash_at = [
-        line.occurred_at
-        for line in statement.lines
-        if line.group_kind == _CASH_ACCEPTED and line.delta.available_credit.is_positive
-    ]
-    newest_cash = max(cash_at) if cash_at else None
 
     applied: list[UUID] = []
 

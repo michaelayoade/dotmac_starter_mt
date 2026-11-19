@@ -143,4 +143,5 @@ Source only; not published, not composed into any assembly.
   account statement (Settle only). Applications are dated the latest of the two
   invoice dates and the newest cash received since (spent or not); the source
   reference carries the document's Billing `source_version`; faults raise the
-  new `BalancePassFailed`.
+  new `BalancePassFailed`. An overflowing statement window is split (newer half
+  first) rather than failing.

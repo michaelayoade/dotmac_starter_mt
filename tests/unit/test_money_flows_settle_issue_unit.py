@@ -67,6 +67,7 @@ class _World:
         self.trigger = trigger
         self.cash = kw.get("cash", [])  # (kind, credit amount, days after NOW)
         self.statements: list[SimpleNamespace] = []
+        self.cap = kw.get("cap")  # Billing's statement size cap, when under test
 
         def exposure(db, *, scope, document_id):
             self.calls.append("exposure")
@@ -95,6 +96,13 @@ class _World:
                 )
                 for kind, amount, days in self.cash
             ]
+            lines = [
+                line
+                for line in lines
+                if request.occurred_from <= line.occurred_at < request.occurred_to
+            ]
+            if self.cap is not None and len(lines) > self.cap:
+                raise BillingRuleViolation("statement_too_large", "too large")
             return SimpleNamespace(lines=lines)
 
         def terms(db, *, scope, account_id, at):
@@ -154,6 +162,7 @@ def test_policy_none_is_a_quiet_no_op(monkeypatch):
     assert outcome.reason_code == "deposit_application_off"
     assert outcome.applied_document_ids == ()
     assert "draw" not in world.calls and "walk" not in world.calls
+    assert "statement" not in world.calls
 
 
 def test_a_new_invoice_that_is_no_longer_open_is_a_no_op(monkeypatch):
@@ -163,6 +172,7 @@ def test_a_new_invoice_that_is_no_longer_open_is_a_no_op(monkeypatch):
     )
     assert world.run().reason_code == "invoice_not_open"
     assert "draw" not in world.calls
+    assert "statement" not in world.calls
 
 
 def test_a_positive_invoice_missing_from_the_open_list_is_a_fault_not_a_no_op(
@@ -183,6 +193,7 @@ def test_no_balance_exits_before_any_document_walk(monkeypatch):
     )
     assert world.run().reason_code == "no_balance"
     assert "walk" not in world.calls and "draw" not in world.calls
+    assert "statement" not in world.calls
 
 
 def test_a_prepaid_account_is_a_no_op_even_with_balance_and_an_open_invoice(
@@ -199,6 +210,7 @@ def test_a_prepaid_account_is_a_no_op_even_with_balance_and_an_open_invoice(
     assert outcome.reason_code == "account_not_postpaid"
     assert outcome.applied_document_ids == ()
     assert "draw" not in world.calls
+    assert "statement" not in world.calls
 
 
 def test_the_terms_are_read_at_the_new_invoices_issue_date(monkeypatch):
@@ -398,9 +410,101 @@ def test_a_statement_failure_propagates_and_posts_nothing(monkeypatch):
     world = _World(monkeypatch, trigger=new, documents=[_doc(new, "10.00")])
 
     def boom(db, *, scope, request):
-        raise BillingRuleViolation("statement_too_large", "too large")
+        raise BillingRuleViolation("statement_integrity", "bad ledger")
 
     monkeypatch.setattr(flows, "get_account_statement", boom)
     with pytest.raises(BillingRuleViolation):
         world.run()
     assert world.paid == []
+
+
+def _paid_date(world):
+    world.run()
+    return world.paid[0].occurred_at
+
+
+def test_an_overflowing_statement_is_split_and_the_newer_half_wins(monkeypatch):
+    new = uuid4()
+    far = 2_700_000  # lands in the newer half of the first split
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(new, "10.00", issued=5)],
+        cap=2,
+        cash=[
+            ("settlement_accepted", "5.00", 7),
+            ("allocation", "1.00", 8),
+            ("settlement_accepted", "9.00", far),
+        ],
+    )
+    assert _paid_date(world) == NOW + timedelta(days=far)
+    full, newer = world.statements
+    assert newer.occurred_to == full.occurred_to  # newer half = [middle, end)
+    assert (
+        newer.occurred_from
+        == full.occurred_from + (full.occurred_to - full.occurred_from) / 2
+    )
+    assert len(world.statements) == 2  # the newer half answered; older never read
+
+
+def test_the_older_half_is_searched_when_the_newer_half_holds_no_cash(monkeypatch):
+    new = uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(new, "10.00", issued=5)],
+        cap=2,
+        cash=[
+            ("settlement_accepted", "5.00", 7),
+            ("settlement_accepted", "5.00", 9),
+            ("allocation", "1.00", 11),
+        ],
+    )
+    assert _paid_date(world) == NOW + timedelta(days=9)  # newest of the older half
+    full, newer, older = world.statements[:3]
+    assert newer.occurred_from == older.occurred_to  # the same midpoint
+    assert older.occurred_from == full.occurred_from
+    assert len(world.statements) < 200  # bounded
+
+
+def test_no_cash_anywhere_leaves_the_base_date(monkeypatch):
+    new = uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(new, "10.00", issued=5)],
+        cap=1,
+        cash=[("allocation", "1.00", 7), ("allocation", "1.00", 9)],
+    )
+    assert _paid_date(world) == NOW + timedelta(days=5)
+
+
+def test_a_window_that_cannot_be_split_raises_and_posts_nothing(monkeypatch):
+    new = uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(new, "10.00", issued=5)],
+        cap=1,
+        cash=[("settlement_accepted", "5.00", 7)] * 2,  # one instant, over the cap
+    )
+    with pytest.raises(BalancePassFailed) as caught:
+        world.run()
+    assert caught.value.code == "statement_unsplittable"
+    assert world.paid == []
+    assert len(world.statements) < 200  # bounded by the timestamp resolution
+
+
+def test_another_billing_refusal_on_the_statement_is_not_split(monkeypatch):
+    new = uuid4()
+    world = _World(monkeypatch, trigger=new, documents=[_doc(new, "10.00")])
+    seen = []
+
+    def refuse(db, *, scope, request):
+        seen.append(request)
+        raise BillingRuleViolation("invalid_window", "bad")
+
+    monkeypatch.setattr(flows, "get_account_statement", refuse)
+    with pytest.raises(BillingRuleViolation):
+        world.run()
+    assert len(seen) == 1

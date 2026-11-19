@@ -86,9 +86,12 @@ invoice or deposit pass completes any missed work.
 issue date, the paid invoice's issue date and the newest cash received since those
 dates, spent or not (the latest `settlement_accepted` statement line that adds
 credit, from Billing's account statement over `[earliest base, 9999-12-31)`;
-opening lots post none). Flows reads no clock. The statement window is bounded by
-Billing at 5000 posting groups: an account with more since the invoice dates
-raises Billing's `statement_too_large` and keeps failing until it is handled.
+opening lots post none). Flows reads no clock. Billing caps one statement at 5000 posting groups; when
+the window overflows (`statement_too_large`) flows splits it at the midpoint and
+searches the newer half first, then the older, recursively, so the newest cash
+wins and the pass never wedges on a busy account. Only a window that cannot be
+split further (over the cap at a single instant) raises
+`BalancePassFailed("statement_unsplittable")`.
 
 Duties of the caller (Sub-thin):
 

@@ -370,6 +370,75 @@ def test_cash_received_after_the_invoice_dates_moves_the_application_date(scratc
     assert occurred == arrived  # not the invoice date: the cash did not exist then
 
 
+def _capped_statement_overflows(db, scope, account_id) -> bool:
+    try:
+        _issue_applications(db, scope, account_id)
+    except BillingRuleViolation as exc:
+        return exc.code == "billing.statement_too_large"
+    return False
+
+
+def _split_world(scratch, days, *, allocated_later_invoice_day=None):
+    """Cash (balance only) on ``days``; optionally a later invoice paid first."""
+    scope, account_id, _ = _world(scratch, invoices=())
+    holder = SimpleNamespace(id=account_id)
+    for day in days:
+        _cash_without_a_pass(
+            scratch, scope, account_id, "500.00", ISSUED + timedelta(days=day)
+        )
+    if allocated_later_invoice_day is not None:
+        with session(scratch, scope) as db:
+            later = seed_invoice(
+                db,
+                scope,
+                holder,
+                issued_at=ISSUED + timedelta(days=allocated_later_invoice_day),
+            ).id
+            db.commit()
+        _issue(scratch, scope, later)  # a non-cash group newer than the cash
+    with session(scratch, scope) as db:
+        trigger = seed_invoice(db, scope, holder, issued_at=ISSUED).id
+        db.commit()
+    return scope, account_id, trigger
+
+
+def test_an_overflowing_statement_is_split_and_the_newer_cash_is_found(
+    scratch, monkeypatch
+):
+    # Four cash lines overflow a cap of 3; the newest (day 4) must date the draw.
+    scope, account_id, trigger = _split_world(scratch, (1, 2, 3, 4))
+    with monkeypatch.context() as patch:
+        patch.setattr("dotmac_billing.account_statement.MAX_STATEMENT_LINES", 3)
+        with session(scratch, scope) as db:
+            assert _capped_statement_overflows(db, scope, account_id)
+        outcome = _issue(scratch, scope, trigger)
+    assert outcome.applied_document_ids == (trigger,)
+    with session(scratch, scope) as db:
+        ((_, occurred),) = _issue_applications(db, scope, account_id)
+    assert occurred == ISSUED + timedelta(days=4)
+
+
+def test_an_overflowing_statement_falls_back_to_the_older_half_for_cash(
+    scratch, monkeypatch
+):
+    # The newest group is a non-cash allocation (day 5); the newest cash is day 3.
+    scope, account_id, trigger = _split_world(
+        scratch, (1, 2, 3), allocated_later_invoice_day=5
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr("dotmac_billing.account_statement.MAX_STATEMENT_LINES", 3)
+        with session(scratch, scope) as db:
+            assert _capped_statement_overflows(db, scope, account_id)
+        outcome = _issue(scratch, scope, trigger)
+    assert outcome.applied_document_ids == (trigger,)
+    with session(scratch, scope) as db:
+        dated = {
+            ref.split(":")[-3]: when
+            for ref, when in _issue_applications(db, scope, account_id)
+        }
+    assert dated[str(trigger)] == ISSUED + timedelta(days=3)
+
+
 def test_cash_older_than_the_invoice_does_not_pull_the_date_back(scratch):
     scope, account_id, (doc,) = _world(scratch, balance="500.00")  # observed earlier
     _issue(scratch, scope, doc)
