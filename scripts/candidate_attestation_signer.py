@@ -1,107 +1,124 @@
 #!/usr/bin/env python3
-"""Produce a signed ``TrustedHostAttestation.v2`` candidate envelope.
+"""Render, assemble and verify a ``TrustedHostAttestation.v2`` candidate envelope.
 
-ADR-0070's 2026-09-08 amendment ("six admission decisions, none of them
-implemented yet") rules that evidence subject is Foundation's own
-``CandidateArtifact.v1`` (decision 1), that the exact built bytes are signed
-once and never recomputed from a rebuild (decision 2), and that the signing
-identity is the protected Starter release-workflow identity, distinct from the
-target-local host-attestation workload
-(``packages/dotmac-deployment-foundation/src/dotmac_deployment_foundation/trusted_host_source.py``
-module docstring). This script is that producer.
+This script holds NO KEY and has no key path at all. It is the publish-only half
+of the candidate-release signer (ruling Q5-B, 2026-11-18; PRE-E11 design 2.5).
+The Ed25519 signature is made elsewhere, once, in the operator's ceremony
+session by an OpenBao transit key (``transit-a2-candidate/``,
+``candidate-release-v1``, non-exportable) and arrives here only as a finished
+signature over bytes this script rendered. There is no PEM, no private-key
+argument, no ``sign`` command and no signing primitive in this module; a test
+proves that by AST.
 
-It reads an already-committed-shape ``CandidateArtifact.v1`` receipt (the
-schema ``scripts/foundation_candidate.py`` writes) and an Ed25519 private key
-supplied as PEM bytes, and emits a ``TrustedHostAttestation.v2`` envelope whose
-subject is a ``CandidateAttestationSubjectV2`` built from that exact receipt —
-never from a rebuilt or recomputed digest.
+Three commands, in ceremony order:
 
-## What this script is not
+``render``
+    Reads the committed ``CandidateArtifact.v1`` receipt and emits the
+    UNSIGNED envelope plus the exact ``signed_bytes`` to be signed. The subject
+    is built from the receipt verbatim, never from a rebuilt or recomputed
+    digest (ADR-0070 2026-09-08, decisions 1 and 2). The envelope carries
+    ``custody_domain = candidate_release_signer`` (fixes F-A: the old
+    ``dotmac.foundation.candidate`` label named no real custody), the ceremony
+    issuer, the enrolment UUID as ``trust_root_version``, and an explicit
+    ``issued_at`` / ``expires_at`` the ceremony chooses.
 
-It does not build, sign, or read anything belonging to the installed-host
-role. It imports nothing from a host-attestation module (there is none in this
-package to import), accepts no ``--host-*`` argument, and can never construct
-an ``InstalledHostAttestationSubjectV2`` or an envelope whose purpose is
-``INSTALLED_OBSERVATION_PURPOSE`` — the purpose string is a hardcoded constant
-imported from the package, not a CLI input. It performs no trust-root
-registration: Control owns binding fingerprints, purposes and custody domains
-(module docstring; ADR-0070's 2026-09-07 amendment).
+``assemble``
+    Joins the unsigned envelope and the externally produced signature into the
+    final envelope. It does no cryptography.
 
-It does not commit its own output to the repository. A human commits the
-signed envelope (and the bound receipt) under ``docs/inventories/`` in a
-follow-up, reviewed change, the same shape every existing
-``foundation-candidate-<version>.json`` file already went through. This
-script's ``sign`` command writes one file for a workflow-local path that
-becomes a build artifact; nothing here touches version control.
+``verify``
+    Authenticates the envelope with Foundation's own
+    ``verify_candidate_attestation`` against ONE pinned public identity (key id,
+    fingerprint, trust-root version) and checks the subject against the
+    committed receipt. This is what the publishing workflow runs.
 
-## Writing the envelope: a thin adapter, not a second writer
+What this script is not: it never builds an ``InstalledHostAttestationSubjectV2``
+or an installed-host envelope, imports no host-attestation module, and performs
+no trust-root registration (Control owns enrolment).
 
-This script does not canonicalize or atomically write the envelope itself.
-``dotmac_deployment_foundation.attestation_store.write_attestation_record``
-does — the package's own writer for ``TrustedHostAttestation.v2`` records,
-which reuses ``lease.write_store_record_once``'s atomic-once mechanism rather
-than a second, independently hand-rolled ``json.dumps(..., sort_keys=True)``.
-`trusted_host_source.py` stays I/O-free by its own stated design; the writer
-therefore lives in a sibling module, not there. This script's only remaining
-job after signing is to hand the package the finished envelope.
-
-## Custody
-
-The private key is never a CLI literal or a repository value. ``sign`` reads
-it from a file path (materialised by the calling workflow step from a
-protected GitHub Environment secret whose canonical source is an OpenBao
-pointer — see the workflow for the exact secret name and pointer) and the
-file is expected to be removed by the caller once this process exits. Nothing
-in this module writes the key material anywhere but into memory for the
-duration of one signature.
+The envelope is written through
+``dotmac_deployment_foundation.attestation_store.write_attestation_record``,
+the package's own atomic-once writer; this script has no JSON writer of its own.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import dataclasses
 import hashlib
 import json
 import sys
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    PublicFormat,
-    load_pem_private_key,
-)
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from dotmac_deployment_foundation.attestation_store import write_attestation_record
 from dotmac_deployment_foundation.digest import Digest
+from dotmac_deployment_foundation.errors import DeploymentFoundationError
 from dotmac_deployment_foundation.trusted_host_source import (
     ATTESTATION_SCHEMA,
     CANDIDATE_ATTESTATION_PURPOSE,
     AttestationEnvelopeV2,
+    AttestationTrustPolicy,
+    AttestationTrustRootV2,
     CandidateAttestationSubjectV2,
+    verify_candidate_attestation,
 )
 
 CANDIDATE_ARTIFACT_SCHEMA = "CandidateArtifact.v1"
 
+#: Constants of the ceremony-signed candidate role. They are not CLI inputs:
+#: the enrolled root descriptor and the envelope must carry the identical
+#: values, so a flag would only be a way to disagree with the enrolment.
+CEREMONY_ISSUER = "urn:dotmac:foundation:candidate-release-ceremony:a2"
+CUSTODY_DOMAIN = "candidate_release_signer"
+CANDIDATE_AUDIENCE = "dotmac-deployment-foundation"
+ALGORITHM = "ed25519"
+#: Ed25519 signature length in bytes.
+SIGNATURE_BYTES = 64
+#: Stands in for the envelope's signature while it is unsigned. Excluded from
+#: ``signed_bytes()``; ``assemble`` refuses anything but this placeholder.
+UNSIGNED_PLACEHOLDER = "unsigned"
+#: The verifier's policy type needs a second role. ``verify`` is candidate-only,
+#: so that role is filled with an inert, per-process random root in a distinct
+#: custody domain; nothing can ever be admitted through it.
+_INERT_ROLE_DOMAIN = "inert-role-for-candidate-only-verification"
+
+
+class Refused(SystemExit):
+    """A fail-closed refusal; the message names the cause, never a value."""
+
 
 def _canonical_instant(value: datetime) -> str:
-    """Fixed-width UTC RFC3339, matching ``trusted_host_source``'s
-    ``_UTC_RFC3339`` regex exactly (no fractional seconds, always ``Z``)."""
+    """Fixed-width UTC RFC3339, matching ``trusted_host_source``'s regex."""
     if value.tzinfo is None:
         raise ValueError("instant must be timezone-aware")
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _parse_instant(text: str, name: str) -> datetime:
+    try:
+        parsed = datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise Refused(
+            f"{name} must be canonical UTC RFC3339 (YYYY-MM-DDTHH:MM:SSZ)"
+        ) from exc
+    return parsed.replace(tzinfo=UTC)
+
+
+def fingerprint_of(raw_public_key: bytes) -> str:
+    return f"sha256:{hashlib.sha256(raw_public_key).hexdigest()}"
+
+
 def load_candidate_artifact_receipt(path: Path) -> dict[str, Any]:
     receipt = json.loads(path.read_text(encoding="utf-8"))
     if receipt.get("schema") != CANDIDATE_ARTIFACT_SCHEMA:
-        raise SystemExit(
+        raise Refused(
             f"{path}: not a {CANDIDATE_ARTIFACT_SCHEMA} receipt "
             f"(schema={receipt.get('schema')!r}). The candidate attestation "
             "subject binds against Foundation's own CandidateArtifact.v1 "
@@ -116,11 +133,7 @@ def candidate_subject_from_receipt(
 ) -> CandidateAttestationSubjectV2:
     """Build the exact subject the verifier expects, from the exact receipt.
 
-    Every field is read from the committed ``CandidateArtifact.v1`` receipt —
-    none is recomputed by re-hashing a file, re-reading the wheel, or asking
-    ``gh api`` again. Signing a recomputed value would open exactly the gap
-    decision 2 forbids: the receipt is the frozen fact, and this function's
-    only job is to reshape it into the subject the verifier parses.
+    Every field is read from the committed receipt; none is recomputed.
     """
     return CandidateAttestationSubjectV2(
         package=str(receipt["facility"]),
@@ -135,102 +148,253 @@ def candidate_subject_from_receipt(
     )
 
 
-def _fingerprint(public_key: Ed25519PublicKey) -> str:
-    raw = public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
-    return f"sha256:{hashlib.sha256(raw).hexdigest()}"
-
-
-def sign_candidate_attestation(
+def render_unsigned_envelope(
     *,
     receipt: dict[str, Any],
-    private_key: Ed25519PrivateKey,
-    issuer: str,
     key_id: str,
-    custody_domain: str,
+    public_key_fingerprint: str,
     trust_root_version: str,
-    audience: str,
     issued_at: datetime,
     expires_at: datetime,
     observation_id: str | None = None,
 ) -> AttestationEnvelopeV2:
-    """Produce one signed ``AttestationEnvelopeV2`` over the receipt's subject.
+    """The unsigned envelope over the receipt's subject. Holds no key.
 
-    Purpose is always ``CANDIDATE_ATTESTATION_PURPOSE`` — it is never a
-    parameter, so there is no code path by which this function could emit an
-    installed-host envelope.
+    Purpose, issuer, custody domain, audience and algorithm are constants of
+    this role, never parameters, so there is no way to render an envelope for
+    another role or another custody.
     """
-    subject = candidate_subject_from_receipt(receipt)
-    public_key = private_key.public_key()
-    fingerprint = _fingerprint(public_key)
-    observation_id = observation_id or str(uuid.uuid4())
-
-    unsigned = AttestationEnvelopeV2(
+    return AttestationEnvelopeV2(
         schema=ATTESTATION_SCHEMA,
         purpose=CANDIDATE_ATTESTATION_PURPOSE,
-        issuer=issuer,
+        issuer=CEREMONY_ISSUER,
         key_id=key_id,
-        algorithm="ed25519",
-        public_key_fingerprint=fingerprint,
-        custody_domain=custody_domain,
+        algorithm=ALGORITHM,
+        public_key_fingerprint=public_key_fingerprint,
+        custody_domain=CUSTODY_DOMAIN,
         trust_root_version=trust_root_version,
         issued_at=_canonical_instant(issued_at),
         expires_at=_canonical_instant(expires_at),
-        audience=audience,
-        observation_id=observation_id,
-        subject=subject.canonical_document(),
-        # Placeholder: excluded from `signed_bytes()`, discarded below.
-        signature="unsigned",
+        audience=CANDIDATE_AUDIENCE,
+        observation_id=observation_id or str(uuid.uuid4()),
+        subject=candidate_subject_from_receipt(receipt).canonical_document(),
+        signature=UNSIGNED_PLACEHOLDER,
     )
-    to_sign = unsigned.signed_bytes()
-    raw_signature = private_key.sign(to_sign)
-    signature = base64.b64encode(raw_signature).decode("ascii")
-    return dataclasses.replace(unsigned, signature=signature)
 
 
-def cmd_sign(args: argparse.Namespace) -> int:
-    receipt = load_candidate_artifact_receipt(Path(args.receipt))
-    key_bytes = Path(args.private_key_file).read_bytes()
-    private_key = load_pem_private_key(key_bytes, password=None)
-    if not isinstance(private_key, Ed25519PrivateKey):
-        raise SystemExit(
-            "the supplied private key is not Ed25519 — "
-            f"{ATTESTATION_SCHEMA} declares algorithm=ed25519 and this "
-            "producer signs no other algorithm"
+def assemble_envelope(
+    unsigned: AttestationEnvelopeV2, signature_b64: str
+) -> AttestationEnvelopeV2:
+    """Attach an externally produced signature. No cryptography happens here."""
+    if unsigned.signature != UNSIGNED_PLACEHOLDER:
+        raise Refused("the envelope to assemble is already signed")
+    try:
+        raw = base64.b64decode(signature_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise Refused("signature is not strict base64") from exc
+    if len(raw) != SIGNATURE_BYTES:
+        raise Refused(
+            f"signature must be {SIGNATURE_BYTES} raw bytes (ed25519), got {len(raw)}"
         )
-    issued_at = datetime.now(UTC)
-    expires_at = issued_at + timedelta(minutes=args.validity_minutes)
-    envelope = sign_candidate_attestation(
+    return dataclasses.replace(
+        unsigned, signature=base64.b64encode(raw).decode("ascii")
+    )
+
+
+class _Ed25519Verifier:
+    """Pure crypto primitive; the trust decision is the policy's, not this."""
+
+    def verify(
+        self, *, public_key: bytes, algorithm: str, message: bytes, signature: str
+    ) -> bool:
+        if algorithm != ALGORITHM:
+            return False
+        try:
+            Ed25519PublicKey.from_public_bytes(public_key).verify(
+                base64.b64decode(signature, validate=True), message
+            )
+        except (InvalidSignature, ValueError):
+            return False
+        return True
+
+
+def _pinned_policy(
+    *,
+    public_key_b64: str,
+    key_id: str,
+    pinned_fingerprint: str,
+    trust_root_version: str,
+    envelope: AttestationEnvelopeV2,
+) -> AttestationTrustPolicy:
+    try:
+        raw = base64.b64decode(public_key_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise Refused("public key is not strict base64") from exc
+    if len(raw) != 32:
+        raise Refused("public key must be a raw 32-byte ed25519 key")
+    if fingerprint_of(raw) != pinned_fingerprint:
+        raise Refused("public key does not match the pinned fingerprint")
+    # The root validity window is the envelope's own lifetime: the workflow pins
+    # only key id, fingerprint and trust-root version, so root not_before and
+    # not_after are not known here. Expiry (`now < expires_at`) and issuance
+    # (`issued_at <= now`) are still enforced by the verifier.
+    candidate_root = AttestationTrustRootV2(
+        public_key_fingerprint=pinned_fingerprint,
+        public_key_base64=public_key_b64,
+        issuer=CEREMONY_ISSUER,
+        key_id=key_id,
+        purpose=CANDIDATE_ATTESTATION_PURPOSE,
+        custody_domain=CUSTODY_DOMAIN,
+        algorithm=ALGORITHM,
+        trust_root_version=trust_root_version,
+        not_before=envelope.issued_at,
+        not_after=envelope.expires_at,
+    )
+    inert_raw = hashlib.sha256(b"inert:" + uuid.uuid4().bytes).digest()
+    inert_root = AttestationTrustRootV2(
+        public_key_fingerprint=fingerprint_of(inert_raw),
+        public_key_base64=base64.b64encode(inert_raw).decode("ascii"),
+        issuer="urn:inert",
+        key_id="inert",
+        purpose="inert",
+        custody_domain=_INERT_ROLE_DOMAIN,
+        algorithm=ALGORITHM,
+        trust_root_version="inert",
+        not_before=envelope.issued_at,
+        not_after=envelope.expires_at,
+    )
+    return AttestationTrustPolicy(
+        candidate_roots=(candidate_root,),
+        installed_roots=(inert_root,),
+        candidate_audience=CANDIDATE_AUDIENCE,
+        installed_audience="inert",
+    )
+
+
+def verify_published_envelope(
+    *,
+    envelope: AttestationEnvelopeV2,
+    receipt: dict[str, Any],
+    public_key_b64: str,
+    key_id: str,
+    pinned_fingerprint: str,
+    trust_root_version: str,
+    now: datetime,
+) -> CandidateAttestationSubjectV2:
+    """Authenticate the envelope against the pinned identity and the receipt.
+
+    Refuses, each as its own cause: a public key that is not the pinned
+    fingerprint; any envelope binding that differs from the pin or the role
+    constants (key id, fingerprint, trust-root version, issuer, custody domain,
+    audience, purpose, algorithm); an invalid or absent signature; an expired or
+    future envelope; and a subject that is not exactly the committed receipt's.
+    """
+    if envelope.signature == UNSIGNED_PLACEHOLDER:
+        raise Refused("the envelope is unsigned")
+    if envelope.public_key_fingerprint != pinned_fingerprint:
+        raise Refused("envelope fingerprint differs from the pinned fingerprint")
+    policy = _pinned_policy(
+        public_key_b64=public_key_b64,
+        key_id=key_id,
+        pinned_fingerprint=pinned_fingerprint,
+        trust_root_version=trust_root_version,
+        envelope=envelope,
+    )
+    try:
+        subject = verify_candidate_attestation(
+            candidate=envelope,
+            verifier=_Ed25519Verifier(),
+            trust_policy=policy,
+            now=now,
+        )
+    except DeploymentFoundationError as exc:
+        raise Refused(
+            f"envelope refused by the verifier: {getattr(exc, 'code', 'unknown')}"
+        ) from exc
+    expected = candidate_subject_from_receipt(receipt).canonical_document()
+    if dict(envelope.subject_mapping()) != expected:
+        raise Refused("envelope subject is not the committed CandidateArtifact.v1")
+    return subject
+
+
+def _load_envelope(path: str) -> AttestationEnvelopeV2:
+    try:
+        return AttestationEnvelopeV2.from_mapping(
+            json.loads(Path(path).read_text(encoding="utf-8"))
+        )
+    except (ValueError, DeploymentFoundationError) as exc:
+        raise Refused(f"{path}: not a well-formed attestation envelope") from exc
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    receipt = load_candidate_artifact_receipt(Path(args.receipt))
+    issued_at = _parse_instant(args.issued_at, "--issued-at")
+    expires_at = _parse_instant(args.expires_at, "--expires-at")
+    if expires_at <= issued_at:
+        raise Refused("--expires-at must follow --issued-at")
+    try:
+        uuid.UUID(args.trust_root_version)
+    except ValueError as exc:
+        raise Refused("--trust-root-version must be the enrolment UUID") from exc
+    unsigned = render_unsigned_envelope(
         receipt=receipt,
-        private_key=private_key,
-        issuer=args.issuer,
         key_id=args.key_id,
-        custody_domain=args.custody_domain,
+        public_key_fingerprint=args.public_key_fingerprint,
         trust_root_version=args.trust_root_version,
-        audience=args.audience,
         issued_at=issued_at,
         expires_at=expires_at,
+        observation_id=args.observation_id,
     )
-    # The package owns this document's wire form and its atomic-once write —
-    # see `attestation_store.py`. This script is a thin adapter over it: it
-    # signs, and hands the package the exact envelope to publish.
-    write_attestation_record(Path(args.out), envelope)
+    signed_bytes = unsigned.signed_bytes()
+    write_attestation_record(Path(args.out_envelope), unsigned)
+    Path(args.out_signed_bytes).write_bytes(signed_bytes)
     print(
-        f"signed {envelope.purpose} for {receipt['facility']} "
-        f"{receipt['version']} (fingerprint {envelope.public_key_fingerprint})"
+        f"rendered unsigned {unsigned.purpose} for {receipt['facility']} "
+        f"{receipt['version']}; signed_bytes sha256:"
+        f"{hashlib.sha256(signed_bytes).hexdigest()}"
+    )
+    return 0
+
+
+def cmd_assemble(args: argparse.Namespace) -> int:
+    unsigned = _load_envelope(args.unsigned)
+    signature = Path(args.signature_file).read_text(encoding="ascii").strip()
+    envelope = assemble_envelope(unsigned, signature)
+    write_attestation_record(Path(args.out), envelope)
+    print(f"assembled {envelope.purpose} (key {envelope.key_id})")
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    receipt = load_candidate_artifact_receipt(Path(args.receipt))
+    envelope = _load_envelope(args.envelope)
+    now = _parse_instant(args.now, "--now") if args.now else datetime.now(UTC)
+    subject = verify_published_envelope(
+        envelope=envelope,
+        receipt=receipt,
+        public_key_b64=args.public_key_base64,
+        key_id=args.key_id,
+        pinned_fingerprint=args.public_key_fingerprint,
+        trust_root_version=args.trust_root_version,
+        now=now,
+    )
+    print(
+        f"verified {envelope.purpose} for {subject.package} {subject.version} "
+        f"(fingerprint {envelope.public_key_fingerprint})"
     )
     if args.summary:
         with open(args.summary, "a", encoding="utf-8") as handle:
             handle.write(
-                "## Candidate attestation — signed, NOT admitted\n\n"
-                "This envelope is verifier input only. No executor accepts it "
-                "yet (ADR-0070, 2026-09-08 amendment, decision 5): the first "
-                "admission occurs only inside the protected artifact-rehearsal "
-                "workflow.\n\n"
+                "## Candidate attestation — verified and published, NOT admitted\n\n"
+                "Signed in the operator ceremony; this workflow only verified "
+                "and published it. It is verifier input only: no executor "
+                "accepts it yet (ADR-0070, 2026-09-08 amendment, decision 5).\n\n"
                 "| fact | value |\n|---|---|\n"
                 f"| purpose | `{envelope.purpose}` |\n"
-                f"| package | `{receipt['facility']}` |\n"
-                f"| version | `{receipt['version']}` |\n"
+                f"| package | `{subject.package}` |\n"
+                f"| version | `{subject.version}` |\n"
                 f"| fingerprint | `{envelope.public_key_fingerprint}` |\n"
+                f"| trust_root_version | `{envelope.trust_root_version}` |\n"
                 f"| observation_id | `{envelope.observation_id}` |\n"
                 f"| issued_at | `{envelope.issued_at}` |\n"
                 f"| expires_at | `{envelope.expires_at}` |\n"
@@ -242,20 +406,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sign = sub.add_parser(
-        "sign", help="sign a CandidateArtifact.v1 receipt into a v2 envelope"
-    )
-    sign.set_defaults(handler=cmd_sign)
-    sign.add_argument("--receipt", required=True)
-    sign.add_argument("--private-key-file", required=True)
-    sign.add_argument("--issuer", required=True)
-    sign.add_argument("--key-id", required=True)
-    sign.add_argument("--custody-domain", required=True)
-    sign.add_argument("--trust-root-version", required=True)
-    sign.add_argument("--audience", required=True)
-    sign.add_argument("--validity-minutes", type=int, default=180)
-    sign.add_argument("--out", required=True)
-    sign.add_argument("--summary", default="")
+    render = sub.add_parser("render", help="unsigned envelope + signed_bytes")
+    render.set_defaults(handler=cmd_render)
+    render.add_argument("--receipt", required=True)
+    render.add_argument("--key-id", required=True)
+    render.add_argument("--public-key-fingerprint", required=True)
+    render.add_argument("--trust-root-version", required=True)
+    render.add_argument("--issued-at", required=True)
+    render.add_argument("--expires-at", required=True)
+    render.add_argument("--observation-id", default=None)
+    render.add_argument("--out-envelope", required=True)
+    render.add_argument("--out-signed-bytes", required=True)
+
+    assemble = sub.add_parser("assemble", help="attach an external signature")
+    assemble.set_defaults(handler=cmd_assemble)
+    assemble.add_argument("--unsigned", required=True)
+    assemble.add_argument("--signature-file", required=True)
+    assemble.add_argument("--out", required=True)
+
+    verify = sub.add_parser("verify", help="verify against the pinned identity")
+    verify.set_defaults(handler=cmd_verify)
+    verify.add_argument("--envelope", required=True)
+    verify.add_argument("--receipt", required=True)
+    verify.add_argument("--public-key-base64", required=True)
+    verify.add_argument("--key-id", required=True)
+    verify.add_argument("--public-key-fingerprint", required=True)
+    verify.add_argument("--trust-root-version", required=True)
+    verify.add_argument("--now", default="")
+    verify.add_argument("--summary", default="")
     return parser
 
 
