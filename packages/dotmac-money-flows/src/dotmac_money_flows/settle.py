@@ -64,6 +64,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -72,12 +73,14 @@ from dotmac_billing import (
     AcceptWithholdingDischarge,
     ApplyAvailableCreditCommand,
     BillingRuleViolation,
+    GetAccountStatementV1,
     GetFundingAvailabilityV1,
     OpenReceivableDocumentV1,
     SettlementFundingLane,
     accept_settlement,
     accept_withholding_discharge,
     apply_available_credit,
+    get_account_statement,
     get_document_exposure,
     get_effective_account_terms,
     get_funding_availability,
@@ -100,6 +103,7 @@ from dotmac_money_flows.contracts import (
     SETTLE_DEFINITION_VERSION,
     WITHHOLDING_SOURCE,
     BalanceAppliedOutcomeV1,
+    BalancePassFailed,
     DepositApplication,
     InvoiceIssuedV1,
     SettleAttentionCursorV1,
@@ -148,6 +152,10 @@ _DOES_NOT_FIT = frozenset(
     {_SHORT_BALANCE, "billing.credit_exceeds_non_withholding_room"}
 )
 _POSTPAID = "postpaid"
+#: Far bound of the statement window that finds the newest cash (Billing accepts
+#: any aware, non-empty half-open window).
+_FAR_FUTURE = datetime(9999, 12, 31, tzinfo=UTC)
+_CASH_ACCEPTED = "settlement_accepted"
 _CODE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 
 
@@ -832,8 +840,13 @@ def apply_balance_on_invoice_issued(
     delivery retries; the deterministic source references make a retry, or the
     next invoice or deposit pass, complete the work without paying twice.
 
-    Applications are dated the later of this invoice's issue date and the paid
-    invoice's issue date; flows reads no clock.
+    Applications are dated the later of this invoice's issue date, the paid
+    invoice's issue date and the newest cash received since those dates (spent
+    or not), read from Billing's account statement; flows reads no clock. The
+    source reference carries the document's Billing ``source_version``, so a
+    replay of the same state posts nothing while a reversal (a new version)
+    can be paid again. Faults raise ``BalancePassFailed``; Billing exceptions
+    propagate unchanged. Both are retryable.
     """
     _tenant(scope)
     trigger = request.document_id
@@ -854,7 +867,7 @@ def apply_balance_on_invoice_issued(
         return done("deposit_application_off")
     exposure = get_document_exposure(db, scope=scope, document_id=trigger)
     if exposure.billing_account_id != account_id:
-        raise SettleRefused("document_account_mismatch")
+        raise BalancePassFailed("document_account_mismatch")
     if not exposure.collectible_receivable.is_positive:
         return done("invoice_not_open")
     if not availability.unrestricted.is_positive:
@@ -862,19 +875,40 @@ def apply_balance_on_invoice_issued(
     currency = exposure.collectible_receivable.currency
     documents = _walk_open_documents(db, scope, account_id, currency)
     if documents is None:
-        raise SettleRefused("open_documents_unreadable")
+        raise BalancePassFailed("open_documents_unreadable")
     issued = {d.document_id: d.issued_at for d in documents}
     if trigger not in issued:
-        return done("invoice_not_open")
+        # Its balance is positive yet Billing does not list it: a fault, not a
+        # no-op. Retry; never stay quiet.
+        raise BalancePassFailed("invoice_missing_from_open_documents")
     terms = get_effective_account_terms(
         db, scope=scope, account_id=account_id, at=issued[trigger]
     )
     if terms.contract_type.value != _POSTPAID:
         return done("account_not_postpaid")
 
+    # Dating: each application is at or after both invoice dates (``base``) and
+    # at or after the newest cash received since then, spent or not. The window
+    # opens at the earliest base; opening lots post no ``settlement_accepted``.
+    bases = {d.document_id: max(issued[trigger], d.issued_at) for d in documents}
+    statement = get_account_statement(
+        db,
+        scope=scope,
+        request=GetAccountStatementV1(
+            scope, account_id, currency, min(bases.values()), _FAR_FUTURE
+        ),
+    )
+    cash_at = [
+        line.occurred_at
+        for line in statement.lines
+        if line.group_kind == _CASH_ACCEPTED and line.delta.available_credit.is_positive
+    ]
+    newest_cash = max(cash_at) if cash_at else None
+
     applied: list[UUID] = []
 
     def pay(document: OpenReceivableDocumentV1) -> str | None:
+        base = bases[document.document_id]
         try:
             apply_available_credit(
                 db,
@@ -883,9 +917,10 @@ def apply_balance_on_invoice_issued(
                     billing_account_id=account_id,
                     document_id=document.document_id,
                     amount=document.collectible_receivable,
-                    occurred_at=max(issued[trigger], document.issued_at),
+                    occurred_at=base if newest_cash is None else max(base, newest_cash),
                     source_ref=(
                         f"money-flows:settle:issue:{trigger}:{document.document_id}"
+                        f":{document.source_version}"
                     ),
                 ),
             )

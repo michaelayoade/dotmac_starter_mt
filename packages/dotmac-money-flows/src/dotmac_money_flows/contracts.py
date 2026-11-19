@@ -231,6 +231,19 @@ class SettleRefused(Exception):
         return str(self.args[0])
 
 
+class BalancePassFailed(Exception):
+    """A technical fault in the invoice-issued balance pass (GAP-3).
+
+    Raised as ``BalancePassFailed(code)``: the caller rolls back and its event
+    delivery retries. It is never a business no-op and writes nothing.
+    """
+
+    @property
+    def code(self) -> str:
+        """The stable machine code (the first argument)."""
+        return str(self.args[0])
+
+
 # --------------------------------------------------------------------------
 # F2 FundedCharge
 # --------------------------------------------------------------------------

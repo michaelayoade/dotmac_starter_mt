@@ -731,6 +731,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "SETTLE_SETTLED_EVENT_TYPE",
         "AccountTermsChangedV1",
         "BalanceAppliedOutcomeV1",
+        "BalancePassFailed",
         "DepositApplication",
         "FundedChargeCursorV1",
         "FundedChargeInstanceV1",

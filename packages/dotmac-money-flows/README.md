@@ -73,18 +73,31 @@ attention item and no event; Billing's own allocation facts are the record.
 A business no-op posts nothing and returns `BalanceAppliedOutcomeV1` with an empty
 `applied_document_ids` and a `reason_code` (`deposit_application_off`,
 `invoice_not_open`, `no_balance`, `account_not_postpaid`, `no_invoice_fits`). A
-technical or owner failure (Billing refusal, unreadable open-document list,
-database error) **raises**; nothing is written. Source references are
-deterministic (`money-flows:settle:issue:{trigger}:{document}`), so a retry never
-pays twice and the next invoice or deposit pass completes any missed work.
+technical fault **raises**; nothing is written. `BalancePassFailed(code)` is the
+flows fault (open-document list unreadable, the new invoice missing from the open
+list while its balance is positive, a document of another account); Billing
+exceptions propagate unchanged. Source references are deterministic
+(`money-flows:settle:issue:{trigger}:{document}:{source_version}`, the document's
+Billing `source_version`), so a replay of the same state never pays twice, a
+reversal (which bumps the version) can be paid again by a rerun, and the next
+invoice or deposit pass completes any missed work.
+
+**Application date.** Each application is dated the latest of the new invoice's
+issue date, the paid invoice's issue date and the newest cash received since those
+dates, spent or not (the latest `settlement_accepted` statement line that adds
+credit, from Billing's account statement over `[earliest base, 9999-12-31)`;
+opening lots post none). Flows reads no clock. The statement window is bounded by
+Billing at 5000 posting groups: an account with more since the invoice dates
+raises Billing's `statement_too_large` and keeps failing until it is handled.
 
 Duties of the caller (Sub-thin):
 
 - Route each Billing invoice-issued document fact (`billing.invoice.document.fact`
   v1/v2/v3 with `document_kind=invoice`, `document_state=issued`, `fact_version=1`)
   to this command, in its own transaction per event.
-- Let a failure propagate so the transport rolls back and its event delivery
-  retries automatically. A persistent failure (retries exhausted) is a technical
+- Treat `BalancePassFailed` and Billing exceptions as retryable. Let the failure
+  propagate so the transport rolls back and its event delivery retries
+  automatically. A persistent failure (retries exhausted) is a technical
   ops alert, never a billing staff queue.
 - Date postpaid invoices at the real issue instant. An application is dated the
   later of the new invoice's issue date and the paid invoice's issue date and

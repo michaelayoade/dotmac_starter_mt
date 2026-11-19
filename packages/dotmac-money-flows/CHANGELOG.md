@@ -139,4 +139,8 @@ Source only; not published, not composed into any assembly.
   postpaid invoice (account lock first; gates read after it; prepaid and
   `deposit_application=none` are no-ops). No row, event or attention item; owner
   failures raise and a replay posts nothing. Settle may now read account terms and
-  funding availability (allowlist widened from FundedCharge only).
+  funding availability (allowlist widened from FundedCharge only), and the
+  account statement (Settle only). Applications are dated the latest of the two
+  invoice dates and the newest cash received since (spent or not); the source
+  reference carries the document's Billing `source_version`; faults raise the
+  new `BalancePassFailed`.

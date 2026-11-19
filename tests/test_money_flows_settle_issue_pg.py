@@ -11,15 +11,22 @@ triggers on one account).
 from __future__ import annotations
 
 import time
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from threading import Event, Thread, current_thread
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
-from dotmac_billing import get_document_exposure
+from dotmac_billing import (
+    GetAccountStatementV1,
+    get_account_statement,
+    get_document_exposure,
+)
 from dotmac_billing import models as billing_models
+from dotmac_billing.commands import DeallocationCommand
 from dotmac_billing.errors import BillingRuleViolation
-from dotmac_billing.service import rebuild_receivable_position
+from dotmac_billing.service import deallocate_settlement, rebuild_receivable_position
+from dotmac_kernel.money import Currency
 from dotmac_money_flows import (
     DepositApplication,
     InvoiceIssuedV1,
@@ -33,6 +40,7 @@ from dotmac_money_flows.models import SettleInstance
 from dotmac_payments.contracts import PaymentPurpose
 from sqlalchemy import func, select, text
 
+from tests import test_billing_isolation as b
 from tests.money_flows_fixtures import (
     BASE,
     RecordingTargets,
@@ -313,6 +321,137 @@ def test_a_reseller_account_pays_invoices_of_every_service_ref(scratch):
         assert _credit(db, scope, account_id) == 1000 - 360
 
 
+def _issue_applications(db, scope, account_id):
+    """(source_ref, occurred_at) of every GAP-3 application, from the statement."""
+    statement = get_account_statement(
+        db,
+        scope=scope,
+        request=GetAccountStatementV1(
+            scope,
+            account_id,
+            Currency("NGN", 2),
+            datetime(2000, 1, 1, tzinfo=UTC),
+            datetime(9999, 12, 31, tzinfo=UTC),
+        ),
+    )
+    return [
+        (line.source_ref, line.occurred_at)
+        for line in statement.lines
+        if line.source_ref.startswith("money-flows:settle:issue:")
+    ]
+
+
+def _cash_without_a_pass(scratch, scope, account_id, amount, observed_at):
+    """Cash that lands as balance only (policy none), observed at a given time."""
+    reference = f"acct:{account_id}"
+    with session(scratch, scope) as db:
+        payment = seed_payment(
+            db,
+            scope,
+            purpose=PaymentPurpose.ACCOUNT_CREDIT_DEPOSIT,
+            amount=amount,
+            target_reference=reference,
+            observed_at=observed_at,
+        )
+        db.commit()
+    targets = RecordingTargets({reference: SettlementTargetV1(account_id)})
+    policy = SettlePolicyV1(version="p", deposit_application=DepositApplication.NONE)
+    assembly_settle(scratch, scope, payment.command(), make_ports(targets, policy))
+
+
+def test_cash_received_after_the_invoice_dates_moves_the_application_date(scratch):
+    scope, account_id, (doc,) = _world(scratch)
+    arrived = ISSUED + timedelta(days=3)
+    _cash_without_a_pass(scratch, scope, account_id, "500.00", arrived)
+    outcome = _issue(scratch, scope, doc)
+    assert outcome.applied_document_ids == (doc,)
+    with session(scratch, scope) as db:
+        ((_, occurred),) = _issue_applications(db, scope, account_id)
+    assert occurred == arrived  # not the invoice date: the cash did not exist then
+
+
+def test_cash_older_than_the_invoice_does_not_pull_the_date_back(scratch):
+    scope, account_id, (doc,) = _world(scratch, balance="500.00")  # observed earlier
+    _issue(scratch, scope, doc)
+    with session(scratch, scope) as db:
+        ((_, occurred),) = _issue_applications(db, scope, account_id)
+    assert occurred == ISSUED
+
+
+def test_a_replay_after_new_cash_raises_nothing_and_posts_nothing(scratch):
+    scope, account_id, (doc,) = _world(scratch, balance="500.00")
+    _issue(scratch, scope, doc)
+    _cash_without_a_pass(
+        scratch, scope, account_id, "300.00", ISSUED + timedelta(days=2)
+    )
+    again = _issue(scratch, scope, doc)  # must not raise
+    assert again.applied_document_ids == ()
+    assert again.reason_code == "invoice_not_open"
+    with session(scratch, scope) as db:
+        assert _allocations(db) == 1
+        assert len(_issue_applications(db, scope, account_id)) == 1
+        assert _credit(db, scope, account_id) == 500 - 144 + 300
+
+
+def test_billing_bumps_the_source_version_on_allocation_and_on_reversal(scratch):
+    scope, account_id, (doc,) = _world(scratch, balance="500.00")
+    with session(scratch, scope) as db:
+        opened = get_document_exposure(db, scope=scope, document_id=doc).source_version
+    _issue(scratch, scope, doc)
+    with session(scratch, scope) as db:
+        paid = get_document_exposure(db, scope=scope, document_id=doc).source_version
+        root = db.execute(
+            select(billing_models.AllocationEffect.id).where(
+                billing_models.AllocationEffect.effect_kind == "allocation"
+            )
+        ).scalar_one()
+        deallocate_settlement(
+            db,
+            scope=scope,
+            command=DeallocationCommand(
+                root,
+                b._money("144.00"),
+                ISSUED + timedelta(days=1),
+                str(uuid4()),
+            ),
+        )
+        db.commit()
+    with session(scratch, scope) as db:
+        reopened = get_document_exposure(
+            db, scope=scope, document_id=doc
+        ).source_version
+        assert _outstanding(db, scope, doc) == 144
+    assert opened < paid < reopened
+
+
+def test_a_reversal_then_a_rerun_pays_the_invoice_again(scratch):
+    scope, account_id, (doc,) = _world(scratch, balance="500.00")
+    _issue(scratch, scope, doc)
+    with session(scratch, scope) as db:
+        root = db.execute(
+            select(billing_models.AllocationEffect.id).where(
+                billing_models.AllocationEffect.effect_kind == "allocation"
+            )
+        ).scalar_one()
+        deallocate_settlement(
+            db,
+            scope=scope,
+            command=DeallocationCommand(
+                root,
+                b._money("144.00"),
+                ISSUED + timedelta(days=1),
+                str(uuid4()),
+            ),
+        )
+        db.commit()
+    again = _issue(scratch, scope, doc)
+    assert again.applied_document_ids == (doc,)  # new version, new source_ref
+    with session(scratch, scope) as db:
+        assert _outstanding(db, scope, doc) == 0
+        refs = [ref for ref, _ in _issue_applications(db, scope, account_id)]
+        assert len(refs) == 2 and len(set(refs)) == 2
+
+
 # --------------------------------------------------------------------------
 # Real two-session races
 # --------------------------------------------------------------------------
@@ -466,6 +605,7 @@ def test_race_two_issue_triggers_on_one_account_pay_one_whole_invoice(scratch):
 
     database = scratch[0].rsplit("/", 1)[1]
     threads = [Thread(target=attempt, args=(d,)) for d in (one, two)]
+    observed = False
     with session(scratch, scope) as holder:
         holder.execute(
             text(
@@ -473,17 +613,21 @@ def test_race_two_issue_triggers_on_one_account_pay_one_whole_invoice(scratch):
             ),
             {"i": account_id},
         )
-        for thread in threads:
-            thread.start()
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            waiting, ungranted = _blocked_on_locks(database)
-            if waiting >= 2 and ungranted >= 2:
-                break
-            time.sleep(0.2)
-        holder.rollback()
+        try:
+            for thread in threads:
+                thread.start()
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                waiting, ungranted = _blocked_on_locks(database)
+                if waiting >= 2 and ungranted >= 2:
+                    observed = True
+                    break
+                time.sleep(0.2)
+        finally:
+            holder.rollback()  # always release, so the threads can finish
     for thread in threads:
         thread.join(timeout=120)
+    assert observed, "both sessions must be seen blocked on the account lock"
     assert errors == []
     with session(scratch, scope) as db:
         remaining = sorted(_outstanding(db, scope, d) for d in (one, two))

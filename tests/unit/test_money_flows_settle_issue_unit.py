@@ -18,11 +18,11 @@ from dotmac_billing.contracts import DueDateBasisStatus
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Currency, Money
 from dotmac_money_flows import (
+    BalancePassFailed,
     DepositApplication,
     InvoiceIssuedV1,
     SettlePolicyV1,
     SettlePorts,
-    SettleRefused,
     apply_balance_on_invoice_issued,
 )
 from dotmac_money_flows import settle as flows
@@ -37,14 +37,14 @@ def _money(amount: str) -> Money:
     return Money.of(amount, NGN)
 
 
-def _doc(doc_id, amount, *, issued=0, due=0):
+def _doc(doc_id, amount, *, issued=0, due=0, version=1):
     return OpenReceivableDocumentV1(
         document_id=doc_id,
         issued_at=NOW + timedelta(days=issued),
         due_at=NOW + timedelta(days=due),
         collectible_receivable=_money(amount),
         service_ref=None,
-        source_version=1,
+        source_version=version,
         financial_state="open",
         due_at_basis=DueDateBasisStatus.VERIFIED,
     )
@@ -65,6 +65,8 @@ class _World:
         self.refuse = kw.get("refuse", {})
         self.fail_with = kw.get("fail_with")
         self.trigger = trigger
+        self.cash = kw.get("cash", [])  # (kind, credit amount, days after NOW)
+        self.statements: list[SimpleNamespace] = []
 
         def exposure(db, *, scope, document_id):
             self.calls.append("exposure")
@@ -81,6 +83,19 @@ class _World:
         def listing(db, scope, account_id, currency):
             self.calls.append("walk")
             return self.walk
+
+        def statement(db, *, scope, request):
+            self.calls.append("statement")
+            self.statements.append(request)
+            lines = [
+                SimpleNamespace(
+                    group_kind=kind,
+                    occurred_at=NOW + timedelta(days=days),
+                    delta=SimpleNamespace(available_credit=_money(amount)),
+                )
+                for kind, amount, days in self.cash
+            ]
+            return SimpleNamespace(lines=lines)
 
         def terms(db, *, scope, account_id, at):
             self.calls.append("terms")
@@ -103,6 +118,7 @@ class _World:
         monkeypatch.setattr(flows, "get_funding_availability", availability)
         monkeypatch.setattr(flows, "_walk_open_documents", listing)
         monkeypatch.setattr(flows, "get_effective_account_terms", terms)
+        monkeypatch.setattr(flows, "get_account_statement", statement)
         monkeypatch.setattr(flows, "apply_available_credit", draw)
         monkeypatch.setattr(flows, "enqueue_event", no_event)
 
@@ -149,10 +165,14 @@ def test_a_new_invoice_that_is_no_longer_open_is_a_no_op(monkeypatch):
     assert "draw" not in world.calls
 
 
-def test_a_new_invoice_missing_from_the_open_list_is_a_no_op(monkeypatch):
+def test_a_positive_invoice_missing_from_the_open_list_is_a_fault_not_a_no_op(
+    monkeypatch,
+):
     new = uuid4()
     world = _World(monkeypatch, trigger=new, documents=[_doc(uuid4(), "10.00")])
-    assert world.run().reason_code == "invoice_not_open"
+    with pytest.raises(BalancePassFailed) as caught:
+        world.run()
+    assert caught.value.code == "invoice_missing_from_open_documents"
     assert "draw" not in world.calls
 
 
@@ -202,8 +222,8 @@ def test_the_pass_pays_oldest_due_first_with_deterministic_source_refs(monkeypat
     outcome = world.run()
     assert outcome.applied_document_ids == (older, new)
     assert [c.source_ref for c in world.paid] == [
-        f"money-flows:settle:issue:{new}:{older}",
-        f"money-flows:settle:issue:{new}:{new}",
+        f"money-flows:settle:issue:{new}:{older}:1",
+        f"money-flows:settle:issue:{new}:{new}:1",
     ]
     assert [c.amount for c in world.paid] == [_money("80.00"), _money("100.00")]
 
@@ -279,7 +299,7 @@ def test_an_unreadable_open_document_list_raises_rather_than_staying_quiet(
 ):
     new = uuid4()
     world = _World(monkeypatch, trigger=new, documents=None)
-    with pytest.raises(SettleRefused) as caught:
+    with pytest.raises(BalancePassFailed) as caught:
         world.run()
     assert caught.value.code == "open_documents_unreadable"
     assert "draw" not in world.calls
@@ -296,9 +316,91 @@ def test_a_document_of_another_account_is_refused(monkeypatch):
         )
 
     monkeypatch.setattr(flows, "get_document_exposure", exposure)
-    with pytest.raises(SettleRefused):
+    with pytest.raises(BalancePassFailed) as caught:
         world.run()
+    assert caught.value.code == "document_account_mismatch"
 
 
 def test_the_trigger_is_only_a_document_id():
     assert InvoiceIssuedV1(UUID(int=1)).document_id == UUID(int=1)
+
+
+def test_the_source_reference_carries_the_documents_source_version(monkeypatch):
+    new = uuid4()
+    first = _World(monkeypatch, trigger=new, documents=[_doc(new, "10.00", version=3)])
+    first.run()
+    second = _World(monkeypatch, trigger=new, documents=[_doc(new, "10.00", version=7)])
+    second.run()
+    assert first.paid[0].source_ref.endswith(f"{new}:{new}:3")
+    assert second.paid[0].source_ref.endswith(f"{new}:{new}:7")
+    assert first.paid[0].source_ref != second.paid[0].source_ref
+
+
+def test_the_statement_is_read_from_the_earliest_base_to_a_far_bound(monkeypatch):
+    new, older = uuid4(), uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(older, "10.00", issued=1), _doc(new, "10.00", issued=5)],
+    )
+    world.run()
+    (request,) = world.statements
+    assert request.occurred_from == NOW + timedelta(days=5)  # max(trigger, doc)
+    assert request.occurred_to == datetime(9999, 12, 31, tzinfo=UTC)
+    assert request.billing_account_id == ACCOUNT
+    assert request.currency == NGN
+    assert world.calls.index("lock") < world.calls.index("statement")
+
+
+def test_cash_received_after_the_invoice_dates_moves_the_application_date(
+    monkeypatch,
+):
+    new, older = uuid4(), uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(older, "10.00", issued=1), _doc(new, "10.00", issued=5)],
+        cash=[("settlement_accepted", "50.00", 7), ("settlement_accepted", "5.00", 6)],
+    )
+    world.run()
+    assert {c.occurred_at for c in world.paid} == {NOW + timedelta(days=7)}
+
+
+def test_cash_older_than_the_invoice_dates_never_pulls_the_date_back(monkeypatch):
+    new = uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(new, "10.00", issued=5)],
+        cash=[("settlement_accepted", "50.00", 2)],
+    )
+    world.run()
+    assert world.paid[0].occurred_at == NOW + timedelta(days=5)
+
+
+def test_only_accepted_cash_that_adds_credit_counts(monkeypatch):
+    new = uuid4()
+    world = _World(
+        monkeypatch,
+        trigger=new,
+        documents=[_doc(new, "10.00", issued=5)],
+        cash=[
+            ("allocation", "50.00", 9),  # not a cash acceptance
+            ("settlement_accepted", "0.00", 8),  # adds no credit
+        ],
+    )
+    world.run()
+    assert world.paid[0].occurred_at == NOW + timedelta(days=5)
+
+
+def test_a_statement_failure_propagates_and_posts_nothing(monkeypatch):
+    new = uuid4()
+    world = _World(monkeypatch, trigger=new, documents=[_doc(new, "10.00")])
+
+    def boom(db, *, scope, request):
+        raise BillingRuleViolation("statement_too_large", "too large")
+
+    monkeypatch.setattr(flows, "get_account_statement", boom)
+    with pytest.raises(BillingRuleViolation):
+        world.run()
+    assert world.paid == []
