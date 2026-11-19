@@ -2,18 +2,23 @@
 
 `/admin/comms/suppressions` lists the tenant's suppressions (filter by channel,
 scope, address); `/admin/comms/receipts` shows what providers said about one
-address; `POST /admin/comms/suppressions/clear` clears one suppression with a
-recorded reason. Same shape as the other admin screens: thin wrappers over
-`service.py`, `render()` for HTML, the hidden-field/htmx-header CSRF contract
-(htmx `hx-post` here), "re-render at 200, don't redirect" on a refused input.
+address (by suppression id from the list, or a free address lookup);
+`POST /admin/comms/suppressions/{id}/restore` restores transactional mail for
+one suppression with a recorded reason (scope `all` -> `marketing`; the row is
+kept and marketing stays blocked). Same shape as the other admin screens: thin
+wrappers over `service.py`, `render()` for HTML, the htmx-header CSRF contract,
+"re-render at 200, don't redirect" on a refused input.
+
+Links and redirects carry the suppression id, not the address, so the address
+stays out of access logs except on the free lookup form.
 
 Permissions are declared by this feature (`feature.py`) and checked per route:
-read for the lists, `comms.suppressions.manage` for the one mutation.
+read for the lists, `comms_operations.suppressions.manage` for the mutation.
 """
 
 from __future__ import annotations
 
-from urllib.parse import urlencode
+from uuid import UUID
 
 from dotmac_kernel.deps import get_db, require_tenant
 from dotmac_kernel.exceptions import BadRequestError
@@ -31,12 +36,20 @@ router = APIRouter(prefix="/admin/comms", tags=["web"])
 PAGE_SIZE = 20
 LIST_PATH = "/admin/comms/suppressions"
 RECEIPTS_PATH = "/admin/comms/receipts"
-CLEAR_PATH = "/admin/comms/suppressions/clear"
+RESTORE_PATH = "/admin/comms/suppressions/{suppression_id}/restore"
 #: Paths handed to the templates, so no template authors a facet prefix.
-_URLS = {"suppressions": LIST_PATH, "receipts": RECEIPTS_PATH, "clear": CLEAR_PATH}
-_CLEARED_NOTICES = {
-    "1": "Suppression cleared.",
-    "0": "No such suppression; nothing was cleared.",
+_URLS = {
+    "suppressions": LIST_PATH,
+    "receipts": RECEIPTS_PATH,
+    "restore_prefix": LIST_PATH + "/",
+}
+_RESTORED_NOTICES = {
+    "1": (
+        "Transactional mail restored; marketing stays blocked. Messages that "
+        "were suppressed earlier are not re-sent: ask the customer to request "
+        "again."
+    ),
+    "0": "No such suppression; nothing was changed.",
 }
 
 
@@ -89,11 +102,13 @@ def suppressions_index(
     channel: str = "",
     scope: str = "",
     address: str = "",
-    cleared: str = "",
+    restored: str = "",
     page: int = Query(default=1, ge=1),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    party: Party = Depends(require_web_permission("comms.suppressions.read")),
+    party: Party = Depends(
+        require_web_permission("comms_operations.suppressions.read")
+    ),
 ) -> HTMLResponse:
     try:
         return _render_suppressions(
@@ -104,7 +119,7 @@ def suppressions_index(
             scope=scope.strip(),
             address=address.strip(),
             page=page,
-            notice=_CLEARED_NOTICES.get(cleared),
+            notice=_RESTORED_NOTICES.get(restored),
         )
     except BadRequestError as exc:
         return _render_suppressions(
@@ -127,8 +142,8 @@ def _render_receipts(
     *,
     channel: str,
     address: str,
+    notice: str | None = None,
     error: str | None = None,
-    status_code: int = 200,
 ) -> HTMLResponse:
     receipts: tuple[service.ReceiptRow, ...] = ()
     suppression = None
@@ -149,10 +164,10 @@ def _render_receipts(
             "address": address,
             "receipts": receipts,
             "suppression": suppression,
+            "notice": notice,
             "error": error,
             "urls": _URLS,
         },
-        status_code=status_code,
     )
 
 
@@ -161,33 +176,52 @@ def receipts_index(
     request: Request,
     channel: str = "email",
     address: str = "",
+    suppression_id: UUID | None = None,
+    restored: str = "",
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    party: Party = Depends(require_web_permission("comms.receipts.read")),
+    party: Party = Depends(require_web_permission("comms_operations.receipts.read")),
 ) -> HTMLResponse:
+    channel = channel.strip() or "email"
+    address = address.strip()
+    if suppression_id is not None:
+        # By id: the address never rides in the URL. Tenant-scoped; an unknown
+        # or foreign id is simply "no such address".
+        row = service.get_suppression_by_id(db, tenant.id, suppression_id)
+        if row is not None:
+            channel, address = row.channel, row.address
     return _render_receipts(
-        request, db, tenant, channel=channel.strip() or "email", address=address.strip()
+        request,
+        db,
+        tenant,
+        channel=channel,
+        address=address,
+        notice=_RESTORED_NOTICES.get(restored),
     )
 
 
-@router.post("/suppressions/clear", response_model=None, name="clear_suppression")
-async def suppression_clear(
+@router.post(
+    "/suppressions/{suppression_id}/restore",
+    response_model=None,
+    name="restore_suppression",
+)
+async def suppression_restore(
+    suppression_id: UUID,
     request: Request,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    party: Party = Depends(require_web_permission("comms.suppressions.manage")),
+    party: Party = Depends(
+        require_web_permission("comms_operations.suppressions.manage")
+    ),
 ) -> HTMLResponse | RedirectResponse:
     form = await request.form()
-    channel = str(form.get("channel", "")).strip()
-    address = str(form.get("address", "")).strip()
     reason = str(form.get("reason", "")).strip()
     back = str(form.get("back", "")).strip()
     try:
-        cleared = service.clear_suppression(
+        restored = service.restore_transactional_mail(
             db,
             tenant.id,
-            channel=channel,
-            address=address,
+            suppression_id=suppression_id,
             reason=reason,
             actor_party_id=party.id,
         )
@@ -202,11 +236,11 @@ async def suppression_clear(
             page=1,
             error=str(exc),
         )
+    flag = 1 if restored else 0
     if back == "receipts":
-        query = urlencode({"channel": channel, "address": address})
-        target = f"{RECEIPTS_PATH}?{query}"
+        target = f"{RECEIPTS_PATH}?suppression_id={suppression_id}&restored={flag}"
     else:
-        target = f"{LIST_PATH}?cleared={1 if cleared else 0}"
+        target = f"{LIST_PATH}?restored={flag}"
     response = RedirectResponse(url=target, status_code=302)
     response.headers["HX-Redirect"] = target
     return response

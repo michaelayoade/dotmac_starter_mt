@@ -1,47 +1,58 @@
 """Operator view over the consent ledger and delivery receipts (ADR-0006 § 5c/5g, K-7).
 
-**Owner of:** *an operator can see why an address stopped receiving mail, and,
-on a real business case, clear that suppression with a recorded reason.*
+**Owner of:** *an operator can see why an address stopped receiving mail and,
+on a real business case, restore transactional mail with a recorded reason.*
 
-This is a thin layer over kernel primitives; it owns no table and adds no
-authority the kernel did not already expose:
+This is a thin layer over kernel primitives; it owns no table:
 
 - reads: the tenant's `communication_suppressions` (filter by channel, scope,
-  address) and `dotmac_kernel.receipts_for_address`;
-- the one mutation: `clear_suppression` = `unsuppress` plus ONE
-  `communication.suppression.cleared` audit row in the same transaction.
+  address) and `dotmac_kernel.delivery.receipts_for_address`;
+- the one mutation: `restore_transactional_mail` = the kernel's
+  `consent.restore_transactional` (scope `all` -> `marketing`; the row, its
+  reason and provenance are KEPT, marketing stays blocked, never a delete) plus
+  ONE `communication.suppression.transactional_restored` audit row in the same
+  transaction. An erasure row and a marketing opt-out are refused before any
+  change (`RestoreRefused`).
 
-Every query carries an explicit `tenant_id` predicate on top of RLS, so a bug
-in the session scope cannot widen a read. The audit row never carries the
-address (PII); it carries the suppression id and a short digest of the
-normalised address, enough to correlate with the receipts without storing it.
+Every query carries an explicit `tenant_id` predicate on top of RLS. The audit
+row never carries the address; the retained suppression id identifies the row.
+Messages suppressed earlier are NOT revived: the customer must request again.
 
 Flush-only: the caller (`dotmac_kernel.db`) owns the transaction.
 """
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.audit_actions import active_audit_actions
-from dotmac_kernel.consent import normalize_address, normalize_channel, unsuppress
+from dotmac_kernel.consent import (
+    normalize_address,
+    normalize_channel,
+    restore_transactional,
+)
 from dotmac_kernel.consent_models import (
+    REASON_ERASURE,
+    SCOPE_ALL,
     SUPPRESSION_SCOPES,
     CommunicationSuppression,
 )
 from dotmac_kernel.delivery import receipts_for_address
 from dotmac_kernel.delivery_models import CommunicationDelivery
-from dotmac_kernel.exceptions import BadRequestError, NotFoundError
+from dotmac_kernel.exceptions import BadRequestError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-AUDIT_ACTION_CLEARED = "communication.suppression.cleared"
+AUDIT_ACTION_RESTORED = "communication.suppression.transactional_restored"
 AUDIT_ENTITY_TYPE = "communication_suppression"
 MAX_REASON_LENGTH = 500
 RECEIPTS_LIMIT = 50
+
+
+class RestoreRefused(BadRequestError):
+    """The suppression may not be restored. Nothing was changed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +65,11 @@ class SuppressionRow:
     note: str | None
     created_at: object
     created_by: str | None
+
+    @property
+    def can_restore(self) -> bool:
+        """Only a transactional block on a non-erasure row can be lifted."""
+        return self.scope == SCOPE_ALL and self.reason != REASON_ERASURE
 
 
 def _view(row: CommunicationSuppression) -> SuppressionRow:
@@ -143,6 +159,18 @@ def get_suppression(
     return None if row is None else _view(row)
 
 
+def get_suppression_by_id(
+    db: Session, tenant_id: UUID, suppression_id: UUID
+) -> SuppressionRow | None:
+    row = db.execute(
+        select(CommunicationSuppression).where(
+            CommunicationSuppression.tenant_id == tenant_id,
+            CommunicationSuppression.id == suppression_id,
+        )
+    ).scalar_one_or_none()
+    return None if row is None else _view(row)
+
+
 @dataclass(frozen=True, slots=True)
 class ReceiptRow:
     id: UUID
@@ -176,77 +204,81 @@ def _receipt_view(row: CommunicationDelivery) -> ReceiptRow:
     )
 
 
-def clear_suppression(
+def restore_transactional_mail(
     db: Session,
     tenant_id: UUID,
     *,
-    channel: str,
-    address: str,
+    suppression_id: UUID,
     reason: str,
     actor_party_id: UUID,
 ) -> bool:
-    """Clear one suppression and audit it. True if a suppression was cleared.
+    """Restore transactional mail for one suppression and audit it.
 
-    Validates the reason and the declared audit action BEFORE changing state
-    (the audit table is append-only; a failed write could not be amended). A
-    missing suppression is a no-op returning False: no audit row, since nothing
-    changed.
+    Downgrades scope `all` -> `marketing` through the kernel's
+    `restore_transactional`; the row, its reason and its provenance are kept
+    and marketing stays blocked. Refuses (typed `RestoreRefused`, nothing
+    changed, no audit row) an erasure row and a marketing-only row. Validates
+    the reason and the declared audit action BEFORE changing state. Returns
+    False (no audit row) when the suppression does not exist for this tenant.
     """
-    active_audit_actions().require(AUDIT_ACTION_CLEARED)
+    active_audit_actions().require(AUDIT_ACTION_RESTORED)
     cleaned = (reason or "").strip()
     if not cleaned:
-        raise BadRequestError("clearing a suppression needs a reason")
+        raise RestoreRefused("restoring transactional mail needs a reason")
     if len(cleaned) > MAX_REASON_LENGTH:
-        raise BadRequestError(f"reason exceeds {MAX_REASON_LENGTH} characters")
+        raise RestoreRefused(f"reason exceeds {MAX_REASON_LENGTH} characters")
 
-    normalized_channel = normalize_channel(channel)
-    normalized = normalize_address(normalized_channel, address)
-    existing = (
-        db.execute(
-            select(CommunicationSuppression)
-            .where(
-                CommunicationSuppression.tenant_id == tenant_id,
-                CommunicationSuppression.channel == normalized_channel,
-                CommunicationSuppression.address == normalized,
-            )
-            .with_for_update()
-        ).scalar_one_or_none()
-        if normalized
-        else None
-    )
+    existing = db.execute(
+        select(CommunicationSuppression)
+        .where(
+            CommunicationSuppression.tenant_id == tenant_id,
+            CommunicationSuppression.id == suppression_id,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
     if existing is None:
         return False
-    details: dict[str, object] = {
-        "reason": cleaned,
-        "channel": existing.channel,
-        "scope": existing.scope,
-        "suppression_reason": existing.reason,
-        "address_sha256": hashlib.sha256(normalized.encode()).hexdigest()[:16],
-    }
-    suppression_id = existing.id
-    if not unsuppress(db, tenant_id, channel=normalized_channel, address=normalized):
-        raise NotFoundError("suppression disappeared during clear")
+    if existing.reason == REASON_ERASURE:
+        raise RestoreRefused("an erasure suppression is never lifted")
+    if existing.scope != SCOPE_ALL:
+        raise RestoreRefused(
+            "this is a marketing opt-out; only the customer can lift it"
+        )
+    previous_scope = existing.scope
+    updated = restore_transactional(
+        db, tenant_id, channel=existing.channel, address=existing.address
+    )
+    if updated is None:
+        return False
     write_audit_event(
         db,
         tenant_id=tenant_id,
         actor_party_id=actor_party_id,
         actor_type="user",
         actor_id=str(actor_party_id),
-        action=AUDIT_ACTION_CLEARED,
+        action=AUDIT_ACTION_RESTORED,
         entity_type=AUDIT_ENTITY_TYPE,
-        entity_id=str(suppression_id),
+        entity_id=str(updated.id),
         is_success=True,
-        details=details,
+        details={
+            "reason": cleaned,
+            "channel": updated.channel,
+            "previous_scope": previous_scope,
+            "new_scope": updated.scope,
+            "suppression_reason": updated.reason,
+        },
     )
     return True
 
 
 __all__ = [
-    "AUDIT_ACTION_CLEARED",
+    "AUDIT_ACTION_RESTORED",
     "MAX_REASON_LENGTH",
     "ReceiptRow",
     "SuppressionRow",
-    "clear_suppression",
+    "RestoreRefused",
+    "get_suppression_by_id",
+    "restore_transactional_mail",
     "count_suppressions",
     "get_suppression",
     "list_receipts",

@@ -10,6 +10,13 @@ here.
 
 ### Added
 
+- `dotmac_kernel.consent.restore_transactional(db, tenant_id, *, channel, address)`
+  (K-7): locks a suppression row (`FOR UPDATE`) and downgrades scope `all` ->
+  `marketing`, keeping the row, reason, note and provenance (never deletes).
+  Raises `ConsentError`, changing nothing, for an erasure row or an
+  already-marketing-only row. Additive. The K-7 operator screens ship as
+  kernel packaged templates under `admin/comms/`.
+
 - K-6 follow-up: kernel migration `0034_receipts_platform_ro` revokes UPDATE and
   DELETE on `communication_deliveries` from `platform_api` (the `app_user` side
   was `0033`). Privilege tightening only; down restores the grant. Nothing

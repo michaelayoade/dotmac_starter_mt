@@ -30,17 +30,24 @@
 
 - Consent and receipt operator surface (ADR-0006 § 5c/5g, K-7): the new
   `comms_operations` assembly feature adds `/admin/comms/suppressions` (the
-  tenant's consent ledger, filter by address, channel and scope) and
+  tenant's consent ledger, filter by address, channel and scope),
   `/admin/comms/receipts` (what providers reported for one address, plus its
-  suppression state), and `POST /admin/comms/suppressions/clear`, which clears
-  one suppression on an operator's stated reason and writes one
-  `communication.suppression.cleared` audit row (actor, reason, scope, a short
-  address digest; never the address). A bounce or complaint suppression blocks
-  every message including password resets, so this is where it becomes visible
-  and clearable. Declares `comms.suppressions.read`, `comms.receipts.read` and
-  `comms.suppressions.manage`, granted to `admin` in the `starter.admin`
-  profile. Additive: no table, no new write path beyond the kernel's own
-  `consent.unsuppress`; revert is a plain revert.
+  suppression state; linked by suppression id) and
+  `POST /admin/comms/suppressions/{id}/restore`. Restore does NOT delete: it
+  downgrades a scope-`all` suppression to `marketing` through the new kernel
+  `consent.restore_transactional`, keeping the row and its reason and
+  provenance, so password resets and invoices flow again while marketing stays
+  blocked (an unsubscribe that was later escalated by a bounce is not lost).
+  Erasure rows and marketing-only opt-outs are refused before any change, and
+  the screen offers the action only on `all`-scope non-erasure rows. Each
+  restore needs a reason and writes one
+  `communication.suppression.transactional_restored` audit row (actor, reason,
+  previous and new scope, suppression reason, retained suppression id; never
+  the address). Messages suppressed earlier are not re-sent; the screen says to
+  ask the customer to request again. Declares
+  `comms_operations.suppressions.read`, `comms_operations.receipts.read` and
+  `comms_operations.suppressions.manage`, granted to `admin` in the
+  `starter.admin` profile. Additive; revert is a plain revert.
 
 - A pure, storage-neutral permission provisioning contract separates
   module-owned `PermissionDefinition`s from assembly-owned `RoleDefinition`s

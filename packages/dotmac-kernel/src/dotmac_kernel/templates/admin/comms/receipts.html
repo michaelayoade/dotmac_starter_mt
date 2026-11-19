@@ -2,8 +2,8 @@
   Delivery receipts for one address (K-7).
 
   Context: `channel`, `address` (lookup), `receipts` (tuple[ReceiptRow]),
-  `suppression` (SuppressionRow | None), `error`, `urls` (`suppressions`,
-  `receipts`, `clear`). Shows what providers said (newest first) and whether
+  `suppression` (SuppressionRow | None), `notice`, `error`, `urls`
+  (`suppressions`, `receipts`, `restore_prefix`). Shows what providers said (newest first) and whether
   the address is suppressed; never message bodies.
 #}
 {% extends "layouts/admin.html" %}
@@ -20,6 +20,7 @@
   </div>
 
   {% if error %}<div class="comms-alert-error" role="alert">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="comms-alert-ok" role="status">{{ notice }}</div>{% endif %}
 
   <form method="get" action="{{ urls.receipts }}" class="comms-row" style="margin-bottom:var(--dmui-space-md);">
     <div>
@@ -37,14 +38,18 @@
   {% if suppression %}
   <div class="comms-alert-warn" role="status">
     <p style="margin-bottom:var(--dmui-space-sm);">This address is suppressed: scope <strong>{{ suppression.scope }}</strong>, reason <strong>{{ suppression.reason }}</strong>{% if suppression.scope == "all" %}. It blocks every message, including password resets{% endif %}.</p>
-    <form hx-post="{{ urls.clear }}" class="comms-row" style="align-items:center;">
-      <input type="hidden" name="channel" value="{{ suppression.channel }}" />
-      <input type="hidden" name="address" value="{{ suppression.address }}" />
+    {% if suppression.can_restore %}
+    <form hx-post="{{ urls.restore_prefix }}{{ suppression.id }}/restore" class="comms-row" style="align-items:center;">
       <input type="hidden" name="back" value="receipts" />
-      <input type="text" name="reason" required maxlength="500" placeholder="Reason for clearing"
-             aria-label="Reason for clearing this suppression" class="comms-input" />
-      <button type="submit" class="comms-button comms-danger">Clear suppression</button>
+      <input type="text" name="reason" required maxlength="500" placeholder="Reason (no personal data)"
+             aria-label="Reason for restoring transactional mail (no personal data)" class="comms-input" />
+      <button type="submit" class="comms-button comms-danger">Restore transactional mail; marketing stays blocked</button>
     </form>
+    {% elif suppression.reason == "erasure" %}
+    <p>Erasure suppressions cannot be lifted.</p>
+    {% else %}
+    <p>This is a marketing opt-out; only the customer can lift it.</p>
+    {% endif %}
   </div>
   {% else %}
   <p style="margin-bottom:var(--dmui-space-md); font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">This address is not suppressed.</p>

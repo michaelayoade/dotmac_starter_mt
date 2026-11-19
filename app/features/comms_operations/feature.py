@@ -1,9 +1,11 @@
 """Comms operations feature manifest (K-7: consent/receipt operator surface).
 
 Declares and OWNS the vocabulary this surface uses: three permissions (read
-suppressions, read receipts, clear a suppression) and one audit action. A
-suppression is cleared by an operator on a real business case, with a recorded
-reason; the surface adds no queue and no second approver.
+suppressions, read receipts, restore transactional mail) and one audit action,
+and owns the whole `comms_operations.` permission namespace. Restoring is an
+operator decision on a real business case with a recorded reason (scope `all`
+-> `marketing`; the row is kept); the surface adds no queue and no second
+approver.
 """
 
 from dotmac_kernel.features import FeatureManifest, NavItem
@@ -17,20 +19,22 @@ feature = FeatureManifest(
     nav=[NavItem("Suppressions", "/admin/comms/suppressions")],
     permissions=[
         PermissionSpec(
-            code="comms.suppressions.read",
+            code="comms_operations.suppressions.read",
             description="List the tenant's communication suppressions.",
         ),
         PermissionSpec(
-            code="comms.receipts.read",
+            code="comms_operations.receipts.read",
             description="Read the delivery receipts recorded for an address.",
         ),
         PermissionSpec(
-            code="comms.suppressions.manage",
+            code="comms_operations.suppressions.manage",
             description=(
-                "Clear a communication suppression (including a bounce or "
-                "complaint) with a recorded reason."
+                "Restore transactional mail to a suppressed address (scope "
+                "all -> marketing; the row is kept, marketing stays blocked) "
+                "with a recorded reason. Erasure rows and marketing opt-outs "
+                "cannot be restored."
             ),
         ),
     ],
-    audit_actions=["communication.suppression.cleared"],
+    audit_actions=["communication.suppression.transactional_restored"],
 )

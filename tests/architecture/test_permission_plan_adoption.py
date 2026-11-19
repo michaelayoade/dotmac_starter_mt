@@ -17,9 +17,9 @@ EXPECTED_STARTER_ADMIN_PERMISSIONS = frozenset(
         "template_studio.templates.manage",
         "template_studio.templates.publish",
         "template_studio.templates.render",
-        "comms.suppressions.read",
-        "comms.receipts.read",
-        "comms.suppressions.manage",
+        "comms_operations.suppressions.read",
+        "comms_operations.receipts.read",
+        "comms_operations.suppressions.manage",
     }
 )
 

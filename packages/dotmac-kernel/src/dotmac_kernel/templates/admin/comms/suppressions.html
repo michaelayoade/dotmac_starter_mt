@@ -1,13 +1,14 @@
 {#
   Suppressions (K-7) — the tenant's consent ledger, with a filter and a
-  clear-with-reason action per row.
+  restore-transactional-mail action per row.
 
-  Context: `rows` (list[SuppressionRow]), `page`, `total`, `total_pages`,
+  Context: `rows` (list[SuppressionRow], each with `can_restore`), `page`, `total`, `total_pages`,
   `channel`/`scope`/`address` (current filters), `error`, `notice`, `urls`
-  (`suppressions`, `receipts`, `clear` — paths supplied by the route, so no
+  (`suppressions`, `receipts`, `restore_prefix` — paths supplied by the route, so no
   facet prefix is authored here). A bounce or complaint suppression (scope
   `all`) blocks transactional mail, including password resets, until an
-  operator clears it here.
+  operator restores transactional mail here (the row is kept; marketing stays
+  blocked).
 #}
 {% extends "layouts/admin.html" %}
 
@@ -17,7 +18,7 @@
   <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--dmui-space-lg);">
     <div>
       <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary);">Suppressions</h1>
-      <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">Addresses we will not send to. A bounce or complaint blocks every message, including password resets, until cleared.</p>
+      <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">Addresses we will not send to. A bounce or complaint blocks every message, including password resets, until an operator restores transactional mail.</p>
     </div>
     <a href="{{ urls.receipts }}" class="comms-button">Delivery receipts</a>
   </div>
@@ -55,14 +56,14 @@
           <th scope="col">Scope</th>
           <th scope="col">Reason</th>
           <th scope="col">Since</th>
-          <th scope="col">Clear</th>
+          <th scope="col">Action</th>
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
         <tr>
           <td>
-            <a href="{{ urls.receipts }}?channel={{ row.channel | urlencode }}&amp;address={{ row.address | urlencode }}"
+            <a href="{{ urls.receipts }}?suppression_id={{ row.id }}"
                style="color:var(--dmui-action-primary-default); text-decoration:none; font-weight:var(--dmui-font-weight-medium);">{{ row.address }}</a>
           </td>
           <td>{{ row.channel }}</td>
@@ -70,13 +71,17 @@
           <td>{{ row.reason }}{% if row.note %} — {{ row.note }}{% endif %}</td>
           <td>{{ row.created_at | local_datetime }}</td>
           <td>
-            <form hx-post="{{ urls.clear }}" class="comms-row" style="align-items:center;">
-              <input type="hidden" name="channel" value="{{ row.channel }}" />
-              <input type="hidden" name="address" value="{{ row.address }}" />
-              <input type="text" name="reason" required maxlength="500" placeholder="Reason"
-                     aria-label="Reason for clearing {{ row.address }}" class="comms-input" />
-              <button type="submit" class="comms-button comms-danger">Clear</button>
+            {% if row.can_restore %}
+            <form hx-post="{{ urls.restore_prefix }}{{ row.id }}/restore" class="comms-row" style="align-items:center;">
+              <input type="text" name="reason" required maxlength="500" placeholder="Reason (no personal data)"
+                     aria-label="Reason for restoring transactional mail (no personal data)" class="comms-input" />
+              <button type="submit" class="comms-button comms-danger">Restore transactional mail; marketing stays blocked</button>
             </form>
+            {% elif row.reason == "erasure" %}
+            <span class="comms-empty" style="padding:0;">Erasure: cannot be lifted</span>
+            {% else %}
+            <span class="comms-empty" style="padding:0;">Marketing opt-out: only the customer can lift it</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
