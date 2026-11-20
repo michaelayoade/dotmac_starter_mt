@@ -19,9 +19,9 @@ Outcome contract with `dotmac_kernel.delivery_providers.send`:
   recipient and must not become receipts.
 * An admission refusal RAISES `SmtpAdmissionRefused` and writes no receipt. It
   IS a kernel `DeliveryDeferred` (K-4): the relay reschedules without charging
-  an attempt, bounded by `RelayPolicy.max_deferrals`. `SmtpOutcomeUnknown` still
-  becomes the kernel unknown-outcome type later (S10).
-* Today the kernel relay retries EVERY raised exception, including the ones
+  an attempt, bounded by `RelayPolicy.max_deferrals`. `SmtpOutcomeUnknown` IS a
+  kernel `DeliveryOutcomeUnknown` (K-8): the relay transport never retries it.
+* The kernel relay retries every OTHER raised exception, including the ones
   above that are operator faults. A raise therefore means "no receipt, retried
   by the relay", not "terminal"; a terminal type is a kernel follow-up.
 * Never logs or raises with the password, the message body or the recipient.
@@ -41,7 +41,7 @@ from email.policy import SMTP as SMTP_POLICY
 from email.utils import parseaddr
 from typing import Any
 
-from dotmac_kernel.delivery import DeliveryDeferred
+from dotmac_kernel.delivery import DeliveryDeferred, DeliveryOutcomeUnknown
 from dotmac_kernel.delivery_models import (
     DELIVERY_ACCEPTED,
     DELIVERY_FAILED,
@@ -123,8 +123,14 @@ class SmtpAdapterError(RuntimeError):
     """Base for adapter faults that are raised rather than returned."""
 
 
-class SmtpOutcomeUnknown(SmtpAdapterError):
-    """The message may or may not have been accepted (reply lost after DATA)."""
+class SmtpOutcomeUnknown(DeliveryOutcomeUnknown, SmtpAdapterError):
+    """The message may or may not have been accepted (reply lost after DATA).
+
+    A kernel `DeliveryOutcomeUnknown` (K-8): the relay transport does NOT retry
+    it (SMTP ignores the dispatch idempotency key, so a retry can double-send);
+    it dead-letters the event at once and marks the dispatch `dead` with an
+    audit row for the operator. `DeliveryOutcomeUnknown` comes first in the MRO
+    so its `reason` initialiser runs."""
 
 
 class SmtpAuthenticationError(SmtpAdapterError):

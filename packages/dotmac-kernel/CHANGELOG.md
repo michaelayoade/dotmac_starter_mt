@@ -10,6 +10,21 @@ here.
 
 ### Added
 
+- Entry fixes for K-8. Exhausted attempts and the deferral bound now move the
+  DISPATCH to `dead` as well as the outbox row (`DeadLetterAware.dead_letter`,
+  run by the worker and committed before the row is settled; if it fails the
+  row is left claimed and reclaimed), so S8's requeue-dead works on it.
+  `DeliveryOutcomeUnknown` (an adapter could not tell whether the provider took
+  the message) and `DeliveryTerminal` (a transport verdict: dead-letter now, no
+  retry) are new in `dotmac_kernel.delivery`; the worker dead-letters on
+  `DeliveryTerminal` at once, uncharged. An unknown outcome is never retried
+  (a retry can double-send): the dispatch goes `dead` and one
+  `communication.dispatch.outcome_unknown` audit row (new Kernel audit action)
+  records it for the operator. New helpers: `delivery_dispatch.settle_dispatch`,
+  `relay.record_dead_letter`, `relay.failure_dead_letters`,
+  `relay.deferral_dead_letters`. `SmtpOutcomeUnknown` in `dotmac-delivery-smtp`
+  is now a `DeliveryOutcomeUnknown`.
+
 - `dotmac_kernel.consent.restore_transactional(db, tenant_id, *, channel, address)`
   (K-7): locks a suppression row (`FOR UPDATE`) and downgrades scope `all` ->
   `marketing`, keeping the row, reason, note and provenance (never deletes).

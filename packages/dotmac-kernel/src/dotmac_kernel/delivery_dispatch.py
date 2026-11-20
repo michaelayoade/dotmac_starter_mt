@@ -71,8 +71,12 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.delivery import DeliveryError
 from dotmac_kernel.delivery_models import (
+    DISPATCH_DEAD,
+    DISPATCH_FAILED,
     DISPATCH_HISTORY,
     DISPATCH_PENDING,
+    DISPATCH_SENT,
+    DISPATCH_SUPPRESSED,
     CommunicationDispatch,
 )
 from dotmac_kernel.delivery_providers import AttachmentRef, OutboundMessage
@@ -474,6 +478,42 @@ def load_dispatch(db: Session, tenant_id: UUID, dispatch_id: UUID) -> LoadedDisp
     return LoadedDispatch(dispatch=row, message=message)
 
 
+#: The terminal states the relay transport (K-8) may record from `pending`.
+_SETTLE_TARGETS = frozenset(
+    {DISPATCH_SENT, DISPATCH_FAILED, DISPATCH_DEAD, DISPATCH_SUPPRESSED}
+)
+
+
+def settle_dispatch(
+    db: Session, tenant_id: UUID, dispatch_id: UUID, status: str
+) -> bool:
+    """Move one `pending` dispatch to a terminal `status` (K-8).
+
+    Returns True when THIS call changed it. A dispatch that is not `pending`
+    (already terminal, a history row, another tenant's, unknown) is left alone
+    and returns False, so a repeated or racing call is a no-op and a terminal
+    state is never overwritten. Takes the row lock; flush-only, the caller owns
+    the transaction. The database guard trigger enforces the same transitions.
+    """
+    if status not in _SETTLE_TARGETS:
+        raise ValueError(f"cannot settle a dispatch to {status!r}")
+    row = db.execute(
+        select(CommunicationDispatch)
+        .where(
+            CommunicationDispatch.tenant_id == tenant_id,
+            CommunicationDispatch.dispatch_id == dispatch_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if row is None or row.status != DISPATCH_PENDING:
+        return False
+    row.status = status
+    row.terminal_at = func.now()
+    db.flush()
+    return True
+
+
 __all__ = [
     "DISPATCH_EVENT_TYPE",
     "DispatchConflict",
@@ -489,4 +529,5 @@ __all__ = [
     "import_history_key",
     "import_pending",
     "load_dispatch",
+    "settle_dispatch",
 ]

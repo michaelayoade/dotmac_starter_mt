@@ -358,6 +358,8 @@
       "exports": [
         "DeliveryDeferred",
         "DeliveryError",
+        "DeliveryOutcomeUnknown",
+        "DeliveryTerminal",
         "latest_receipt_for_dispatch",
         "receipts_for_address",
         "record_receipt"
@@ -380,7 +382,8 @@
         "find_dispatch_by_key",
         "import_history_key",
         "import_pending",
-        "load_dispatch"
+        "load_dispatch",
+        "settle_dispatch"
       ],
       "status": "declared"
     },
@@ -847,6 +850,9 @@
         "FailureOutcome",
         "RelayPolicy",
         "claim_batch",
+        "deferral_dead_letters",
+        "failure_dead_letters",
+        "record_dead_letter",
         "record_deferral",
         "record_failure",
         "record_success"
@@ -856,6 +862,7 @@
     "dotmac_kernel.messaging.worker": {
       "classification": "supported",
       "exports": [
+        "DeadLetterAware",
         "DeliveryTransport",
         "LoggingTransport",
         "SessionFactory",

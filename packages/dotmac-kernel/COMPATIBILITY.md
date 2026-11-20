@@ -236,7 +236,7 @@ Two rules travel with it:
 | `dotmac_kernel.session_runtime` | `DatabaseRuntime`, `TenantLookup`, `CANONICAL_TENANT_SETTING` |
 | `dotmac_kernel.db` | `runtime`, `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_scope`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
 | `dotmac_kernel.transactions` | `conflict_savepoint` — engine-free SAVEPOINT mechanics for services that receive a caller-owned session; the caller's boundary still owns the outer commit or rollback |
-| `dotmac_kernel.delivery` | `DeliveryDeferred` (K-4 hold outcome, no receipt, not charged), `DeliveryError`, `latest_receipt_for_dispatch`, `receipts_for_address`, `record_receipt` |
+| `dotmac_kernel.delivery` | `DeliveryDeferred` (K-4 hold outcome, no receipt, not charged), `DeliveryError`, `DeliveryOutcomeUnknown` (adapter could not tell whether the provider took the message; never retried), `DeliveryTerminal` (transport verdict: dead-letter now), `latest_receipt_for_dispatch`, `receipts_for_address`, `record_receipt` |
 | `dotmac_kernel.delivery_models` | `DELIVERY_ACCEPTED`, `DELIVERY_BOUNCED`, `DELIVERY_COMPLAINT`, `DELIVERY_DELIVERED`, `DELIVERY_FAILED`, `DELIVERY_REJECTED`, `DELIVERY_STATUSES`, `SUPPRESSING_STATUSES`, `CommunicationDelivery` |
 | `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage` (parts `text`/`html`, allowlisted `headers`, `attachments`), `AttachmentRef`, `ALLOWED_HEADERS`, `ALLOWED_ATTACHMENT_CONTENT_TYPES`, `MAX_PART_BYTES`, `FEATURE_HTML`, `FEATURE_ATTACHMENTS`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
 | `dotmac_kernel.delivery_requeue` | `requeue_dead_dispatch`, `RequeueResult`, `RequeueRefused`, `AUDIT_ACTION_REQUEUED`, `MAX_REASON_LENGTH` (K-5 audited requeue of a dead dispatch) |
@@ -260,9 +260,9 @@ Two rules travel with it:
 | `dotmac_kernel.messaging.inbox` | `process_once`, `ProcessOutcome`, `CommandHandler` |
 | `dotmac_kernel.messaging.outbox` | `enqueue_event`, `enqueue_platform_event` |
 | `dotmac_kernel.messaging.platform` | `process_once_platform`, `PlatformCommandHandler` |
-| `dotmac_kernel.messaging.relay` | `RelayPolicy` (incl. `max_deferrals`), `ClaimedEvent`, `FailureOutcome`, `DeferralOutcome`, `claim_batch`, `record_success`, `record_failure`, `record_deferral` (WS3 relay behavior; dispatcher-bound session; see "Outbox/inbox" below) |
+| `dotmac_kernel.messaging.relay` | `RelayPolicy` (incl. `max_deferrals`), `ClaimedEvent`, `FailureOutcome`, `DeferralOutcome`, `claim_batch`, `record_success`, `record_failure`, `record_deferral`, `record_dead_letter`, `failure_dead_letters`, `deferral_dead_letters` (WS3 relay behavior; dispatcher-bound session; see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.platform_relay` | `ClaimedPlatformEvent`, `claim_platform_batch`, `record_success`, `record_failure` (platform relay behavior; reuses `relay`'s `RelayPolicy`/`FailureOutcome`/backoff; `platform_outbox_dispatcher`-bound session) |
-| `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
+| `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `DeadLetterAware` (optional transport hook run before the outbox row goes dead), `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
 | `dotmac_kernel.messaging.platform_worker` | `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `run_once`, `run_forever` (platform relay worker; dispatcher claims/settles, delivery on a separate `platform_api` session with no tenant context; run via `scripts/run_platform_relay.py`) |
 | `dotmac_kernel.messaging.models` | `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` |
 | `dotmac_kernel.fingerprints` | `fingerprint_of` (canonical payload digest, no persistence or configured database required — import this rather than `idempotency` when you only need identity) |
