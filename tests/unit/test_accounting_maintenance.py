@@ -55,6 +55,7 @@ def db() -> Iterator[Session]:
         yield session
     engine.dispose()
 
+
 _CHANGE_CLOCK = itertools.count(1)
 
 
