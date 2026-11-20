@@ -8818,7 +8818,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "20261119_0034_receipts_platform_append_only.py",
         }
     ),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
