@@ -85,3 +85,16 @@ returns the balanced fact Dr bank cash GL / Cr liability account for the
 assembly to post. The additive migration is `py_0003_settlement_reversal`; its
 downgrade refuses once a reversal exists. This declaration is not publication
 evidence.
+
+The declared `0.1.0a6` successor adds `adjust_liability`, an audited signed
+adjustment of one liability (for example writing down unclaimed salary). The
+adjustment lives in the append-only `payroll_liability_adjustments` table and
+the `amount_adjusted` column; `payroll_liabilities.amount` is never changed, so
+the run consequence still matches its calculation. `effective_liability_amount`
+(`amount + amount_adjusted`) is what settlement compares against and what a
+payout adapter must pay. `build_liability_adjustment_consequence` returns the
+balanced fact (write-down: Dr liability account / Cr offset; increase: the
+reverse). No second person is required; corrections are made forward with an
+opposite adjustment. The additive migration is `py_0004_liability_adjustments`;
+its downgrade refuses once an adjustment exists. This declaration is not
+publication evidence.

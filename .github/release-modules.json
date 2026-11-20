@@ -2586,6 +2586,7 @@
           "dotmac_payroll/migrations/versions/py_0001_payroll.py",
           "dotmac_payroll/migrations/versions/py_0002_mode_and_run_cancel.py",
           "dotmac_payroll/migrations/versions/py_0003_settlement_reversal.py",
+          "dotmac_payroll/migrations/versions/py_0004_liability_adjustments.py",
           "dotmac_payroll/models.py",
           "dotmac_payroll/service.py"
         ],

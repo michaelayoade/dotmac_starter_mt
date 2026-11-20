@@ -23,7 +23,7 @@ MIGRATION = SOURCE / "migrations/versions/py_0001_payroll.py"
 
 def test_manifest_allocates_one_tenant_only_payroll_lineage() -> None:
     assert module.code == "payroll"
-    assert module.version == "0.1.0a5"
+    assert module.version == "0.1.0a6"
     assert module.short_code == "payroll"
     assert module.migration_prefix == "py"
     assert module.migration_branch == "payroll"
@@ -132,8 +132,10 @@ def test_payroll_migration_forces_rls_and_protects_calculation_evidence() -> Non
     source = MIGRATION.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", " ", source)
     assert "protect_payroll_evidence" in source
-    # The a5 reversal table is created by py_0003 (checked separately below).
-    for table in (x for x in module.tables if x != "payroll_settlement_reversals"):
+    # The a5 reversal and a6 adjustment tables are created by py_0003 / py_0004
+    # (each checked separately below).
+    _LATER_TABLES = {"payroll_settlement_reversals", "payroll_liability_adjustments"}
+    for table in (x for x in module.tables if x not in _LATER_TABLES):
         assert (
             f"ALTER TABLE {module.db_schema}.{table} ENABLE ROW LEVEL SECURITY"
             in compact
@@ -177,3 +179,16 @@ def test_payroll_a5_migration_chain_revision_and_append_only_reversal() -> None:
     assert "GRANT SELECT, INSERT ON" in source
     assert "downgrade refused" in source
     assert models.PayrollSettlementReversal.__tablename__ in module.tables
+
+
+def test_payroll_a6_migration_chain_revision_and_append_only_adjustments() -> None:
+    migration = SOURCE / "migrations/versions/py_0004_liability_adjustments.py"
+    source = migration.read_text(encoding="utf-8")
+    assert 'revision = "py_0004_liability_adjustments"' in source
+    assert 'down_revision = "py_0003_settlement_reversal"' in source
+    assert len("py_0004_liability_adjustments") <= 32
+    assert "protect_payroll_evidence" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "GRANT SELECT, INSERT ON" in source
+    assert "downgrade refused" in source
+    assert models.PayrollLiabilityAdjustment.__tablename__ in module.tables
