@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-customers"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant customer accounts, profiles, and party references"
 authors = ["DotMac"]
 readme = "README.md"
