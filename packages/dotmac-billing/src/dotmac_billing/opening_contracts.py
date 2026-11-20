@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from datetime import datetime
 from types import UnionType
-from typing import Protocol, get_args, get_origin, get_type_hints
+from typing import Literal, Protocol, get_args, get_origin, get_type_hints
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope, TenantScope
@@ -20,6 +20,10 @@ class OpeningEvidenceError(ValueError):
 
 
 def _matches(value: object, expected: object) -> bool:
+    if get_origin(expected) is Literal:
+        return any(
+            type(value) is type(item) and value == item for item in get_args(expected)
+        )
     if get_origin(expected) is UnionType:
         return any(_matches(value, item) for item in get_args(expected))
     if get_origin(expected) is tuple:

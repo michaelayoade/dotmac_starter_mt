@@ -15,13 +15,17 @@ from dotmac_billing import service as s
 from dotmac_billing.commands import IssueCreditNote
 from dotmac_billing.errors import BillingRuleViolation
 from dotmac_billing.opening_commands import ReverseOpeningAccountImportV1
-from dotmac_billing.opening_contracts import OpeningSourceIdentityV1
+from dotmac_billing.opening_contracts import (
+    OpeningEvidenceError,
+    OpeningSourceIdentityV1,
+)
 from dotmac_billing.opening_variance import (
     list_opening_variances,
     opening_control_report,
     require_resolution_primitive,
 )
 from dotmac_billing.opening_variance_contracts import (
+    ConfirmOpeningVarianceEvidenceV1,
     OpeningVarianceApprovalV1,
     OpeningVarianceResolutionRefV1,
     OpeningVarianceV1,
@@ -139,9 +143,11 @@ def _carrying_command(session, scope, *, exact: bool = False, gap: bool = False)
     return replace(cmd, manifest=manifest)
 
 
-def _imported(session, scope, *, seal: bool = True, gap: bool = False):
+def _imported(
+    session, scope, *, seal: bool = True, gap: bool = False, dual_control: str = "on"
+):
     cmd = _carrying_command(session, scope, gap=gap)
-    cash._prepare_window(session, scope, cmd)
+    cash._prepare_window(session, scope, cmd, dual_control)
     session.commit()
     receipt = cash._import_command(
         session,
@@ -816,3 +822,194 @@ def test_the_seal_set_check_refuses_a_recorded_set_that_differs_from_the_manifes
             is False
         )
         assert matches("jsonb_set({m}, '{variances}', '[]'::jsonb)") is False
+
+
+# --- R4b: variance and control-gap approval follow the window's dual_control ---
+
+
+class NeverCalledApprovals:
+    """OFF consults no Approvals port at all."""
+
+    calls = 0
+
+    def hold_approval(self, *args, **kwargs):
+        type(self).calls += 1
+        raise AssertionError("approvals must not be consulted when dual_control is off")
+
+
+def _off_command(scope, variance, amount, **overrides):
+    values = {
+        "scope": scope,
+        "variance_id": variance.variance_id,
+        "amount_minor": amount,
+        "gl_target_class": "bad_debt",
+        "approval_request_id": None,
+        "maker_ref": "maker:v",
+        "idempotency_key": f"recognise:{uuid4()}",
+        "occurred_at": evidence.NOW,
+    }
+    values.update(overrides)
+    return RecogniseOpeningVarianceV1(**values)
+
+
+def test_off_recognises_and_confirms_without_an_approval_and_records_it(scratch):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _imported(session, scope, dual_control="off")
+        _records, by_amount = _ids(session, scope)
+        assert (
+            s.recognise_opening_variance(
+                session,
+                scope=scope,
+                command=_off_command(scope, by_amount[300], 300),
+                approvals=NeverCalledApprovals(),
+            )
+            == "resolved"
+        )
+        assert (
+            s.confirm_opening_variance_evidence(
+                session,
+                scope=scope,
+                command=ConfirmOpeningVarianceEvidenceV1(
+                    scope,
+                    by_amount[500].variance_id,
+                    500,
+                    "evidence:memo",
+                    None,
+                    "maker:v",
+                    f"confirm:{uuid4()}",
+                    evidence.NOW,
+                ),
+                approvals=None,
+            )
+            == "resolved"
+        )
+        session.commit()
+        assert NeverCalledApprovals.calls == 0
+        rows = session.execute(
+            text(
+                "SELECT kind, maker_ref, approver_refs, approval_request_id, actor "
+                "FROM mod_billing.opening_variance_events "
+                "WHERE kind IN ('resolving','resolved')"
+            )
+        ).all()
+        assert len(rows) == 4
+        for row in rows:
+            assert row.approval_request_id is None and row.approver_refs == []
+            assert row.maker_ref == row.actor == "maker:v"
+
+
+def test_off_refuses_a_supplied_approval_and_keeps_the_other_checks(scratch):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _imported(session, scope, dual_control="off")
+        _records, by_amount = _ids(session, scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            s.recognise_opening_variance(
+                session,
+                scope=scope,
+                command=_off_command(
+                    scope, by_amount[300], 300, approval_request_id=uuid4()
+                ),
+                approvals=VarianceApprovals(),
+            )
+        assert refused.value.code.endswith("opening_variance_approval_not_applicable")
+        session.rollback()
+        for variance, amount in ((by_amount[-700], -700), (by_amount[500], 500)):
+            with pytest.raises(BillingRuleViolation) as refused:  # adverse and memo
+                s.recognise_opening_variance(
+                    session,
+                    scope=scope,
+                    command=_off_command(scope, variance, amount),
+                    approvals=None,
+                )
+            assert refused.value.code.endswith("variance_recognise_adverse")
+            session.rollback()
+        with pytest.raises(OpeningEvidenceError):  # a maker is mandatory
+            _off_command(scope, by_amount[300], 300, maker_ref=" ")
+
+
+def test_on_without_an_approval_id_is_refused(scratch):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _imported(session, scope)  # "on"
+        _records, by_amount = _ids(session, scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            s.recognise_opening_variance(
+                session,
+                scope=scope,
+                command=_off_command(scope, by_amount[300], 300),
+                approvals=VarianceApprovals(),
+            )
+        assert refused.value.code.endswith("opening_variance_approval_missing")
+        session.rollback()
+
+
+def test_database_enforces_the_off_policy_on_variance_events(scratch):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _imported(session, scope, dual_control="off")
+        row = _row(session, 300)
+        for bad in (
+            {"req": uuid4(), "refs": "[]"},  # a supplied approval id
+            {"req": None, "refs": '["checker:v"]'},  # a supplied approver
+            {"req": None, "refs": "null"},
+            {"req": None, "refs": "[]", "maker": ""},  # a maker stays mandatory
+            {"req": None, "refs": "[]", "actor": "someone:else"},
+        ):
+            _refused(session, row=row, **bad)
+        _event(session, row["window_id"], row, req=None, refs="[]")  # valid
+
+
+def test_off_control_gap_resolution_takes_no_approval(scratch):
+    scope, url = _scope(scratch)
+    with cash._session(scratch, url, scope) as session:
+        _imported(session, scope, gap=True, dual_control="off")
+        gap = (
+            session.execute(
+                text(
+                    "SELECT id, tenant_id, window_id, billing_account_id "
+                    "FROM mod_billing.opening_control_gaps"
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+        def insert(**values):
+            row = {
+                "id": uuid4(),
+                "t": gap["tenant_id"],
+                "w": gap["window_id"],
+                "g": gap["id"],
+                "a": gap["billing_account_id"],
+                "ev": "rebuild-run:1",
+                "maker": "maker:g",
+                "refs": "[]",
+                "req": None,
+                "actor": "maker:g",
+            }
+            row.update(values)
+            session.execute(
+                text(
+                    "INSERT INTO mod_billing.opening_control_gap_events (id, "
+                    "tenant_id, window_id, gap_id, billing_account_id, kind, "
+                    "evidence_ref, maker_ref, approver_refs, approval_request_id, "
+                    "actor, occurred_at) VALUES (:id, :t, :w, :g, :a, 'resolved', "
+                    ":ev, :maker, CAST(:refs AS jsonb), :req, :actor, now())"
+                ),
+                row,
+            )
+
+        for bad in (
+            {"req": uuid4()},
+            {"refs": '["checker:g"]'},
+            {"ev": None},  # the evidence reference stays mandatory
+            {"maker": ""},
+            {"actor": "someone:else"},
+        ):
+            with pytest.raises(DBAPIError) as refused:
+                with session.begin_nested():
+                    insert(**bad)
+            assert refused.value.orig.sqlstate == "23514"
+        insert()  # valid: no approval, everything else present

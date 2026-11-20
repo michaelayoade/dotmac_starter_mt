@@ -8779,8 +8779,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
         }
     ),
     # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
-    # frozen. `bi_0018` (account terms) is a13's, editable until a13 is tagged.
-    "dotmac-billing": frozenset({"bi_0018_account_terms.py"}),
+    # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
+    # two-person policy) are a13's, editable until a13 is tagged.
+    "dotmac-billing": frozenset(
+        {"bi_0018_account_terms.py", "bi_0019_opening_dual_control.py"}
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),

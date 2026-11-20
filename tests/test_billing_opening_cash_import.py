@@ -166,12 +166,16 @@ def _as_opening_principal(session):
         assert session.scalar(text("SELECT current_user")) == ordinary
 
 
-def _prepare_window(session, scope, command):
+def _prepare_window(session, scope, command, dual_control="on"):
     """Explicitly freeze the entire scenario manifest before admission."""
     scratch = session.info["opening_scratch"]
     if scope not in scratch.windows:
         scratch.windows[scope] = window_fixture._provision(
-            scratch, scope, session.info["opening_principal"], command
+            scratch,
+            scope,
+            session.info["opening_principal"],
+            command,
+            dual_control,
         )
     return scratch.windows[scope]
 

@@ -79,7 +79,7 @@
     },
     "dotmac-billing": {
       "declared": "0.1.0a13",
-      "reason": "UNRELEASED SOURCE for the account-terms change (bi_0018: append-only account and tenant-default terms versions, record_account_terms, record_default_terms, get_effective_account_terms), approved by Michael 2026-11-16. 0.1.0a12 is published and tagged (dotmac-billing-v0.1.0a12); a13 source no longer matches those bytes. This row is not publication or adoption evidence. Remove it only via the verified a13 release record.",
+      "reason": "UNRELEASED SOURCE for the account-terms change (bi_0018: append-only account and tenant-default terms versions, record_account_terms, record_default_terms, get_effective_account_terms), approved by Michael 2026-11-16, and for the receivable control position read (get_receivable_control_position_v1, R1) and the optional per-window opening two-person approval (bi_0019: dual_control for held-partition admission, variance and control-gap resolution, R4/R4b), approved by Michael 2026-11-19. 0.1.0a12 is published and tagged (dotmac-billing-v0.1.0a12); a13 source no longer matches those bytes. This row is not publication or adoption evidence. Remove it only via the verified a13 release record.",
       "state": "declared-unpublished"
     },
     "dotmac-brand-profiles": {

@@ -353,7 +353,7 @@ class OpeningVarianceResolutionRefV1(_ClosedEvidence):
 
     variance_id: UUID
     amount_minor: int
-    approval_request_id: UUID
+    approval_request_id: UUID | None  # None exactly when dual_control is "off"
     maker_ref: str
 
     def __post_init__(self) -> None:
@@ -374,7 +374,7 @@ class RecogniseOpeningVarianceV1(_ClosedEvidence):
     variance_id: UUID
     amount_minor: int
     gl_target_class: str
-    approval_request_id: UUID
+    approval_request_id: UUID | None  # None exactly when dual_control is "off"
     maker_ref: str
     idempotency_key: str
     occurred_at: datetime
@@ -397,7 +397,7 @@ class ConfirmOpeningVarianceEvidenceV1(_ClosedEvidence):
     variance_id: UUID
     amount_minor: int
     evidence_ref: str
-    approval_request_id: UUID
+    approval_request_id: UUID | None  # None exactly when dual_control is "off"
     maker_ref: str
     idempotency_key: str
     occurred_at: datetime
@@ -537,7 +537,7 @@ class OpeningVarianceResolutionFactV1(OpeningCashValue):
         Literal["bad_debt", "revenue_adjustment", "customer_liability"] | None
     )
     corrected_by_posting_group_id: UUID | None
-    approval_request_id: UUID
+    approval_request_id: UUID | None  # None exactly when dual_control is "off"
     maker_ref: str
     approver_refs: tuple[str, ...]
 
@@ -545,7 +545,7 @@ class OpeningVarianceResolutionFactV1(OpeningCashValue):
         OpeningCashValue.__post_init__(self)
         if (
             len(set(self.approver_refs)) != len(self.approver_refs)
-            or not self.approver_refs
+            or (self.approval_request_id is None) != (not self.approver_refs)
             or self.maker_ref in self.approver_refs
             or (self.resolution_kind == "recognised")
             != (self.gl_target_class is not None)
