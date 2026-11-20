@@ -11,6 +11,11 @@ here, in Python — the SQL functions stay mechanical):
 - `record_success` — settle a delivered event to `sent`.
 - `record_failure` — increment attempts and either back off (`pending`, future
   `available_at`) or dead-letter (`dead`, retained) at `max_attempts`.
+- `record_dead_letter` — an immediate, non-retryable dead-letter (a transport's
+  `DeliveryTerminal`, K-8), retained for the audited requeue.
+- `failure_dead_letters` / `deferral_dead_letters` — whether the NEXT failure or
+  deferral will dead-letter, so a transport can settle its own dead state
+  before the outbox row goes dead.
 - `record_deferral` — a `DeliveryDeferred` hold (K-4): reschedule (`pending`,
   future `available_at`) WITHOUT charging an attempt, bounded by
   `RelayPolicy.max_deferrals`, after which the event is dead-lettered.
@@ -198,6 +203,39 @@ def record_failure(
     return FailureOutcome(event_id, next_attempts, False, retry_at)
 
 
+def failure_dead_letters(attempts: int, policy: RelayPolicy = RelayPolicy()) -> bool:
+    """True when `record_failure` with this claimed `attempts` dead-letters."""
+    return attempts + 1 >= policy.max_attempts
+
+
+def deferral_dead_letters(deferrals: int, policy: RelayPolicy = RelayPolicy()) -> bool:
+    """True when `record_deferral` with this claimed `deferrals` dead-letters."""
+    return deferrals + 1 > policy.max_deferrals
+
+
+def record_dead_letter(
+    db: Session,
+    *,
+    event_id: UUID,
+    worker_id: str,
+    attempts: int,
+    error: str,
+) -> None:
+    """Dead-letter an event NOW, without further retries (K-8). Used when a
+    transport says the outcome must not be retried (an unknown provider outcome
+    could double-send). `attempts` is passed back unchanged. The row is retained
+    as `dead`; the audited requeue is the only way back in."""
+    db.execute(
+        text("SELECT settle_outbox_event(:id, :w, 'dead', NULL, :a, :e)"),
+        {
+            "id": str(event_id),
+            "w": worker_id,
+            "a": attempts,
+            "e": error[:_ERR_MAX],
+        },
+    )
+
+
 def _parse_deferrals(last_error: str | None) -> int:
     """The deferral count from a `deferred:<n>: ...` marker; 0 for anything else
     (a failure overwrites `last_error`, which correctly resets the run)."""
@@ -265,6 +303,9 @@ __all__ = [
     "FailureOutcome",
     "RelayPolicy",
     "claim_batch",
+    "deferral_dead_letters",
+    "failure_dead_letters",
+    "record_dead_letter",
     "record_deferral",
     "record_failure",
     "record_success",
