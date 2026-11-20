@@ -437,6 +437,19 @@ class AccountTermsChangedV1:
 
 
 @dataclass(frozen=True, slots=True)
+class AccountCreditChangedV1:
+    """Spendable credit may have risen on an account: re-check its pending charges.
+
+    The account is the only claim; everything else is re-read from Billing, so a
+    mis-routed event only causes an early, harmless re-check. ``after`` is set
+    only on a continuation event.
+    """
+
+    billing_account_id: UUID
+    after: FundedChargeCursorV1 | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FundedChargeOutcomeV1:
     """What a call decided. References only."""
 
@@ -447,6 +460,19 @@ class FundedChargeOutcomeV1:
     billing_account_id: UUID
     document_id: UUID | None
     replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CreditRecheckOutcomeV1:
+    """What an account-credit re-check decided. References only.
+
+    ``reason_code`` names a quiet no-op (``no_pending_charges``, ``no_balance``,
+    ``nothing_fits``) and is None when at least one pending charge changed.
+    """
+
+    billing_account_id: UUID
+    changed: tuple[FundedChargeOutcomeV1, ...]
+    reason_code: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,6 +528,7 @@ class FundedChargeStepFailed(Exception):
 
 
 __all__ = [
+    "AccountCreditChangedV1",
     "AccountTermsChangedV1",
     "DEFAULT_ACCEPTED_SOURCES",
     "FUNDED_CHARGE_DEFINITION_VERSION",
@@ -511,6 +538,7 @@ __all__ = [
     "WITHHOLDING_SOURCE",
     "SETTLE_INSERT_STATES",
     "SETTLE_TRANSITIONS",
+    "CreditRecheckOutcomeV1",
     "DepositApplication",
     "FundedChargeCursorV1",
     "FundedChargeInstanceV1",
