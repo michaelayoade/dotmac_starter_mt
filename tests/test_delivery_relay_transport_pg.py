@@ -292,25 +292,26 @@ def test_unknown_outcome_is_terminal_audited_and_never_retried(
 
 
 def test_unknown_outcome_stays_dead_even_if_its_audit_write_fails(
-    admin_session, tenant_a, factories, relay_registries, cleanup, monkeypatch
+    admin_session,
+    tenant_a,
+    factories,
+    audit_registry,
+    relay_registries,
+    cleanup,
+    monkeypatch,
 ) -> None:
-    from dotmac_kernel import audit_actions, delivery_relay
-    from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+    from dotmac_kernel import delivery_relay
 
-    install_audit_actions(AuditActionRegistry.from_manifests(()))
-    try:
-        did = make_dispatch(factories, tenant_a)
+    did = make_dispatch(factories, tenant_a)
 
-        def boom(*a, **k):
-            raise RuntimeError("audit store down")
+    def boom(*a, **k):
+        raise RuntimeError("audit store down")
 
-        monkeypatch.setattr(delivery_relay, "write_audit_event", boom)
-        h = Harness([DeliveryOutcomeUnknown("reply lost")])
-        run(factories, h.transport, POLICY)
-        assert dispatch_row(admin_session, did).status == "dead"
-        assert outbox_rows(admin_session, tenant_a)[0].status == "dead"
-    finally:
-        audit_actions._active_registry = None
+    monkeypatch.setattr(delivery_relay, "write_audit_event", boom)
+    h = Harness([DeliveryOutcomeUnknown("reply lost")])
+    run(factories, h.transport, POLICY)
+    assert dispatch_row(admin_session, did).status == "dead"
+    assert outbox_rows(admin_session, tenant_a)[0].status == "dead"
 
 
 def test_the_unknown_audit_action_must_be_writable_before_any_send(
@@ -329,7 +330,7 @@ def test_the_unknown_audit_action_must_be_writable_before_any_send(
     except AuditActionsNotInstalledError:
         previous = None
     audit_actions._active_registry = None
-    try:
+    try:  # restored below, whatever the session had
         make_dispatch(factories, tenant_a)
         h = Harness(["accepted"])
         run(factories, h.transport, POLICY)
