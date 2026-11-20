@@ -1213,9 +1213,9 @@ def _cp6_export_premise(source: str) -> bool:
             return False
         if isinstance(node, ast.arg) and node.arg in _CP6_FORBIDDEN_NAMES:
             return False
-        if isinstance(node, ast.Attribute) and node.attr in (
-            _CP6_FORBIDDEN_ATTRIBUTES | _CP6_FORBIDDEN_NAMES
-        ):
+        # `re.compile` is legitimate, so attributes are judged against their own
+        # set, not the bare-name set.
+        if isinstance(node, ast.Attribute) and node.attr in _CP6_FORBIDDEN_ATTRIBUTES:
             return False
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             if "write_lease" in node.value or "write_store_record" in node.value:
