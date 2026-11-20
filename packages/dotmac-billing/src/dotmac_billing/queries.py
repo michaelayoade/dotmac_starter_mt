@@ -22,6 +22,8 @@ from dotmac_billing.contracts import (
     DOCUMENT_FACT_V2_CONTRACT,
     DOCUMENT_FACT_V3_CONTRACT,
     AccountingFactV1,
+    AccountingFactV2,
+    AccountingFactV3,
     BillingAccountObservationV1,
     CurrentCashCreditDrawV1,
     CurrentReceivablePositionV1,
@@ -201,6 +203,188 @@ def get_accounting_fact_v1(
             raise BillingRuleViolation(
                 "accounting_fact_integrity", "stored V1 accounting evidence is invalid"
             ) from exc
+
+
+def _read_accounting_fact_v2_v3(
+    db: Session,
+    *,
+    scope: Scope,
+    fact_id: UUID,
+    version: Literal[2, 3],
+    schema: Any,
+) -> Any:
+    """Shared exact reader for the stored V2 (withholding) and V3 (non-cash) facts.
+
+    Same discipline as the V1 read: explicit scope, exact version filter (an id of
+    another version is simply not found), digest, envelope, posting group and posting
+    effects cross-checked, plus the version's own child rows. Pure read; the caller
+    owns the session and transaction.
+    """
+    from dotmac_billing.opening_queries import _row, _scoped, _table
+
+    if not isinstance(scope, TenantScope | PlatformScope) or (
+        isinstance(scope, TenantScope) and not isinstance(scope.tenant_id, UUID)
+    ):
+        raise BillingRuleViolation(
+            "scope_mismatch", "accounting reads require explicit scope"
+        )
+    if not isinstance(fact_id, UUID):
+        raise BillingRuleViolation(
+            "invalid_fact_id", "accounting fact identity must be a UUID"
+        )
+    table = _table(scope, "accounting_facts")
+    with db.no_autoflush:
+        row = (
+            db.execute(
+                _scoped(
+                    select(table).where(
+                        table.c.id == fact_id,
+                        table.c.fact_version == version,
+                    ),
+                    scope,
+                    table,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            raise BillingRuleViolation(
+                "not_found", f"exact V{version} accounting fact was not found"
+            )
+        try:
+            if fingerprint_of(row["fact_payload"]) != row["fact_digest"]:
+                raise ValueError("accounting digest disagrees")
+            with localcontext(cash_decimal_context()):
+                fact = _decode(row["fact_payload"], schema)
+            if not (
+                fact.scope == scope
+                and fact.fact_id == row["id"]
+                and fact.fact_version == row["fact_version"] == version
+                and fact.posting_group_id == row["posting_group_id"]
+                and fact.effect_kind == row["effect_kind"]
+                and fact.source_system == row["source_system"]
+                and fact.source_authority == row["source_authority"]
+                and fact.occurred_at == row["occurred_at"]
+                and getattr(fact, "reverses_fact_id", None) == row["reverses_fact_id"]
+            ):
+                raise ValueError("accounting envelope disagrees")
+            group = _row(db, scope, "posting_groups", fact.posting_group_id)
+            if not (
+                group["billing_account_id"] == fact.billing_account_id
+                and group["group_kind"] == fact.effect_kind
+                and group["source_ref"] == fact.source_ref
+                and group["occurred_at"] == fact.occurred_at
+            ):
+                raise ValueError("accounting posting group disagrees")
+            amounts = [item.amount_delta for item in fact.effects]
+            if version == 2:
+                amounts.extend(
+                    item.accepted_delta for item in fact.withholding_discharges
+                )
+            else:
+                amounts.extend(
+                    item.availability_delta for item in fact.non_cash_credit_effects
+                )
+            if any(
+                (amount.currency.code, amount.currency.minor_units)
+                != (group["currency"], group["minor_units"])
+                for amount in amounts
+            ):
+                raise ValueError("accounting money identity disagrees")
+            posting = _table(scope, "posting_effects")
+            postings = (
+                db.execute(
+                    _scoped(
+                        select(posting).where(
+                            posting.c.posting_group_id == fact.posting_group_id,
+                        ),
+                        scope,
+                        posting,
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            if Counter(
+                (
+                    item.lane,
+                    item.amount_delta.amount,
+                    item.amount_delta.currency.code,
+                    item.amount_delta.currency.minor_units,
+                    fact.billing_account_id,
+                )
+                for item in fact.effects
+            ) != Counter(
+                (
+                    item["lane"],
+                    item["amount_delta"],
+                    item["currency"],
+                    item["minor_units"],
+                    item["billing_account_id"],
+                )
+                for item in postings
+            ):
+                raise ValueError("accounting posting effects disagree")
+            child_name, child_ids = (
+                (
+                    "withholding_discharges",
+                    {item.discharge_id for item in fact.withholding_discharges},
+                )
+                if version == 2
+                else (
+                    "non_cash_credit_effects",
+                    {item.effect_id for item in fact.non_cash_credit_effects},
+                )
+            )
+            child = _table(scope, child_name)
+            stored = set(
+                db.execute(
+                    _scoped(
+                        select(child.c.id).where(
+                            child.c.posting_group_id == fact.posting_group_id
+                        ),
+                        scope,
+                        child,
+                    )
+                ).scalars()
+            )
+            if stored != child_ids:
+                raise ValueError("accounting child evidence disagrees")
+            return fact
+        except (ValueError, TypeError, DecimalException, MoneyError) as exc:
+            raise BillingRuleViolation(
+                "accounting_fact_integrity",
+                f"stored V{version} accounting evidence is invalid",
+            ) from exc
+
+
+def get_accounting_fact_v2(
+    db: Session, *, scope: Scope, fact_id: UUID
+) -> AccountingFactV2:
+    """Read one stored V2 (withholding accepted/reversed) accounting fact by id.
+
+    Pure read of immutable evidence; a fact of any other version, another tenant's
+    fact or an unknown id is ``not_found``. Does not observe current capacity.
+    """
+    return cast(
+        AccountingFactV2,
+        _read_accounting_fact_v2_v3(
+            db, scope=scope, fact_id=fact_id, version=2, schema=AccountingFactV2
+        ),
+    )
+
+
+def get_accounting_fact_v3(
+    db: Session, *, scope: Scope, fact_id: UUID
+) -> AccountingFactV3:
+    """Read one stored V3 (non-cash credit) accounting fact by id; see V2."""
+    return cast(
+        AccountingFactV3,
+        _read_accounting_fact_v2_v3(
+            db, scope=scope, fact_id=fact_id, version=3, schema=AccountingFactV3
+        ),
+    )
 
 
 def get_allocation_accounting_fact_v1(
@@ -441,6 +625,8 @@ def _get_invoice_document_fact(
 __all__ = [
     "get_invoice_document_fact_v3",
     "get_accounting_fact_v1",
+    "get_accounting_fact_v2",
+    "get_accounting_fact_v3",
     "get_allocation_accounting_fact_v1",
     "get_billing_account_observation",
     "get_current_settlement_allocation",

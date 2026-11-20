@@ -381,6 +381,8 @@ from dotmac_billing.opening_window_queries import (
 )
 from dotmac_billing.queries import (
     get_accounting_fact_v1,
+    get_accounting_fact_v2,
+    get_accounting_fact_v3,
     get_allocation_accounting_fact_v1,
     get_billing_account_observation,
     get_current_cash_credit_draw,
@@ -510,6 +512,8 @@ __all__ = [
     "WithholdingTaxEvidenceV2",
     "get_invoice_document_fact_v3",
     "get_accounting_fact_v1",
+    "get_accounting_fact_v2",
+    "get_accounting_fact_v3",
     "get_allocation_accounting_fact_v1",
     "ConfirmedSettlementObservationV1",
     "GetConfirmedSettlementV1",
