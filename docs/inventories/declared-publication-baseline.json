@@ -152,11 +152,6 @@
       "reason": "Unpublished tenant-plane money-flows skeleton (manifest and mf_0001 settle_instances lineage; no flow behaviour). It awaits the kernel migration-namespace allocation, the owners' public exports and the protected release lifecycle. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
       "state": "never-published"
     },
-    "dotmac-payables": {
-      "declared": "0.1.0a6",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a5 is published and tagged and its migration bytes remain unchanged. 0.1.0a6 adds the cash-basis release of deferred input tax at supplier payment under a declared tax-deferral policy, verifier-bound no-GL admission of the deferral already released on settled historical invoices and of historical overpayments as supplier credits, withholding account guards and zero-value line handling in the document consequences, through the additive pa_0006 migration. Publication is authorized by Michael (register v1516) but happens only through the release lane after review and his separate release go; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
-      "state": "declared-unpublished"
-    },
     "dotmac-payroll": {
       "declared": "0.1.0a6",
       "reason": "Unpublished source successor to published 0.1.0a5 (ERP v2 cutover). It adds the audited signed liability adjustment (adjust_liability, effective_liability_amount and build_liability_adjustment_consequence), with additive migration py_0004; payroll_liabilities.amount is never changed. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record.",
