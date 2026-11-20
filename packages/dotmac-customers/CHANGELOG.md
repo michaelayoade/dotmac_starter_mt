@@ -9,6 +9,14 @@
   idempotent for an unchanged name, tenant-scoped, refused (`Conflict`) on a
   CLOSED account. No migration; account id and number are never changed.
 
+### Changed
+
+- `create_account` and `link_party_reference` import `conflict_savepoint` from
+  the engine-free `dotmac_kernel.transactions` (same function object as
+  `dotmac_kernel.db`'s re-export), because a strict-bound composed runtime
+  refuses `dotmac_kernel.db`. The kernel floor is raised from a91 to a98, the
+  first published kernel that exports it there.
+
 ## 0.1.0a1 — 2026-08-20
 
 ### Added

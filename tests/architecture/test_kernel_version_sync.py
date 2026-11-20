@@ -136,7 +136,6 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # a91 is both the allocation and the first kernel that can register any of
     # them, which is the ordinary rule rather than an exception — none of the
     # fourteen consumes a kernel capability newer than its own allocation.
-    "dotmac-customers": "0.1.0a91",
     "dotmac-service-catalog": "0.1.0a91",
     "dotmac-qualification": "0.1.0a91",
     "dotmac-services": "0.1.0a91",
@@ -197,6 +196,10 @@ CAPABILITY_RAISED_FLOORS = {
     # canonical instants, first available in published a103. The namespace was
     # allocated in a85, which cannot supply those later public APIs.
     "dotmac-payables": ("0.1.0a103", "0.1.0a85"),
+    # create_account and link_party_reference use a98's engine-free public
+    # savepoint API (dotmac_kernel.transactions); the namespace was allocated
+    # in a91. The strict-bound ERP runtime refuses dotmac_kernel.db.
+    "dotmac-customers": ("0.1.0a98", "0.1.0a91"),
     # Grant-bound Health writers consume the engine-free a98 savepoint API.
     "dotmac-platform-health": ("0.1.0a98", "0.1.0a88"),
     # Opening-window refusal recovery observes Kernel's exact-root rollback
@@ -1037,6 +1040,6 @@ def test_the_kernel_is_at_least_every_module_floor() -> None:
         *STATELESS_CAPABILITY_FLOORS.values(),
     }
     for release in floors:
-        assert _alpha(declared) >= _alpha(
-            release
-        ), f"kernel is {declared} but a module floors at {release}"
+        assert _alpha(declared) >= _alpha(release), (
+            f"kernel is {declared} but a module floors at {release}"
+        )
