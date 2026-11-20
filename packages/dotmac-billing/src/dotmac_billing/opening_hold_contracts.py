@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope, TenantScope
@@ -64,7 +64,9 @@ class AdmitHeldOpeningAccountV2(OpeningCashValue):
     import_command: ImportOpeningAccountV2
     disposition: OpeningHoldDispositionV1
     maker_ref: str
-    approval_request_id: UUID
+    #: Required when the window binds dual_control "on"; must be None when "off"
+    #: (a supplied approval is refused, never ignored).
+    approval_request_id: UUID | None = None
 
     def __post_init__(self) -> None:
         OpeningCashValue.__post_init__(self)
@@ -121,8 +123,13 @@ class OpeningHoldAdmissionV1(OpeningCashValue):
     content_digest: str
     disposition: OpeningHoldDispositionV1
     maker_ref: str
-    approval: HeldOpeningHoldApprovalV1
+    #: None only when the window binds dual_control "off".
+    approval: HeldOpeningHoldApprovalV1 | None
     recorded_at: datetime
+    #: Widening (D-9): under "off" no approval stands and ``approval`` is None;
+    #: every other control and this audit record stay. Evidence stored under "on"
+    #: omits this key and is byte-identical to a pre-bi_0019 record.
+    dual_control: Literal["off", "on"] = "on"
 
 
 def opening_hold_subject_id(command: AdmitHeldOpeningAccountV2) -> str:
@@ -152,12 +159,21 @@ def opening_hold_content_digest(command: AdmitHeldOpeningAccountV2) -> str:
     return f"sha256:{digest}"
 
 
+def require_hold_no_approval(command: AdmitHeldOpeningAccountV2) -> None:
+    """Under dual_control "off" a supplied approval is refused, never ignored."""
+    if command.approval_request_id is not None:
+        raise BillingRuleViolation(
+            "opening_hold_approval_not_applicable",
+            "this opening window binds no two-person approval for hold admission",
+        )
+
+
 def require_hold_maker_checker(
     command: AdmitHeldOpeningAccountV2,
     approval: HeldOpeningHoldApprovalV1 | None,
 ) -> HeldOpeningHoldApprovalV1:
     """Refuse unless the approval is for exactly this command and maker != checker."""
-    if approval is None:
+    if approval is None or command.approval_request_id is None:
         raise BillingRuleViolation(
             "opening_hold_approval_missing",
             "hold admission requires a standing Approvals decision",
@@ -200,4 +216,5 @@ __all__ = [
     "opening_hold_content_digest",
     "opening_hold_subject_id",
     "require_hold_maker_checker",
+    "require_hold_no_approval",
 ]

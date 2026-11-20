@@ -8779,8 +8779,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
         }
     ),
     # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
-    # frozen. `bi_0018` (account terms) is a13's, editable until a13 is tagged.
-    "dotmac-billing": frozenset({"bi_0018_account_terms.py"}),
+    # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
+    # two-person policy) are a13's, editable until a13 is tagged.
+    "dotmac-billing": frozenset(
+        {"bi_0018_account_terms.py", "bi_0019_opening_dual_control.py"}
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8815,7 +8818,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "20261119_0034_receipts_platform_append_only.py",
         }
     ),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
@@ -8825,7 +8828,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-content": frozenset(),
     "dotmac-documents": frozenset(),
     "dotmac-durable-timers": frozenset(),
-    "dotmac-expenses": frozenset(),
+    # `ex_0002` adds the claim liability lifecycle; editable until
+    # `dotmac-expenses` 0.1.0a2 is tagged.
+    "dotmac-expenses": frozenset({"ex_0002_claim_liabilities.py"}),
     "dotmac-fiber-plant": frozenset(),
     "dotmac-finance": frozenset(),
     "dotmac-inventory": frozenset(),

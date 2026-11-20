@@ -8,8 +8,9 @@ domain result, not a competing replay mechanism.
 
 from __future__ import annotations
 
+import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
@@ -18,12 +19,14 @@ from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.models import Tenant
 from dotmac_kernel.transactions import conflict_savepoint
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_accounting.contracts import (
+    AccountChangeKind,
     AccountKind,
+    ActivateAccount,
     Conflict,
     CreateAccount,
     CreateAccountCategory,
@@ -43,12 +46,16 @@ from dotmac_accounting.contracts import (
     NotFound,
     PeriodCloseEvidence,
     PeriodStatus,
+    RecodeAccount,
+    RetireAccount,
     ReverseJournal,
+    UpdateAccountFlags,
     VoidDraftJournal,
 )
 from dotmac_accounting.models import (
     Account,
     AccountCategory,
+    AccountChange,
     AccountingDimension,
     AccountingDimensionValue,
     FiscalPeriod,
@@ -1146,7 +1153,369 @@ def void_draft_journal(
     return _journal(db, tenant_id, UUID(str(outcome.result["journal_id"])))
 
 
+def _record_account_change(
+    session: Session,
+    *,
+    tenant_id: UUID,
+    account: Account,
+    kind: AccountChangeKind,
+    reason: str,
+    actor: str,
+    evidence: Mapping[str, object],
+    occurred_at: datetime,
+    code: str,
+    account_kind: AccountKind,
+    posting_allowed: bool,
+    is_active: bool,
+) -> None:
+    """Append the history row, then apply the change to the same account.
+
+    The row is flushed first: the database guard refuses any code or flag
+    change that is not matched by a history row of the same transaction.
+    """
+    session.add(
+        AccountChange(
+            tenant_id=tenant_id,
+            account_id=account.id,
+            change_kind=kind.value,
+            old_code=account.code,
+            new_code=code,
+            old_kind=account.kind.value,
+            new_kind=account_kind.value,
+            old_posting_allowed=account.posting_allowed,
+            new_posting_allowed=posting_allowed,
+            old_is_active=account.is_active,
+            new_is_active=is_active,
+            reason=reason,
+            actor_ref=actor,
+            evidence=dict(evidence),
+            occurred_at=occurred_at,
+        )
+    )
+    session.flush()
+    account.code = code
+    account.kind = account_kind
+    account.posting_allowed = posting_allowed
+    account.is_active = is_active
+    account.updated_at = occurred_at
+    session.flush()
+
+
+def _maintenance(
+    db: Session,
+    *,
+    scope: TenantScope,
+    scope_name: str,
+    payload: Mapping[str, object],
+    apply: Callable[[Session, UUID], None],
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+) -> Account:
+    tenant_id = scope.tenant_id
+    account_id = UUID(str(payload["account_id"]))
+
+    def operation(session: Session) -> Mapping[str, object]:
+        apply(session, tenant_id)
+        return {"account_id": str(account_id)}
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant_id,
+        scope=scope_name,
+        key=idempotency_key,
+        operation=operation,
+        fingerprint=fingerprint_of(payload),
+        expires_at=idempotency_expires_at,
+    )
+    return _account(db, tenant_id, UUID(str(outcome.result["account_id"])))
+
+
+def recode_account(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: RecodeAccount,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    changed_at: datetime,
+) -> Account:
+    """Change an account's code, keeping its identity and its posted history.
+
+    The new code is unique per tenant and must match the chart policy pattern
+    when one is supplied. Posted ledger lines keep their stored
+    ``account_code``; the history row records the old and the new code.
+    """
+    payload = command.fingerprint_payload()
+    pattern = None
+    if command.code_pattern is not None:
+        try:
+            pattern = re.compile(command.code_pattern)
+        except re.error as exc:
+            raise InvalidAccount("account code pattern is not a valid pattern") from exc
+
+    def apply(session: Session, tenant_id: UUID) -> None:
+        account = _account(session, tenant_id, command.account_id, lock=True)
+        new_code = str(payload["new_code"])
+        if pattern is not None and pattern.fullmatch(new_code) is None:
+            raise InvalidAccount("account code does not match the chart code policy")
+        if new_code == account.code:
+            raise InvalidAccount("the new account code equals the current code")
+        clash = session.scalar(
+            select(Account.id).where(
+                Account.tenant_id == tenant_id,
+                Account.code == new_code,
+                Account.id != account.id,
+            )
+        )
+        if clash is not None:
+            raise Conflict("account code already exists")
+        try:
+            with conflict_savepoint(session):
+                _record_account_change(
+                    session,
+                    tenant_id=tenant_id,
+                    account=account,
+                    kind=AccountChangeKind.RECODE,
+                    reason=str(payload["reason"]),
+                    actor=str(payload["actor"]),
+                    evidence={"code_pattern": command.code_pattern},
+                    occurred_at=changed_at,
+                    code=new_code,
+                    account_kind=account.kind,
+                    posting_allowed=account.posting_allowed,
+                    is_active=account.is_active,
+                )
+        except IntegrityError as exc:
+            raise Conflict("account code already exists") from exc
+
+    return _maintenance(
+        db,
+        scope=scope,
+        scope_name="accounting.recode_account",
+        payload=payload,
+        apply=apply,
+        idempotency_key=idempotency_key,
+        idempotency_expires_at=idempotency_expires_at,
+    )
+
+
+def update_account_flags(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: UpdateAccountFlags,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    changed_at: datetime,
+) -> Account:
+    """Correct the control/posting flags; posted history is not touched."""
+    payload = command.fingerprint_payload()
+
+    def apply(session: Session, tenant_id: UUID) -> None:
+        account = _account(session, tenant_id, command.account_id, lock=True)
+        kind = command.kind if command.kind is not None else account.kind
+        allowed = (
+            command.posting_allowed
+            if command.posting_allowed is not None
+            else account.posting_allowed
+        )
+        if kind == account.kind and allowed == account.posting_allowed:
+            raise InvalidAccount("the flags already have the requested values")
+        if kind != AccountKind.POSTING and allowed:
+            raise InvalidAccount("only a posting account can allow journal posting")
+        if allowed and not account.is_active:
+            raise InvalidAccount("a retired account cannot allow journal posting")
+        if kind != AccountKind.POSTING and account.kind == AccountKind.POSTING:
+            posted = session.scalar(
+                select(PostedLedgerLine.id)
+                .where(
+                    PostedLedgerLine.tenant_id == tenant_id,
+                    PostedLedgerLine.account_id == account.id,
+                )
+                .limit(1)
+            )
+            if posted is not None:
+                raise InvalidAccount(
+                    "an account with posted ledger lines cannot stop being a "
+                    "posting account"
+                )
+        if kind == AccountKind.POSTING:
+            has_children = session.scalar(
+                select(Account.id)
+                .where(Account.tenant_id == tenant_id, Account.parent_id == account.id)
+                .limit(1)
+            )
+            if has_children is not None:
+                raise InvalidAccount("a parent account cannot be a posting account")
+        _record_account_change(
+            session,
+            tenant_id=tenant_id,
+            account=account,
+            kind=AccountChangeKind.FLAGS,
+            reason=str(payload["reason"]),
+            actor=str(payload["actor"]),
+            evidence={},
+            occurred_at=changed_at,
+            code=account.code,
+            account_kind=kind,
+            posting_allowed=allowed,
+            is_active=account.is_active,
+        )
+
+    return _maintenance(
+        db,
+        scope=scope,
+        scope_name="accounting.update_account_flags",
+        payload=payload,
+        apply=apply,
+        idempotency_key=idempotency_key,
+        idempotency_expires_at=idempotency_expires_at,
+    )
+
+
+def retire_account(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: RetireAccount,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    changed_at: datetime,
+) -> Account:
+    """Make an account inactive and non-posting, refusing live use.
+
+    Refused while the account holds a posted balance, a draft journal line, an
+    active child account, or when the caller attests open subledger items.
+    """
+    payload = command.fingerprint_payload()
+
+    def apply(session: Session, tenant_id: UUID) -> None:
+        account = _account(session, tenant_id, command.account_id, lock=True)
+        if not account.is_active:
+            raise InvalidAccount("the account is already retired")
+        if command.open_subledger_items > 0:
+            raise InvalidAccount(
+                "an account with open subledger items cannot be retired"
+            )
+        debit, credit = session.execute(
+            select(
+                func.coalesce(func.sum(PostedLedgerLine.debit), 0),
+                func.coalesce(func.sum(PostedLedgerLine.credit), 0),
+            ).where(
+                PostedLedgerLine.tenant_id == tenant_id,
+                PostedLedgerLine.account_id == account.id,
+            )
+        ).one()
+        balance = _money(Decimal(debit) - Decimal(credit))
+        if balance != 0:
+            raise InvalidAccount("an account with a balance cannot be retired")
+        draft_line = session.scalar(
+            select(JournalLine.id)
+            .join(
+                JournalEntry,
+                (JournalEntry.tenant_id == JournalLine.tenant_id)
+                & (JournalEntry.id == JournalLine.journal_id),
+            )
+            .where(
+                JournalLine.tenant_id == tenant_id,
+                JournalLine.account_id == account.id,
+                JournalEntry.status == JournalStatus.DRAFT,
+            )
+            .limit(1)
+        )
+        if draft_line is not None:
+            raise InvalidAccount("an account used by a draft journal cannot be retired")
+        child = session.scalar(
+            select(Account.id)
+            .where(
+                Account.tenant_id == tenant_id,
+                Account.parent_id == account.id,
+                Account.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        if child is not None:
+            raise InvalidAccount(
+                "an account with active child accounts cannot be retired"
+            )
+        _record_account_change(
+            session,
+            tenant_id=tenant_id,
+            account=account,
+            kind=AccountChangeKind.RETIRE,
+            reason=str(payload["reason"]),
+            actor=str(payload["actor"]),
+            evidence={
+                "posted_balance": str(balance),
+                "open_subledger_items": command.open_subledger_items,
+            },
+            occurred_at=changed_at,
+            code=account.code,
+            account_kind=account.kind,
+            posting_allowed=False,
+            is_active=False,
+        )
+
+    return _maintenance(
+        db,
+        scope=scope,
+        scope_name="accounting.retire_account",
+        payload=payload,
+        apply=apply,
+        idempotency_key=idempotency_key,
+        idempotency_expires_at=idempotency_expires_at,
+    )
+
+
+def activate_account(
+    db: Session,
+    *,
+    scope: TenantScope,
+    command: ActivateAccount,
+    idempotency_key: str,
+    idempotency_expires_at: datetime | None,
+    changed_at: datetime,
+) -> Account:
+    """Reactivate a retired account (posting stays off unless requested)."""
+    payload = command.fingerprint_payload()
+
+    def apply(session: Session, tenant_id: UUID) -> None:
+        account = _account(session, tenant_id, command.account_id, lock=True)
+        if account.is_active:
+            raise InvalidAccount("the account is already active")
+        if command.posting_allowed and account.kind != AccountKind.POSTING:
+            raise InvalidAccount("only a posting account can allow journal posting")
+        category = _category(session, tenant_id, account.category_id)
+        if not category.is_active:
+            raise InvalidAccount("account category is inactive")
+        _record_account_change(
+            session,
+            tenant_id=tenant_id,
+            account=account,
+            kind=AccountChangeKind.ACTIVATE,
+            reason=str(payload["reason"]),
+            actor=str(payload["actor"]),
+            evidence={},
+            occurred_at=changed_at,
+            code=account.code,
+            account_kind=account.kind,
+            posting_allowed=command.posting_allowed,
+            is_active=True,
+        )
+
+    return _maintenance(
+        db,
+        scope=scope,
+        scope_name="accounting.activate_account",
+        payload=payload,
+        apply=apply,
+        idempotency_key=idempotency_key,
+        idempotency_expires_at=idempotency_expires_at,
+    )
+
+
 __all__ = [
+    "activate_account",
     "create_account",
     "create_account_category",
     "create_dimension",
@@ -1157,8 +1526,11 @@ __all__ = [
     "lock_period",
     "open_period",
     "post_journal",
+    "recode_account",
     "reopen_period",
+    "retire_account",
     "reverse_journal",
     "soft_close_period",
+    "update_account_flags",
     "void_draft_journal",
 ]

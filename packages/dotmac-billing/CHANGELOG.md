@@ -38,6 +38,36 @@ Account terms (approved 2026-11-16; new owner work). a12 was published (tag
   map by constraint name. README documents the cutover order.
 - No behaviour change to any existing Billing command.
 
+Receivable control position and optional opening two-person approval (approved
+2026-11-19).
+
+- R1 `get_receivable_control_position_v1(db, scope=) -> ReceivableControlPositionV1`
+  (also `ReceivableControlCurrencyV1`, `RECEIVABLE_CONTROL_POSITION_CONTRACT`
+  `billing.receivable.control_position.v1`): a pure read, no migration. Per currency,
+  exact minor-unit sums of the latest V2 position of every account in scope plus a
+  domain-separated per-currency fingerprint. The caller owns a `READ ONLY`
+  `REPEATABLE READ`/`SERIALIZABLE` transaction (refused otherwise); on the tenant
+  plane `app.current_tenant` must equal the scope. An incomplete history, a foreign
+  source owner or a precision conflict is refused, never summed. `open_documents` is
+  not in v1. The fingerprint encoding is documented in the README with a pinned
+  golden vector.
+- R4/R4b `bi_0019_opening_dual_control` (both planes, additive, no downgrade):
+  `OpeningWindowV1.dual_control` (`"off"` | `"on"`, last field, default `"off"`) is
+  bound in the immutable window evidence and attested by the provision verifier. It
+  decides whether held-partition admission, opening variance resolution and control-gap
+  resolution need an Approvals maker-checker. **Widening:** under `"off"` no approval is
+  required, a supplied approval is refused rather than ignored, and every other check
+  and the audit record stay. Windows provisioned before this migration read as `"on"`
+  and behave and store exactly as before. `opening_hold_admissions.approval_request_id`
+  becomes nullable; the window guard requires `dual_control` to be `"on"` or `"off"`;
+  the hold-admission, variance-event and gap-event guards read the bound policy
+  (new helper `opening_resolution_approval_ok` per plane). Contract changes:
+  `AdmitHeldOpeningAccountV2`, `RecogniseOpeningVarianceV1`,
+  `ConfirmOpeningVarianceEvidenceV1` and `OpeningVarianceResolutionRefV1` take
+  `approval_request_id: UUID | None`; `OpeningHoldAdmissionV1.approval` may be `None`;
+  an `AccountingFactV6` resolution block has a null request id and no approvers under
+  `"off"`.
+
 ## 0.1.0a12 — published 2026-11-12
 
 a11 was published on 2026-11-10 (tag `dotmac-billing-v0.1.0a11`); a12 adds the

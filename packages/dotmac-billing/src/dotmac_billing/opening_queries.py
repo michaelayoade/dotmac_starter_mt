@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from decimal import DecimalException, localcontext
 from typing import Any, TypeVar, cast
 from uuid import UUID
@@ -79,12 +80,19 @@ def _decode_row(
     *,
     payload: str = "evidence",
     digest: str = "evidence_digest",
+    legacy: Callable[[Any], Any] | None = None,
 ) -> _T:
+    """Decode digest-checked evidence; ``legacy`` fills keys older rows lack.
+
+    The digest is checked on the stored bytes first, so the normaliser cannot
+    hide tampering; it only supplies the explicit default for a missing key.
+    """
     try:
         if fingerprint_of(row[payload]) != row[digest]:
             raise ValueError("original opening digest disagrees")
+        value = row[payload] if legacy is None else legacy(row[payload])
         with localcontext(cash_decimal_context()):
-            return cast(_T, _decode(row[payload], schema))
+            return cast(_T, _decode(value, schema))
     except (ValueError, TypeError, DecimalException) as exc:
         raise BillingRuleViolation(
             "opening_evidence_integrity", "stored opening evidence is invalid"

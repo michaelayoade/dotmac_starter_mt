@@ -260,3 +260,16 @@ def test_a_real_v5_fact_keeps_its_exact_bytes() -> None:
     payload = _jsonable(fact)
     assert json.loads(json.dumps(payload)) == stored["payload"]
     assert fingerprint_of(payload) == stored["digest"]
+
+
+def test_a_dual_control_off_resolution_carries_no_approval_and_no_approver() -> None:
+    off = _resolution(approval_request_id=None, approver_refs=())
+    assert off.approval_request_id is None and off.approver_refs == ()
+    # An approval id with no approver, or an approver with no id, stays refused.
+    with pytest.raises(OpeningEvidenceError):
+        _resolution(approval_request_id=None, approver_refs=("checker",))
+    with pytest.raises(OpeningEvidenceError):
+        _resolution(approval_request_id=_u(5), approver_refs=())
+    # The maker is still never an approver.
+    with pytest.raises(OpeningEvidenceError):
+        _resolution(approval_request_id=_u(5), approver_refs=("maker",))

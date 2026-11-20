@@ -161,6 +161,7 @@
           "dotmac_accounting/migrations/versions/ac_0001_accounting.py",
           "dotmac_accounting/migrations/versions/ac_0002_posted_content.py",
           "dotmac_accounting/migrations/versions/ac_0003_draft_void.py",
+          "dotmac_accounting/migrations/versions/ac_0004_account_maintenance.py",
           "dotmac_accounting/models.py",
           "dotmac_accounting/service.py"
         ],
@@ -517,6 +518,7 @@
           "dotmac_billing/migrations/versions/bi_0016_withholding_components.py",
           "dotmac_billing/migrations/versions/bi_0017_open_documents_index.py",
           "dotmac_billing/migrations/versions/bi_0018_account_terms.py",
+          "dotmac_billing/migrations/versions/bi_0019_opening_dual_control.py",
           "dotmac_billing/account_terms.py",
           "dotmac_billing/account_statement.py"
         ],
@@ -1116,18 +1118,22 @@
       "package_dir": "packages/dotmac-expenses",
       "import_name": "dotmac_expenses",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a85",
+      "kernel_floor": "0.1.0a103",
       "db_schema": "mod_expenses",
       "tag_prefix": "dotmac-expenses-v",
       "wheel_contents": {
         "required": [
           "dotmac_expenses/py.typed",
+          "dotmac_expenses/consequences.py",
           "dotmac_expenses/contracts.py",
+          "dotmac_expenses/liability.py",
           "dotmac_expenses/manifest.py",
           "dotmac_expenses/migrations/__init__.py",
           "dotmac_expenses/migrations/versions/ex_0001_expenses.py",
+          "dotmac_expenses/migrations/versions/ex_0002_claim_liabilities.py",
           "dotmac_expenses/models.py",
-          "dotmac_expenses/service.py"
+          "dotmac_expenses/service.py",
+          "dotmac_expenses/settings.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -132,3 +132,31 @@ Two consequences that were already true and are now stated:
 
 *Corrects: § Context, third paragraph, third sentence. Cited by: ADR-0061
 Amendment A5. Related: ADR-0041, ADR-0042 § 3, ADR-0044, ADR-0061, ADR-0063.*
+
+## Amendment — 2026-11-19: the staff claim liability (a2)
+
+Ruled by Michael (B-6, register v1648/v1649; D-A6-3: the expenses ledger owns
+claims). `dotmac-expenses` 0.1.0a2 widens the contract: an APPROVED claim can be
+accepted into a **claim liability** (what the company owes the claimant), which
+is settled, returned by the bank, adjusted or, while untouched, reversed. This
+deliberately reverses the a1 exclusion of "AP/GL ... settlement" for that one
+record and nothing else:
+
+- the owner still moves no money, posts nothing and reads no bank. It records
+  facts a human or the assembly already performed and returns balanced,
+  fingerprinted consequence facts (Dr expense / Cr claims-payable on acceptance)
+  for the assembly to post;
+- the claims-payable control account is its own account (2045 in the ERP chart),
+  tied to this subledger; salary net pay stays on its own control account;
+- input VAT is a tenant setting (`expenses.claim_input_vat`: `none` by default,
+  `immediate` to the immediate input-VAT account), frozen at acceptance;
+- legacy claims are admitted as posted with no GL
+  (`admit_historical_claim_liability`), proven by a trusted verifier;
+- `withdraw_claim_approval` is refused while a live liability exists (a
+  tightening);
+- no second person is compulsory: a distinct reverser is checked only when the
+  caller asks for it.
+
+Payout batches, the accept-open step and the reclass journal are assembly
+(ERP v2) work, not this package. The eligibility/payment split above is
+otherwise unchanged: eligibility is still not payment.

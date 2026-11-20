@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope
@@ -26,13 +27,28 @@ from dotmac_billing.opening_window_contracts import (
 )
 
 
+def _legacy_window(evidence: Any) -> Any:
+    """A window stored before bi_0019 has no policy key: it is two-person ("on")."""
+    window = evidence.get("window") if isinstance(evidence, dict) else None
+    if isinstance(window, dict) and "dual_control" not in window:
+        return {**evidence, "window": {**window, "dual_control": "on"}}
+    return evidence
+
+
+def _legacy_hold(evidence: Any) -> Any:
+    """Hold evidence stored under "on" omits the key (byte-identical to before)."""
+    if isinstance(evidence, dict) and "dual_control" not in evidence:
+        return {**evidence, "dual_control": "on"}
+    return evidence
+
+
 def get_opening_window(db: Session, *, scope: Scope) -> OpeningWindowV1 | None:
     table = _table(scope, "opening_windows")
     with db.no_autoflush:
         row = db.execute(_scoped(select(table), scope, table)).mappings().one_or_none()
     if row is None:
         return None
-    stored = _decode_row(row, StoredOpeningWindowV1)
+    stored = _decode_row(row, StoredOpeningWindowV1, legacy=_legacy_window)
     window, proof = stored.window, stored.verification
     digest = (
         opening_manifest_fingerprint_v2(window.manifest)
@@ -153,9 +169,29 @@ def get_opening_hold_admissions(
             .all()
         )
     held = set(get_opening_hold_list(db, scope=scope))
+    window_policy = get_opening_window(db, scope=scope) if rows else None
     result = []
     for row in rows:
-        item = _decode_row(row, OpeningHoldAdmissionV1)
+        item = _decode_row(row, OpeningHoldAdmissionV1, legacy=_legacy_hold)
+        approval = item.approval
+        _require(
+            window_policy is not None
+            and item.dual_control == window_policy.dual_control
+            and (
+                (
+                    approval is not None
+                    and approval.request_id == row["approval_request_id"]
+                    and list(approval.approver_refs) == list(row["approver_refs"])
+                    and item.maker_ref not in approval.approver_refs
+                )
+                if item.dual_control == "on"
+                else (
+                    approval is None
+                    and row["approval_request_id"] is None
+                    and list(row["approver_refs"]) == []
+                )
+            )
+        )
         _require(
             item.scope == scope
             and item.admission_id == row["id"]
@@ -165,9 +201,6 @@ def get_opening_hold_admissions(
             and item.billing_account_id in held
             and item.disposition.disposition_digest == row["disposition_digest"]
             and item.maker_ref == row["maker_ref"]
-            and item.approval.request_id == row["approval_request_id"]
-            and list(item.approval.approver_refs) == list(row["approver_refs"])
-            and item.maker_ref not in item.approval.approver_refs
         )
         result.append(item)
     return tuple(result)
