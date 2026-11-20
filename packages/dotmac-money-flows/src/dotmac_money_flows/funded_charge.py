@@ -217,8 +217,10 @@ class _Ctx:
     ports: FundedChargePorts
     policy_version: str
     actor_ref: str | None = None
-    #: Newest-credit instants read this call, keyed by the window start (GAP-L1).
-    credit_dates: dict[datetime, datetime | None] = field(default_factory=dict)
+    #: Newest-credit instants read this call, keyed by (window start, currency).
+    credit_dates: dict[tuple[datetime, str], datetime | None] = field(
+        default_factory=dict
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1002,16 +1004,17 @@ def on_account_credit_changed(
 
     def funded_at(charge: RatedChargeV1) -> datetime:
         start = charge.due_at
-        if start not in ctx.credit_dates:
+        memo_key = (start, charge.total.currency.code)
+        if memo_key not in ctx.credit_dates:
             try:
-                ctx.credit_dates[start] = newest_credit_at(
+                ctx.credit_dates[memo_key] = newest_credit_at(
                     db, scope, account_id, charge.total.currency, start
                 )
             except BillingError as exc:
                 # A statement read is a technical fault, never an owner refusal
                 # on a charge: raise, write nothing, let delivery retry.
                 raise BalancePassFailed("credit_dating_failed") from exc
-        newest = ctx.credit_dates[start]
+        newest = ctx.credit_dates[memo_key]
         return start if newest is None else newest
 
     batch = rows[:cap]

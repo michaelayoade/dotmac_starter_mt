@@ -232,10 +232,13 @@ class SettleRefused(Exception):
 
 
 class BalancePassFailed(Exception):
-    """A technical fault in the invoice-issued balance pass (GAP-3).
+    """A technical fault in a balance pass: GAP-3 or the GAP-L1 credit re-check.
 
-    Raised as ``BalancePassFailed(code)``: the caller rolls back and its event
-    delivery retries. It is never a business no-op and writes nothing.
+    Raised as ``BalancePassFailed(code)`` by ``apply_balance_on_invoice_issued``
+    (open documents unreadable, a document of another account, an unsplittable
+    statement window) and by ``on_account_credit_changed`` (an unreadable or
+    unsplittable statement). The caller rolls back and its event delivery
+    retries. It is never a business no-op and writes nothing.
     """
 
     @property

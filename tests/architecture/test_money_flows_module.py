@@ -1280,6 +1280,46 @@ def test_terms_and_availability_reads_are_settle_and_funded_charge_only() -> Non
         assert forbidden_call_violations(source, "adjust.py"), name
 
 
+#: The only modules that may use the dating module (and so the statement read).
+DATING_CALLERS = frozenset({"settle.py", "funded_charge.py"})
+DATING_NAMES = frozenset({"_credit_dating", "newest_credit_at"})
+
+
+def dating_reference_violations(source: str, relative_path: str) -> list[str]:
+    """A module outside ``DATING_CALLERS`` may not reach the statement read through
+    the dating module (``newest_credit_at``)."""
+    if relative_path in DATING_CALLERS | {"_credit_dating.py"}:
+        return []
+    return [
+        f"{name}: only {sorted(DATING_CALLERS)} may use the credit dating module"
+        for name in sorted(referenced_names(source) & DATING_NAMES)
+    ]
+
+
+def test_only_settle_and_funded_charge_reach_the_credit_dating_module() -> None:
+    for source in (
+        "from dotmac_money_flows import _credit_dating",
+        "from dotmac_money_flows._credit_dating import newest_credit_at",
+        "import dotmac_money_flows._credit_dating",
+        "newest_credit_at(db)",
+        "dating.newest_credit_at(db)",
+    ):
+        assert dating_reference_violations(source, "adjust.py"), source
+        assert dating_reference_violations(source, "settle.py") == [], source
+        assert dating_reference_violations(source, "funded_charge.py") == [], source
+    modules = {
+        _relative(path)
+        for path in _source_files()
+        if referenced_names(path.read_text("utf-8")) & DATING_NAMES
+    }
+    assert modules <= DATING_CALLERS | {"_credit_dating.py"}
+    assert DATING_CALLERS <= modules  # non-vacuous: both really use it
+    for path in _source_files():
+        assert (
+            dating_reference_violations(path.read_text("utf-8"), _relative(path)) == []
+        )
+
+
 def test_the_account_statement_read_is_credit_dating_only() -> None:
     for name in ("get_account_statement", "GetAccountStatementV1"):
         source = f"from dotmac_billing import {name}\n"

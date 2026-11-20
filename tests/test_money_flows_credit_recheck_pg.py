@@ -62,7 +62,7 @@ from dotmac_money_flows import (
 )
 from dotmac_money_flows import _credit_dating as dating
 from dotmac_money_flows.models import FundedChargeInstance
-from sqlalchemy import select, text
+from sqlalchemy import create_engine, select, text
 
 from tests import test_billing_isolation as b
 from tests import test_billing_opening_cash_import as cash
@@ -92,7 +92,6 @@ from tests.test_money_flows_funded_charge_pg import (
     _rows,
     _world,
 )
-from tests.test_money_flows_settle_pg import _blocked_on_locks
 from tests.test_money_flows_terms_recheck_pg import (
     SWITCH,
     _postpaid,
@@ -753,17 +752,38 @@ def _locked_race(scratch, scope, account, jobs, *, ordered: bool):
     database = scratch[0].rsplit("/", 1)[1]
     threads = [Thread(target=wrap(name, job)) for name, job in jobs]
 
-    def wait_blocked(count: int) -> None:
+    def blocked_by(holder_pid: int) -> list[tuple[int, set[int]]]:
+        """Every session waiting on a lock in this database and who blocks it."""
+        engine = create_engine(b._superuser_url())
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT pid, pg_blocking_pids(pid) FROM pg_stat_activity "
+                    "WHERE datname = :d AND wait_event_type = 'Lock'"
+                ),
+                {"d": database},
+            ).all()
+        engine.dispose()
+        return [(pid, set(blocking)) for pid, blocking in rows]
+
+    def wait_blocked(count: int, holder_pid: int) -> None:
+        """``count`` sessions wait, each behind the holder or an earlier waiter."""
         deadline = time.monotonic() + 90
+        waiters: list[tuple[int, set[int]]] = []
         while time.monotonic() < deadline:
-            waiting, ungranted = _blocked_on_locks(database)
-            if waiting >= count and ungranted >= count:
-                return
+            waiters = blocked_by(holder_pid)
+            if len(waiters) >= count:
+                break
             time.sleep(0.2)
-        waiting, ungranted = _blocked_on_locks(database)
-        assert waiting >= count and ungranted >= count, (waiting, ungranted)
+        assert len(waiters) >= count, waiters
+        pids = {pid for pid, _ in waiters} | {holder_pid}
+        for pid, blocking in waiters:
+            # Never an unrelated lock: the holder, or a session queued ahead.
+            assert blocking and blocking <= pids - {pid}, (pid, blocking, pids)
+        assert any(holder_pid in blocking for _, blocking in waiters)
 
     with session(scratch, scope) as holder:
+        holder_pid = holder.scalar(text("SELECT pg_backend_pid()"))
         holder.execute(
             text(
                 "SELECT id FROM mod_billing.billing_accounts WHERE id = :i FOR UPDATE"
@@ -773,11 +793,11 @@ def _locked_race(scratch, scope, account, jobs, *, ordered: bool):
         if ordered:
             for position, thread in enumerate(threads, 1):
                 thread.start()
-                wait_blocked(position)
+                wait_blocked(position, holder_pid)
         else:
             for thread in threads:
                 thread.start()
-            wait_blocked(len(threads))
+            wait_blocked(len(threads), holder_pid)
         assert results == [] and errors == []  # every session is blocked
         holder.rollback()
     for thread in threads:
