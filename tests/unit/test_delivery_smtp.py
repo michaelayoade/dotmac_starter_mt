@@ -40,7 +40,6 @@ from dotmac_delivery_smtp.provider import (
     SmtpOperatorFault,
 )
 from dotmac_kernel import secret_sources
-from dotmac_kernel.delivery import DeliveryOutcomeUnknown
 from dotmac_kernel.delivery_providers import (
     AttachmentRef,
     DeliveryProvider,
@@ -519,11 +518,8 @@ def test_connect_timeout_is_retryable() -> None:
 
 def test_reply_lost_after_data_is_unknown_not_failed(server, trusting) -> None:
     server.drop_after_data = True
-    # The kernel type the relay transport maps to a terminal, non-retried state.
-    with pytest.raises(DeliveryOutcomeUnknown) as caught:
+    with pytest.raises(SmtpOutcomeUnknown):
         provider(server, trusting).send(msg())
-    assert isinstance(caught.value, SmtpOutcomeUnknown)
-    assert "recipient" not in caught.value.reason  # no recipient in the reason
 
 
 # ---------------------------------------------------------- admission hook

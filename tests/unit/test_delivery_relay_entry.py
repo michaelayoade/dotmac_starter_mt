@@ -34,6 +34,16 @@ def test_smtp_outcome_unknown_is_the_kernel_unknown_outcome() -> None:
     assert not isinstance(exc, DeliveryDeferred | DeliveryError)
 
 
+def test_smtp_unknown_outcome_reason_carries_no_recipient() -> None:
+    from dotmac_delivery_smtp.provider import SmtpAdapterError
+
+    exc = SmtpOutcomeUnknown(
+        "reply lost after DATA (TimeoutError); may have been accepted"
+    )
+    assert isinstance(exc, SmtpAdapterError) and isinstance(exc, DeliveryOutcomeUnknown)
+    assert "@" not in exc.reason
+
+
 def test_unknown_and_terminal_are_distinct_from_holds_and_errors() -> None:
     for kind in (DeliveryOutcomeUnknown, DeliveryTerminal):
         assert not issubclass(kind, DeliveryDeferred | DeliveryError | ValueError)

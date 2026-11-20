@@ -506,3 +506,185 @@ def test_the_transport_only_loads_its_own_tenants_dispatch(
     assert dispatch_row(admin_session, did_b).status == "pending"
     (row,) = outbox_rows(admin_session, tenant_a)
     assert row.status == "dead" and row.last_error == "terminal: dispatch not found"
+
+
+# ------------------------------------------------- post-send faults (H2, H1)
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"status": "bogus", "response_code": "250"},
+        {"status": "accepted", "response_code": "x" * 500},
+        {"status": "accepted", "provider_message_id": "m" * 1000},
+    ],
+)
+def test_a_fault_after_the_provider_returned_never_resends(
+    raw, admin_session, tenant_a, factories, audit_registry, relay_registries, cleanup
+) -> None:
+    did = make_dispatch(factories, tenant_a)
+    h = Harness([raw])
+    run(factories, h.transport, RelayPolicy(max_attempts=8))
+    assert h.calls == 1
+    assert dispatch_row(admin_session, did).status == "dead"
+    (row,) = outbox_rows(admin_session, tenant_a)
+    assert row.status == "dead" and row.attempts == 0
+    assert row.last_error.startswith("terminal: provider outcome unknown")
+    make_due(admin_session)
+    assert run(factories, h.transport) == 0 and h.calls == 1
+    audit = admin_session.execute(
+        text("SELECT details FROM audit_events WHERE tenant_id = :t AND action = :a"),
+        {"t": str(tenant_a.id), "a": AUDIT_ACTION_OUTCOME_UNKNOWN},
+    ).one()
+    assert audit.details["reason"].startswith("post-send fault")
+
+
+def test_a_commit_failure_after_the_provider_returned_never_resends(
+    admin_session, tenant_a, factories, audit_registry, relay_registries, cleanup
+) -> None:
+    from sqlalchemy.orm import Session
+
+    did = make_dispatch(factories, tenant_a)
+    h = Harness(["accepted"])
+    real_commit = Session.commit
+    state = {"n": 0}
+
+    def flaky_commit(self):
+        is_tenant = self.get_bind().url.username == "app_user"
+        state["n"] += is_tenant
+        if is_tenant and state["n"] == 1:  # the post-send outcome commit
+            self.rollback()  # a failed COMMIT leaves nothing committed
+            raise RuntimeError("connection reset")
+        return real_commit(self)
+
+    import unittest.mock as mock
+
+    with mock.patch.object(Session, "commit", flaky_commit):
+        run(factories, h.transport, RelayPolicy(max_attempts=8))
+    assert h.calls == 1
+    assert dispatch_row(admin_session, did).status == "dead"
+    assert outbox_rows(admin_session, tenant_a)[0].status == "dead"
+
+
+def test_stale_lease_reclaim_during_an_unknown_outcome_does_not_resend(
+    admin_session, tenant_a, factories, audit_registry, relay_registries, cleanup
+) -> None:
+    """Worker A's attempt outlives its lease; B reclaims and waits on the dispatch
+    row lock; A then hits the unknown outcome. The dead state is written under
+    the lock A still holds, so B finds it dead and sends nothing."""
+    import threading
+
+    did = make_dispatch(factories, tenant_a)
+    entered, gate = threading.Event(), threading.Event()
+
+    def blocked_then_unknown():
+        entered.set()
+        assert gate.wait(30)
+        return DeliveryOutcomeUnknown("reply lost")
+
+    h = Harness([blocked_then_unknown, "accepted"])
+    out: dict[str, object] = {}
+
+    def worker(name, policy):
+        try:
+            out[name] = run(factories, h.transport, policy)
+        except Exception as exc:  # surfaced by the assertions below
+            out[name] = exc
+
+    a = threading.Thread(target=worker, args=("a", POLICY))
+    a.start()
+    assert entered.wait(30)
+    admin_session.execute(
+        text("UPDATE outbox_events SET leased_at = now() - interval '1 hour'")
+    )
+    admin_session.commit()
+    b = threading.Thread(target=worker, args=("b", POLICY))
+    b.start()
+    b.join(3)
+    assert b.is_alive()  # B reclaimed and is blocked on the dispatch row lock
+    gate.set()
+    a.join(30)
+    b.join(30)
+    assert not a.is_alive() and not b.is_alive()
+
+    assert out == {"a": 1, "b": 1}
+    assert h.calls == 1  # exactly one provider call
+    assert dispatch_row(admin_session, did).status == "dead"
+    (row,) = outbox_rows(admin_session, tenant_a)
+    assert row.status == "dead"
+
+
+# ------------------------------------------------------------ requeue (M1)
+def _requeue(factories, tenant, did, **extra):
+    _, tenant_sm = factories
+    db = tenant_sm()
+    try:
+        db.execute(
+            text("SELECT set_config('app.current_tenant', :t, true)"),
+            {"t": str(tenant.id)},
+        )
+        res = requeue_dead_dispatch(
+            db,
+            tenant.id,
+            dispatch_id=did,
+            actor_id="operator-1",
+            reason="checked with the provider",
+            source_application="dotmac_starter_mt",
+            **extra,
+        )
+        db.commit()
+        return res
+    finally:
+        db.close()
+
+
+def test_requeue_of_an_unknown_outcome_needs_the_typed_acknowledgement(
+    admin_session, tenant_a, factories, audit_registry, relay_registries, cleanup
+) -> None:
+    from dotmac_kernel.delivery_requeue import RequeueRefused
+
+    did = make_dispatch(factories, tenant_a)
+    run(factories, Harness([DeliveryOutcomeUnknown("reply lost")]).transport, POLICY)
+    assert dispatch_row(admin_session, did).status == "dead"
+
+    with pytest.raises(RequeueRefused, match="UNKNOWN provider outcome"):
+        _requeue(factories, tenant_a, did)
+    with pytest.raises(RequeueRefused, match="UNKNOWN provider outcome"):
+        _requeue(factories, tenant_a, did, acknowledge_possible_duplicate="yes")
+    assert dispatch_row(admin_session, did).status == "dead"
+
+    res = _requeue(factories, tenant_a, did, acknowledge_possible_duplicate=True)
+    assert res.requeued and dispatch_row(admin_session, did).status == "pending"
+    details = admin_session.execute(
+        text(
+            "SELECT details FROM audit_events WHERE tenant_id = :t "
+            "AND action = 'communication.dispatch.requeued'"
+        ),
+        {"t": str(tenant_a.id)},
+    ).scalar_one()
+    assert details["acknowledged_possible_duplicate"] is True
+
+    # The acknowledgement is spent: sent now, and a LATER ordinary dead needs none.
+    h = Harness(["failed"])
+    for _ in range(3):
+        run(factories, h.transport, RelayPolicy(max_attempts=1))
+        make_due(admin_session)
+    assert dispatch_row(admin_session, did).status == "dead"
+    res = _requeue(factories, tenant_a, did)
+    assert res.requeued
+
+
+def test_requeue_of_an_ordinary_dead_dispatch_needs_no_acknowledgement(
+    admin_session, tenant_a, factories, audit_registry, relay_registries, cleanup
+) -> None:
+    did = make_dispatch(factories, tenant_a)
+    run(factories, Harness(["failed"]).transport, RelayPolicy(max_attempts=1))
+    assert dispatch_row(admin_session, did).status == "dead"
+    res = _requeue(factories, tenant_a, did)
+    assert res.requeued
+    details = admin_session.execute(
+        text(
+            "SELECT details FROM audit_events WHERE tenant_id = :t "
+            "AND action = 'communication.dispatch.requeued'"
+        ),
+        {"t": str(tenant_a.id)},
+    ).scalar_one()
+    assert details["acknowledged_possible_duplicate"] is False

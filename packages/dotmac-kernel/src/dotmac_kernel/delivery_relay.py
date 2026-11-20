@@ -72,13 +72,26 @@ back whatever was installed.
 
 Error text is stored on the outbox row. This module raises only fixed text, never
 an address, subject, body, token or provider response body; anything unexpected
-is reduced to its exception type name.
+is reduced to its exception type name by a final wrapper around `deliver`.
+
+**After the provider returns, nothing retries the send.** The dispatch row is
+locked from before the send; `send()` runs in a savepoint; any fault after the
+provider returned (bad status, receipt write, commit), like an unknown outcome,
+settles the dispatch `dead` with the audit row in the same locked transaction
+and ends in `DeliveryTerminal`. A worker that reclaimed a stale lease waits on
+the lock and then finds the dispatch dead.
+
+**One transport per worker claims every outbox event type** (the claim function
+is not type-scoped): a foreign event type is dead-lettered at once, so a relay
+wired with this transport must not share an outbox with other event types until
+a type-scoped claim exists (follow-up, Academy A4 gate).
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -392,6 +405,24 @@ def _dispatch_id_of(payload: Mapping[str, object]) -> UUID:
         raise DeliveryTerminal("malformed payload: dispatch_id is not a UUID") from None
 
 
+class _TrackedProvider:
+    """Wraps a provider so the transport knows whether it RETURNED: from that
+    moment the message may have been taken, and nothing may re-send it."""
+
+    def __init__(self, inner: DeliveryProvider) -> None:
+        self._inner = inner
+        self.returned = False
+        self.name = inner.name
+        for attr in ("message_features", "message_headers"):
+            if hasattr(inner, attr):
+                setattr(self, attr, getattr(inner, attr))
+
+    def send(self, message):  # type: ignore[no-untyped-def]
+        result = self._inner.send(message)
+        self.returned = True
+        return result
+
+
 class DispatchRelayTransport:
     """`DeliveryTransport` for `delivery.dispatch.v1`. See the module docstring."""
 
@@ -411,13 +442,36 @@ class DispatchRelayTransport:
     # -- worker protocol -------------------------------------------------
 
     def deliver(self, event: ClaimedEvent, tenant_db: Session) -> None:
+        try:
+            self._deliver(event, tenant_db)
+        except (
+            DeliveryDeferred,
+            DeliveryTerminal,
+            DeliveryError,
+            TransientProviderFailure,
+            ProjectionFailed,
+            RelayRegistryNotInstalledError,
+        ):
+            raise
+        except Exception as exc:
+            # Whatever else escapes is reduced to its type name: the worker
+            # stores `repr(exc)` on the outbox row.
+            raise TransientProviderFailure(
+                f"transport error {type(exc).__name__}"
+            ) from None
+
+    def _deliver(self, event: ClaimedEvent, tenant_db: Session) -> None:
         if event.event_type != DISPATCH_EVENT_TYPE:
             raise DeliveryTerminal("unexpected event type for the dispatch transport")
         dispatch_id = _dispatch_id_of(event.payload)
         tenant_id = event.tenant_id
         # Wiring faults surface BEFORE a send is attempted, never after one.
-        resolvers = self._resolvers or active_attachment_resolvers()
-        hooks = self._hooks or active_projection_hooks()
+        resolvers = (
+            self._resolvers
+            if self._resolvers is not None
+            else active_attachment_resolvers()
+        )
+        hooks = self._hooks if self._hooks is not None else active_projection_hooks()
         active_audit_actions().require(AUDIT_ACTION_OUTCOME_UNKNOWN)
 
         row = tenant_db.execute(
@@ -472,96 +526,131 @@ class DispatchRelayTransport:
         resolvers: AttachmentResolverRegistry,
         hooks: ProjectionHookRegistry,
     ) -> None:
+        """Send once and record the outcome.
+
+        The dispatch row stays locked (`FOR UPDATE`, taken in `deliver`) from
+        before the send until the outcome is committed. `send()` runs in a
+        SAVEPOINT, so an unknown outcome rolls back only the savepoint and the
+        dead state is written under the same lock: a worker that reclaimed a
+        stale lease waits on the lock and then sees `dead`, never sending twice.
+
+        Once the provider has RETURNED, nothing may retry the send: any later
+        fault (bad status, receipt write, commit) takes the unknown path.
+        """
         dispatch_id = loaded.message.dispatch_id
         resolved = ResolvedAttachments(
             db=db, tenant_id=tenant_id, dispatch_id=dispatch_id, registry=resolvers
         )
+        tracker: _TrackedProvider | None = None
+        retry: TransientProviderFailure | None = None
+        run_hooks = False
+        left_savepoint = False
         try:
-            provider = self._provider_factory(resolved)
-            outcome = send(db, tenant_id, provider=provider, message=loaded.message)
-        except DeliveryDeferred:
-            raise  # a hold: nothing written, the worker reschedules
-        except DeliveryOutcomeUnknown as unknown:
-            self._record_unknown(db, tenant_id, dispatch_id, unknown)
-            raise DeliveryTerminal(
-                "provider outcome unknown; not retried (operator review)"
-            ) from None
-        except DeliveryTerminal:
-            raise
-        except DeliveryError:
-            raise  # our own fixed-text refusals (misconfiguration): retried
+            tracker = _TrackedProvider(self._provider_factory(resolved))
+            with db.begin_nested():
+                outcome = send(db, tenant_id, provider=tracker, message=loaded.message)
+            left_savepoint = True
+            if not isinstance(outcome, Sent):
+                settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_SUPPRESSED)
+                db.commit()
+            else:
+                receipt_status = outcome.receipt.status
+                if receipt_status == DELIVERY_FAILED:
+                    # Keep the receipt (evidence of this attempt), then retry.
+                    code = outcome.receipt.response_code
+                    db.commit()
+                    retry = TransientProviderFailure(
+                        "provider reported a transient failure"
+                        + (f" ({code})" if code else "")
+                    )
+                elif receipt_status in _SENT_STATUSES:
+                    settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_SENT)
+                    db.commit()
+                    run_hooks = True
+                else:
+                    # rejected / bounced / complaint: a final verdict on the
+                    # recipient. The bounce already suppressed the address.
+                    settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_FAILED)
+                    db.commit()
+        except (DeliveryDeferred, DeliveryTerminal):
+            raise  # a hold, or a terminal verdict: nothing was sent / handled
         except Exception as exc:
-            logger.warning(
-                "dispatch %s send raised %s", dispatch_id, type(exc).__name__
-            )
-            raise TransientProviderFailure(
-                f"send raised {type(exc).__name__}"
-            ) from None
-
-        if not isinstance(outcome, Sent):
-            settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_SUPPRESSED)
-            db.commit()
-            return
-
-        receipt_status = outcome.receipt.status
-        if receipt_status == DELIVERY_FAILED:
-            # Keep the receipt (evidence of this attempt), then retry.
-            code = outcome.receipt.response_code
-            db.commit()
-            raise TransientProviderFailure(
-                "provider reported a transient failure" + (f" ({code})" if code else "")
-            )
-        if receipt_status in _SENT_STATUSES:
-            settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_SENT)
-            db.commit()
+            if isinstance(exc, DeliveryOutcomeUnknown):
+                reason = exc.reason
+            elif tracker is not None and tracker.returned:
+                reason = f"post-send fault: {type(exc).__name__}"
+            else:
+                # The provider was never reached: a plain retry cannot double-send.
+                if isinstance(exc, DeliveryError):
+                    raise
+                logger.warning(
+                    "dispatch %s send raised %s", dispatch_id, type(exc).__name__
+                )
+                raise TransientProviderFailure(
+                    f"send raised {type(exc).__name__}"
+                ) from None
+            if left_savepoint:
+                # The fault was in recording (settle/commit): whatever the
+                # transaction holds is not trustworthy, start clean.
+                with suppress(Exception):
+                    db.rollback()
+                with suppress(Exception):
+                    _set_tenant(db, tenant_id)
+            self._terminal_unknown(db, tenant_id, dispatch_id, reason)
+            raise  # unreachable: _terminal_unknown always raises DeliveryTerminal
+        if retry is not None:
+            raise retry
+        if run_hooks:
             _set_tenant(db, tenant_id)
             row = db.get(CommunicationDispatch, dispatch_id)
             if row is not None:
                 self._project(db, tenant_id, row, hooks)
-            return
-        # rejected / bounced / complaint: a final verdict on the recipient. The
-        # bounce has already suppressed the address inside `send`.
-        settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_FAILED)
-        db.commit()
 
-    def _record_unknown(
-        self,
-        db: Session,
-        tenant_id: UUID,
-        dispatch_id: UUID,
-        unknown: DeliveryOutcomeUnknown,
+    def _terminal_unknown(
+        self, db: Session, tenant_id: UUID, dispatch_id: UUID, reason: str
     ) -> None:
-        # Terminal state first and durable, then the audit row: the dead state
-        # must not depend on the audit write.
-        db.rollback()
-        _set_tenant(db, tenant_id)
-        settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_DEAD)
-        db.commit()
-        _set_tenant(db, tenant_id)
-        try:
-            write_audit_event(
-                db,
-                tenant_id=tenant_id,
-                actor_type="system",
-                actor_id="delivery-relay",
-                action=AUDIT_ACTION_OUTCOME_UNKNOWN,
-                entity_type=AUDIT_ENTITY_TYPE,
-                entity_id=str(dispatch_id),
-                is_success=False,
-                details={
-                    "reason": unknown.reason[:200],
-                    "retried": False,
-                    "operator_action": "verify with the provider, then requeue",
-                },
-            )
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            logger.error(
-                "dispatch %s outcome-unknown audit write failed (%s)",
-                dispatch_id,
-                type(exc).__name__,
-            )
+        """Dead state + audit row in ONE transaction, under the row lock still
+        held. If that cannot commit, retry after a rollback, then settle-only.
+        Always ends in `DeliveryTerminal`; the worker's `_mark_dead` retries the
+        dead marking in a fresh session if even that failed."""
+        for step, with_audit in enumerate((True, True, False)):
+            try:
+                if step:
+                    db.rollback()
+                    _set_tenant(db, tenant_id)
+                settle_dispatch(db, tenant_id, dispatch_id, DISPATCH_DEAD)
+                if with_audit:
+                    write_audit_event(
+                        db,
+                        tenant_id=tenant_id,
+                        actor_type="system",
+                        actor_id="delivery-relay",
+                        action=AUDIT_ACTION_OUTCOME_UNKNOWN,
+                        entity_type=AUDIT_ENTITY_TYPE,
+                        entity_id=str(dispatch_id),
+                        is_success=False,
+                        details={
+                            "reason": reason[:200],
+                            "retried": False,
+                            "operator_action": "verify with the provider, then "
+                            "requeue with acknowledge_possible_duplicate",
+                        },
+                    )
+                db.commit()
+                break
+            except Exception as exc:
+                logger.error(
+                    "dispatch %s unknown-outcome record step %d failed (%s)",
+                    dispatch_id,
+                    step,
+                    type(exc).__name__,
+                )
+        else:
+            with suppress(Exception):
+                db.rollback()
+        raise DeliveryTerminal(
+            "provider outcome unknown; not retried (operator review)"
+        )
 
     def _project(
         self,

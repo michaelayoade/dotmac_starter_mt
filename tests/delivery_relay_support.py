@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
+from types import SimpleNamespace
 
 import pytest
 from dotmac_kernel import audit_actions, delivery_relay
@@ -191,7 +192,8 @@ def relay_registries() -> Generator[None, None, None]:
 
 class FakeProvider:
     """A scripted provider. `script` is a list of outcomes consumed per send, the
-    last one repeating: a status string, or an exception instance to raise."""
+    last one repeating: a status string, an exception instance to raise, a dict
+    (a raw result) or a zero-argument callable returning one of those."""
 
     name = "fake"
     message_features = frozenset({FEATURE_HTML, FEATURE_ATTACHMENTS})
@@ -206,8 +208,19 @@ class FakeProvider:
     def send(self, message: OutboundMessage) -> ProviderResult:
         step = self.script[min(len(self.sent), len(self.script) - 1)]
         self.sent.append(message)
+        if callable(step):
+            step = step()  # may block, then raise or return a step
         if isinstance(step, BaseException):
             raise step
+        if isinstance(step, dict):
+            # A RAW result, bypassing ProviderResult's own validation, to model
+            # an adapter that returns something the kernel then refuses to record.
+            return SimpleNamespace(
+                status=step.get("status", "accepted"),
+                provider_message_id=step.get("provider_message_id"),
+                response_code=step.get("response_code"),
+                response_body=None,
+            )
         for ref in message.attachments:
             assert self.resolved is not None
             self.attachment_bytes.append(self.resolved(ref))
