@@ -34,6 +34,7 @@ import math
 import smtplib
 import socket
 import ssl
+import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager, suppress
 from email.message import EmailMessage
@@ -236,8 +237,23 @@ class SmtpDeliveryProvider:
             return _result(DELIVERY_REJECTED, CODE_NON_ASCII_ADDRESS)
         lease = self._admission(message) if self._admission is not None else None
         if isinstance(lease, AbstractContextManager):
-            with lease as decision:
-                return self._admitted_send(message, cfg, password, decision)
+            decision = lease.__enter__()
+            try:
+                result = self._admitted_send(message, cfg, password, decision)
+            except BaseException:
+                # Not decided: let the lease see the exception as `with` would.
+                lease.__exit__(*sys.exc_info())
+                raise
+            try:
+                lease.__exit__(None, None, None)
+            except Exception as exc:
+                # The outcome already exists (the message may be on its way):
+                # a failing release must never turn it into a retry.
+                logger.error(
+                    "admission lease release failed after the send (%s)",
+                    type(exc).__name__,
+                )
+            return result
         return self._admitted_send(message, cfg, password, lease)
 
     def _admitted_send(

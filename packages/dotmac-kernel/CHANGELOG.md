@@ -23,6 +23,7 @@ here.
   `install_projection_hooks`, `active_*`); a worker that never installed one is
   refused, not treated as empty. Projection hooks must be idempotent (a hook
   failure retries only the hooks, never the send). Additive; no migration.
+- `requeue_dead_dispatch(..., acknowledge_possible_duplicate=False)`: a dead dispatch whose provider outcome was unknown (newest audit row, or a `terminal:` dead outbox marker if the row was lost) is refused unless the operator passes the flag (CLI `--accept-possible-duplicate`); recorded in the requeue audit row.
 - Entry fixes for K-8. Exhausted attempts and the deferral bound now move the
   DISPATCH to `dead` as well as the outbox row (`DeadLetterAware.dead_letter`,
   run by the worker and committed before the row is settled; if it fails the

@@ -61,6 +61,7 @@ from dotmac_kernel.delivery_models import (
     CommunicationDelivery,
     CommunicationDispatch,
 )
+from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_kernel.messaging.outbox import enqueue_event
 
 AUDIT_ACTION_REQUEUED = "communication.dispatch.requeued"
@@ -99,7 +100,23 @@ def _unknown_outcome_pending(db: Session, tenant_id: UUID, dispatch_id: UUID) ->
         .order_by(AuditEvent.occurred_at.desc(), AuditEvent.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
-    return newest == AUDIT_ACTION_UNKNOWN
+    if newest == AUDIT_ACTION_UNKNOWN:
+        return True
+    # Fail closed when the audit row was lost (the unknown path's last tiers
+    # settle dead without one): the transport's own dead-letter marker on the
+    # newest outbox event says the same thing.
+    last_error = db.execute(
+        select(OutboxEvent.last_error)
+        .where(
+            OutboxEvent.status == "dead",
+            OutboxEvent.tenant_id == tenant_id,
+            OutboxEvent.event_type == DISPATCH_EVENT_TYPE,
+            OutboxEvent.payload["dispatch_id"].as_string() == str(dispatch_id),
+        )
+        .order_by(OutboxEvent.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return bool(last_error) and last_error.startswith("terminal:")
 
 
 def requeue_dead_dispatch(

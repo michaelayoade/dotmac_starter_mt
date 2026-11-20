@@ -688,3 +688,39 @@ def test_requeue_of_an_ordinary_dead_dispatch_needs_no_acknowledgement(
         {"t": str(tenant_a.id)},
     ).scalar_one()
     assert details["acknowledged_possible_duplicate"] is False
+
+
+def test_requeue_gate_fails_closed_when_the_unknown_audit_row_was_lost(
+    admin_session,
+    tenant_a,
+    factories,
+    audit_registry,
+    relay_registries,
+    cleanup,
+    monkeypatch,
+) -> None:
+    """Tier 3 (settle only) leaves the dispatch dead with no audit row. The
+    outbox marker `terminal:` still demands the acknowledgement."""
+    from dotmac_kernel import delivery_relay
+    from dotmac_kernel.delivery_requeue import RequeueRefused
+
+    def boom(*a, **k):
+        raise RuntimeError("audit store down")
+
+    monkeypatch.setattr(delivery_relay, "write_audit_event", boom)
+    did = make_dispatch(factories, tenant_a)
+    run(factories, Harness([DeliveryOutcomeUnknown("reply lost")]).transport, POLICY)
+    monkeypatch.undo()
+    assert dispatch_row(admin_session, did).status == "dead"
+    audits = _count(
+        admin_session,
+        "SELECT count(*) FROM audit_events WHERE tenant_id = :t AND action = :a",
+        t=str(tenant_a.id),
+        a=AUDIT_ACTION_OUTCOME_UNKNOWN,
+    )
+    assert audits == 0  # the row really is lost
+
+    with pytest.raises(RequeueRefused, match="UNKNOWN provider outcome"):
+        _requeue(factories, tenant_a, did)
+    res = _requeue(factories, tenant_a, did, acknowledge_possible_duplicate=True)
+    assert res.requeued

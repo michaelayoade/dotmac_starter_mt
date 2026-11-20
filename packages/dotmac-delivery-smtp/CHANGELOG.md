@@ -14,3 +14,4 @@
   double-send): the dispatch goes `dead`, the outbox event is dead-lettered at
   once and an audit row records it for the operator. Needs the kernel release
   containing S10; declared floor unchanged.
+- S10 review: the admission lease's release failing AFTER a send no longer turns the result into a failure (logged by type name only; the result is returned).
