@@ -8818,7 +8818,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "20261119_0034_receipts_platform_append_only.py",
         }
     ),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
@@ -8828,7 +8828,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-content": frozenset(),
     "dotmac-documents": frozenset(),
     "dotmac-durable-timers": frozenset(),
-    "dotmac-expenses": frozenset(),
+    # `ex_0002` adds the claim liability lifecycle; editable until
+    # `dotmac-expenses` 0.1.0a2 is tagged.
+    "dotmac-expenses": frozenset({"ex_0002_claim_liabilities.py"}),
     "dotmac-fiber-plant": frozenset(),
     "dotmac-finance": frozenset(),
     "dotmac-inventory": frozenset(),

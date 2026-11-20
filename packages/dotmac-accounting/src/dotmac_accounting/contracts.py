@@ -50,6 +50,13 @@ class AccountClass(enum.StrEnum):
     OTHER_COMPREHENSIVE_INCOME = "OTHER_COMPREHENSIVE_INCOME"
 
 
+class AccountChangeKind(enum.StrEnum):
+    RECODE = "RECODE"
+    FLAGS = "FLAGS"
+    RETIRE = "RETIRE"
+    ACTIVATE = "ACTIVATE"
+
+
 class AccountKind(enum.StrEnum):
     CONTROL = "CONTROL"
     POSTING = "POSTING"
@@ -312,6 +319,101 @@ class VoidDraftJournal:
 
 
 @dataclass(frozen=True, slots=True)
+class RecodeAccount:
+    """Change an account's code; its identity (``id``) never changes.
+
+    ``code_pattern`` is the tenant's chart-policy regular expression for the
+    new code (for example ``[0-9]{4}``); the caller owns that policy and the
+    code must match it completely. Posted ledger lines keep the code they were
+    posted under as history.
+    """
+
+    account_id: UUID
+    new_code: str
+    reason: str
+    actor: str
+    code_pattern: str | None = None
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        return {
+            "account_id": str(self.account_id),
+            "new_code": _code(self.new_code, "account code", maximum=40),
+            "reason": _required(self.reason, "change reason", maximum=2000),
+            "actor": _required(self.actor, "actor", maximum=255),
+            "code_pattern": self.code_pattern,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateAccountFlags:
+    """Correct the control/posting flags of an account (``None`` = unchanged)."""
+
+    account_id: UUID
+    reason: str
+    actor: str
+    kind: AccountKind | None = None
+    posting_allowed: bool | None = None
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        if self.kind is None and self.posting_allowed is None:
+            raise InvalidAccount("a flag update must change at least one flag")
+        return {
+            "account_id": str(self.account_id),
+            "kind": None if self.kind is None else self.kind.value,
+            "posting_allowed": self.posting_allowed,
+            "reason": _required(self.reason, "change reason", maximum=2000),
+            "actor": _required(self.actor, "actor", maximum=255),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RetireAccount:
+    """Retire an account: inactive and non-posting.
+
+    ``open_subledger_items`` is the caller's attestation of open items held by
+    owning modules against this account (accounting cannot see sibling
+    modules); any positive value refuses the retirement.
+    """
+
+    account_id: UUID
+    reason: str
+    actor: str
+    open_subledger_items: int
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        if isinstance(self.open_subledger_items, bool) or not isinstance(
+            self.open_subledger_items, int
+        ):
+            raise InvalidAccount("open subledger items must be an integer count")
+        if self.open_subledger_items < 0:
+            raise InvalidAccount("open subledger items must not be negative")
+        return {
+            "account_id": str(self.account_id),
+            "reason": _required(self.reason, "change reason", maximum=2000),
+            "actor": _required(self.actor, "actor", maximum=255),
+            "open_subledger_items": self.open_subledger_items,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ActivateAccount:
+    """Reactivate a retired account; posting stays off unless asked for."""
+
+    account_id: UUID
+    reason: str
+    actor: str
+    posting_allowed: bool = False
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        return {
+            "account_id": str(self.account_id),
+            "reason": _required(self.reason, "change reason", maximum=2000),
+            "actor": _required(self.actor, "actor", maximum=255),
+            "posting_allowed": self.posting_allowed,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CloseCheck:
     code: str
     passed: bool
@@ -347,9 +449,11 @@ class PeriodCloseEvidence:
 
 
 __all__ = [
+    "AccountChangeKind",
     "AccountClass",
     "AccountKind",
     "AccountingError",
+    "ActivateAccount",
     "CloseCheck",
     "Conflict",
     "CreateAccount",
@@ -371,7 +475,10 @@ __all__ = [
     "NotFound",
     "PeriodCloseEvidence",
     "PeriodStatus",
+    "RecodeAccount",
+    "RetireAccount",
     "ReverseJournal",
     "SourceIdentity",
+    "UpdateAccountFlags",
     "VoidDraftJournal",
 ]

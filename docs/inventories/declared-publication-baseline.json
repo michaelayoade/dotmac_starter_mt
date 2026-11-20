@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-accounting": {
+      "declared": "0.1.0a3",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a2 is published and tagged (dotmac-accounting-v0.1.0a2) and its migration bytes remain unchanged. 0.1.0a3 adds ac_0004_account_maintenance: governed, audited, idempotent recode, flag update, retire and activate of accounts with an append-only history and a database guard that keeps account identity stable and lets posted ledger lines keep the code they were posted under (Michael ruling D-M4, chart recode). Publication requires the release lane and his separate release go; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-ai-operations": {
       "declared": "0.1.0a2",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ai-operations-v0.1.0a1). 0.1.0a2 adds the stateless advisory-protocol contracts (AIAdvisoryInvocation/AIAdvisoryResult/AIActionProposal/AIActionDecision/AIExecutionObservation/AICapabilityExposureRef) and hardens capability-id/digest binding, so src/ no longer matches the bytes that the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication.",
@@ -211,6 +216,11 @@
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
+    },
+    "dotmac-expenses": {
+      "declared": "0.1.0a2",
+      "reason": "Unpublished source successor to published 0.1.0a1 (ERP v2 cutover). It adds the staff claim liability lifecycle (accept, settle, bank return, adjust, reverse acceptance, historical admission with no GL, sealed consequence facts and the claim input-VAT setting declaration), with additive migration ex_0002_claim_liabilities; the released ex_0001 bytes are unchanged and the kernel floor rises to a103. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record, never by editing the declared version down.",
+      "state": "declared-unpublished"
     }
   }
 }
