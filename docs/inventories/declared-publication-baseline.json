@@ -62,11 +62,6 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-accounting": {
-      "declared": "0.1.0a3",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a2 is published and tagged (dotmac-accounting-v0.1.0a2) and its migration bytes remain unchanged. 0.1.0a3 adds ac_0004_account_maintenance: governed, audited, idempotent recode, flag update, retire and activate of accounts with an append-only history and a database guard that keeps account identity stable and lets posted ledger lines keep the code they were posted under (Michael ruling D-M4, chart recode). Publication requires the release lane and his separate release go; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
-      "state": "declared-unpublished"
-    },
     "dotmac-ai-operations": {
       "declared": "0.1.0a2",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ai-operations-v0.1.0a1). 0.1.0a2 adds the stateless advisory-protocol contracts (AIAdvisoryInvocation/AIAdvisoryResult/AIActionProposal/AIActionDecision/AIExecutionObservation/AICapabilityExposureRef) and hardens capability-id/digest binding, so src/ no longer matches the bytes that the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication.",

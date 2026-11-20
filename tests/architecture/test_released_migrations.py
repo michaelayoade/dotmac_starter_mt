@@ -7690,6 +7690,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-accounting ──
+    "dotmac-accounting-v0.1.0a3": (
+        "dotmac-accounting",
+        "cd9f72b0874312d9217e481f359ccaa5376603b3",
+        {
+            "ac_0001_accounting.py": (
+                "ed2aedd04df0c7446ae7a7b90d6e97d40c2f352f806b9c8eba26558521ef686e"
+            ),
+            "ac_0002_posted_content.py": (
+                "fc9dcf698fa6cfc32e72dc48767d1e03dd2043ac33b75fe998660cf1a111373d"
+            ),
+            "ac_0003_draft_void.py": (
+                "ae340a29f4de0356436bb74a5c49038a97e8de5f8c0af1a9c973714aa22d5183"
+            ),
+            "ac_0004_account_maintenance.py": (
+                "a08fca0775700ab33672b7e86e07ad12a4a1749cb3ebdee1ace684bd82a6d839"
+            ),
+        },
+    ),
     "dotmac-accounting-v0.1.0a2": (
         "dotmac-accounting",
         "adf15837767e3a013d662c0af85ff299c24ef9a9",
@@ -8818,7 +8836,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
             "20261119_0034_receipts_platform_append_only.py",
         }
     ),
-    "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
+    "dotmac-accounting": frozenset(),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
