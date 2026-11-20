@@ -117,9 +117,11 @@ FUNDED_CHARGE_ONLY = frozenset({"funded_charge.py"})
 # the account terms and the balance to pay a new postpaid invoice. Read-only
 # names; the single widening beyond FundedCharge.
 FUNDED_CHARGE_AND_SETTLE = frozenset({"funded_charge.py", "settle.py"})
-# GAP-3 dating: Settle alone reads the account statement (read-only, one account,
-# no lock) to find the newest cash received since the invoice dates.
-SETTLE_ONLY = frozenset({"settle.py"})
+# GAP-3 / GAP-L1 dating: only the private ``_credit_dating.py`` reads the account
+# statement (read-only, one account, no lock) to find the newest credit that
+# reached the account; Settle and FundedCharge call it and never read the
+# statement themselves.
+CREDIT_DATING_ONLY = frozenset({"_credit_dating.py"})
 # The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
 # narrow this to modules; PR E adds the F3/F5 modules to the restricted names.
 OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
@@ -147,8 +149,8 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "AccountTermsV1": FUNDED_CHARGE_AND_SETTLE,
     "get_funding_availability": FUNDED_CHARGE_AND_SETTLE,
     "GetFundingAvailabilityV1": FUNDED_CHARGE_AND_SETTLE,
-    "get_account_statement": SETTLE_ONLY,
-    "GetAccountStatementV1": SETTLE_ONLY,
+    "get_account_statement": CREDIT_DATING_ONLY,
+    "GetAccountStatementV1": CREDIT_DATING_ONLY,
     "get_confirmed_settlement": FUNDED_CHARGE_ONLY,
     "GetConfirmedSettlementV1": FUNDED_CHARGE_ONLY,
     "IssueRatedInvoiceV3": FUNDED_CHARGE_ONLY,
@@ -1273,12 +1275,19 @@ def test_terms_and_availability_reads_are_settle_and_funded_charge_only() -> Non
         assert forbidden_call_violations(source, "adjust.py"), name
 
 
-def test_the_account_statement_read_is_settle_only() -> None:
+def test_the_account_statement_read_is_credit_dating_only() -> None:
     for name in ("get_account_statement", "GetAccountStatementV1"):
         source = f"from dotmac_billing import {name}\n"
-        assert forbidden_call_violations(source, "settle.py") == [], name
+        assert forbidden_call_violations(source, "_credit_dating.py") == [], name
+        assert forbidden_call_violations(source, "settle.py"), name
         assert forbidden_call_violations(source, "funded_charge.py"), name
         assert forbidden_call_violations(source, "adjust.py"), name
+    # The real tree: no module but the dating module names the statement read.
+    for path in _source_files():
+        if _relative(path) == "_credit_dating.py":
+            continue
+        names = referenced_names(path.read_text("utf-8"))
+        assert not names & {"get_account_statement", "GetAccountStatementV1"}, path
 
 
 def test_the_listed_owner_calls_are_accepted() -> None:
