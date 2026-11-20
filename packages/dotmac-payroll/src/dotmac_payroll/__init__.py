@@ -3,12 +3,14 @@
 from dotmac_payroll.consequences import (
     CONSEQUENCE_OWNER,
     CONSEQUENCE_SOURCE_VERSION,
+    LIABILITY_ADJUSTMENT_DOCUMENT_KIND,
     RUN_DOCUMENT_KIND,
     SETTLEMENT_DOCUMENT_KIND,
     SETTLEMENT_REVERSAL_DOCUMENT_KIND,
     PayrollAccountingConsequence,
     PayrollAccountingEntry,
     PayrollConsequenceSource,
+    build_liability_adjustment_consequence,
     build_liability_settlement_consequence,
     build_run_accounting_consequence,
     build_settlement_reversal_consequence,
@@ -24,6 +26,7 @@ from dotmac_payroll.service import (
     PayrollConflict,
     PayrollNotFound,
     PayrollRuleViolation,
+    adjust_liability,
     approve_payroll_run,
     assign_employee_pay_structure,
     calculate_employee_payroll,
@@ -31,6 +34,7 @@ from dotmac_payroll.service import (
     create_pay_component,
     create_pay_structure,
     create_payroll_run,
+    effective_liability_amount,
     finalize_payroll_run,
     publish_pay_structure_revision,
     read_payroll_run_totals,
@@ -47,11 +51,12 @@ from dotmac_payroll.totals import (
     validate_payment_total,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a6"
 
 __all__ = [
     "CONSEQUENCE_OWNER",
     "CONSEQUENCE_SOURCE_VERSION",
+    "LIABILITY_ADJUSTMENT_DOCUMENT_KIND",
     "RUN_DOCUMENT_KIND",
     "SETTLEMENT_DOCUMENT_KIND",
     "SETTLEMENT_REVERSAL_DOCUMENT_KIND",
@@ -69,8 +74,10 @@ __all__ = [
     "PayrollTotalsViolation",
     "__version__",
     "aggregate_payroll_run_totals",
+    "adjust_liability",
     "approve_payroll_run",
     "assign_employee_pay_structure",
+    "build_liability_adjustment_consequence",
     "build_liability_settlement_consequence",
     "build_run_accounting_consequence",
     "build_settlement_reversal_consequence",
@@ -79,6 +86,7 @@ __all__ = [
     "create_pay_component",
     "create_pay_structure",
     "create_payroll_run",
+    "effective_liability_amount",
     "finalize_payroll_run",
     "module",
     "publish_pay_structure_revision",

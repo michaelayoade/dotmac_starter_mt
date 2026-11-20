@@ -8848,9 +8848,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
     # by the 0.1.0a5 entry.
     "dotmac-payables": frozenset({"pa_0006_tax_release_hist_credit.py"}),
-    # `py_0003` adds the settlement reversal table; editable until
-    # `dotmac-payroll` 0.1.0a5 is tagged.
-    "dotmac-payroll": frozenset(),
+    # `py_0004` adds audited liability adjustments; editable until
+    # `dotmac-payroll` 0.1.0a6 is tagged.
+    "dotmac-payroll": frozenset({"py_0004_liability_adjustments.py"}),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
     # `dotmac-positioning` 0.2.0a2 is tagged.
