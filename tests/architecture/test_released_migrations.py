@@ -8843,9 +8843,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    # `pa_0005` adds payment reversal, settled historical admission and invoice
-    # recognition; still editable until `dotmac-payables` 0.1.0a5 is tagged.
-    "dotmac-payables": frozenset(),
+    # `pa_0006` adds the deferred-VAT release policy and rows, the historical
+    # deferral position and the historical supplier credit; still editable until
+    # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
+    # by the 0.1.0a5 entry.
+    "dotmac-payables": frozenset({"pa_0006_tax_release_hist_credit.py"}),
     # `py_0003` adds the settlement reversal table; editable until
     # `dotmac-payroll` 0.1.0a5 is tagged.
     "dotmac-payroll": frozenset(),
