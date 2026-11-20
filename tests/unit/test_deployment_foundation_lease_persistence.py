@@ -1155,6 +1155,9 @@ _CP6_FORBIDDEN_NAMES = frozenset(
         "tempfile",
         "socket",
         "__import__",
+        "__builtins__",
+        "sys",
+        "codecs",
         "getattr",
         "setattr",
         "vars",
@@ -1180,6 +1183,20 @@ _CP6_FORBIDDEN_ATTRIBUTES = (
             "mkdir",
             "unlink",
             "dump",
+            "import_module",
+            "__import__",
+            "__builtins__",
+            "__dict__",
+            "os",
+            "sys",
+            "modules",
+            "codecs",
+            "system",
+            "popen",
+            "Popen",
+            "write_lease",
+            "write_store_record",
+            "write_store_record_once",
         }
     )
     | _LINK_ATTRIBUTES
@@ -1218,7 +1235,15 @@ def _cp6_export_premise(source: str) -> bool:
         if isinstance(node, ast.Attribute) and node.attr in _CP6_FORBIDDEN_ATTRIBUTES:
             return False
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if "write_lease" in node.value or "write_store_record" in node.value:
+            if any(
+                token in node.value
+                for token in (
+                    "write_lease",
+                    "write_store_record",
+                    "__builtins__",
+                    "__import__",
+                )
+            ):
                 return False
     owners = {
         fn.name
@@ -1276,6 +1301,12 @@ def test_the_cp6_export_premise_rejects_every_plant() -> None:
         "\n_x = eval('1')\n",
         "\n_x = write_store_record_once\n",
         "\n_x = 'write_lease'\n",
+        "\n_x = uuid.os.system('true')\n",
+        "\n_x = dataclasses.sys.modules['os']\n",
+        "\n_x = __builtins__['__import__']\n",
+        "\n_x = hashlib.codecs\n",
+        "\n_x = json.os.popen('true')\n",
+        "\n_x = '__import__'\n",
         "\ndef _g(d):\n    return json.dumps(d, sort_keys=True)\n",
         "\ndef _g(d):\n    return json.dumps(d)\n",
     ):

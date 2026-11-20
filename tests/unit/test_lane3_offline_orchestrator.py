@@ -300,6 +300,9 @@ class World:
         # presentation key whose public half is the PINNED input of the run.
         self.pres_key = Ed25519PrivateKey.generate()
         self.pres_pub = b64url(public_raw(self.pres_key))
+        # Presentation live window is [store_time - 2s, store_time + 298s]; the
+        # default ledger time is T + 5m.
+        self.store_time = T + timedelta(minutes=5)
         self.admission: dict[str, Any] = {
             "attempt_id": self.dispatch_id,
             "presentation": None,
@@ -452,7 +455,7 @@ class World:
             attempt_id=self.admission["attempt_id"],
             candidate=AttestationEnvelopeV2.from_mapping(self.admission["candidate"]),
             installed=AttestationEnvelopeV2.from_mapping(self.admission["installed"]),
-            store_time=T,
+            store_time=self.store_time,
             presentation_id="presentation-1",
         )
 
@@ -563,6 +566,8 @@ def test_every_join_passes_and_emits_a_result_the_consumer_parses(world: World) 
 def test_an_unreleased_lease_uses_its_expiry_as_the_bracket_end(world: World) -> None:
     world.cp["release"] = None
     world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(minutes=50))
+    world.store_time = T + timedelta(minutes=50)
+    world.resign_admission()
     world.cp["installed_root"]["revoked_at"] = ts(T + timedelta(minutes=55))
     world.run()
 
@@ -821,6 +826,8 @@ def test_a_release_after_expiry_is_refused(world: World) -> None:
 
 def test_bracket_bounds_are_inclusive(world: World) -> None:
     world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(minutes=1))
+    world.store_time = T + timedelta(minutes=1)
+    world.resign_admission()
     world.cp["destruction"]["destroyed_at"] = ts(T + timedelta(minutes=1))
     world.run()
 
@@ -1305,3 +1312,51 @@ def test_the_pinned_presentation_key_must_be_the_signing_one(world: World) -> No
 
 def test_host_admission_bytes_must_be_json(world: World) -> None:
     refused(world, "host-admission-unreadable", host_admission_bytes=b"not json")
+
+
+def test_an_expired_presentation_is_refused(world: World) -> None:
+    # issued = store - 2s, expires = issued + 300s, well before the ledger row.
+    world.store_time = T + timedelta(minutes=5) - timedelta(seconds=310)
+    world.resign_admission()
+    refused(world, "host-admission-presentation-not-fresh")
+
+
+def test_the_presentation_expiry_instant_itself_is_refused(world: World) -> None:
+    ledger = T + timedelta(minutes=5)
+    world.export["control"]["ledger"]["created_at"] = ts(ledger)
+    world.store_time = ledger - timedelta(seconds=298)  # expires_at == ledger
+    world.resign_admission()
+    refused(world, "host-admission-presentation-not-fresh")
+
+
+def test_a_not_yet_issued_presentation_is_refused(world: World) -> None:
+    world.store_time = T + timedelta(minutes=10)
+    world.resign_admission()
+    refused(world, "host-admission-presentation-not-fresh")
+
+
+def test_a_presentation_issued_exactly_at_the_ledger_is_accepted(world: World) -> None:
+    world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(minutes=5))
+    world.store_time = T + timedelta(minutes=5, seconds=2)
+    world.resign_admission()
+    world.run()
+
+
+def test_deeply_nested_host_admission_is_a_refusal_not_a_crash(world: World) -> None:
+    nested = b"[" * 100000 + b"]" * 100000
+    with pytest.raises(orchestrator.JoinRefused) as caught:
+        orchestrator.read_host_admission(
+            nested, presentation_public_key_b64url=world.pres_pub
+        )
+    assert str(caught.value).startswith("offline-join-host-admission-")
+    refused(world, "host-admission-unreadable", host_admission_bytes=nested)
+
+
+def test_a_non_s2_exception_from_the_reader_is_a_refusal(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise ValueError("private text must not be quoted")
+
+    monkeypatch.setattr(orchestrator, "parse_host_admission", boom)
+    refused(world, "host-admission-unreadable")

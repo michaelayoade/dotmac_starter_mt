@@ -174,6 +174,10 @@ def read_host_admission(
         if not code.startswith("host-admission-"):
             code = "host-admission-" + code
         _refuse(code)
+    except Exception:
+        # RecursionError (deeply nested JSON) or anything else outside S2's own
+        # refusals: a refusal, never a crash and never supplied text.
+        _refuse("host-admission-unreadable")
     raise AssertionError  # pragma: no cover
 
 
@@ -346,6 +350,32 @@ def _join_control(
     if ledger.fingerprint != expected_fingerprint:
         _refuse("ledger-fingerprint-mismatch")
 
+    _join_lease_bracket(export, receipt)
+    _join_presentation_freshness(export, admission)
+
+
+def _presentation_instant(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        _refuse("host-admission-presentation-time-invalid")
+    raise AssertionError  # pragma: no cover
+
+
+def _join_presentation_freshness(
+    export: Cp6Export, admission: HostAdmissionDigest
+) -> None:
+    """The presentation was live when Control consumed it:
+    `issued_at <= ledger.created_at < expires_at`."""
+    issued = _presentation_instant(admission.issued_at)
+    expires = _presentation_instant(admission.expires_at)
+    if not issued <= export.ledger.created_at < expires:
+        _refuse("host-admission-presentation-not-fresh")
+
+
+def _join_lease_bracket(export: Cp6Export, receipt: RehearsalReceiptV2) -> None:
+    """Lease identity and the launcher-observed DB-time bracket."""
+    ledger = export.ledger
     lease = export.lease
     # The receipt's `lease_id` is the launcher's authorization run id.
     if (
