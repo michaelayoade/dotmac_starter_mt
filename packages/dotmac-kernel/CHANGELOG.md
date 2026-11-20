@@ -10,6 +10,35 @@ here.
 
 ### Added
 
+- Generic relay transport for `delivery.dispatch.v1` (ADR-0006 § 5g, K-8, S10).
+  New submodule `dotmac_kernel.delivery_relay`: `DispatchRelayTransport` loads
+  the dispatch (id-only payload, tenant session, fingerprint re-verified), runs
+  attachment resolvers lazily from an `AttachmentResolverRegistry` (keyed by
+  `AttachmentRef.kind`), calls `delivery_providers.send`, maps the outcome
+  (accepted -> `sent` and projection hooks; suppressed -> `suppressed`; deferred
+  -> K-4 reschedule; receipt `failed` -> retry with its receipt kept; rejected,
+  bounced, complaint -> dispatch `failed`; unknown -> terminal) and runs
+  `ProjectionHookRegistry` hooks after an accepted send. Both registries use the
+  install/active pattern (`install_attachment_resolvers`,
+  `install_projection_hooks`, `active_*`); a worker that never installed one is
+  refused, not treated as empty. Projection hooks must be idempotent (a hook
+  failure retries only the hooks, never the send). Additive; no migration.
+- `requeue_dead_dispatch(..., acknowledge_possible_duplicate=False)`: a dead dispatch whose provider outcome was unknown (newest audit row, or a `terminal:` dead outbox marker if the row was lost) is refused unless the operator passes the flag (CLI `--accept-possible-duplicate`); recorded in the requeue audit row.
+- Entry fixes for K-8. Exhausted attempts and the deferral bound now move the
+  DISPATCH to `dead` as well as the outbox row (`DeadLetterAware.dead_letter`,
+  run by the worker and committed before the row is settled; if it fails the
+  row is left claimed and reclaimed), so S8's requeue-dead works on it.
+  `DeliveryOutcomeUnknown` (an adapter could not tell whether the provider took
+  the message) and `DeliveryTerminal` (a transport verdict: dead-letter now, no
+  retry) are new in `dotmac_kernel.delivery`; the worker dead-letters on
+  `DeliveryTerminal` at once, uncharged. An unknown outcome is never retried
+  (a retry can double-send): the dispatch goes `dead` and one
+  `communication.dispatch.outcome_unknown` audit row (new Kernel audit action)
+  records it for the operator. New helpers: `delivery_dispatch.settle_dispatch`,
+  `relay.record_dead_letter`, `relay.failure_dead_letters`,
+  `relay.deferral_dead_letters`. `SmtpOutcomeUnknown` in `dotmac-delivery-smtp`
+  is now a `DeliveryOutcomeUnknown`.
+
 - `dotmac_kernel.consent.restore_transactional(db, tenant_id, *, channel, address)`
   (K-7): locks a suppression row (`FOR UPDATE`) and downgrades scope `all` ->
   `marketing`, keeping the row, reason, note and provenance (never deletes).

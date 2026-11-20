@@ -1,6 +1,6 @@
 """Pure contract checks for held-partition admission and the seal hold list."""
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -145,3 +145,28 @@ def test_lane_port_refuses_an_untrusted_authority_object():
         )
     assert refused.value.code == "billing.opening_verifier_unavailable"
     assert isinstance(UUID(int=1), UUID)
+
+
+def test_dual_control_off_hold_admission_takes_no_approval():
+    command = _command(approval_request_id=None)
+    assert command.approval_request_id is None
+    assert hold.require_hold_no_approval(command) is None
+    # A supplied approval is refused rather than ignored.
+    with pytest.raises(BillingRuleViolation) as refused:
+        hold.require_hold_no_approval(_command())
+    assert refused.value.code == "billing.opening_hold_approval_not_applicable"
+
+
+def test_dual_control_on_still_requires_a_standing_approval():
+    command = _command(approval_request_id=None)
+    for approval in (None, _approval(_command())):
+        with pytest.raises(BillingRuleViolation) as refused:
+            hold.require_hold_maker_checker(command, approval)
+        assert refused.value.code == "billing.opening_hold_approval_missing"
+
+
+def test_the_approval_id_defaults_to_none_and_stays_the_last_field():
+    names = [f.name for f in fields(hold.AdmitHeldOpeningAccountV2)]
+    assert names[-1] == "approval_request_id"
+    admission = hold.OpeningHoldAdmissionV1
+    assert [f.name for f in fields(admission)][-1] == "dual_control"

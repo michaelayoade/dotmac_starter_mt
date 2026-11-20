@@ -26,6 +26,7 @@ SMTP adapter for the kernel delivery-provider seam
 - **Classification** is documented in `classify.py`: RCPT 5.1.1/2/3/6/10 `bounced`,
   5.7.x `rejected`, sender-side 5.1.7/5.1.8 and any MAIL-stage 5xx raise (operator fault), soft 5.2/5.4 and 4xx/timeouts/connection errors `failed`.
   A reply lost after the DATA payload raises `SmtpOutcomeUnknown` (SMTP has no
-  idempotency key, so the kernel contract forbids returning `failed`).
+  idempotency key, so the kernel contract forbids returning `failed`). It is a kernel
+  `DeliveryOutcomeUnknown`: the relay transport never retries it (dispatch `dead`, audit row).
 
 Bounce coverage is synchronous only; asynchronous DSNs are not captured.

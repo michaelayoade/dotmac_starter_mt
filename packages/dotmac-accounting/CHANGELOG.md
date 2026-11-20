@@ -1,5 +1,31 @@
 # Changelog — dotmac-accounting
 
+## 0.1.0a3 — unreleased candidate
+
+- Add `ac_0004_account_maintenance`: the append-only `account_changes` history
+  and a database guard on `accounts`. The account `id` and `tenant_id` never
+  change; `code`, `kind`, `posting_allowed` and `is_active` change only together
+  with a matching history row written in the same transaction (the row is
+  stamped with the database transaction id).
+- Add governed, idempotent (`execute_once`) commands `recode_account`,
+  `update_account_flags`, `retire_account` and `activate_account`
+  (`RecodeAccount`, `UpdateAccountFlags`, `RetireAccount`, `ActivateAccount`),
+  each recording reason, actor and the full before/after snapshot.
+- `recode_account`: new code unique per tenant and, when the caller supplies the
+  tenant chart-policy pattern, matching it completely. Posted ledger lines keep
+  the `account_code` they were posted under (history); the account is
+  identified by `account_id`, which never changes.
+- `retire_account` refuses a non-zero posted balance, any draft journal line,
+  an active child account, and a positive caller-attested count of open
+  subledger items (accounting cannot see sibling modules); it sets the account
+  inactive and non-posting. `activate_account` reverses it, posting stays off
+  unless requested for a posting account.
+- The guard also refuses any change to `category_id`, `normal_balance`,
+  `parent_id` and `currency_code`; `update_account_flags` refuses moving a
+  posted-to account away from POSTING. Callers must always pass the pinned
+  numeric `code_pattern` to `recode_account`.
+- Downgrade of ac_0004 refuses once any history row exists.
+
 ## 0.1.0a2 — unreleased candidate
 
 - Add `ac_0002_posted_content` without changing the published root migration.

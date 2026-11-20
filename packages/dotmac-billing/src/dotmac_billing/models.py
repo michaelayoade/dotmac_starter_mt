@@ -2865,7 +2865,8 @@ class _HoldAdmissionColumns(_EvidenceTime):
     receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     disposition_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     maker_ref: Mapped[str] = mapped_column(String(255), nullable=False)
-    approval_request_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    #: NULL only when the window binds dual_control = "off" (bi_0019).
+    approval_request_id: Mapped[UUID | None] = mapped_column(Uuid())
     approver_refs: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)

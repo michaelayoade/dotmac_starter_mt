@@ -358,6 +358,8 @@
       "exports": [
         "DeliveryDeferred",
         "DeliveryError",
+        "DeliveryOutcomeUnknown",
+        "DeliveryTerminal",
         "latest_receipt_for_dispatch",
         "receipts_for_address",
         "record_receipt"
@@ -380,7 +382,8 @@
         "find_dispatch_by_key",
         "import_history_key",
         "import_pending",
-        "load_dispatch"
+        "load_dispatch",
+        "settle_dispatch"
       ],
       "status": "declared"
     },
@@ -423,6 +426,31 @@
         "Sent",
         "Suppressed",
         "send"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.delivery_relay": {
+      "classification": "supported",
+      "exports": [
+        "AUDIT_ACTION_OUTCOME_UNKNOWN",
+        "AttachmentContext",
+        "AttachmentResolver",
+        "AttachmentResolverRegistry",
+        "DispatchRelayTransport",
+        "DuplicateRelayRegistrationError",
+        "ProjectionContext",
+        "ProjectionFailed",
+        "ProjectionHook",
+        "ProjectionHookRegistry",
+        "ProviderFactory",
+        "RelayRegistryNotInstalledError",
+        "ResolvedAttachments",
+        "TransientProviderFailure",
+        "UnknownAttachmentKind",
+        "active_attachment_resolvers",
+        "active_projection_hooks",
+        "install_attachment_resolvers",
+        "install_projection_hooks"
       ],
       "status": "declared"
     },
@@ -847,6 +875,9 @@
         "FailureOutcome",
         "RelayPolicy",
         "claim_batch",
+        "deferral_dead_letters",
+        "failure_dead_letters",
+        "record_dead_letter",
         "record_deferral",
         "record_failure",
         "record_success"
@@ -856,6 +887,7 @@
     "dotmac_kernel.messaging.worker": {
       "classification": "supported",
       "exports": [
+        "DeadLetterAware",
         "DeliveryTransport",
         "LoggingTransport",
         "SessionFactory",
@@ -2182,6 +2214,7 @@
     "dotmac_kernel.delivery_dispatch",
     "dotmac_kernel.delivery_models",
     "dotmac_kernel.delivery_providers",
+    "dotmac_kernel.delivery_relay",
     "dotmac_kernel.delivery_requeue",
     "dotmac_kernel.deps",
     "dotmac_kernel.entitlements",

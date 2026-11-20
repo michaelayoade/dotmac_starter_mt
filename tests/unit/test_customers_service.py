@@ -20,6 +20,7 @@ from dotmac_customers.service import (
     create_account,
     get_account,
     link_party_reference,
+    rename_account,
     set_profile,
     transition_account,
 )
@@ -138,3 +139,80 @@ def test_mutations_are_flush_only(db: Session) -> None:
         )
         is None
     )
+
+
+def _account(db: Session, number: str, name: str = "Original") -> uuid.UUID:
+    return create_account(
+        db,
+        scope=TenantScope(TENANT_A),
+        command=CreateCustomerAccount(number, name),
+    ).id
+
+
+def test_rename_changes_only_the_display_name_and_is_idempotent(db: Session) -> None:
+    account_id = _account(db, "CUST-010")
+    scope = TenantScope(TENANT_A)
+    renamed = rename_account(
+        db, scope=scope, account_id=account_id, display_name="  Ada Ltd  "
+    )
+    assert renamed.display_name == "Ada Ltd"
+    assert renamed.account_number == "CUST-010"
+    assert renamed.id == account_id
+    again = rename_account(
+        db, scope=scope, account_id=account_id, display_name="Ada Ltd"
+    )
+    assert again is renamed
+    assert again.display_name == "Ada Ltd"
+
+
+def test_rename_validates_the_name(db: Session) -> None:
+    account_id = _account(db, "CUST-011")
+    scope = TenantScope(TENANT_A)
+    with pytest.raises(ValueError, match="display name"):
+        rename_account(db, scope=scope, account_id=account_id, display_name="   ")
+    with pytest.raises(ValueError, match="at most 200"):
+        rename_account(db, scope=scope, account_id=account_id, display_name="x" * 201)
+    ok = rename_account(db, scope=scope, account_id=account_id, display_name="x" * 200)
+    assert len(ok.display_name) == 200
+
+
+def test_rename_is_tenant_scoped(db: Session) -> None:
+    account_id = _account(db, "CUST-012")
+    with pytest.raises(NotFound):
+        rename_account(
+            db, scope=TenantScope(TENANT_B), account_id=account_id, display_name="X"
+        )
+    assert (
+        get_account(db, scope=TenantScope(TENANT_A), account_id=account_id)
+    ).display_name == "Original"
+
+
+def test_rename_is_refused_on_a_closed_account_and_allowed_when_suspended(
+    db: Session,
+) -> None:
+    account_id = _account(db, "CUST-013")
+    scope = TenantScope(TENANT_A)
+    for target in (AccountStatus.ACTIVE, AccountStatus.SUSPENDED):
+        transition_account(db, scope=scope, account_id=account_id, target=target)
+    assert (
+        rename_account(
+            db, scope=scope, account_id=account_id, display_name="Suspended Co"
+        ).display_name
+        == "Suspended Co"
+    )
+    transition_account(
+        db, scope=scope, account_id=account_id, target=AccountStatus.CLOSED
+    )
+    with pytest.raises(Conflict, match="closed"):
+        rename_account(db, scope=scope, account_id=account_id, display_name="Late")
+
+
+def test_rename_requires_an_explicit_tenant_scope(db: Session) -> None:
+    account_id = _account(db, "CUST-014")
+    with pytest.raises(TypeError):
+        rename_account(
+            db,
+            scope=TENANT_A,  # type: ignore[arg-type]
+            account_id=account_id,
+            display_name="X",
+        )

@@ -6,6 +6,7 @@ import ast
 from pathlib import Path
 
 import dotmac_expenses
+import pytest
 from dotmac_expenses.manifest import module
 from dotmac_expenses.models import TENANT_TABLES, metadata_table
 from dotmac_kernel.namespaces import EXPENSES_MIGRATION_OWNER, module_schema
@@ -14,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "packages/dotmac-expenses"
 SOURCE = PACKAGE / "src/dotmac_expenses"
 MIGRATION = SOURCE / "migrations/versions/ex_0001_expenses.py"
+MIGRATION_A2 = SOURCE / "migrations/versions/ex_0002_claim_liabilities.py"
 
-EXPECTED_TABLES = (
+A1_TABLES = (
     "expense_categories",
     "expense_policies",
     "expense_policy_rules",
@@ -27,10 +29,21 @@ EXPECTED_TABLES = (
     "expense_policy_evaluations",
     "expense_lifecycle_events",
 )
+A2_TABLES = (
+    "claim_liabilities",
+    "claim_liability_lines",
+    "claim_liability_settlements",
+    "claim_settlement_reversals",
+    "claim_liability_adjustments",
+    "claim_liability_reversals",
+    "historical_claim_receipts",
+    "claim_accounting_receipts",
+)
+EXPECTED_TABLES = A1_TABLES + A2_TABLES
 
 
 def test_manifest_allocates_one_tenant_only_lineage() -> None:
-    assert dotmac_expenses.__version__ == module.version == "0.1.0a1"
+    assert dotmac_expenses.__version__ == module.version == "0.1.0a2"
     assert module.code == EXPENSES_MIGRATION_OWNER.owner == "expenses"
     assert module.short_code == "expenses"
     assert module.db_schema == module_schema("expenses") == "mod_expenses"
@@ -43,6 +56,7 @@ def test_manifest_allocates_one_tenant_only_lineage() -> None:
         "tenant_scope_catalog.v1",
         "module_database_roles.v1",
         "party_person_catalog.v1",
+        "idempotency_ledger.v1",
     )
 
 
@@ -78,7 +92,7 @@ def test_table_creating_revision_installs_rls_and_append_only_guards() -> None:
     assert "down_revision = None" in source
     assert 'branch_labels = ("expenses",)' in source
     assert "require_prerequisites" in source
-    for table_name in TENANT_TABLES:
+    for table_name in A1_TABLES:
         assert f'"{table_name}"' in source
         assert (
             f"ALTER TABLE mod_expenses.{table_name} ENABLE ROW LEVEL SECURITY" in source
@@ -94,8 +108,36 @@ def test_table_creating_revision_installs_rls_and_append_only_guards() -> None:
     assert "expense_receipt_metadata_is_immutable" in source
 
 
-def test_service_has_no_transaction_or_sibling_module_authority() -> None:
-    source = (SOURCE / "service.py").read_text(encoding="utf-8")
+def test_claim_liability_revision_is_additive_and_secured() -> None:
+    source = MIGRATION_A2.read_text(encoding="utf-8")
+    assert 'revision = "ex_0002_claim_liabilities"' in source
+    assert 'down_revision = "ex_0001_expenses"' in source
+    assert "branch_labels = None" in source
+    assert "require_prerequisites(op.get_bind(), REQUIRES)" in source
+    assert 'REQUIRES = ("idempotency_ledger.v1",)' in source
+    assert len("ex_0002_claim_liabilities") <= 32
+    for table_name in A2_TABLES:
+        assert f'"{table_name}"' in source
+    assert "ALTER TABLE mod_expenses.{table} ENABLE ROW LEVEL SECURITY" in source
+    assert "ALTER TABLE mod_expenses.{table} FORCE ROW LEVEL SECURITY" in source
+    assert "{table}_tenant_isolation" in source
+    assert "GRANT SELECT, INSERT ON mod_expenses.{table} TO app_user" in source
+    assert "{table}_are_append_only" in source
+    # The one mutable table takes UPDATE on its projection columns only.
+    assert "GRANT UPDATE (amount_settled, amount_adjusted, status)" in source
+    assert "ON mod_expenses.claim_liabilities TO app_user" in source
+    assert "claim_liabilities_are_guarded" in source
+    assert "ACCESS EXCLUSIVE MODE" in source
+    assert "require forward correction" in source
+    # Released bytes are untouched: the new revision never edits ex_0001.
+    assert "ex_0001_expenses.py" not in source
+
+
+@pytest.mark.parametrize(
+    "filename", ["service.py", "liability.py", "consequences.py", "settings.py"]
+)
+def test_owner_has_no_transaction_or_sibling_module_authority(filename: str) -> None:
+    source = (SOURCE / filename).read_text(encoding="utf-8")
     assert ".commit(" not in source
     assert ".rollback(" not in source
     assert "SessionLocal(" not in source
