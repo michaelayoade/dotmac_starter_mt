@@ -98,7 +98,7 @@ FactEmitter = Callable[[VarianceFactRequest], None]
 class ApprovalEvidence:
     """What Approvals vouched for: stored on both the resolving and resolved event."""
 
-    request_id: UUID
+    request_id: UUID | None  # None with no approvers when dual_control is "off"
     maker_ref: str
     approver_refs: tuple[str, ...]
 

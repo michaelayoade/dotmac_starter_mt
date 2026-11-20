@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID
 
 from dotmac_kernel.cache import Scope, TenantScope
@@ -34,6 +34,12 @@ class OpeningWindowV1(_ClosedEvidence):
     principal_oid: int
     provision_authority_ref: str
     recorded_at: datetime
+    #: Two-person approval policy for this tenant's opening approvals (held
+    #: admission, variance and control-gap resolution), bound immutably at
+    #: provision and attested by the product verifier (it is inside the provision
+    #: command digest). The default is the D-9 default (off). A stored window with
+    #: no key predates bi_0019 and is read as "on".
+    dual_control: Literal["off", "on"] = "off"
 
 
 @dataclass(frozen=True, slots=True)
