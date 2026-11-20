@@ -23,13 +23,16 @@ leaves the dispatch `pending` and the outbox relay retries it; the K-2 receipt
 status `failed` (retryable) is a different thing. The allowlist is enforced by a
 database trigger (see migration 0032 and `CommunicationDispatch`).
 
-## TODO for K-8 (the relay transport) and release
+## The relay transport (K-8)
 
-- Never let a database error that echoes parameters (bodies, addresses) reach
-  outbox `last_error`: `worker.py` writes `repr(exc)` there.
-- Consider `SELECT ... FOR UPDATE` in the tenant session when loading.
-- `delivery.dispatch.v1` is declared on a manifest by K-8; S7 must not be
-  released without K-8.
+`dotmac_kernel.delivery_relay.DispatchRelayTransport` consumes the event, loads
+the dispatch in the tenant session, sends through `delivery_providers.send` and
+settles the dispatch with `settle_dispatch`. It reduces every unexpected error to
+its type name, so a database error that echoes parameters never reaches the outbox
+`last_error` (`worker.py` writes `repr(exc)` there), and it row-locks the dispatch
+while it works. `delivery.dispatch.v1` is an outbox routing code owned by the
+module that consumes it: the composing product declares it in its manifest's
+`outbox_event_types`, as for any other consumed event. S7 and K-8 ship together.
 
 ## Duplicate keys
 

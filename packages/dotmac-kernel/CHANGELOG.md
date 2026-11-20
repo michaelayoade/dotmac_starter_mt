@@ -10,6 +10,19 @@ here.
 
 ### Added
 
+- Generic relay transport for `delivery.dispatch.v1` (ADR-0006 § 5g, K-8, S10).
+  New submodule `dotmac_kernel.delivery_relay`: `DispatchRelayTransport` loads
+  the dispatch (id-only payload, tenant session, fingerprint re-verified), runs
+  attachment resolvers lazily from an `AttachmentResolverRegistry` (keyed by
+  `AttachmentRef.kind`), calls `delivery_providers.send`, maps the outcome
+  (accepted -> `sent` and projection hooks; suppressed -> `suppressed`; deferred
+  -> K-4 reschedule; receipt `failed` -> retry with its receipt kept; rejected,
+  bounced, complaint -> dispatch `failed`; unknown -> terminal) and runs
+  `ProjectionHookRegistry` hooks after an accepted send. Both registries use the
+  install/active pattern (`install_attachment_resolvers`,
+  `install_projection_hooks`, `active_*`); a worker that never installed one is
+  refused, not treated as empty. Projection hooks must be idempotent (a hook
+  failure retries only the hooks, never the send). Additive; no migration.
 - Entry fixes for K-8. Exhausted attempts and the deferral bound now move the
   DISPATCH to `dead` as well as the outbox row (`DeadLetterAware.dead_letter`,
   run by the worker and committed before the row is settled; if it fails the

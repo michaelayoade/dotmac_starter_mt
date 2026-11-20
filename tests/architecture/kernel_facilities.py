@@ -430,6 +430,10 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
         "kernel-owned dispatch identity, same tenant-RLS storage owner as "
         "delivery receipts"
     ),
+    "delivery_relay": (
+        "kernel-owned dispatch relay transport, same tenant-RLS storage owner "
+        "as dispatch identity"
+    ),
     "delivery_requeue": (
         "kernel-owned dispatch requeue, same tenant-RLS storage owner as "
         "dispatch identity"

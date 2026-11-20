@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Generator
 
 import pytest
-from dotmac_kernel import audit_actions
+from dotmac_kernel import audit_actions, delivery_relay
 from dotmac_kernel.audit_actions import (
     AuditActionRegistry,
     AuditActionsNotInstalledError,
@@ -21,6 +21,22 @@ from dotmac_kernel.audit_actions import (
     install_audit_actions,
 )
 from dotmac_kernel.delivery_dispatch import create_dispatch
+from dotmac_kernel.delivery_models import (
+    DELIVERY_ACCEPTED,
+    DELIVERY_FAILED,
+)
+from dotmac_kernel.delivery_providers import (
+    FEATURE_ATTACHMENTS,
+    FEATURE_HTML,
+    OutboundMessage,
+    ProviderResult,
+)
+from dotmac_kernel.delivery_relay import (
+    AttachmentResolverRegistry,
+    DispatchRelayTransport,
+    ProjectionHookRegistry,
+    ResolvedAttachments,
+)
 from dotmac_kernel.messaging.relay import RelayPolicy
 from dotmac_kernel.messaging.worker import run_once
 from sqlalchemy import text
@@ -160,3 +176,68 @@ def run(factories, transport, policy: RelayPolicy = RelayPolicy()) -> int:
 # --------------------------------------------------------------------------
 # K-8 transport support
 # --------------------------------------------------------------------------
+@pytest.fixture()
+def relay_registries() -> Generator[None, None, None]:
+    """Process-global resolver/hook registries: start each test empty-installed
+    and put back whatever the session had (never leak one test's registry)."""
+    prev = (delivery_relay._active_resolvers, delivery_relay._active_hooks)
+    delivery_relay.install_attachment_resolvers(AttachmentResolverRegistry(()))
+    delivery_relay.install_projection_hooks(ProjectionHookRegistry(()))
+    try:
+        yield
+    finally:
+        delivery_relay._active_resolvers, delivery_relay._active_hooks = prev
+
+
+class FakeProvider:
+    """A scripted provider. `script` is a list of outcomes consumed per send, the
+    last one repeating: a status string, or an exception instance to raise."""
+
+    name = "fake"
+    message_features = frozenset({FEATURE_HTML, FEATURE_ATTACHMENTS})
+    message_headers = frozenset()
+
+    def __init__(self, script, resolved: ResolvedAttachments | None = None) -> None:
+        self.script = script
+        self.resolved = resolved
+        self.sent: list[OutboundMessage] = []
+        self.attachment_bytes: list[bytes] = []
+
+    def send(self, message: OutboundMessage) -> ProviderResult:
+        step = self.script[min(len(self.sent), len(self.script) - 1)]
+        self.sent.append(message)
+        if isinstance(step, BaseException):
+            raise step
+        for ref in message.attachments:
+            assert self.resolved is not None
+            self.attachment_bytes.append(self.resolved(ref))
+        return ProviderResult(
+            status=step, provider_message_id="pm-1", response_code="250"
+        )
+
+
+class Harness:
+    """One transport over one scripted provider, rebuilt per delivery with the
+    delivery's `ResolvedAttachments` the way a product's factory would be."""
+
+    def __init__(self, script) -> None:
+        self.script = list(script)
+        self.provider = FakeProvider(self.script)
+        self.transport = DispatchRelayTransport(provider_factory=self._factory)
+
+    def _factory(self, resolved: ResolvedAttachments) -> FakeProvider:
+        self.provider.resolved = resolved
+        return self.provider
+
+    @property
+    def calls(self) -> int:
+        return len(self.provider.sent)
+
+
+__all__ += [
+    "DELIVERY_ACCEPTED",
+    "DELIVERY_FAILED",
+    "FakeProvider",
+    "Harness",
+    "relay_registries",
+]
