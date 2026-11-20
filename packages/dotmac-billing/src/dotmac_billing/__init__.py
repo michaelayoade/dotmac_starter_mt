@@ -113,6 +113,12 @@ from dotmac_billing.contracts import (
     WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
 )
+from dotmac_billing.control_position import (
+    RECEIVABLE_CONTROL_POSITION_CONTRACT,
+    ReceivableControlCurrencyV1,
+    ReceivableControlPositionV1,
+    get_receivable_control_position_v1,
+)
 from dotmac_billing.document_queries import (
     AccountingFactCursorV1,
     AccountingFactIndexEntryV1,
@@ -436,6 +442,10 @@ __all__ = [
     "TermsPeriod",
     "TermsVersionRefV1",
     "get_effective_account_terms",
+    "RECEIVABLE_CONTROL_POSITION_CONTRACT",
+    "ReceivableControlCurrencyV1",
+    "ReceivableControlPositionV1",
+    "get_receivable_control_position_v1",
     "record_account_terms",
     "record_default_terms",
     "AllocationCommand",
