@@ -53,6 +53,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
 import lane3_cp6_export as cp6  # noqa: E402
+import lane3_host_admission as ha  # noqa: E402
 import lane3_offline_orchestrator as orchestrator  # noqa: E402
 from lane3_evidence_finalization import _archive  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
@@ -295,12 +296,17 @@ class World:
         )
         self.installed_digest = str(attestation_envelope_digest(installed))
         self.candidate_digest = str(attestation_envelope_digest(candidate))
-        self.admission = {
+        # S2's own document shape; the presentation is signed with a synthetic
+        # presentation key whose public half is the PINNED input of the run.
+        self.pres_key = Ed25519PrivateKey.generate()
+        self.pres_pub = b64url(public_raw(self.pres_key))
+        self.admission: dict[str, Any] = {
             "attempt_id": self.dispatch_id,
-            "presentation": {"opaque": True},
-            "candidate": self.candidate_digest,
+            "presentation": None,
+            "candidate": candidate.canonical_document(),
             "installed": installed.canonical_document(),
         }
+        self.resign_admission()
 
         self.cp_identity = orchestrator.PinnedIdentity(
             "cp-dispatch-key", "ed25519", b64url(public_raw(self.cp_key))
@@ -438,15 +444,53 @@ class World:
             block["statement"], block["signature"]
         )
 
+    def resign_admission(self) -> None:
+        """Re-sign the presentation over the CURRENT attempt id and envelopes."""
+        self.admission["presentation"] = ha.build_presentation(
+            self.pres_key,
+            key_id="presentation-key-1",
+            attempt_id=self.admission["attempt_id"],
+            candidate=AttestationEnvelopeV2.from_mapping(self.admission["candidate"]),
+            installed=AttestationEnvelopeV2.from_mapping(self.admission["installed"]),
+            store_time=T,
+            presentation_id="presentation-1",
+        )
+
+    def admission_facts(self):
+        return orchestrator.read_host_admission(
+            json.dumps(self.admission).encode(),
+            presentation_public_key_b64url=self.pres_pub,
+        )
+
+    def variant(self, name: str) -> dict[str, Any]:
+        """A different, validly signed envelope in the `name` slot."""
+        old = AttestationEnvelopeV2.from_mapping(self.admission[name])
+        key = self.cand_key if name == "candidate" else self.inst_key
+        envelope, _raw = sign_envelope(
+            key,
+            purpose=old.purpose,
+            issuer=old.issuer,
+            key_id=old.key_id,
+            custody_domain=old.custody_domain,
+            trust_root_version=old.trust_root_version,
+            issued_at=old.issued_at,
+            expires_at=old.expires_at,
+            audience=old.audience,
+            observation_id=old.observation_id + "-other",
+            subject=old.subject,
+        )
+        return envelope.canonical_document()
+
     def refresh_ledger(self) -> None:
         """Recompute the ledger fingerprint from the CURRENT admission digests."""
-        facts = orchestrator.read_host_admission(json.dumps(self.admission).encode())
+        self.resign_admission()
+        facts = self.admission_facts()
         self.export["control"]["ledger"]["fingerprint"] = cp6.ledger_fingerprint(
             dispatch_envelope_digest=self.export["control"]["dispatch"][
                 "envelope_digest"
             ],
-            candidate_attestation_envelope_digest=facts.candidate_digest,
-            installed_attestation_envelope_digest=facts.installed_digest,
+            candidate_attestation_envelope_digest=facts.candidate_attestation_digest,
+            installed_attestation_envelope_digest=facts.installed_attestation_digest,
         )
 
     # -- accessors for planted mutations
@@ -474,6 +518,7 @@ class World:
             "candidate_envelope_bytes": self.candidate_bytes,
             "installed_envelope_bytes": self.installed_bytes,
             "host_admission_bytes": json.dumps(self.admission).encode(),
+            "presentation_public_key_b64url": self.pres_pub,
             "policy": self.policy,
             "now": self.now,
         }
@@ -792,6 +837,7 @@ def test_release_for_another_lease_row_is_refused(world: World) -> None:
 
 def test_host_admission_attempt_must_be_the_dispatch_id(world: World) -> None:
     world.admission["attempt_id"] = "11111111-2222-4333-8444-555555555555"
+    world.resign_admission()
     refused(world, "host-admission-attempt-mismatch")
 
 
@@ -819,9 +865,7 @@ def test_acquire_after_ledger_is_refused_by_the_e10_join_directly() -> None:
             export,
             plan=world.plan,
             expected_receipt_digest=cp6.receipt_digest(world.cp["e10_receipt"]),
-            admission=orchestrator.read_host_admission(
-                json.dumps(world.admission).encode()
-            ),
+            admission=world.admission_facts(),
         )
     assert str(caught.value) == "offline-join-e10-acquired-after-ledger"
     refused(world, "ledger-outside-bracket")
@@ -838,7 +882,7 @@ def test_installed_root_with_the_wrong_custody_domain_is_refused(world: World) -
 
 
 def test_installed_digest_mismatch_with_host_admission_is_refused(world: World) -> None:
-    world.admission["installed"] = digest(b"another installed envelope")
+    world.admission["installed"] = world.variant("installed")
     world.refresh_ledger()
     refused(world, "e10-installed-digest-mismatch")
 
@@ -948,13 +992,13 @@ def test_candidate_envelope_signed_by_another_key_is_refused(world: World) -> No
             )
         },
     )
-    world.admission["candidate"] = str(attestation_envelope_digest(forged))
+    world.admission["candidate"] = forged.canonical_document()
     world.refresh_ledger()
     refused(world, "pair-key-not-trusted", candidate_envelope_bytes=forged_bytes)
 
 
 def test_candidate_envelope_not_the_admitted_one_is_refused(world: World) -> None:
-    world.admission["candidate"] = digest(b"other candidate")
+    world.admission["candidate"] = world.variant("candidate")
     world.refresh_ledger()
     refused(world, "host-admission-digest-mismatch")
 
@@ -966,10 +1010,10 @@ def test_installed_envelope_with_a_corrupted_signature_is_refused(world: World) 
     document["signature"] = base64.b64encode(bytes(signature)).decode()
     corrupted = json.dumps(document).encode()
     envelope = AttestationEnvelopeV2.from_mapping(document)
-    world.admission["installed"] = str(attestation_envelope_digest(envelope))
-    world.cp["destruction"]["installed_attestation_digest"] = world.admission[
-        "installed"
-    ]
+    world.admission["installed"] = envelope.canonical_document()
+    world.cp["destruction"]["installed_attestation_digest"] = str(
+        attestation_envelope_digest(envelope)
+    )
     world.refresh_ledger()
     refused(world, "pair-signature-invalid", installed_envelope_bytes=corrupted)
 
@@ -990,10 +1034,10 @@ def test_installed_envelope_for_another_dispatch_is_refused(world: World) -> Non
             json.loads(world.installed_bytes)
         ).subject,
     )
-    world.admission["installed"] = str(attestation_envelope_digest(envelope))
-    world.cp["destruction"]["installed_attestation_digest"] = world.admission[
-        "installed"
-    ]
+    world.admission["installed"] = envelope.canonical_document()
+    world.cp["destruction"]["installed_attestation_digest"] = str(
+        attestation_envelope_digest(envelope)
+    )
     world.refresh_ledger()
     refused(world, "pair-observation-id-mismatch", installed_envelope_bytes=raw)
 
@@ -1013,7 +1057,7 @@ def _candidate_with(world: World, **subject_changes: Any) -> tuple[str, bytes]:
         observation_id=old.observation_id,
         subject={**old.subject, **subject_changes},
     )
-    return str(attestation_envelope_digest(envelope)), raw
+    return envelope.canonical_document(), raw
 
 
 def test_candidate_wheel_must_be_the_plans_wheel(world: World) -> None:
@@ -1084,12 +1128,12 @@ def test_null_together_rule_for_destruction(world: World) -> None:
 
 def test_host_admission_must_be_closed(world: World) -> None:
     world.admission["extra"] = 1
-    refused(world, "host-admission-invalid")
+    refused(world, "host-admission-malformed")
 
 
-def test_host_admission_digest_must_be_canonical(world: World) -> None:
+def test_host_admission_envelope_must_be_an_envelope(world: World) -> None:
     world.admission["candidate"] = "sha256:XYZ"
-    refused(world, "host-admission-invalid")
+    refused(world, "host-admission-candidate-envelope-malformed")
 
 
 def test_age_decryptor_refuses_a_pin_mismatch_and_a_missing_tool(tmp_path) -> None:
@@ -1209,9 +1253,55 @@ def test_top_level_dispatch_id_must_be_a_canonical_uuid(world: World) -> None:
 
 def test_host_admission_attempt_id_must_be_a_canonical_uuid(world: World) -> None:
     world.admission["attempt_id"] = "attempt-1"
-    refused(world, "host-admission-invalid")
+    refused(world, "host-admission-attempt-id-invalid")
 
 
 def test_plan_digest_is_compared_exactly(world: World) -> None:
     world.resign(execution_plan_digest=str(world.plan.digest()).removeprefix("sha256:"))
     refused(world, "export-invalid")
+
+
+# --- S2 reader: presentation signature, pinned key ---------------------------
+
+
+def test_presentation_signed_by_another_key_is_refused(world: World) -> None:
+    world.pres_key = Ed25519PrivateKey.generate()
+    world.resign_admission()
+    refused(world, "host-admission-presentation-signature-invalid")
+
+
+def test_a_tampered_presentation_statement_is_refused(world: World) -> None:
+    world.admission["presentation"]["statement"]["presentation_id"] = "presentation-2"
+    refused(world, "host-admission-presentation-signature-invalid")
+
+
+def test_presentation_dispatch_must_be_the_attempt_id(world: World) -> None:
+    world.admission["attempt_id"] = "11111111-2222-4333-8444-555555555555"
+    refused(world, "host-admission-presentation-dispatch-mismatch")
+
+
+def test_presentation_digests_must_be_those_of_the_carried_envelopes(
+    world: World,
+) -> None:
+    world.admission["installed"] = world.variant("installed")
+    refused(world, "host-admission-presentation-digest-mismatch")
+
+
+def test_the_pinned_presentation_key_must_be_well_formed(world: World) -> None:
+    refused(
+        world,
+        "host-admission-presentation-key-invalid",
+        presentation_public_key_b64url="AAAA",
+    )
+
+
+def test_the_pinned_presentation_key_must_be_the_signing_one(world: World) -> None:
+    refused(
+        world,
+        "host-admission-presentation-signature-invalid",
+        presentation_public_key_b64url=b64url(public_raw(Ed25519PrivateKey.generate())),
+    )
+
+
+def test_host_admission_bytes_must_be_json(world: World) -> None:
+    refused(world, "host-admission-unreadable", host_admission_bytes=b"not json")

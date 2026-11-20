@@ -25,9 +25,10 @@ NOT built here (S8b): the two-target / negative-target compensation proof. The
 archive's outer carrier stays fixed at three members; that proof belongs inside
 the encrypted manifest; there is one newest run per SHA.
 
-DEPENDS ON S2 (`lane3_host_admission.py`): `read_host_admission` below is the
-minimal interface consumed, marked `S2 INTERFACE`. Unverified offline: the
-presentation signature (Control verified it at consumption).
+DEPENDS ON S2 (`lane3_host_admission.py`): `read_host_admission` below CALLS S2's
+`parse_host_admission` (no parsing or signature logic is restated here). The
+presentation signature is verified against a caller-supplied PINNED presentation
+public key (the one `key-init` printed at E10.4).
 """
 
 from __future__ import annotations
@@ -41,7 +42,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -92,6 +92,8 @@ from lane3_evidence_finalization import (
     FinalizationRefused,
     read_plaintext_evidence_archive,
 )
+from lane3_host_admission import HostAdmissionDigest, parse_host_admission
+from lane3_host_admission import Refused as HostAdmissionRefused
 from lane3_host_source_admission import (
     EXPECTED_PACKAGE,
     Ed25519AttestationVerifier,
@@ -105,6 +107,7 @@ from lane3_offline_result import (
     OfflineResultRefused,
     OfflineResultUnavailable,
     VerificationPolicy,
+    canonical_result_bytes,
     parse_result,
     require_result_bindings,
 )
@@ -113,7 +116,6 @@ from lane3_receipt_v2 import evidence_bundle_digest
 
 __all__ = [
     "CANDIDATE_AUDIENCE",
-    "HostAdmissionFacts",
     "JoinRefused",
     "OfflineVerification",
     "PinnedIdentity",
@@ -143,13 +145,6 @@ def _refuse(code: str) -> None:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class HostAdmissionFacts:
-    attempt_id: str
-    candidate_digest: str
-    installed_digest: str
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
 class OfflineVerification:
     #: The canonical UNSIGNED `offline-result.json` bytes.
     result_bytes: bytes
@@ -158,54 +153,28 @@ class OfflineVerification:
     input_digests: Mapping[str, str]
 
 
-# --- S2 INTERFACE -------------------------------------------------------------
+# --- S2 reader ----------------------------------------------------------------
 
 
-def _member_digest(value: Any) -> str:
-    if isinstance(value, str):
-        if not _DIGEST.fullmatch(value):
-            _refuse("host-admission-invalid")
-        return value
-    try:
-        return str(
-            attestation_envelope_digest(AttestationEnvelopeV2.from_mapping(value))
-        )
-    except (SpecError, TypeError, ValueError):
-        _refuse("host-admission-invalid")
-    raise AssertionError  # pragma: no cover
+def read_host_admission(
+    payload: bytes, *, presentation_public_key_b64url: str
+) -> HostAdmissionDigest:
+    """Read `host-admission.json` through S2's own verifier.
 
-
-def _is_uuid(value: str) -> bool:
-    try:
-        return str(uuid.UUID(value)) == value
-    except ValueError:
-        return False
-
-
-def read_host_admission(payload: bytes) -> HostAdmissionFacts:
-    """S2 INTERFACE: parse `host-admission.json` for its two digests only.
-
-    Closed document `{attempt_id, presentation, candidate, installed}` (design
-    V5). `candidate` and `installed` may each be a `sha256:` digest or the
-    envelope mapping (design section 4 is ambiguous; both are accepted). The
-    presentation is not verified here. Replace with S2's reader when it lands.
+    Delegates to `lane3_host_admission.parse_host_admission` (closed member set,
+    presentation signature under the pinned presentation key, dispatch id and both
+    envelope digests). Any S2 refusal becomes a stable `offline-join-*` code.
     """
     try:
-        document = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        _refuse("host-admission-invalid")
-    if (
-        not isinstance(document, dict)
-        or set(document) != {"attempt_id", "presentation", "candidate", "installed"}
-        or not isinstance(document["attempt_id"], str)
-        or not _is_uuid(document["attempt_id"])
-    ):
-        _refuse("host-admission-invalid")
-    return HostAdmissionFacts(
-        document["attempt_id"],
-        _member_digest(document["candidate"]),
-        _member_digest(document["installed"]),
-    )
+        return parse_host_admission(
+            payload, presentation_public_key_b64url=presentation_public_key_b64url
+        )
+    except HostAdmissionRefused as exc:
+        code = str(exc.code)
+        if not code.startswith("host-admission-"):
+            code = "host-admission-" + code
+        _refuse(code)
+    raise AssertionError  # pragma: no cover
 
 
 # --- decryption ---------------------------------------------------------------
@@ -331,7 +300,7 @@ def _join_control(
     receipt: RehearsalReceiptV2,
     plan: FoundationExecutionPlanV3,
     pinned: Sequence[PinnedIdentity],
-    admission: HostAdmissionFacts,
+    admission: HostAdmissionDigest,
 ) -> None:
     """Control join: signed dispatch, ledger row, lease bracket."""
     dispatch = receipt.content["control_dispatch"]
@@ -371,8 +340,8 @@ def _join_control(
         _refuse("ledger-coordinate-mismatch")
     expected_fingerprint = ledger_fingerprint(
         dispatch_envelope_digest=export.dispatch.envelope_digest,
-        candidate_attestation_envelope_digest=admission.candidate_digest,
-        installed_attestation_envelope_digest=admission.installed_digest,
+        candidate_attestation_envelope_digest=admission.candidate_attestation_digest,
+        installed_attestation_envelope_digest=admission.installed_attestation_digest,
     )
     if ledger.fingerprint != expected_fingerprint:
         _refuse("ledger-fingerprint-mismatch")
@@ -407,7 +376,7 @@ def _join_e10(
     *,
     plan: FoundationExecutionPlanV3,
     expected_receipt_digest: str,
-    admission: HostAdmissionFacts,
+    admission: HostAdmissionDigest,
 ) -> None:
     row = export.receipt
     recomputed = receipt_digest(row.document)
@@ -457,7 +426,10 @@ def _join_e10(
         _refuse("e10-destroyed-after-acquire")
     if lease.acquired_at > ledger.created_at:
         _refuse("e10-acquired-after-ledger")
-    if destruction.installed_attestation_digest != admission.installed_digest:
+    if (
+        destruction.installed_attestation_digest
+        != admission.installed_attestation_digest
+    ):
         _refuse("e10-installed-digest-mismatch")
     if (
         root.fingerprint != row.incarnation_fingerprint
@@ -483,7 +455,7 @@ def _join_candidate(
     plan: FoundationExecutionPlanV3,
     candidate_bytes: bytes,
     installed_bytes: bytes,
-    admission: HostAdmissionFacts,
+    admission: HostAdmissionDigest,
     pinned_candidate_root_fingerprint: str,
     candidate_audience: str,
 ) -> None:
@@ -503,8 +475,10 @@ def _join_candidate(
     candidate = _envelope(candidate_bytes, "candidate-envelope-invalid")
     installed = _envelope(installed_bytes, "installed-envelope-invalid")
     if (
-        str(attestation_envelope_digest(candidate)) != admission.candidate_digest
-        or str(attestation_envelope_digest(installed)) != admission.installed_digest
+        str(attestation_envelope_digest(candidate))
+        != admission.candidate_attestation_digest
+        or str(attestation_envelope_digest(installed))
+        != admission.installed_attestation_digest
     ):
         _refuse("host-admission-digest-mismatch")
     try:
@@ -564,10 +538,7 @@ def _result_bytes(
         ),
         "conclusion": "verified",
     }
-    return (
-        json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-        + "\n"
-    ).encode("ascii")
+    return canonical_result_bytes(document)
 
 
 def verify_offline(
@@ -587,6 +558,7 @@ def verify_offline(
     candidate_envelope_bytes: bytes,
     installed_envelope_bytes: bytes,
     host_admission_bytes: bytes,
+    presentation_public_key_b64url: str,
     policy: VerificationPolicy,
     now: datetime,
     candidate_audience: str = CANDIDATE_AUDIENCE,
@@ -651,7 +623,10 @@ def verify_offline(
         export = parse_cp6_export(export_bytes)
     except Cp6ExportRefused:
         _refuse("export-invalid")
-    admission = read_host_admission(host_admission_bytes)
+    admission = read_host_admission(
+        host_admission_bytes,
+        presentation_public_key_b64url=presentation_public_key_b64url,
+    )
     _join_control(
         export,
         receipt=receipt,

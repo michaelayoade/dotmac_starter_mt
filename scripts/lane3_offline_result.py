@@ -95,6 +95,18 @@ def _refuse(scope: str, reason: str) -> None:
     raise OfflineResultRefused(f"offline_{scope}.{reason}")
 
 
+def canonical_result_bytes(document: dict) -> bytes:
+    """THE canonical encoding of an offline-result document (owner: this module).
+
+    Producers (the offline orchestrator) call this; `_json` re-encodes with it to
+    refuse non-canonical bytes, so producer and consumer share one codec.
+    """
+    return (
+        json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("ascii")
+
+
 def _json(payload: bytes, limit: int, scope: str) -> dict:
     if type(payload) is not bytes or not 0 < len(payload) <= limit:
         _refuse(scope, "size")
@@ -119,12 +131,7 @@ def _json(payload: bytes, limit: int, scope: str) -> dict:
         )
         if type(document) is not dict:
             _refuse(scope, "schema")
-        canonical = (
-            json.dumps(
-                document, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-            )
-            + "\n"
-        ).encode("ascii")
+        canonical = canonical_result_bytes(document)
         if canonical != payload:
             _refuse(scope, "noncanonical")
     except (
