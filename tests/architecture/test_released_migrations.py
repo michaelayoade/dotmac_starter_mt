@@ -8779,8 +8779,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
         }
     ),
     # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
-    # frozen. `bi_0018` (account terms) is a13's, editable until a13 is tagged.
-    "dotmac-billing": frozenset({"bi_0018_account_terms.py"}),
+    # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
+    # two-person policy) are a13's, editable until a13 is tagged.
+    "dotmac-billing": frozenset(
+        {"bi_0018_account_terms.py", "bi_0019_opening_dual_control.py"}
+    ),
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
@@ -8804,16 +8807,18 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
     # `0032_communication_dispatches` (dispatch identity, K-3) and
-    # `0033_receipts_append_only` (K-6) remain editable until a verified
-    # published tag carries them and their digests are recorded above.
+    # `0033_receipts_append_only` (K-6) and `0034_receipts_platform_ro` remain
+    # editable until a verified published tag carries them and their digests
+    # are recorded above.
     # (`0031_rate_limit_buckets` is released: see its digest above.)
     "dotmac-kernel": frozenset(
         {
             "20261118_0032_communication_dispatches.py",
             "20261119_0033_receipts_append_only.py",
+            "20261119_0034_receipts_platform_append_only.py",
         }
     ),
-    "dotmac-accounting": frozenset(),
+    "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
     "dotmac-assets": frozenset(),
@@ -8823,7 +8828,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-content": frozenset(),
     "dotmac-documents": frozenset(),
     "dotmac-durable-timers": frozenset(),
-    "dotmac-expenses": frozenset(),
+    # `ex_0002` adds the claim liability lifecycle; editable until
+    # `dotmac-expenses` 0.1.0a2 is tagged.
+    "dotmac-expenses": frozenset({"ex_0002_claim_liabilities.py"}),
     "dotmac-fiber-plant": frozenset(),
     "dotmac-finance": frozenset(),
     "dotmac-inventory": frozenset(),
@@ -8845,9 +8852,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
     # by the 0.1.0a5 entry.
     "dotmac-payables": frozenset({"pa_0006_tax_release_hist_credit.py"}),
-    # `py_0003` adds the settlement reversal table; editable until
-    # `dotmac-payroll` 0.1.0a5 is tagged.
-    "dotmac-payroll": frozenset(),
+    # `py_0004` adds audited liability adjustments; editable until
+    # `dotmac-payroll` 0.1.0a6 is tagged.
+    "dotmac-payroll": frozenset({"py_0004_liability_adjustments.py"}),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
     # `dotmac-positioning` 0.2.0a2 is tagged.

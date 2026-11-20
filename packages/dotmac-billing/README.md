@@ -424,6 +424,90 @@ Dated, append-only contract terms (`record_account_terms`, `record_default_terms
   terms at that instant is an exact retry and is refused (`billing.terms_version_exists`).
 
 
+## Receivable control position (R1, unreleased a13)
+
+`get_receivable_control_position_v1(db, *, scope) -> ReceivableControlPositionV1`
+sums the latest persisted V2 receivable position of every billing account in
+scope, per currency, in exact minor units, so a consuming ledger can tie its
+receivables control account to Billing. The public surface of Billing is
+`dotmac_billing.__all__` (there is no `public_exports.json` here); the function,
+`ReceivableControlPositionV1`, `ReceivableControlCurrencyV1` and
+`RECEIVABLE_CONTROL_POSITION_CONTRACT` are exported there.
+
+- **The caller owns the snapshot.** Open a `READ ONLY` + `REPEATABLE READ`
+  (`SERIALIZABLE` is also accepted) transaction, read your own ledger and this
+  function inside it, and finish the transaction yourself. Anything else is refused
+  with `control_position_requires_repeatable_read_read_only`. Billing never begins,
+  commits or changes the isolation of your transaction, takes no locks and flushes
+  nothing. `snapshot_at` is the database `transaction_timestamp()` (transaction
+  start); the snapshot itself is taken at the first statement, at or after it.
+- **Tenant plane:** the session's `app.current_tenant` must equal the requested
+  scope, otherwise `control_position_tenant_context` (forced row-level security would
+  otherwise hide every row and return zeros).
+- **Output:** per currency present, `precision`, `accounts` (accounts with a position
+  row), the four lane sums (`collectible_receivable_minor`, `available_credit_minor`,
+  `available_non_cash_credit_minor`, `prepaid_funding_minor`) and
+  `position_fingerprint`. A missing currency means zero. `open_documents` is
+  deliberately absent from v1.
+- **Refusals, never partial sums:** `control_position_incomplete` (an account has
+  posting groups but no V2 row, as with pre-bi_0005 history; version gaps; the V2
+  version or watermark is not the account's latest group; currency or precision
+  differ; completeness is not `complete`, mode not `authoritative`, authority not
+  `internal`), `control_position_precision_conflict`, `control_position_source_owner`
+  (a row whose owner is not `dotmac-billing`). Accounts with no posting groups
+  contribute nothing.
+- **Fingerprint encoding** (per currency; recomputable): sha256 hex of the UTF-8 JSON
+  with sorted keys and `,`/`:` separators (ASCII-escaped) of
+  `{"contract": "billing.receivable.control_position.v1", "scope": {"kind": "tenant",
+  "tenant_id": "<uuid>"} | {"kind": "platform"}, "currency": "NGN", "precision": 2,
+  "rows": [["<account uuid>", "NGN", <source_version>, "<state_fingerprint>"], ...]}`
+  with `rows` sorted by lowercase account uuid text. Scope, contract and precision are
+  included for domain separation. A golden vector is pinned in
+  `tests/unit/test_billing_control_position.py`.
+- **No per-row re-verification.** Rows are append-only (`refuse_mutation`) and
+  envelope-checked at insert; the per-account verified reads remain
+  `get_current_receivable_position` and `get_receivable_position_v2`.
+- **Tie notes (accountant check).** `collectible_receivable` is the open receivable,
+  `available_credit` confirmed cash credit (a customer liability),
+  `available_non_cash_credit` unapplied credit notes (contra-receivable) and
+  `prepaid_funding` is not written by any main-line writer, so it is 0. Anchor an
+  opening reclass amount to the sealed manifest, not to a live read, and tie per
+  currency in transaction currency.
+
+
+## Opening two-person approval is a per-window policy (D-9 / R4b, unreleased a13)
+
+`bi_0019_opening_dual_control` makes the maker-checker approval of the opening
+approvals a tenant policy, bound into the immutable opening window at provision:
+`OpeningWindowV1.dual_control: "off" | "on"` (last field; default `"off"` for new
+windows). The product supplies it as a typed parameter and its provision verifier
+attests it (it is inside the provision command digest). The policy governs held
+partition admission (`admit_held_opening_account_v2`), variance resolution
+(`recognise_opening_variance`, `confirm_opening_variance_evidence`, a governed
+primitive's `resolves_variance_ref`) and control-gap resolution, through the database
+guards.
+
+- **Widening, stated.** With `"off"` no Approvals decision is required. Every other
+  control stays: the trusted verifier re-derivation, sealed hold-list membership, no
+  post-seal activity, a disposition ref and digest, a non-empty maker (who is the
+  actor), the restricted principal, the evidence reference of a gap resolution and
+  the mandatory audit record. A supplied approval is refused, never ignored
+  (`opening_hold_approval_not_applicable`, `opening_variance_approval_not_applicable`;
+  the database refuses a non-null request id or a non-empty `approver_refs`). No
+  Approvals port is consulted. Under `"off"` the audit evidence records
+  `dual_control: "off"` and `approval: null`; `approver_refs` is `[]` and
+  `approval_request_id` is NULL. A resolved variance's `AccountingFactV6` resolution
+  block then carries `approval_request_id: null` and no approvers.
+- **Windows provisioned before this migration stay `"on"`.** A stored window without
+  the key reads as `"on"` and the guards use `coalesce(..., 'on')`. Under `"on"` the
+  behaviour and the stored evidence are unchanged.
+- The key is frozen with the rest of the window evidence; the provision guard requires
+  exactly `"on"` or `"off"`.
+- Commands: `AdmitHeldOpeningAccountV2.approval_request_id` and the variance commands'
+  `approval_request_id` are `UUID | None`; `OpeningHoldAdmissionV1.approval` is
+  `HeldOpeningHoldApprovalV1 | None` with a new last field `dual_control`.
+
+
 ## Final release and adoption gates
 
 The final serial publication train is Payroll a2 → Tax a7 → Billing a10.

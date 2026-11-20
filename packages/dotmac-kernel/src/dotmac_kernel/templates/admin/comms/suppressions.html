@@ -1,0 +1,109 @@
+{#
+  Suppressions (K-7) — the tenant's consent ledger, with a filter and a
+  restore-transactional-mail action per row.
+
+  Context: `rows` (list[SuppressionRow], each with `can_restore`), `page`, `total`, `total_pages`,
+  `channel`/`scope`/`address` (current filters), `error`, `notice`, `urls`
+  (`suppressions`, `receipts`, `restore_prefix` — paths supplied by the route, so no
+  facet prefix is authored here). A bounce or complaint suppression (scope
+  `all`) blocks transactional mail, including password resets, until an
+  operator restores transactional mail here (the row is kept; marketing stays
+  blocked).
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+{% include "admin/comms/_styles.html" %}
+<div id="comms-content">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--dmui-space-lg);">
+    <div>
+      <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary);">Suppressions</h1>
+      <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">Addresses we will not send to. A bounce or complaint blocks every message, including password resets, until an operator restores transactional mail.</p>
+    </div>
+    <a href="{{ urls.receipts }}" class="comms-button">Delivery receipts</a>
+  </div>
+
+  {% if error %}<div class="comms-alert-error" role="alert">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="comms-alert-ok" role="status">{{ notice }}</div>{% endif %}
+
+  <form method="get" action="{{ urls.suppressions }}" class="comms-row" style="margin-bottom:var(--dmui-space-md);">
+    <div>
+      <label for="f-address" class="comms-label">Address contains</label>
+      <input type="search" id="f-address" name="address" value="{{ address }}" class="comms-input" />
+    </div>
+    <div>
+      <label for="f-channel" class="comms-label">Channel</label>
+      <input type="text" id="f-channel" name="channel" value="{{ channel }}" placeholder="email" class="comms-input" />
+    </div>
+    <div>
+      <label for="f-scope" class="comms-label">Scope</label>
+      <select id="f-scope" name="scope" class="comms-input">
+        <option value="" {% if not scope %}selected{% endif %}>Any</option>
+        <option value="all" {% if scope == "all" %}selected{% endif %}>all (blocks everything)</option>
+        <option value="marketing" {% if scope == "marketing" %}selected{% endif %}>marketing only</option>
+      </select>
+    </div>
+    <button type="submit" class="comms-button">Filter</button>
+  </form>
+
+  <div class="comms-card">
+    {% if rows %}
+    <table class="comms-table">
+      <thead>
+        <tr>
+          <th scope="col">Address</th>
+          <th scope="col">Channel</th>
+          <th scope="col">Scope</th>
+          <th scope="col">Reason</th>
+          <th scope="col">Since</th>
+          <th scope="col">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>
+            <a href="{{ urls.receipts }}?suppression_id={{ row.id }}"
+               style="color:var(--dmui-action-primary-default); text-decoration:none; font-weight:var(--dmui-font-weight-medium);">{{ row.address }}</a>
+          </td>
+          <td>{{ row.channel }}</td>
+          <td>{{ row.scope }}</td>
+          <td>{{ row.reason }}{% if row.note %} — {{ row.note }}{% endif %}</td>
+          <td>{{ row.created_at | local_datetime }}</td>
+          <td>
+            {% if row.can_restore %}
+            <form hx-post="{{ urls.restore_prefix }}{{ row.id }}/restore" class="comms-row" style="align-items:center;">
+              <input type="text" name="reason" required maxlength="500" placeholder="Reason (no personal data)"
+                     aria-label="Reason for restoring transactional mail (no personal data)" class="comms-input" />
+              <button type="submit" class="comms-button comms-danger">Restore transactional mail; marketing stays blocked</button>
+            </form>
+            {% elif row.reason == "erasure" %}
+            <span class="comms-empty" style="padding:0;">Erasure: cannot be lifted</span>
+            {% else %}
+            <span class="comms-empty" style="padding:0;">Marketing opt-out: only the customer can lift it</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="comms-empty">No suppressions found.</p>
+    {% endif %}
+
+    {% if total_pages > 1 %}
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:var(--dmui-space-sm) var(--dmui-space-md); border-top:1px solid var(--dmui-border-subtle);">
+      <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">Page {{ page }} of {{ total_pages }} ({{ total }} total)</p>
+      <div style="display:flex; gap:var(--dmui-space-xs);">
+        {% if page > 1 %}
+        <a href="{{ urls.suppressions }}?page={{ page - 1 }}&amp;channel={{ channel | urlencode }}&amp;scope={{ scope | urlencode }}&amp;address={{ address | urlencode }}" class="comms-button">Previous</a>
+        {% endif %}
+        {% if page < total_pages %}
+        <a href="{{ urls.suppressions }}?page={{ page + 1 }}&amp;channel={{ channel | urlencode }}&amp;scope={{ scope | urlencode }}&amp;address={{ address | urlencode }}" class="comms-button">Next</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

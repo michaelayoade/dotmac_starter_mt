@@ -1,9 +1,11 @@
 """Tenant accounting authority extracted product-first from ERP."""
 
 from dotmac_accounting.contracts import (
+    AccountChangeKind,
     AccountClass,
     AccountingError,
     AccountKind,
+    ActivateAccount,
     CloseCheck,
     Conflict,
     CreateAccount,
@@ -25,8 +27,11 @@ from dotmac_accounting.contracts import (
     NotFound,
     PeriodCloseEvidence,
     PeriodStatus,
+    RecodeAccount,
+    RetireAccount,
     ReverseJournal,
     SourceIdentity,
+    UpdateAccountFlags,
     VoidDraftJournal,
 )
 from dotmac_accounting.manifest import module
@@ -34,6 +39,7 @@ from dotmac_accounting.migrations import versions_dir
 from dotmac_accounting.models import (
     Account,
     AccountCategory,
+    AccountChange,
     AccountingDimension,
     AccountingDimensionValue,
     FiscalPeriod,
@@ -46,6 +52,7 @@ from dotmac_accounting.models import (
     PostedLedgerLine,
 )
 from dotmac_accounting.service import (
+    activate_account,
     create_account,
     create_account_category,
     create_dimension,
@@ -56,22 +63,28 @@ from dotmac_accounting.service import (
     lock_period,
     open_period,
     post_journal,
+    recode_account,
     reopen_period,
+    retire_account,
     reverse_journal,
     soft_close_period,
+    update_account_flags,
     void_draft_journal,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "Account",
     "AccountCategory",
+    "AccountChange",
+    "AccountChangeKind",
     "AccountClass",
     "AccountKind",
     "AccountingDimension",
     "AccountingDimensionValue",
     "AccountingError",
+    "ActivateAccount",
     "CloseCheck",
     "Conflict",
     "CreateAccount",
@@ -101,10 +114,14 @@ __all__ = [
     "PeriodStatus",
     "PostedLedgerDimension",
     "PostedLedgerLine",
+    "RecodeAccount",
+    "RetireAccount",
     "ReverseJournal",
     "SourceIdentity",
+    "UpdateAccountFlags",
     "VoidDraftJournal",
     "__version__",
+    "activate_account",
     "create_account",
     "create_account_category",
     "create_dimension",
@@ -116,9 +133,12 @@ __all__ = [
     "module",
     "open_period",
     "post_journal",
+    "recode_account",
     "reopen_period",
+    "retire_account",
     "reverse_journal",
     "soft_close_period",
+    "update_account_flags",
     "versions_dir",
     "void_draft_journal",
 ]
