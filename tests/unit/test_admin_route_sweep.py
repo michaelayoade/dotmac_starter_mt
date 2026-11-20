@@ -70,6 +70,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.features.auth.web import router as auth_web_router
+from app.features.comms_operations.feature import feature as comms_feature
+from app.features.comms_operations.web import router as comms_web_router
 from app.features.custom_fields.web import router as custom_fields_web_router
 from app.features.parties.web import router as parties_web_router
 from app.features.rbac.web import router as rbac_web_router
@@ -209,6 +211,13 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
                 ("custom_fields", custom_fields_web_router),
             )
         ),
+        ModuleManifest(
+            code="comms_operations",
+            version="1",
+            contract_version=1,
+            web_routers=(comms_web_router,),
+            permissions=comms_feature.permissions,
+        ),
         template_studio_module,
     )
     install_permissions(PermissionCatalogue.from_manifests(manifests))
@@ -294,6 +303,7 @@ def test_sweep_covers_at_least_one_route_per_admin_feature() -> None:
         "/admin/settings",
         "/admin/custom-fields",
         "/admin/templates",
+        "/admin/comms",
     }
     seen = {
         prefix for prefix in prefixes for _, path in routes if path.startswith(prefix)

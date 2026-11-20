@@ -598,6 +598,59 @@ class PeriodEvent(Base):
     )
 
 
+class AccountChange(Base):
+    """Append-only history of governed account maintenance.
+
+    One row per RECODE, FLAGS, RETIRE or ACTIVATE with the full before/after
+    snapshot, reason and actor. The account's ``id`` never changes; posted
+    ledger lines keep the ``account_code`` they were posted under.
+    ``applied_txid`` is stamped by the database so the account guard can tie a
+    mutation of the account to a change row written in the same transaction.
+    """
+
+    __tablename__ = "account_changes"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_account_changes_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "account_id"],
+            [f"{SCHEMA}.accounts.tenant_id", f"{SCHEMA}.accounts.id"],
+            ondelete="RESTRICT",
+            name="fk_account_changes_tenant_account",
+        ),
+        CheckConstraint(
+            "change_kind IN ('RECODE','FLAGS','RETIRE','ACTIVATE')",
+            name="ck_account_changes_kind",
+        ),
+        Index(
+            "ix_account_changes_tenant_account",
+            "tenant_id",
+            "account_id",
+            "occurred_at",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    change_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    old_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    new_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    old_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    new_kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    old_posting_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    new_posting_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    old_is_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    new_is_active: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    applied_txid: Mapped[int | None] = mapped_column(sa.BigInteger())
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 ALL_MODELS = (
     AccountCategory,
     Account,
@@ -611,6 +664,7 @@ ALL_MODELS = (
     PostedLedgerLine,
     PostedLedgerDimension,
     PeriodEvent,
+    AccountChange,
 )
 TABLES = tuple(model.__tablename__ for model in ALL_MODELS)
 
@@ -624,6 +678,7 @@ __all__ = [
     "TABLES",
     "Account",
     "AccountCategory",
+    "AccountChange",
     "AccountingDimension",
     "AccountingDimensionValue",
     "FiscalPeriod",

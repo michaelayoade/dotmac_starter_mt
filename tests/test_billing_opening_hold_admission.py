@@ -5,6 +5,7 @@ Fixture ports qualify injected evidence only; they are not production authority.
 
 # SQL identifiers come only from fixed table names.
 # ruff: noqa: S608
+import json
 from dataclasses import fields, replace
 from uuid import UUID, uuid4
 
@@ -89,7 +90,7 @@ class Authority:
         return self._approvals
 
 
-def _two_partitions(session, scope):
+def _two_partitions(session, scope, dual_control="on"):
     """One window manifest freezing an admitted partition and a held one."""
     admitted_id, held_id = (
         cash._new_account(session, scope),
@@ -116,7 +117,7 @@ def _two_partitions(session, scope):
     )
     first = replace(first, manifest=manifest)
     second = replace(second, manifest=manifest, idempotency_key=f"hold:{held_id}")
-    cash._prepare_window(session, scope, first)
+    cash._prepare_window(session, scope, first, dual_control)
     session.commit()
     return first, second
 
@@ -687,3 +688,206 @@ def test_seal_hold_list_must_equal_the_typed_operational_holds(scratch):
         assert refused.value.code == "billing.opening_hold_list_invalid"
         session.rollback()
         assert get_opening_window_seal(session, scope=scope) is None
+
+
+# --- D-9: two-person approval is a per-window policy (bi_0019) -----------------
+
+
+def _off_ready(session, scope):
+    admitted, held = _two_partitions(session, scope, "off")
+    _import(session, scope, admitted)
+    session.commit()
+    _seal(session, scope, held=[_held_id(held)])
+    session.commit()
+    return held
+
+
+@pytest.mark.parametrize("plane", ["tenant", "platform"])
+def test_off_admits_without_an_approval_and_records_it(scratch, plane):
+    scope, url = cash.runtime._scope_url(scratch, plane)
+    with cash._session(scratch, url, scope) as session:
+        held = _off_ready(session, scope)
+        approvals = Approvals()
+        receipt = _admit(
+            session, scope, held, approvals=approvals, approval_request_id=None
+        )
+        session.commit()
+        assert approvals.calls == 0  # the Approvals port is never consulted
+        (audit,) = get_opening_hold_admissions(session, scope=scope)
+        assert audit.receipt_id == receipt.receipt_id
+        assert audit.dual_control == "off" and audit.approval is None
+        assert audit.maker_ref == MAKER
+        table = (
+            "opening_hold_admissions"
+            if plane == "tenant"
+            else "platform_opening_hold_admissions"
+        )
+        row = session.execute(
+            text(
+                f"SELECT approval_request_id, approver_refs, evidence "
+                f"FROM mod_billing.{table}"
+            )
+        ).one()
+        assert row.approval_request_id is None and row.approver_refs == []
+        assert row.evidence["approval"] is None
+        assert row.evidence["dual_control"] == "off"
+        assert row.evidence["maker_ref"] == MAKER
+        assert row.evidence["disposition"]["disposition_digest"] == DIGEST
+
+
+def test_off_refuses_a_supplied_approval_rather_than_ignoring_it(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        held = _off_ready(session, scope)
+        approvals = Approvals()
+        baseline = cash._counts(session, "tenant", _held_id(held))
+        with pytest.raises(BillingRuleViolation) as refused:
+            _admit(session, scope, held, approvals=approvals)  # carries an id
+        assert refused.value.code == "billing.opening_hold_approval_not_applicable"
+        assert approvals.calls == 0
+        session.rollback()
+        assert cash._counts(session, "tenant", _held_id(held)) == baseline
+        assert get_opening_hold_admissions(session, scope=scope) == ()
+
+
+def test_off_keeps_every_non_approval_control(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        held = _off_ready(session, scope)
+        with pytest.raises(BillingRuleViolation):  # not on the hold list
+            _admit(
+                session,
+                scope,
+                _import_for_stranger(session, scope),
+                approval_request_id=None,
+            )
+        session.rollback()
+        with pytest.raises(OpeningEvidenceError):  # a digest is mandatory
+            hold.OpeningHoldDispositionV1("d", "not-a-digest")
+        with pytest.raises(OpeningEvidenceError):  # a maker is mandatory
+            _admit(session, scope, held, approval_request_id=None, maker_ref=" ")
+        session.rollback()
+        assert get_opening_hold_admissions(session, scope=scope) == ()
+        _admit(session, scope, held, approval_request_id=None)  # control
+        session.commit()
+        assert len(get_opening_hold_admissions(session, scope=scope)) == 1
+
+
+def _import_for_stranger(session, scope):
+    stranger = cash._new_account(session, scope)
+    return ar._command(session, scope, stranger)
+
+
+def test_on_without_an_approval_is_still_missing(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as session:
+        admitted, held = _two_partitions(session, scope)  # "on"
+        _import(session, scope, admitted)
+        session.commit()
+        _seal(session, scope, held=[_held_id(held)])
+        session.commit()
+        with pytest.raises(BillingRuleViolation) as refused:
+            _admit(session, scope, held, approval_request_id=None)
+        assert refused.value.code == "billing.opening_hold_approval_missing"
+        session.rollback()
+
+
+def _bypass_import(session, scope, held):
+    """The writer without the audit hook (as a raw caller of the principal)."""
+    with cash._as_opening_principal(session):
+        return s._import_opening_account_v2(
+            session,
+            scope=scope,
+            command=held,
+            verifier=evidence.TrustedVerifier(),
+            operation_scope="billing.opening.bypass",
+            fingerprint=None,
+            admit=lambda sess, verified: None,
+            after_import=None,
+        )
+
+
+def _raw_hold_row(session, scope, receipt, *, request, refs, approval, dual):
+    window = session.info["opening_scratch"].windows[scope]
+    body = {
+        "maker_ref": MAKER,
+        "receipt_id": str(receipt.receipt_id),
+        "billing_account_id": str(receipt.billing_account_id),
+        "window_id": str(window.window_id),
+        "disposition": {"disposition_digest": DIGEST},
+        "approval": approval,
+    }
+    if dual is not None:
+        body["dual_control"] = dual
+    return session.execute(
+        text(
+            "INSERT INTO mod_billing.opening_hold_admissions (id, tenant_id, "
+            "window_id, billing_account_id, receipt_id, disposition_digest, "
+            "maker_ref, approval_request_id, approver_refs, evidence, "
+            "evidence_digest) VALUES (:id, :t, :w, :a, :r, :d, :m, :req, "
+            "CAST(:refs AS json), CAST(:ev AS json), :dg)"
+        ),
+        {
+            "id": uuid4(),
+            "t": scope.tenant_id,
+            "w": window.window_id,
+            "a": receipt.billing_account_id,
+            "r": receipt.receipt_id,
+            "d": DIGEST,
+            "m": MAKER,
+            "req": request,
+            "refs": json.dumps(refs),
+            "ev": json.dumps(body),
+            "dg": "0" * 64,
+        },
+    )
+
+
+def _refused_raw(session, scope, receipt, **values):
+    with cash._as_opening_principal(session):
+        with pytest.raises(DBAPIError) as refused:
+            with session.begin_nested():
+                _raw_hold_row(session, scope, receipt, **values)
+    assert refused.value.orig.sqlstate == "23514"
+
+
+def test_database_refuses_null_approval_under_on_and_any_approval_under_off(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    stand = {"request_id": str(uuid4()), "requester_ref": MAKER}
+    with cash._session(scratch, url, scope) as session:  # ON window
+        admitted, held = _two_partitions(session, scope)
+        _import(session, scope, admitted)
+        session.commit()
+        _seal(session, scope, held=[_held_id(held)])
+        session.commit()
+        receipt = _bypass_import(session, scope, held)
+        _refused_raw(  # NULL id under ON
+            session,
+            scope,
+            receipt,
+            request=None,
+            refs=[CHECKER],
+            approval=stand,
+            dual=None,
+        )
+        _refused_raw(  # an ON window cannot claim "off"
+            session, scope, receipt, request=None, refs=[], approval=None, dual="off"
+        )
+        session.rollback()
+
+
+def test_database_refuses_approvals_under_an_off_window(scratch):
+    scope, url = cash.runtime._scope_url(scratch, "tenant")
+    stand = {"request_id": str(uuid4()), "requester_ref": MAKER}
+    with cash._session(scratch, url, scope) as session:
+        held = _off_ready(session, scope)
+        receipt = _bypass_import(session, scope, held)
+        for values in (
+            {"request": uuid4(), "refs": [], "approval": None, "dual": "off"},
+            {"request": None, "refs": [CHECKER], "approval": None, "dual": "off"},
+            {"request": None, "refs": [], "approval": stand, "dual": "off"},
+            {"request": None, "refs": [], "approval": None, "dual": None},
+            {"request": None, "refs": [], "approval": None, "dual": "on"},
+        ):
+            _refused_raw(session, scope, receipt, **values)
+        session.rollback()

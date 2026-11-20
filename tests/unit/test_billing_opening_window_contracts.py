@@ -73,3 +73,39 @@ def test_frozen_full_manifest_window_rejects_mutable_or_coerced_evidence():
     ):
         with pytest.raises(OpeningEvidenceError):
             replace(window, **{field: value})
+
+
+def test_dual_control_defaults_off_is_closed_and_the_last_field():
+    from dataclasses import fields
+
+    from dotmac_billing.opening_window_queries import _legacy_hold, _legacy_window
+
+    candidate = evidence._candidate()
+    args = (
+        candidate.manifest.scope,
+        uuid4(),
+        uuid4(),
+        1,
+        "a" * 64,
+        candidate.manifest,
+        "fixture_restricted",
+        123,
+        "authority:1",
+        evidence.NOW,
+    )
+    window = OpeningWindowV1(*args)  # existing positional calls still work
+    assert window.dual_control == "off"  # the D-9 default
+    assert OpeningWindowV1(*args, "on").dual_control == "on"
+    assert [f.name for f in fields(OpeningWindowV1)][-1] == "dual_control"
+    for bad in ("maybe", "", None, True):
+        with pytest.raises(OpeningEvidenceError):
+            OpeningWindowV1(*args, bad)
+    # A stored window with no key predates bi_0019 and reads as "on".
+    stored = {"window": {"window_id": "x"}, "verification": {}}
+    assert _legacy_window(stored)["window"]["dual_control"] == "on"
+    assert "dual_control" not in stored["window"]  # the stored bytes are untouched
+    kept = {"window": {"dual_control": "off"}}
+    assert _legacy_window(kept) is kept
+    assert _legacy_hold({"maker_ref": "m"})["dual_control"] == "on"
+    already = {"dual_control": "off"}
+    assert _legacy_hold(already) is already

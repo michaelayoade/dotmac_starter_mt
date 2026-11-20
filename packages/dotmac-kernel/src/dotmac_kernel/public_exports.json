@@ -216,6 +216,7 @@
         "register_marketing_categories",
         "register_numeric_channels",
         "registered_marketing_categories",
+        "restore_transactional",
         "suppress",
         "suppression_reason",
         "suppression_reasons_for_addresses",
@@ -355,6 +356,7 @@
     "dotmac_kernel.delivery": {
       "classification": "supported",
       "exports": [
+        "DeliveryDeferred",
         "DeliveryError",
         "latest_receipt_for_dispatch",
         "receipts_for_address",
@@ -421,6 +423,17 @@
         "Sent",
         "Suppressed",
         "send"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.delivery_requeue": {
+      "classification": "supported",
+      "exports": [
+        "AUDIT_ACTION_REQUEUED",
+        "MAX_REASON_LENGTH",
+        "RequeueRefused",
+        "RequeueResult",
+        "requeue_dead_dispatch"
       ],
       "status": "declared"
     },
@@ -830,9 +843,11 @@
       "classification": "supported",
       "exports": [
         "ClaimedEvent",
+        "DeferralOutcome",
         "FailureOutcome",
         "RelayPolicy",
         "claim_batch",
+        "record_deferral",
         "record_failure",
         "record_success"
       ],
@@ -2167,6 +2182,7 @@
     "dotmac_kernel.delivery_dispatch",
     "dotmac_kernel.delivery_models",
     "dotmac_kernel.delivery_providers",
+    "dotmac_kernel.delivery_requeue",
     "dotmac_kernel.deps",
     "dotmac_kernel.entitlements",
     "dotmac_kernel.errors",

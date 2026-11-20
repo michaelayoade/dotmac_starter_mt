@@ -167,6 +167,29 @@ class SettleOutcomeV1:
 
 
 @dataclass(frozen=True, slots=True)
+class InvoiceIssuedV1:
+    """GAP-3 trigger: Billing issued this invoice (the routed issued fact).
+
+    Only the document id is trusted; everything else is re-read from Billing.
+    """
+
+    document_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class BalanceAppliedOutcomeV1:
+    """What an invoice-issued balance pass did. References only.
+
+    ``reason_code`` is None when at least one document was paid; otherwise it
+    names the quiet no-op (nothing was posted).
+    """
+
+    billing_account_id: UUID
+    applied_document_ids: tuple[UUID, ...]
+    reason_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class SettleAttentionCursorV1:
     """Keyset cursor for ``list_settle_attention`` (the last row's position)."""
 
@@ -200,6 +223,19 @@ class SettleRefused(Exception):
 
     Raised as ``SettleRefused(code)`` for caller errors that write nothing (a
     stale ``expected_version``, retrying an instance that is not refused).
+    """
+
+    @property
+    def code(self) -> str:
+        """The stable machine code (the first argument)."""
+        return str(self.args[0])
+
+
+class BalancePassFailed(Exception):
+    """A technical fault in the invoice-issued balance pass (GAP-3).
+
+    Raised as ``BalancePassFailed(code)``: the caller rolls back and its event
+    delivery retries. It is never a business no-op and writes nothing.
     """
 
     @property

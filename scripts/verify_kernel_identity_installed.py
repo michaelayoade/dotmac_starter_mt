@@ -242,7 +242,7 @@ def exercise_public_history(sa, receipt: dict[str, object]) -> None:
             cfg.set_main_option("version_locations", str(versions_dir()))
             scripts = ScriptDirectory.from_config(cfg)
             require(
-                scripts.get_heads() == ["0032_communication_dispatches"],
+                scripts.get_heads() == ["0034_receipts_platform_ro"],
                 "Installed migration head differs",
             )
 
@@ -288,7 +288,7 @@ def exercise_public_history(sa, receipt: dict[str, object]) -> None:
                     "Probe database not empty",
                 )
                 cfg.attributes["connection"] = connection
-                command.upgrade(cfg, "0032_communication_dispatches")
+                command.upgrade(cfg, "0034_receipts_platform_ro")
             require(
                 {r["revision"] for r in revisions}
                 == {r.revision for r in scripts.walk_revisions()},
@@ -496,7 +496,7 @@ def exercise_public_history(sa, receipt: dict[str, object]) -> None:
             source_revision=os.environ["IDENTITY_SOURCE_SHA"],
             session_issuance_review_ref="synthetic-revoked-session-not-admission",
             password_session_ids=cohort.auth_sessions,
-            installed_kernel_head="0032_communication_dispatches",
+            installed_kernel_head="0034_receipts_platform_ro",
         )
         operation = IdentityHistoryImportOperationV1(
             is_active=True,

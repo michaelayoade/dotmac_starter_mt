@@ -27,7 +27,7 @@ Starter; this package is the first.
 
 Bounce coverage is synchronous only (reply at RCPT/DATA). Asynchronous DSNs
 are not captured. An admission refusal raises `SmtpAdmissionRefused` and writes no receipt,
-until kernel `DeliveryDeferred` (K-4, S8) exists.
+and is a kernel `DeliveryDeferred` (K-4, S8): the relay reschedules without charging an attempt.
 
 ## ERP and Sub: inventoried, no shared writer
 

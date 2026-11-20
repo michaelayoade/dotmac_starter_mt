@@ -1,0 +1,36 @@
+{#
+  Shared token styles for the comms operator screens (K-7). Fragment: included
+  by suppressions.html and receipts.html. Authored against `var(--dmui-*)`,
+  never the hardcoded palette (tests/architecture/test_palette_ratchet.py).
+#}
+<style>
+  .comms-input { padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default);
+                 border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary);
+                 color:var(--dmui-text-primary); font-size:var(--dmui-font-size-sm); }
+  .comms-label { display:block; margin-bottom:var(--dmui-space-3xs); font-size:var(--dmui-font-size-xs);
+                 color:var(--dmui-text-secondary); }
+  .comms-button { padding:var(--dmui-space-xs) var(--dmui-space-md); border:1px solid var(--dmui-border-default);
+                  border-radius:var(--dmui-radius-md); background:var(--dmui-surface-elevated);
+                  color:var(--dmui-text-primary); font-size:var(--dmui-font-size-sm); cursor:pointer;
+                  text-decoration:none; }
+  .comms-danger { border-color:var(--dmui-status-negative-border); color:var(--dmui-status-negative-foreground); }
+  .comms-card { border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                background:var(--dmui-surface-elevated); overflow:hidden; }
+  .comms-table { width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm); }
+  .comms-table th { padding:var(--dmui-space-sm) var(--dmui-space-md); text-align:left;
+                    background:var(--dmui-surface-secondary); color:var(--dmui-text-secondary);
+                    font-weight:var(--dmui-font-weight-medium); }
+  .comms-table td { padding:var(--dmui-space-sm) var(--dmui-space-md); border-top:1px solid var(--dmui-border-subtle);
+                    color:var(--dmui-text-secondary); }
+  .comms-alert-error { margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+                       border-radius:var(--dmui-radius-md); background:var(--dmui-status-negative-surface);
+                       color:var(--dmui-status-negative-foreground); font-size:var(--dmui-font-size-sm); }
+  .comms-alert-ok { margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+                    border-radius:var(--dmui-radius-md); background:var(--dmui-status-positive-surface);
+                    color:var(--dmui-status-positive-foreground); font-size:var(--dmui-font-size-sm); }
+  .comms-alert-warn { margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-md);
+                      border:1px solid var(--dmui-status-negative-border); border-radius:var(--dmui-radius-md);
+                      color:var(--dmui-text-primary); font-size:var(--dmui-font-size-sm); }
+  .comms-row { display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--dmui-space-sm); }
+  .comms-empty { padding:var(--dmui-space-lg); color:var(--dmui-text-muted); font-size:var(--dmui-font-size-sm); }
+</style>

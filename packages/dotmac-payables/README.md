@@ -4,8 +4,15 @@
 liabilities, due-date payment obligations, credit applications and immutable
 settlement/accounting observations.
 
-Version `0.1.0a5` is an unpublished candidate and is not adopted by this change.
-It adds a governed reversal of RECORDED supplier payments (REVERSED, terminal; the
+Version `0.1.0a6` is an unpublished candidate and is not adopted by this change.
+It adds the cash-basis release of deferred input tax at payment (a declared
+`TaxDeferralPolicy`, proportional with an exact final remainder, reversed with the
+payment), verifier-bound no-GL admission of the deferral already released on settled
+historical invoices and of historical overpayments as supplier credits, withholding
+account guards, and zero-value line handling in the document consequences. No second
+person is required by any of it.
+
+Version `0.1.0a5` added a governed reversal of RECORDED supplier payments (REVERSED, terminal; the
 reverser is not the recorder or approver; obligations reopen; a GL reversal
 consequence is exposed), verifier-bound admission of partially settled historical
 invoices with immutable legacy settlements and an exactly proved residual (no GL

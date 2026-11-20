@@ -188,7 +188,8 @@ def _restricted_session(scratch, scope, principal, *, isolation="READ COMMITTED"
         engine.dispose()
 
 
-def _provision(scratch, scope, principal, command):
+def _provision(scratch, scope, principal, command, dual_control="on"):
+    """Existing proofs assume two-person approval, so the fixture default is "on"."""
     manifest_digest = (
         opening_manifest_fingerprint(command.manifest)
         if type(command.manifest) is OpeningManifestV1
@@ -205,6 +206,7 @@ def _provision(scratch, scope, principal, command):
         principal[1],
         "fixture:explicit-provision",
         datetime.now(UTC),
+        dual_control,
     )
     with b._session(scratch[0], scope) as session:
         s.provision_opening_window(

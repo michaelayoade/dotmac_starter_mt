@@ -173,3 +173,16 @@ the transition without that row or with any posting evidence. POSTED and
 REVERSED journals are never voided: correction is reversal only. VOID journals
 stay frozen and keep their source identity. Downgrade refuses once such rows
 exist.
+
+## Amendment, 2026-11-18 — governed account maintenance
+
+`0.1.0a3` adds `ac_0004_account_maintenance`: `recode_account`,
+`update_account_flags`, `retire_account` and `activate_account`, recorded in the
+append-only `account_changes` history, with a database guard so an account's
+`id` never changes and its code or flags change only with a history row of the
+same transaction. A recode changes the current code only: posted ledger lines
+keep the `account_code` they were posted under as history, and identity is the
+account id. Retirement refuses a non-zero posted balance, draft journal lines,
+active children and attested open subledger items. Downgrade refuses once
+history exists. This source candidate allocates no publication, adoption or
+production change.

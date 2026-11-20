@@ -120,7 +120,10 @@ def test_service_owns_no_session_transaction_or_sibling_module() -> None:
 
 
 def test_migration_proves_rls_and_database_immutability() -> None:
-    source = MIGRATION.read_text(encoding="utf-8")
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(MIGRATION.parent.glob("ac_*.py"))
+    )
     for table in module.tables:
         qualified = f"mod_accounting.{table}"
         assert f"{qualified} ENABLE ROW LEVEL SECURITY" in source
@@ -165,3 +168,16 @@ def test_clean_cutover_dossier_guard_is_sensitive() -> None:
     assert len(violations) == 7
     assert "first_cutover missing 'never replays legacy journal'" in violations
     assert "shadow_and_drift missing 'not import or parity targets'" in violations
+
+
+def test_account_maintenance_migration_guards_identity_and_history() -> None:
+    source = (MIGRATION.parent / "ac_0004_account_maintenance.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'down_revision = "ac_0003_draft_void"' in source
+    assert "account identity is immutable" in source
+    assert "accounts_maintenance_guard" in source
+    assert "account_changes_immutable" in source
+    # Append-only history: the application role can read and add, never alter.
+    assert "GRANT SELECT, INSERT ON mod_accounting.account_changes" in source
+    assert "cannot downgrade ac_0004" in source

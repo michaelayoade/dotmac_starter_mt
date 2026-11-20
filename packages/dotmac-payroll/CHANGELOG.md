@@ -1,5 +1,43 @@
 # Changelog — dotmac-payroll
 
+## 0.1.0a6 — declared successor
+
+- `adjust_liability`: an audited, signed adjustment of one liability (a write-down
+  such as unclaimed salary, or an increase). Takes an adjustment reference,
+  reason, evidence reference, an offset account ref and a timezone-aware
+  `adjusted_at` that is not before the liability's `created_at`. The liability is
+  locked FOR UPDATE. Refused: internal recoveries
+  (`internal_recovery_not_adjustable`), a different currency, an amount off the
+  currency scale or zero, a write-down larger than effective amount minus
+  settled amount (`adjustment_exceeds_outstanding`), an offset equal to the
+  liability account (`offset_is_liability_account`) and blank references. An
+  identical replay returns the existing row; anything else under the same
+  (tenant, liability, adjustment reference) is a `PayrollConflict`. Corrections
+  are made forward with an opposite adjustment. No second person is required.
+- `payroll_liabilities.amount` is NEVER changed (the run consequence compares it
+  with the calculation). The signed sum lives in the new
+  `payroll_liabilities.amount_adjusted` column and in the append-only
+  `payroll_liability_adjustments` rows. `effective_liability_amount(liability)`
+  is `amount + amount_adjusted`; `record_liability_settlement` and
+  `reverse_liability_settlement` compare against it, and the status becomes
+  `settled` when settled equals effective, `outstanding` when nothing is
+  settled, else `partially_settled`. A fully written-down liability is
+  `settled` and cannot be paid. The caller (ERP pin) must pay
+  `effective_liability_amount`, not `amount`.
+- `build_liability_adjustment_consequence`: read-only fact, kind
+  `payroll_liability_adjustment`, keyed on the adjustment id. A write-down is
+  Dr liability account / Cr offset; an increase is Dr offset / Cr liability
+  account. The offset is the one frozen on the adjustment row; the posting date
+  is caller-supplied and fingerprinted.
+- Migration `py_0004_liability_adjustments` is additive: `amount_adjusted`
+  (default 0), the amounts CHECK widened to the effective amount, and the new
+  table (evidence trigger, forced RLS, SELECT/INSERT grants, `amount <> 0`,
+  unique (tenant, liability, adjustment reference)). Downgrade refuses once an
+  adjustment exists.
+- Existing a3-a5 transitions, amounts and consequence fingerprints are
+  byte-identical (regression tests pin the settlement and run facts).
+- Publication and ERP adoption remain separate gates; `0.1.0a5` is unchanged.
+
 ## 0.1.0a5 — declared successor
 
 - `reverse_liability_settlement`: governed reversal of one whole recorded
