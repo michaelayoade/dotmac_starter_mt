@@ -1,5 +1,91 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a6 — unreleased
+
+Publication is authorized by Michael (register v1516, D-9 and the a6 VAT-release and
+WHT work) but happens only through the release lane after review. No assembly adopts
+this candidate by this change. Billing is untouched. No second person is required by
+any new command (Michael, 2026-11-17: maker-checker is optional and off).
+
+- Cash-basis release of deferred input tax at payment. `declare_tax_deferral` declares,
+  as an immutable owner fact (one row per tenant and deferral account, never metadata),
+  that tax booked to a deferral account is released to a release account as the
+  invoice is paid. `record_supplier_payment` now freezes one
+  `supplier_payment_tax_releases` row per (invoice, deferral account): the proportional
+  share of what remains deferred, rounded half up to the policy's minor units, and the
+  exact remainder on the final payment (`deferred_tax_release`,
+  `invoice_deferred_tax_position`). The payment consequence appends Dr release / Cr
+  deferral per row to the a5 lines; the reversal mirrors them. A payment with no rows
+  is byte-identical to a5 (fingerprints pinned). A credit note carrying deferral tax
+  must name its invoice and cannot exceed what remains deferred
+  (`deferred_tax_credit_requires_invoice`, `deferred_tax_credit_exceeds_remaining`).
+  A negative position is a data fault and is refused (`deferred_tax_position_negative`).
+- `admit_historical_tax_deferral`: verifier-bound, no GL. Records the deferral already
+  released before admission on a settled historical invoice, so its first payment here
+  cannot over-release. Without it, such a payment is refused
+  (`historical_deferral_unproven`). Basis-neutral: `released_before_admission`, and
+  opaque `releases` evidence whose meaning the verifier defines. Domain
+  `payables.historical-tax-deferral.v1`.
+- Withholding at payment: a withholding account that is the payment's cash account, an
+  allocated invoice's liability account or a declared deferral or release account is
+  refused at creation and re-checked at approval and recording
+  (`withholding_account_conflict`). The consequence shape is unchanged.
+- `admit_historical_supplier_credit` (R5b): verifier-bound, no GL. Admits a settled
+  historical invoice that was overpaid as an APPROVED credit note (no lines, no tax),
+  an immutable `historical_credit_receipts` row with its settlements, and a
+  `historical_credit_recognized` liability event of minus the credit. Refused unless the
+  settlements exceed the total by exactly the credit (`historical_credit_not_overpaid`)
+  and the carried supplier control amount equals minus the credit
+  (`legacy_gl_does_not_hold_credit`). Such a credit has no accounting consequence or
+  receipt (`historical_credit_has_no_consequence`), and its invoice cannot be recognized,
+  admitted or posted. `apply_credit_note` applies it unchanged. Domain
+  `payables.historical-supplier-credit.v1`.
+- Invoice and credit-note consequences skip a zero-value line's amount entry (a tax-only
+  line keeps its tax entry) and refuse an empty, unbalanced or zero-valued entry set
+  (`consequence_entry_invalid`). Stored lines are unchanged; fingerprints are unchanged
+  for every document without a zero line.
+- `PayablesError` accepts an optional keyword `code`; every new refusal sets it and
+  carries it in parentheses in the message. Existing raises are unchanged.
+- Add `pa_0006_tax_release_hist_credit` (additive: `tax_deferral_policies`,
+  `supplier_payment_tax_releases`, `credit_note_tax_splits`,
+  `credit_application_tax_releases`, `historical_tax_deferrals`,
+  `historical_credit_receipts`, `historical_credit_settlements`; forced RLS,
+  append-only triggers, SELECT and INSERT grants only). No released table or column
+  changes. Its downgrade refuses once any row exists. The revision id is shortened
+  from the design's `pa_0006_tax_release_history_credit`, which exceeds the 32-character
+  `alembic_version.version_num`.
+- Credit notes against paid invoices and credit applications (spec rev 3, section 11).
+  Credit kind is structural: a CASH credit is a historical overpayment
+  (`historical_credit_receipts`); every other credit is a DOCUMENT credit. At approval
+  a credit's tax on a deferral account is split, frozen in `credit_note_tax_splits`:
+  min(tax, still deferred) reverses the deferral account and the rest reverses the
+  release account (the share already claimed); the credit consequence emits both
+  (a credit whose split puts nothing on the release account is byte-identical to a5).
+  Refused: tax above the invoice's net tax (`credit_tax_exceeds_invoice_tax`), a line
+  taxed to a release account (`credit_tax_on_release_account`). Applications release
+  deferred tax into `credit_application_tax_releases`: a CASH credit like a payment
+  (proportional, exact remainder at final settlement); an own DOCUMENT credit only at the
+  final settlement, which releases exactly the remainder; a DOCUMENT credit set off against
+  another invoice that still defers tax is refused (`credit_setoff_on_deferred_invoice`).
+  `build_credit_application_accounting_consequence` (Dr release / Cr deferral) and receipt
+  kind `supplier_credit_application`; none when nothing was released
+  (`credit_application_has_no_consequence`). Reversing a payment after a credit settled the
+  invoice's VAT is refused (`payment_reversal_blocked_by_credit_vat`); reverse the credit
+  first. Owner invariants at every write: R >= 0, Claimed >= 0, credit tax <= D
+  (`deferred_tax_position_negative`). No un-apply. `deferred_tax_credit_exceeds_remaining`
+  is removed.
+- An external settlement observation takes the invoice lock and is refused while the
+  invoice still defers tax (`settlement_observation_on_deferred_invoice`), because it
+  lowers the balance without releasing; payments are unaffected. The payment owner string is reserved: the public `record_settlement` refuses it (`settlement_owner_reserved`) and `record_supplier_payment` uses a private path. A credit application
+  validates its amount before any release is measured.
+- Review hardening: a historical-credit replay with another credit number, evidence
+  reference or admitting actor is a conflict; credit approval refuses deferral tax on
+  unproven settled history (`historical_deferral_unproven`); `apply_credit_note` and
+  `reverse_supplier_payment` take the invoice lock (payment, obligations, invoices in
+  id order); both historical admission paths queue on a PostgreSQL advisory lock keyed
+  by (tenant, legacy settlement id).
+- Kernel floor unchanged at a103.
+
 ## 0.1.0a5 — unreleased
 
 Publication is authorized by Michael (register v1302 rulings; W9) but happens only

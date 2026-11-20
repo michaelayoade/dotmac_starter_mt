@@ -706,7 +706,7 @@ def test_recover_is_still_out_of_the_authorization_vocabulary() -> None:
 #: than re-implementing it, and gives `TrustedHostAttestation.v2` its own
 #: declared writer. The script now calls it and carries no canonicalizing
 #: `json.dumps` of its own —
-#: `test_cmd_sign_writes_through_the_package_owned_writer_not_its_own_json_dumps`
+#: `test_script_writes_through_the_package_owned_writer_not_its_own_json_dumps`
 #: in `test_candidate_attestation_signer.py` asserts the AST contains none.
 SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     "audit_kernel_surface.py": 1,
@@ -745,6 +745,13 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # every handoff digest, is owned by that protocol module, and is written to
     # no Foundation store; it is not a host-lease release record.
     "lane3_handoff_protocol.py": 1,
+    # The presentation-statement signature bytes (Control `canonical_json`
+    # form) and the bytes of the per-run `host-admission.json` and its unsigned
+    # `{attempt_id, candidate, installed}` precursor, through ONE helper
+    # (`_canonical`). `lane3_host_admission.py` (S2) writes the file, Control
+    # owns the presentation inside it, and CP `host_admission_source` reads it.
+    # Written to no Foundation store, only a per-run owner-only directory.
+    "lane3_host_admission.py": 1,
     # Public offline-verification result and protected signer policy share
     # one canonical JSON codec, owned by lane3_offline_result. Neither writes
     # a Foundation grant or persistent store.

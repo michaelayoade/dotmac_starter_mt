@@ -773,7 +773,7 @@ def test_payroll_settlement_reversal_on_postgres(
     admin = create_engine(admin_url)
     with admin.connect() as conn:
         heads = conn.execute(text("SELECT version_num FROM public.alembic_version"))
-        assert "py_0003_settlement_reversal" in heads.scalars().all()
+        assert "py_0004_liability_adjustments" in heads.scalars().all()
     admin.dispose()
 
 
@@ -794,5 +794,213 @@ def test_payroll_a5_downgrade_succeeds_when_no_reversal_exists(
             text("SELECT to_regclass('mod_payroll.payroll_settlement_reversals')")
         ).scalar_one()
         assert gone is None
+    admin.dispose()
+    command.upgrade(config, "heads")
+
+
+def test_payroll_a6_liability_adjustment_on_postgres(
+    migrated_module: tuple[ModuleCase, str, str],
+) -> None:
+    """Adjusted liability through real columns, CHECK, append-only and downgrade."""
+    from datetime import UTC, date, datetime, timedelta
+    from decimal import Decimal
+
+    from dotmac_kernel.money import Currency, Money
+    from dotmac_payroll import (
+        EmployeeComponentInput,
+        PayrollRuleViolation,
+        adjust_liability,
+        approve_payroll_run,
+        assign_employee_pay_structure,
+        build_liability_adjustment_consequence,
+        build_run_accounting_consequence,
+        calculate_employee_payroll,
+        create_payroll_run,
+        effective_liability_amount,
+        finalize_payroll_run,
+        record_liability_settlement,
+    )
+    from dotmac_payroll.models import PayrollLiability, PayrollLiabilityAdjustment
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    from tests.unit.test_payroll_service import _configured_payroll
+
+    case, admin_url, app_url = migrated_module
+    if case.manifest.code != "payroll":
+        pytest.skip("payroll-only proof")
+    tenant_a, tenant_b = _seed_tenants(admin_url)
+    ngn = Currency("NGN", 2)
+    now = datetime(2026, 8, 19, 12, tzinfo=UTC)
+    later = datetime.now(UTC) + timedelta(minutes=5)
+    actor = uuid.uuid4()
+    with _tenant_session(app_url, tenant_a) as session:
+        base, _, deduction, _, revision, _ = _configured_payroll(session, tenant_a)
+        assign_employee_pay_structure(
+            session,
+            tenant_id=tenant_a,
+            employee_ref="employee:pg-a6",
+            revision_id=revision.id,
+            effective_from=date(2026, 1, 1),
+            effective_to=None,
+            source_ref="people-assignment:6",
+            source_version="1",
+        )
+        run = create_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_ref="PG-A6",
+            period_start=date(2026, 7, 1),
+            period_end=date(2026, 7, 31),
+            currency=ngn,
+            created_by_id=uuid.uuid4(),
+            created_at=now,
+        )
+        calculate_employee_payroll(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            employee_ref="employee:pg-a6",
+            proration_factor=Decimal("1"),
+            inputs=(
+                EmployeeComponentInput(base.id, Money.of("1000.10", ngn), "c"),
+                EmployeeComponentInput(deduction.id, Money.of("100.05", ngn), "t"),
+            ),
+            calculated_at=now,
+        )
+        approve_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            approved_by_id=uuid.uuid4(),
+            approved_at=now,
+        )
+        finalize_payroll_run(
+            session,
+            tenant_id=tenant_a,
+            run_id=run.id,
+            finalized_by_id=uuid.uuid4(),
+            finalized_at=now,
+        )
+        net = session.scalars(
+            select(PayrollLiability).where(
+                PayrollLiability.run_id == run.id,
+                PayrollLiability.liability_key == "employee-net-pay",
+            )
+        ).one()
+        original = net.amount
+        before = build_run_accounting_consequence(
+            session, tenant_id=tenant_a, run_id=run.id
+        )
+        row = adjust_liability(
+            session,
+            tenant_id=tenant_a,
+            liability_id=net.id,
+            amount=Money.of("-100.05", ngn),
+            adjustment_ref="PG-ADJ-1",
+            reason="unclaimed",
+            evidence_ref="memo:1",
+            offset_account_ref="ledger:unclaimed",
+            adjusted_by_id=actor,
+            adjusted_at=later,
+        )
+        assert (net.amount, net.amount_adjusted) == (original, Decimal("-100.05"))
+        assert effective_liability_amount(net) == original - Decimal("100.05")
+        assert (
+            build_run_accounting_consequence(session, tenant_id=tenant_a, run_id=run.id)
+            == before
+        )
+        fact = build_liability_adjustment_consequence(
+            session,
+            tenant_id=tenant_a,
+            adjustment_id=row.id,
+            posting_date=date(2026, 9, 1),
+        )
+        assert {e.account_ref: e.debit for e in fact.entries if e.debit} == {
+            net.liability_account_ref: Decimal("100.05")
+        }
+        with pytest.raises(PayrollRuleViolation, match="exceeds the outstanding"):
+            record_liability_settlement(
+                session,
+                tenant_id=tenant_a,
+                liability_id=net.id,
+                amount=Money.of(str(original), ngn),
+                settlement_ref="PG-PAY-FULL",
+                evidence_ref="bank:1",
+                recorded_by_id=actor,
+                recorded_at=now,
+            )
+        record_liability_settlement(
+            session,
+            tenant_id=tenant_a,
+            liability_id=net.id,
+            amount=Money.of(str(effective_liability_amount(net)), ngn),
+            settlement_ref="PG-PAY-EFF",
+            evidence_ref="bank:2",
+            recorded_by_id=actor,
+            recorded_at=now,
+        )
+        assert net.status == "settled"
+        session.commit()
+        # The DB CHECK backstops the service: settled above effective is refused.
+        net.amount_settled = original
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+    with _tenant_session(app_url, tenant_b) as session:
+        assert session.scalars(select(PayrollLiabilityAdjustment)).all() == []
+    with _tenant_session(app_url, tenant_a) as session:
+        assert len(session.scalars(select(PayrollLiabilityAdjustment)).all()) == 1
+        for statement in (
+            "UPDATE mod_payroll.payroll_liability_adjustments SET reason = 'x'",
+            "DELETE FROM mod_payroll.payroll_liability_adjustments",
+        ):
+            with pytest.raises(DBAPIError):
+                session.execute(text(statement))
+            session.rollback()
+    admin = create_engine(admin_url)
+    for statement in (
+        "UPDATE mod_payroll.payroll_liability_adjustments SET reason = 'x'",
+        "DELETE FROM mod_payroll.payroll_liability_adjustments",
+    ):
+        with pytest.raises(DBAPIError, match="append-only"), admin.begin() as conn:
+            conn.execute(text(statement))
+    admin.dispose()
+
+    from alembic import command
+
+    os.environ["MIGRATION_DATABASE_URL"] = admin_url
+    with pytest.raises(RuntimeError, match="a6 downgrade refused"):
+        command.downgrade(_alembic_config(case), "py_0003_settlement_reversal")
+
+
+def test_payroll_a6_downgrade_succeeds_when_no_adjustment_exists(
+    migrated_module: tuple[ModuleCase, str, str],
+) -> None:
+    from alembic import command
+
+    case, admin_url, _ = migrated_module
+    if case.manifest.code != "payroll":
+        pytest.skip("payroll-only proof")
+    os.environ["MIGRATION_DATABASE_URL"] = admin_url
+    config = _alembic_config(case)
+    command.downgrade(config, "py_0003_settlement_reversal")
+    admin = create_engine(admin_url)
+    with admin.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT to_regclass('mod_payroll.payroll_liability_adjustments')")
+            ).scalar_one()
+            is None
+        )
+        cols = conn.execute(
+            text(
+                "SELECT count(*) FROM information_schema.columns WHERE "
+                "table_schema='mod_payroll' AND table_name='payroll_liabilities' "
+                "AND column_name='amount_adjusted'"
+            )
+        ).scalar_one()
+        assert cols == 0
     admin.dispose()
     command.upgrade(config, "heads")

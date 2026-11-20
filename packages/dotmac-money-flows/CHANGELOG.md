@@ -109,6 +109,23 @@ Source only; not published, not composed into any assembly.
 - `funded_charge_instances` rows are never pruned: the access `source_version`
   is a sum over a service's rows, so deleting or archiving rows would lower it.
 
+- F2 D3: `reevaluate_account_terms` and `AccountTermsChangedV1`, a per-account
+  terms re-check. Each pending row of the account is gated at `max(due_at, at)`:
+  no longer prepaid is `withdrawn/contract_type_changed` (service resumes), a
+  vanished charge is `charge_withdrawn`, a key or account mismatch is attention.
+  It never pays or issues, leaves `attention_required` rows alone, is idempotent,
+  takes locks in the `on_settlement_settled` order and continues over the batch
+  cap with the new `money_flows.funded_charge.terms_recheck.v1` event. No
+  migration, no new table; `funded_charge.v1` is unchanged.
+- F2 N1: `start_funded_charge` reads the account's contract type after taking the
+  account lock, not before, so a terms switch committed while a start waited is
+  refused (`not_prepaid`) instead of leaving a pending row after the re-check.
+  Lock order unchanged; no migration. A start after the re-check for a charge due
+  before the switch still holds pending: the caller re-runs the re-check whenever
+  a start returns pending (replays included), with `at` = the latest terms
+  version already in effect, never a future one (README). A postpaid start is
+  still refused before any lock.
+
 ### Release gates (F2)
 
 - Billing `0.1.0a13` must be published before money-flows `0.1.0a1`. This joins
@@ -117,3 +134,14 @@ Source only; not published, not composed into any assembly.
 - Not covered by a test here: an opening-lot credit funding a charge (Billing
   admits opening lots through a sealed window under a restricted role, which the
   scratch fixture does not provision).
+
+- GAP-3: `apply_balance_on_invoice_issued` runs the C2a pass when Billing issues a
+  postpaid invoice (account lock first; gates read after it; prepaid and
+  `deposit_application=none` are no-ops). No row, event or attention item; owner
+  failures raise and a replay posts nothing. Settle may now read account terms and
+  funding availability (allowlist widened from FundedCharge only), and the
+  account statement (Settle only). Applications are dated the latest of the two
+  invoice dates and the newest cash received since (spent or not); the source
+  reference carries the document's Billing `source_version`; faults raise the
+  new `BalancePassFailed`. An overflowing statement window is split (newer half
+  first) rather than failing.

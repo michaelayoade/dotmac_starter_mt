@@ -22,7 +22,7 @@ SMTP adapter for the kernel delivery-provider seam
   `<dispatch_id@from-domain>`.
 - **Admission hook**: a callable invoked before any connection (the product
   passes e.g. its mail-gate lease). A refusal raises `SmtpAdmissionRefused`: nothing is connected and no
-  receipt is written. S8 follow-up: kernel `DeliveryDeferred` (K-4).
+  receipt is written. It is a kernel `DeliveryDeferred` (K-4): the relay holds the event without charging an attempt.
 - **Classification** is documented in `classify.py`: RCPT 5.1.1/2/3/6/10 `bounced`,
   5.7.x `rejected`, sender-side 5.1.7/5.1.8 and any MAIL-stage 5xx raise (operator fault), soft 5.2/5.4 and 4xx/timeouts/connection errors `failed`.
   A reply lost after the DATA payload raises `SmtpOutcomeUnknown` (SMTP has no

@@ -8803,10 +8803,16 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
-    # `0032_communication_dispatches` (dispatch identity, K-3) remains editable
-    # until a verified published tag carries it and its digest is recorded above.
+    # `0032_communication_dispatches` (dispatch identity, K-3) and
+    # `0033_receipts_append_only` (K-6) remain editable until a verified
+    # published tag carries them and their digests are recorded above.
     # (`0031_rate_limit_buckets` is released: see its digest above.)
-    "dotmac-kernel": frozenset({"20261118_0032_communication_dispatches.py"}),
+    "dotmac-kernel": frozenset(
+        {
+            "20261118_0032_communication_dispatches.py",
+            "20261119_0033_receipts_append_only.py",
+        }
+    ),
     "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
@@ -8834,12 +8840,14 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    # `pa_0005` adds payment reversal, settled historical admission and invoice
-    # recognition; still editable until `dotmac-payables` 0.1.0a5 is tagged.
-    "dotmac-payables": frozenset(),
-    # `py_0003` adds the settlement reversal table; editable until
-    # `dotmac-payroll` 0.1.0a5 is tagged.
-    "dotmac-payroll": frozenset(),
+    # `pa_0006` adds the deferred-VAT release policy and rows, the historical
+    # deferral position and the historical supplier credit; still editable until
+    # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
+    # by the 0.1.0a5 entry.
+    "dotmac-payables": frozenset({"pa_0006_tax_release_hist_credit.py"}),
+    # `py_0004` adds audited liability adjustments; editable until
+    # `dotmac-payroll` 0.1.0a6 is tagged.
+    "dotmac-payroll": frozenset({"py_0004_liability_adjustments.py"}),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
     # `dotmac-positioning` 0.2.0a2 is tagged.

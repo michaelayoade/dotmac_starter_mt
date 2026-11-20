@@ -2501,6 +2501,7 @@
           "dotmac_payables/migrations/versions/pa_0003_historical_invoice.py",
           "dotmac_payables/migrations/versions/pa_0004_supplier_payments.py",
           "dotmac_payables/migrations/versions/pa_0005_reversal_settled_history.py",
+          "dotmac_payables/migrations/versions/pa_0006_tax_release_hist_credit.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],
@@ -2586,6 +2587,7 @@
           "dotmac_payroll/migrations/versions/py_0001_payroll.py",
           "dotmac_payroll/migrations/versions/py_0002_mode_and_run_cancel.py",
           "dotmac_payroll/migrations/versions/py_0003_settlement_reversal.py",
+          "dotmac_payroll/migrations/versions/py_0004_liability_adjustments.py",
           "dotmac_payroll/models.py",
           "dotmac_payroll/service.py"
         ],
