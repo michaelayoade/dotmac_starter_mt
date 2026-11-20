@@ -7814,6 +7814,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-expenses ──
+    "dotmac-expenses-v0.1.0a2": (
+        "dotmac-expenses",
+        "cd9f72b0874312d9217e481f359ccaa5376603b3",
+        {
+            "ex_0001_expenses.py": (
+                "985234f5b245372655f33c49f91b00369f6ecc8cf7e1b2ed328f70a8745a6687"
+            ),
+            "ex_0002_claim_liabilities.py": (
+                "ee1cf2da3bc0abd89008ef68c10aefcccf292e78c6b3907830e0829244c4946b"
+            ),
+        },
+    ),
     "dotmac-expenses-v0.1.0a1": (
         "dotmac-expenses",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -8830,7 +8842,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-durable-timers": frozenset(),
     # `ex_0002` adds the claim liability lifecycle; editable until
     # `dotmac-expenses` 0.1.0a2 is tagged.
-    "dotmac-expenses": frozenset({"ex_0002_claim_liabilities.py"}),
+    "dotmac-expenses": frozenset(),
     "dotmac-fiber-plant": frozenset(),
     "dotmac-finance": frozenset(),
     "dotmac-inventory": frozenset(),

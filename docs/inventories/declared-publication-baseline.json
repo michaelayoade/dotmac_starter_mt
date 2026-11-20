@@ -221,11 +221,6 @@
       "declared": "0.1.0a1",
       "reason": "SUPPLY-ONLY RELEASE AUTHORIZED BY MICHAEL ON 2026-08-25. Sub is the named first intended consumer; ERP and CRM are later consumers under the dossier. Publication makes an immutable artifact available for the separately governed backfill and shadow work; it does not compose the module, move workforce authority, or retire any Sub/ERP/CRM writer. Remove this row only in the a1 oracle-backed release record; preserve the adoption gates in EXTRACTION.toml.",
       "state": "never-published"
-    },
-    "dotmac-expenses": {
-      "declared": "0.1.0a2",
-      "reason": "Unpublished source successor to published 0.1.0a1 (ERP v2 cutover). It adds the staff claim liability lifecycle (accept, settle, bank return, adjust, reverse acceptance, historical admission with no GL, sealed consequence facts and the claim input-VAT setting declaration), with additive migration ex_0002_claim_liabilities; the released ex_0001 bytes are unchanged and the kernel floor rises to a103. Publication goes through the authorized release lane with a verified release record; this row is removed only with that record, never by editing the declared version down.",
-      "state": "declared-unpublished"
     }
   }
 }
