@@ -505,7 +505,9 @@ class PayrollLiability(Base):
             name="ck_payroll_liabilities_status",
         ),
         CheckConstraint(
-            "amount >= 0 AND amount_settled >= 0 AND amount_settled <= amount",
+            "amount >= 0 AND amount_settled >= 0 "
+            "AND amount + amount_adjusted >= 0 "
+            "AND amount_settled <= amount + amount_adjusted",
             name="ck_payroll_liabilities_amounts",
         ),
         CheckConstraint(
@@ -530,6 +532,10 @@ class PayrollLiability(Base):
     liability_account_ref: Mapped[str] = mapped_column(String(240), nullable=False)
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     amount_settled: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    # a6: signed sum of the audited adjustment rows; ``amount`` never changes.
+    amount_adjusted: Mapped[Decimal] = mapped_column(
+        MONEY, nullable=False, default=Decimal("0"), server_default="0"
+    )
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
     minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -634,6 +640,53 @@ class PayrollSettlementReversal(Base):
     )
 
 
+class PayrollLiabilityAdjustment(Base):
+    """Append-only signed adjustment of one liability (a6).
+
+    ``payroll_liabilities.amount`` is the calculation-bound original and is
+    never changed; the signed sum of these rows is ``amount_adjusted``.
+    """
+
+    __tablename__ = "payroll_liability_adjustments"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_payroll_liability_adjustments_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "liability_id",
+            "adjustment_ref",
+            name="uq_payroll_liability_adjustments_ref",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "liability_id"],
+            [
+                f"{SCHEMA}.payroll_liabilities.tenant_id",
+                f"{SCHEMA}.payroll_liabilities.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_payroll_liability_adjustments_liability",
+        ),
+        CheckConstraint("amount <> 0", name="ck_payroll_liability_adjustments_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    adjustment_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    offset_account_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    adjusted_by_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    adjusted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 TENANT_MODELS = (
     PayComponent,
     PayStructure,
@@ -647,6 +700,7 @@ TENANT_MODELS = (
     PayrollLiability,
     PayrollLiabilitySettlement,
     PayrollSettlementReversal,
+    PayrollLiabilityAdjustment,
 )
 TENANT_TABLES = tuple(model.__tablename__ for model in TENANT_MODELS)
 
@@ -662,6 +716,7 @@ __all__ = [
     "PayrollCalculation",
     "PayrollCalculationLine",
     "PayrollLiability",
+    "PayrollLiabilityAdjustment",
     "PayrollLiabilitySettlement",
     "PayrollRun",
     "PayrollSettlementReversal",
