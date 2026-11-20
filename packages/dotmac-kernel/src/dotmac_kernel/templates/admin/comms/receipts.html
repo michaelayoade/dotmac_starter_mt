@@ -1,0 +1,88 @@
+{#
+  Delivery receipts for one address (K-7).
+
+  Context: `channel`, `address` (lookup), `receipts` (tuple[ReceiptRow]),
+  `suppression` (SuppressionRow | None), `notice`, `error`, `urls`
+  (`suppressions`, `receipts`, `restore_prefix`). Shows what providers said (newest first) and whether
+  the address is suppressed; never message bodies.
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+{% include "admin/comms/_styles.html" %}
+<div id="comms-content">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--dmui-space-lg);">
+    <div>
+      <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary);">Delivery receipts</h1>
+      <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">What providers reported for one address, newest first.</p>
+    </div>
+    <a href="{{ urls.suppressions }}" class="comms-button">Suppressions</a>
+  </div>
+
+  {% if error %}<div class="comms-alert-error" role="alert">{{ error }}</div>{% endif %}
+  {% if notice %}<div class="comms-alert-ok" role="status">{{ notice }}</div>{% endif %}
+
+  <form method="get" action="{{ urls.receipts }}" class="comms-row" style="margin-bottom:var(--dmui-space-md);">
+    <div>
+      <label for="r-channel" class="comms-label">Channel</label>
+      <input type="text" id="r-channel" name="channel" value="{{ channel }}" class="comms-input" />
+    </div>
+    <div>
+      <label for="r-address" class="comms-label">Address</label>
+      <input type="text" id="r-address" name="address" value="{{ address }}" required class="comms-input" />
+    </div>
+    <button type="submit" class="comms-button">Look up</button>
+  </form>
+
+  {% if address %}
+  {% if suppression %}
+  <div class="comms-alert-warn" role="status">
+    <p style="margin-bottom:var(--dmui-space-sm);">This address is suppressed: scope <strong>{{ suppression.scope }}</strong>, reason <strong>{{ suppression.reason }}</strong>{% if suppression.scope == "all" %}. It blocks every message, including password resets{% endif %}.</p>
+    {% if suppression.can_restore %}
+    <form hx-post="{{ urls.restore_prefix }}{{ suppression.id }}/restore" class="comms-row" style="align-items:center;">
+      <input type="hidden" name="back" value="receipts" />
+      <input type="text" name="reason" required maxlength="500" placeholder="Reason (no personal data)"
+             aria-label="Reason for restoring transactional mail (no personal data)" class="comms-input" />
+      <button type="submit" class="comms-button comms-danger">Restore transactional mail; marketing stays blocked</button>
+    </form>
+    {% elif suppression.reason == "erasure" %}
+    <p>Erasure suppressions cannot be lifted.</p>
+    {% else %}
+    <p>This is a marketing opt-out; only the customer can lift it.</p>
+    {% endif %}
+  </div>
+  {% else %}
+  <p style="margin-bottom:var(--dmui-space-md); font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">This address is not suppressed.</p>
+  {% endif %}
+
+  <div class="comms-card">
+    {% if receipts %}
+    <table class="comms-table">
+      <thead>
+        <tr>
+          <th scope="col">When</th>
+          <th scope="col">Status</th>
+          <th scope="col">Provider</th>
+          <th scope="col">Response</th>
+          <th scope="col">Message id</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for receipt in receipts %}
+        <tr>
+          <td>{{ receipt.occurred_at | local_datetime }}</td>
+          <td style="color:var(--dmui-text-primary); font-weight:var(--dmui-font-weight-medium);">{{ receipt.status }}</td>
+          <td>{{ receipt.provider }}</td>
+          <td>{{ receipt.response_code or "" }}</td>
+          <td>{{ receipt.provider_message_id or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="comms-empty">No receipts for this address.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
