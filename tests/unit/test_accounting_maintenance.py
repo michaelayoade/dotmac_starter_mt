@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from dotmac_accounting import models
@@ -54,6 +55,16 @@ def db() -> Iterator[Session]:
         yield session
     engine.dispose()
 
+_CHANGE_CLOCK = itertools.count(1)
+
+
+def _next_change_time():
+    # Account-change ids are random UUIDs and occurred_at is caller-supplied, so
+    # two changes stamped with the same instant have no defined order. Give each
+    # maintenance command its own strictly increasing instant so history order
+    # is the causal order the tests assert.
+    return NOW + timedelta(seconds=next(_CHANGE_CLOCK))
+
 
 def _recode(db, scope, account, new_code="1100", *, key="recode:1", **overrides):
     values = {
@@ -70,7 +81,7 @@ def _recode(db, scope, account, new_code="1100", *, key="recode:1", **overrides)
         command=RecodeAccount(**values),
         idempotency_key=key,
         idempotency_expires_at=None,
-        changed_at=NOW,
+        changed_at=_next_change_time(),
     )
 
 
@@ -88,7 +99,7 @@ def _retire(db, scope, account, *, key="retire:1", open_items=0, **overrides):
         command=RetireAccount(**values),
         idempotency_key=key,
         idempotency_expires_at=None,
-        changed_at=NOW,
+        changed_at=_next_change_time(),
     )
 
 
@@ -105,7 +116,7 @@ def _activate(db, scope, account, *, key="activate:1", **overrides):
         command=ActivateAccount(**values),
         idempotency_key=key,
         idempotency_expires_at=None,
-        changed_at=NOW,
+        changed_at=_next_change_time(),
     )
 
 
@@ -122,7 +133,7 @@ def _flags(db, scope, account, *, key="flags:1", **overrides):
         command=UpdateAccountFlags(**values),
         idempotency_key=key,
         idempotency_expires_at=None,
-        changed_at=NOW,
+        changed_at=_next_change_time(),
     )
 
 
