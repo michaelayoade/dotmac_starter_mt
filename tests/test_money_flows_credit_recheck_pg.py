@@ -855,7 +855,10 @@ def test_r2_an_admission_racing_a_start_for_the_same_account(
     assert _draws(scratch, scope) == 1
     assert len(source.issues) == 1
     assert unrestricted(scratch, scope, account) == Decimal("10.00")
-    assert [event["active"] for event in _access(scratch, scope)][-1] is False
+    signals = [event["active"] for event in _access(scratch, scope)]
+    # Pending then paid switches the service off and on; paid at the start never
+    # turned it off, so there is no signal at all.
+    assert signals == ([True, False] if start_first else [])
 
 
 def test_r3_two_credit_rechecks_at_once_pay_once(scratch):
