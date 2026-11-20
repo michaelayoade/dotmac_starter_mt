@@ -7,5 +7,6 @@ FEATURE_MODULES = [
     "app.features.presentation",
     "app.features.custom_fields",
     "app.features.licensing",
+    "app.features.comms_operations",
     "app.features.web",
 ]

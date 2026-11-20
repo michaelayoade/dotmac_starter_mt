@@ -32,6 +32,7 @@ from tests.test_migration_split_rehearsals import (
 TABLE = "communication_deliveries"
 REVISION = "0033_receipts_append_only"
 PREVIOUS = "0032_communication_dispatches"
+PLATFORM_REVISION = "0034_receipts_platform_ro"
 
 
 @pytest.fixture(scope="module")
@@ -122,6 +123,69 @@ def test_app_user_can_insert_and_select_but_not_update_or_delete(
             db.close()
 
 
+def test_platform_api_is_append_only_on_the_migrated_test_database(
+    admin_session: Session,
+) -> None:
+    """The grant canary for the platform plane (K-6 follow-up, migration 0034)."""
+    privileges = {
+        priv: bool(
+            admin_session.execute(
+                text("SELECT has_table_privilege('platform_api', :t, :p)"),
+                {"t": TABLE, "p": priv},
+            ).scalar()
+        )
+        for priv in ("SELECT", "INSERT", "UPDATE", "DELETE")
+    }
+    assert privileges == {
+        "SELECT": True,
+        "INSERT": True,
+        "UPDATE": False,
+        "DELETE": False,
+    }
+
+
+def test_tenant_deletion_by_platform_api_still_cascades(
+    admin_session: Session,
+) -> None:
+    """The platform plane deletes tenants; the FK cascade (owner's rights) must
+    still remove receipts although `platform_api` lost DELETE on the table."""
+    url = os.getenv("TEST_PLATFORM_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_PLATFORM_DATABASE_URL not set")
+    tenant = uuid.uuid4()
+    admin_session.execute(
+        text("INSERT INTO tenants (id, slug, name) VALUES (:i, :s, 'T')"),
+        {"i": str(tenant), "s": f"p{tenant.hex[:8]}"},
+    )
+    admin_session.commit()
+    engine = create_engine(url, future=True)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("SELECT set_config('app.current_tenant', :t, true)"),
+                {"t": str(tenant)},
+            )
+            conn.execute(
+                text(
+                    f"INSERT INTO {TABLE} (id, tenant_id, dispatch_id, channel, "
+                    "address, provider, status) VALUES (:id, :t, :d, 'email', "
+                    "'jane@example.com', 'smtp', 'accepted')"
+                ),
+                {"id": str(uuid.uuid4()), "t": str(tenant), "d": str(uuid.uuid4())},
+            )
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM tenants WHERE id = :i"), {"i": str(tenant)})
+    finally:
+        engine.dispose()
+    assert (
+        admin_session.execute(
+            text(f"SELECT count(*) FROM {TABLE} WHERE tenant_id = :t"),
+            {"t": str(tenant)},
+        ).scalar()
+        == 0
+    )
+
+
 def test_the_row_survives_the_refused_writes(
     tenant_a, app_engine: Engine, admin_session: Session
 ) -> None:
@@ -177,7 +241,9 @@ def test_migration_up_down_up_restores_and_removes_the_grants(
     scratch_db: str,  # noqa: F811
 ) -> None:
     _upgrade(scratch_db, "heads")
-    assert REVISION in _versions(scratch_db)
+    # `alembic_version` holds heads, so while 0034 is the head 0033 is an
+    # ancestor: the live row is 0034, and 0033's effect is asserted below.
+    assert PLATFORM_REVISION in _versions(scratch_db)
     eng = create_engine(scratch_db)
     sql = text(
         "SELECT has_table_privilege('app_user', :t, 'UPDATE'), "
@@ -194,6 +260,7 @@ def test_migration_up_down_up_restores_and_removes_the_grants(
                 True,
             )
         _downgrade(scratch_db, PREVIOUS, version_locations=_both_locations())
+        assert PLATFORM_REVISION not in _versions(scratch_db)
         assert REVISION not in _versions(scratch_db)
         with eng.connect() as conn:
             # The exact 0020 grant is back.
@@ -210,6 +277,54 @@ def test_migration_up_down_up_restores_and_removes_the_grants(
                 False,
                 True,
                 True,
+            )
+    finally:
+        eng.dispose()
+
+
+def test_platform_api_lacks_update_and_delete_but_can_select_and_insert(
+    scratch_db: str,  # noqa: F811
+) -> None:
+    """K-6 follow-up: the platform plane is append-only on receipts too.
+
+    Pins the privilege system's answer for `platform_api`, and that 0034 down
+    restores the 0020 grant and up removes it again.
+    """
+    _upgrade(scratch_db, "heads")
+    assert PLATFORM_REVISION in _versions(scratch_db)
+    eng = create_engine(scratch_db)
+    sql = text(
+        "SELECT has_table_privilege('platform_api', :t, 'SELECT'), "
+        "has_table_privilege('platform_api', :t, 'INSERT'), "
+        "has_table_privilege('platform_api', :t, 'UPDATE'), "
+        "has_table_privilege('platform_api', :t, 'DELETE')"
+    )
+    try:
+        with eng.connect() as conn:
+            assert tuple(conn.execute(sql, {"t": TABLE}).one()) == (
+                True,
+                True,
+                False,
+                False,
+            )
+        _downgrade(scratch_db, REVISION, version_locations=_both_locations())
+        assert PLATFORM_REVISION not in _versions(scratch_db)
+        assert REVISION in _versions(scratch_db)
+        with eng.connect() as conn:
+            # Only the platform grant returns; app_user stays append-only (0033).
+            assert tuple(conn.execute(sql, {"t": TABLE}).one()) == (
+                True,
+                True,
+                True,
+                True,
+            )
+        _upgrade(scratch_db, "heads")
+        with eng.connect() as conn:
+            assert tuple(conn.execute(sql, {"t": TABLE}).one()) == (
+                True,
+                True,
+                False,
+                False,
             )
     finally:
         eng.dispose()

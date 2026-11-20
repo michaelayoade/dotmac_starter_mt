@@ -24,8 +24,8 @@ from tests.test_migration_split_rehearsals import (
 
 REVISION = "0032_communication_dispatches"
 #: The kernel head above it (K-6). `alembic_version` holds heads, not ancestors,
-#: so while 0033 is the head the live row to look for is 0033.
-HEAD = "0033_receipts_append_only"
+#: so while 0034 is the head the live row to look for is 0034.
+HEAD = "0034_receipts_platform_ro"
 PREVIOUS = "0031_rate_limit_buckets"
 TABLE = "communication_dispatches"
 

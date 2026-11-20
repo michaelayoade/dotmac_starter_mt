@@ -61,6 +61,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.consent_models import (
+    REASON_ERASURE,
     REASON_UNSUBSCRIBE,
     SCOPE_ALL,
     SCOPE_MARKETING,
@@ -399,6 +400,45 @@ def unsuppress_marketing(
     return True
 
 
+def restore_transactional(
+    db: Session, tenant_id: UUID, *, channel: str, address: str
+) -> CommunicationSuppression | None:
+    """Lift only the transactional block: scope `all` -> `marketing`.
+
+    The operator-authority way to let password resets and invoices reach an
+    address again (for example after a bounce is fixed) WITHOUT forgetting that
+    the person opted out of marketing. The row is locked (`FOR UPDATE`), kept,
+    and keeps its reason, note, raw address and creation time; it is never
+    deleted. Marketing stays blocked.
+
+    Returns the updated row, or None when no row exists. Refuses (raising
+    `ConsentError`, changing nothing) an erasure row, which is never lifted, and
+    a row that is already marketing-only (nothing transactional to restore).
+    """
+    normalized_channel = normalize_channel(channel)
+    normalized = normalize_address(normalized_channel, address)
+    if not normalized:
+        return None
+    row = db.execute(
+        select(CommunicationSuppression)
+        .where(
+            CommunicationSuppression.tenant_id == tenant_id,
+            CommunicationSuppression.channel == normalized_channel,
+            CommunicationSuppression.address == normalized,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    if row.reason == REASON_ERASURE:
+        raise ConsentError("an erasure suppression is never lifted")
+    if row.scope != SCOPE_ALL:
+        raise ConsentError("suppression is already marketing-only")
+    row.scope = SCOPE_MARKETING
+    db.flush()
+    return row
+
+
 def list_suppressions(
     db: Session,
     tenant_id: UUID,
@@ -437,6 +477,7 @@ __all__ = [
     "register_marketing_categories",
     "register_numeric_channels",
     "registered_marketing_categories",
+    "restore_transactional",
     "suppress",
     "suppression_reason",
     "suppression_reasons_for_addresses",

@@ -8804,13 +8804,15 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
     # `0032_communication_dispatches` (dispatch identity, K-3) and
-    # `0033_receipts_append_only` (K-6) remain editable until a verified
-    # published tag carries them and their digests are recorded above.
+    # `0033_receipts_append_only` (K-6) and `0034_receipts_platform_ro` remain
+    # editable until a verified published tag carries them and their digests
+    # are recorded above.
     # (`0031_rate_limit_buckets` is released: see its digest above.)
     "dotmac-kernel": frozenset(
         {
             "20261118_0032_communication_dispatches.py",
             "20261119_0033_receipts_append_only.py",
+            "20261119_0034_receipts_platform_append_only.py",
         }
     ),
     "dotmac-accounting": frozenset({"ac_0004_account_maintenance.py"}),
