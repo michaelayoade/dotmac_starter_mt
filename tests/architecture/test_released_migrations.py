@@ -7832,6 +7832,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-expenses ──
+    "dotmac-expenses-v0.1.0a2": (
+        "dotmac-expenses",
+        "cd9f72b0874312d9217e481f359ccaa5376603b3",
+        {
+            "ex_0001_expenses.py": (
+                "985234f5b245372655f33c49f91b00369f6ecc8cf7e1b2ed328f70a8745a6687"
+            ),
+            "ex_0002_claim_liabilities.py": (
+                "ee1cf2da3bc0abd89008ef68c10aefcccf292e78c6b3907830e0829244c4946b"
+            ),
+        },
+    ),
     "dotmac-expenses-v0.1.0a1": (
         "dotmac-expenses",
         "20d24703e70e4d361de2f406165df4b36cbee507",
@@ -8044,6 +8056,30 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a6": (
+        "dotmac-payables",
+        "cd9f72b0874312d9217e481f359ccaa5376603b3",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+            "pa_0004_supplier_payments.py": (
+                "1228dca6a16fda7c3ab458d4144e0f3d74838029355213c3fb61c174a8af772b"
+            ),
+            "pa_0005_reversal_settled_history.py": (
+                "1cf9e92760e2a8406f5e7bceb2dd81bd774a03795bde7abc537989f7031ab4cf"
+            ),
+            "pa_0006_tax_release_hist_credit.py": (
+                "89fb1ac4850a4c774db4c8cddbf160ddb0c4ae688bd3cef0f96a5fdef9e6bc26"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a5": (
         "dotmac-payables",
         "6ed9ab5cd1067916229c8993dafbccd5ccc0e682",
@@ -8120,6 +8156,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a6": (
+        "dotmac-payroll",
+        "cd9f72b0874312d9217e481f359ccaa5376603b3",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+            "py_0002_mode_and_run_cancel.py": (
+                "8743517c31f90ec941bf57a6ddb93040c4b2b468c06bec0b633b0900e2805135"
+            ),
+            "py_0003_settlement_reversal.py": (
+                "4ef14914aab73e7b40ba21f060a05eba5878bfc7621534618c17ac68efc42135"
+            ),
+            "py_0004_liability_adjustments.py": (
+                "fa09a903d2368e366d31e62986c8ef9d499ca3b1be4ce7c8d4a41af46d474e5f"
+            ),
+        },
+    ),
     "dotmac-payroll-v0.1.0a5": (
         "dotmac-payroll",
         "c983358a8f8387fec57507d4d15a258574e80c0b",
@@ -8848,7 +8902,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-durable-timers": frozenset(),
     # `ex_0002` adds the claim liability lifecycle; editable until
     # `dotmac-expenses` 0.1.0a2 is tagged.
-    "dotmac-expenses": frozenset({"ex_0002_claim_liabilities.py"}),
+    "dotmac-expenses": frozenset(),
     "dotmac-fiber-plant": frozenset(),
     "dotmac-finance": frozenset(),
     "dotmac-inventory": frozenset(),
@@ -8869,10 +8923,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # deferral position and the historical supplier credit; still editable until
     # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
     # by the 0.1.0a5 entry.
-    "dotmac-payables": frozenset({"pa_0006_tax_release_hist_credit.py"}),
+    "dotmac-payables": frozenset(),
     # `py_0004` adds audited liability adjustments; editable until
     # `dotmac-payroll` 0.1.0a6 is tagged.
-    "dotmac-payroll": frozenset({"py_0004_liability_adjustments.py"}),
+    "dotmac-payroll": frozenset(),
     "dotmac-pon-access": frozenset(),
     # `po_0002` adds neutral observation retention holds; still editable until
     # `dotmac-positioning` 0.2.0a2 is tagged.
