@@ -23,6 +23,7 @@ from dotmac_payroll.models import (
     PayrollCalculation,
     PayrollCalculationLine,
     PayrollLiability,
+    PayrollLiabilityAdjustment,
     PayrollLiabilitySettlement,
     PayrollRun,
     PayrollSettlementReversal,
@@ -33,6 +34,7 @@ CONSEQUENCE_OWNER = "payroll"
 RUN_DOCUMENT_KIND = "payroll_run"
 SETTLEMENT_DOCUMENT_KIND = "payroll_liability_settlement"
 SETTLEMENT_REVERSAL_DOCUMENT_KIND = "payroll_settlement_reversal"
+LIABILITY_ADJUSTMENT_DOCUMENT_KIND = "payroll_liability_adjustment"
 CONSEQUENCE_SOURCE_VERSION = "1"
 _DEBIT = "debit"
 _CREDIT = "credit"
@@ -433,15 +435,74 @@ def build_settlement_reversal_consequence(
     )
 
 
+def build_liability_adjustment_consequence(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    adjustment_id: UUID,
+    posting_date: date,
+) -> PayrollAccountingConsequence:
+    """Fact for a liability adjustment, from the persisted adjustment row.
+
+    A write-down (negative amount) is Dr liability account / Cr offset account;
+    an increase is Dr offset account / Cr liability account. The offset account
+    is the one frozen on the adjustment row. ``posting_date`` is supplied by the
+    caller (who validates it against the open period) and covered by the
+    fingerprint. Calls ``db.flush()``; takes no lock.
+    """
+    db.flush()
+    row = db.execute(
+        select(PayrollLiabilityAdjustment, PayrollLiability)
+        .join(
+            PayrollLiability,
+            (PayrollLiability.tenant_id == PayrollLiabilityAdjustment.tenant_id)
+            & (PayrollLiability.id == PayrollLiabilityAdjustment.liability_id),
+        )
+        .where(
+            PayrollLiabilityAdjustment.tenant_id == tenant_id,
+            PayrollLiabilityAdjustment.id == adjustment_id,
+        )
+    ).one_or_none()
+    if row is None:
+        raise PayrollNotFound("payroll liability adjustment not found")
+    adjustment, liability = row
+    liability_account = _clean_ref(liability.liability_account_ref, "liability account")
+    offset = _clean_ref(adjustment.offset_account_ref, "offset account")
+    if offset == liability_account:
+        raise PayrollRuleViolation(
+            "offset account must differ from the liability account"
+        )
+    if adjustment.amount == 0:
+        raise PayrollRuleViolation("adjustment amount must not be zero")
+    size = abs(adjustment.amount)
+    raw = (
+        [(liability_account, _DEBIT, size), (offset, _CREDIT, size)]
+        if adjustment.amount < 0
+        else [(offset, _DEBIT, size), (liability_account, _CREDIT, size)]
+    )
+    return _seal(
+        tenant_id=tenant_id,
+        document_kind=LIABILITY_ADJUSTMENT_DOCUMENT_KIND,
+        document_id=str(adjustment.id),
+        description=adjustment.adjustment_ref,
+        posting_date=posting_date,
+        currency_code=liability.currency_code,
+        minor_units=liability.minor_units,
+        raw=raw,
+    )
+
+
 __all__ = [
     "CONSEQUENCE_OWNER",
     "CONSEQUENCE_SOURCE_VERSION",
+    "LIABILITY_ADJUSTMENT_DOCUMENT_KIND",
     "RUN_DOCUMENT_KIND",
     "SETTLEMENT_DOCUMENT_KIND",
     "SETTLEMENT_REVERSAL_DOCUMENT_KIND",
     "PayrollAccountingConsequence",
     "PayrollAccountingEntry",
     "PayrollConsequenceSource",
+    "build_liability_adjustment_consequence",
     "build_liability_settlement_consequence",
     "build_run_accounting_consequence",
     "build_settlement_reversal_consequence",

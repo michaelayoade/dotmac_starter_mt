@@ -17,9 +17,10 @@ Outcome contract with `dotmac_kernel.delivery_providers.send`:
   missing password, authentication rejected, a MAIL-stage or sender-address
   refusal, attachment resolver failure) RAISE; they are not verdicts on the
   recipient and must not become receipts.
-* An admission refusal RAISES `SmtpAdmissionRefused` and writes no receipt. S8
-  follow-up: it becomes kernel `DeliveryDeferred` (K-4); likewise
-  `SmtpOutcomeUnknown` becomes the kernel unknown-outcome type (S8/S10).
+* An admission refusal RAISES `SmtpAdmissionRefused` and writes no receipt. It
+  IS a kernel `DeliveryDeferred` (K-4): the relay reschedules without charging
+  an attempt, bounded by `RelayPolicy.max_deferrals`. `SmtpOutcomeUnknown` still
+  becomes the kernel unknown-outcome type later (S10).
 * Today the kernel relay retries EVERY raised exception, including the ones
   above that are operator faults. A raise therefore means "no receipt, retried
   by the relay", not "terminal"; a terminal type is a kernel follow-up.
@@ -40,6 +41,7 @@ from email.policy import SMTP as SMTP_POLICY
 from email.utils import parseaddr
 from typing import Any
 
+from dotmac_kernel.delivery import DeliveryDeferred
 from dotmac_kernel.delivery_models import (
     DELIVERY_ACCEPTED,
     DELIVERY_FAILED,
@@ -143,9 +145,15 @@ class SmtpOperatorFault(SmtpAdapterError):
     and above all no suppression of the recipient."""
 
 
-class SmtpAdmissionRefused(SmtpAdapterError):
+class SmtpAdmissionRefused(DeliveryDeferred, SmtpAdapterError):
     """The admission hook declined; nothing was connected and no receipt is
-    written. S8 follow-up: becomes kernel `DeliveryDeferred` (K-4)."""
+    written. A kernel `DeliveryDeferred` (K-4), so the relay holds the message
+    without charging a relay attempt. `DeliveryDeferred` comes first in the MRO
+    so its `reason` / `retry_after` initialiser runs.
+
+    The reason comes from the admission hook, is stored on the outbox row and is
+    truncated to `RESPONSE_BODY_LIMIT`: a hook must never put an address, body or
+    secret in it."""
 
 
 def _result(status: str, code: str, body: str = "") -> ProviderResult:

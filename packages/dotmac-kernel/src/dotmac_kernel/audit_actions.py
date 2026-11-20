@@ -98,7 +98,11 @@ class AuditActionRegistry:
 
         kernel_manifest = FeatureManifest(
             name="kernel",
-            audit_actions=("identity.history_imported", "credential.password.assigned"),
+            audit_actions=(
+                "identity.history_imported",
+                "credential.password.assigned",
+                "communication.dispatch.requeued",
+            ),
         )
 
         def declarations() -> Iterable[tuple[str, str]]:

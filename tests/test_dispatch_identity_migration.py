@@ -23,13 +23,16 @@ from tests.test_migration_split_rehearsals import (
 )
 
 REVISION = "0032_communication_dispatches"
+#: The kernel head above it (K-6). `alembic_version` holds heads, not ancestors,
+#: so while 0034 is the head the live row to look for is 0034.
+HEAD = "0034_receipts_platform_ro"
 PREVIOUS = "0031_rate_limit_buckets"
 TABLE = "communication_dispatches"
 
 
 def test_up_then_down_on_an_empty_table_then_up_again(scratch_db: str) -> None:  # noqa: F811
     _upgrade(scratch_db, "heads")
-    assert REVISION in _versions(scratch_db)
+    assert HEAD in _versions(scratch_db)
     assert _table_exists(scratch_db, TABLE)
 
     _downgrade(scratch_db, PREVIOUS, version_locations=_both_locations())
@@ -64,7 +67,7 @@ def test_down_refuses_a_non_empty_table(scratch_db: str) -> None:  # noqa: F811
     with pytest.raises(Exception, match="refusing to drop non-empty"):
         _downgrade(scratch_db, PREVIOUS, version_locations=_both_locations())
     assert _table_exists(scratch_db, TABLE)
-    assert REVISION in _versions(scratch_db)
+    assert HEAD in _versions(scratch_db)  # the whole downgrade rolled back
 
 
 def test_table_constraints_hold_on_the_migrated_schema(scratch_db: str) -> None:  # noqa: F811
