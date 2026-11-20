@@ -394,6 +394,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.delivery_dispatch",
         "dotmac_kernel.delivery_models",
         "dotmac_kernel.delivery_providers",
+        "dotmac_kernel.delivery_relay",
         "dotmac_kernel.delivery_requeue",
         "dotmac_kernel.deps",
         "dotmac_kernel.entitlements",

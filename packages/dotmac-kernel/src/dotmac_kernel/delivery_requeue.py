@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel import consent
 from dotmac_kernel.audit import (
+    AuditEvent,
     resolve_audit_actor,
     resolve_event_attribution,
     write_audit_event,
@@ -60,10 +61,14 @@ from dotmac_kernel.delivery_models import (
     CommunicationDelivery,
     CommunicationDispatch,
 )
+from dotmac_kernel.messaging.models import OutboxEvent
 from dotmac_kernel.messaging.outbox import enqueue_event
 
 AUDIT_ACTION_REQUEUED = "communication.dispatch.requeued"
 AUDIT_ENTITY_TYPE = "communication_dispatch"
+#: Written by the K-8 relay transport (`delivery_relay`); a literal here so this
+#: module does not import the transport.
+AUDIT_ACTION_UNKNOWN = "communication.dispatch.outcome_unknown"
 MAX_REASON_LENGTH = 500
 
 
@@ -81,6 +86,40 @@ class RequeueResult:
     outbox_event_id: UUID | None
 
 
+def _unknown_outcome_pending(db: Session, tenant_id: UUID, dispatch_id: UUID) -> bool:
+    """True when the newest of this dispatch's unknown-outcome and requeue audit
+    rows is the unknown outcome (a later requeue clears an earlier one)."""
+    newest = db.execute(
+        select(AuditEvent.action)
+        .where(
+            AuditEvent.tenant_id == tenant_id,
+            AuditEvent.entity_type == AUDIT_ENTITY_TYPE,
+            AuditEvent.entity_id == str(dispatch_id),
+            AuditEvent.action.in_((AUDIT_ACTION_UNKNOWN, AUDIT_ACTION_REQUEUED)),
+        )
+        .order_by(AuditEvent.occurred_at.desc(), AuditEvent.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if newest == AUDIT_ACTION_UNKNOWN:
+        return True
+    # Fail closed when the audit row was lost (the unknown path's last tiers
+    # settle dead without one): the transport's own dead-letter marker on the
+    # newest outbox event says the same thing.
+    last_error = db.execute(
+        select(OutboxEvent.last_error)
+        .where(
+            OutboxEvent.status == "dead",
+            OutboxEvent.tenant_id == tenant_id,
+            OutboxEvent.event_type == DISPATCH_EVENT_TYPE,
+            OutboxEvent.payload["dispatch_id"].as_string() == str(dispatch_id),
+        )
+        .order_by(OutboxEvent.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    # NULL means "not the terminal marker"; the audit-row signal still applies.
+    return last_error is not None and last_error.startswith("terminal:")
+
+
 def requeue_dead_dispatch(
     db: Session,
     tenant_id: UUID,
@@ -89,6 +128,7 @@ def requeue_dead_dispatch(
     actor_id: str,
     reason: str,
     source_application: str | None = None,
+    acknowledge_possible_duplicate: bool = False,
 ) -> RequeueResult:
     """Requeue one dead dispatch. See the module docstring for the contract.
 
@@ -146,6 +186,17 @@ def requeue_dead_dispatch(
             "replay"
         )
 
+    # An unknown provider outcome (K-8): the message may already have been
+    # delivered, so a requeue can double-send. One operator must say so, by name.
+    acknowledged = acknowledge_possible_duplicate is True
+    if not acknowledged and _unknown_outcome_pending(db, tenant_id, dispatch_id):
+        raise RequeueRefused(
+            f"dispatch {dispatch_id} ended with an UNKNOWN provider outcome: the "
+            "message may already have been delivered. Check with the provider, "
+            "then requeue with acknowledge_possible_duplicate=True "
+            "(--accept-possible-duplicate) to accept a possible duplicate send"
+        )
+
     blocked = consent.suppression_reason(
         db,
         tenant_id,
@@ -182,6 +233,7 @@ def requeue_dead_dispatch(
             "reason": cleaned,
             "from_status": DISPATCH_DEAD,
             "outbox_event_id": str(event.id),
+            "acknowledged_possible_duplicate": acknowledge_possible_duplicate is True,
         },
     )
     return RequeueResult(dispatch_id, True, DISPATCH_PENDING, event.id)
