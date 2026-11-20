@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from dotmac_kernel.models import Base, Party, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Date,
@@ -28,6 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from dotmac_expenses.contracts import (
+    ClaimLiabilityStatus,
     ClaimStatus,
     EvaluationResult,
     LimitAction,
@@ -704,6 +706,406 @@ class ExpenseLifecycleEvent(Base):
     )
 
 
+# --- a2: claim liability ------------------------------------------------------------
+
+MONEY = Numeric(20, 6)
+_LIABILITY_STATUSES = "('open', 'partially_settled', 'settled', 'reversed')"
+LIABILITY_AMOUNTS_CHECK = (
+    "amount > 0 AND amount_settled >= 0 "
+    "AND amount + amount_adjusted >= 0 "
+    "AND amount_settled <= amount + amount_adjusted"
+)
+# Status is DERIVED from the amounts (payroll a6 rule): settled when the settled
+# amount equals the effective amount (a full write-down gives settled with
+# settled 0), open when nothing is settled, otherwise partially settled.
+# ``reversed`` is the one status the amounts cannot derive: it implies nothing
+# settled and nothing adjusted.
+LIABILITY_STATUS_CHECK = (
+    "(status = 'reversed' AND amount_settled = 0 AND amount_adjusted = 0) "
+    "OR (status = 'settled' AND amount_settled = amount + amount_adjusted) "
+    "OR (status = 'open' AND amount_settled = 0 "
+    "AND amount_settled < amount + amount_adjusted) "
+    "OR (status = 'partially_settled' AND amount_settled > 0 "
+    "AND amount_settled < amount + amount_adjusted)"
+)
+
+
+def _tenant_id() -> Mapped[UUID]:
+    return mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+
+
+def _liability_fk(table: str) -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        ["tenant_id", "liability_id"],
+        [f"{SCHEMA}.claim_liabilities.tenant_id", f"{SCHEMA}.claim_liabilities.id"],
+        ondelete="RESTRICT",
+        name=f"fk_{table}_liability",
+    )
+
+
+class ClaimLiability(Base):
+    """What an accepted (or historically admitted) claim owes the claimant.
+
+    ``amount`` is the acceptance-bound original and is never changed; the two
+    projections ``amount_settled`` and ``amount_adjusted`` and the derived
+    ``status`` are the only columns that move, guarded by a database trigger.
+    """
+
+    __tablename__ = "claim_liabilities"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_claim_liabilities_tenant_id_id"),
+        UniqueConstraint("tenant_id", "claim_id", name="uq_claim_liabilities_claim"),
+        ForeignKeyConstraint(
+            ["tenant_id", "claim_id"],
+            [f"{SCHEMA}.expense_claims.tenant_id", f"{SCHEMA}.expense_claims.id"],
+            ondelete="RESTRICT",
+            name="fk_claim_liabilities_claim",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "claimant_party_id"],
+            [Party.__table__.c.tenant_id, Party.__table__.c.id],
+            ondelete="RESTRICT",
+            name="fk_claim_liabilities_claimant_party",
+        ),
+        CheckConstraint(LIABILITY_AMOUNTS_CHECK, name="ck_claim_liabilities_amounts"),
+        CheckConstraint(
+            f"status IN {_LIABILITY_STATUSES}", name="ck_claim_liabilities_status"
+        ),
+        CheckConstraint(LIABILITY_STATUS_CHECK, name="ck_claim_liabilities_derived"),
+        CheckConstraint(
+            "origin IN ('accepted', 'historical')", name="ck_claim_liabilities_origin"
+        ),
+        CheckConstraint(
+            "minor_units BETWEEN 0 AND 6", name="ck_claim_liabilities_minor_units"
+        ),
+        CheckConstraint(
+            "(origin = 'accepted' AND input_vat_mode IN ('none', 'immediate') "
+            "AND acceptance_reference IS NOT NULL) "
+            "OR (origin = 'historical' AND input_vat_mode IS NULL "
+            "AND acceptance_reference IS NULL)",
+            name="ck_claim_liabilities_origin_facts",
+        ),
+        Index(
+            "ix_claim_liabilities_tenant_claimant",
+            "tenant_id",
+            "claimant_party_id",
+            "status",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    claim_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    claimant_party_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    liability_account_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_vat_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    acceptance_reference: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    accepted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    amount_settled: Mapped[Decimal] = mapped_column(
+        MONEY, nullable=False, default=Decimal("0"), server_default="0"
+    )
+    amount_adjusted: Mapped[Decimal] = mapped_column(
+        MONEY, nullable=False, default=Decimal("0"), server_default="0"
+    )
+    status: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        default=ClaimLiabilityStatus.OPEN.value,
+        server_default=ClaimLiabilityStatus.OPEN.value,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    lines: Mapped[list[ClaimLiabilityLine]] = relationship(
+        back_populates="liability",
+        order_by="ClaimLiabilityLine.line_number",
+    )
+
+
+class ClaimLiabilityLine(Base):
+    """One accepted claim line: net, tax and the frozen account refs."""
+
+    __tablename__ = "claim_liability_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_claim_liability_lines_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "liability_id",
+            "claim_line_id",
+            name="uq_claim_liability_lines_claim_line",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "liability_id",
+            "line_number",
+            name="uq_claim_liability_lines_number",
+        ),
+        _liability_fk("claim_liability_lines"),
+        ForeignKeyConstraint(
+            ["tenant_id", "claim_line_id"],
+            [
+                f"{SCHEMA}.expense_claim_lines.tenant_id",
+                f"{SCHEMA}.expense_claim_lines.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_claim_liability_lines_claim_line",
+        ),
+        CheckConstraint("net_amount > 0", name="ck_claim_liability_lines_net"),
+        CheckConstraint("tax_amount >= 0", name="ck_claim_liability_lines_tax"),
+        CheckConstraint(
+            "tax_amount = 0 OR (tax_account_ref IS NOT NULL "
+            "AND tax_account_ref <> expense_account_ref)",
+            name="ck_claim_liability_lines_tax_account",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    claim_line_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    expense_account_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    dimension_refs: Mapped[list[list[str]]] = mapped_column(JSON, nullable=False)
+    tax_account_ref: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    net_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+
+    liability: Mapped[ClaimLiability] = relationship(back_populates="lines")
+
+
+class ClaimLiabilitySettlement(Base):
+    __tablename__ = "claim_liability_settlements"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_claim_liability_settlements_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "liability_id",
+            "settlement_ref",
+            name="uq_claim_liability_settlements_ref",
+        ),
+        _liability_fk("claim_liability_settlements"),
+        CheckConstraint("amount > 0", name="ck_claim_liability_settlements_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    settlement_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    value_date: Mapped[date] = mapped_column(Date, nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ClaimSettlementReversal(Base):
+    """A bank return: one whole settlement given back, append-only."""
+
+    __tablename__ = "claim_settlement_reversals"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_claim_settlement_reversals_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "settlement_id",
+            name="uq_claim_settlement_reversals_settlement",
+        ),
+        _liability_fk("claim_settlement_reversals"),
+        ForeignKeyConstraint(
+            ["tenant_id", "settlement_id"],
+            [
+                f"{SCHEMA}.claim_liability_settlements.tenant_id",
+                f"{SCHEMA}.claim_liability_settlements.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_claim_settlement_reversals_settlement",
+        ),
+        CheckConstraint("amount > 0", name="ck_claim_settlement_reversals_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    settlement_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    return_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    reversed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    reversed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ClaimLiabilityAdjustment(Base):
+    __tablename__ = "claim_liability_adjustments"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_claim_liability_adjustments_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "liability_id",
+            "adjustment_ref",
+            name="uq_claim_liability_adjustments_ref",
+        ),
+        _liability_fk("claim_liability_adjustments"),
+        CheckConstraint("amount <> 0", name="ck_claim_liability_adjustments_amount"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    adjustment_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    offset_account_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    adjusted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    adjusted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ClaimLiabilityReversal(Base):
+    """Reversal of an acceptance (OPEN only, terminal)."""
+
+    __tablename__ = "claim_liability_reversals"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_claim_liability_reversals_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "liability_id", name="uq_claim_liability_reversals_liability"
+        ),
+        _liability_fk("claim_liability_reversals"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    reversed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    reversed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class HistoricalClaimReceipt(Base):
+    """Permanent evidence that a legacy claim was admitted with no GL."""
+
+    __tablename__ = "historical_claim_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_historical_claim_receipts_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id", "claim_id", name="uq_historical_claim_receipts_claim"
+        ),
+        UniqueConstraint(
+            "tenant_id", "liability_id", name="uq_historical_claim_receipts_liability"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "source_owner",
+            "source_claim_id",
+            name="uq_historical_claim_receipts_source",
+        ),
+        _liability_fk("historical_claim_receipts"),
+        ForeignKeyConstraint(
+            ["tenant_id", "claim_id"],
+            [f"{SCHEMA}.expense_claims.tenant_id", f"{SCHEMA}.expense_claims.id"],
+            ondelete="RESTRICT",
+            name="fk_historical_claim_receipts_claim",
+        ),
+        CheckConstraint("residual > 0", name="ck_historical_claim_receipts_residual"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    claim_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    liability_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_claim_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    facts_fingerprint: Mapped[str] = mapped_column(String(68), nullable=False)
+    accounting_evidence_fingerprint: Mapped[str] = mapped_column(
+        String(68), nullable=False
+    )
+    source_journal_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    carried_evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    carried_account_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    evidence_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    admitted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    net_payable_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    settled_before_admission: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    residual: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    carried_control_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    original_posted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    admitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class ClaimAccountingReceipt(Base):
+    """The assembly's proof that one consequence was posted (fingerprint-bound)."""
+
+    __tablename__ = "claim_accounting_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "id", name="uq_claim_accounting_receipts_tenant_id_id"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "document_kind",
+            "document_id",
+            name="uq_claim_accounting_receipts_document",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = _tenant_id()
+    document_kind: Mapped[str] = mapped_column(String(80), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    consequence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    accounting_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    accounting_evidence_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 TENANT_TABLES: tuple[str, ...] = (
     "expense_categories",
     "expense_policies",
@@ -715,6 +1117,14 @@ TENANT_TABLES: tuple[str, ...] = (
     "expense_receipts",
     "expense_policy_evaluations",
     "expense_lifecycle_events",
+    "claim_liabilities",
+    "claim_liability_lines",
+    "claim_liability_settlements",
+    "claim_settlement_reversals",
+    "claim_liability_adjustments",
+    "claim_liability_reversals",
+    "historical_claim_receipts",
+    "claim_accounting_receipts",
 )
 
 ALL_MODELS = (
@@ -728,6 +1138,14 @@ ALL_MODELS = (
     ExpenseReceipt,
     ExpensePolicyEvaluation,
     ExpenseLifecycleEvent,
+    ClaimLiability,
+    ClaimLiabilityLine,
+    ClaimLiabilitySettlement,
+    ClaimSettlementReversal,
+    ClaimLiabilityAdjustment,
+    ClaimLiabilityReversal,
+    HistoricalClaimReceipt,
+    ClaimAccountingReceipt,
 )
 
 _TABLE_BY_NAME: dict[str, sa.Table] = {
@@ -743,7 +1161,18 @@ def metadata_table(table_name: str) -> sa.Table:
 
 __all__ = [
     "ALL_MODELS",
+    "LIABILITY_AMOUNTS_CHECK",
+    "LIABILITY_STATUS_CHECK",
+    "MONEY",
     "SCHEMA",
+    "ClaimAccountingReceipt",
+    "ClaimLiability",
+    "ClaimLiabilityAdjustment",
+    "ClaimLiabilityLine",
+    "ClaimLiabilityReversal",
+    "ClaimLiabilitySettlement",
+    "ClaimSettlementReversal",
+    "HistoricalClaimReceipt",
     "TENANT_TABLES",
     "ExpenseCategory",
     "ExpenseClaim",
