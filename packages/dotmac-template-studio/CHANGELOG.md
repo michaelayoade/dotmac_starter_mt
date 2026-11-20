@@ -7,6 +7,34 @@ changes, each called out here.
 
 ## Unreleased
 
+### Optional email layout and brand resolver (S4; TS-5)
+
+Still source-only at the `0.2.0a6+dev` marker.
+
+- A layout is an ordinary template on channel `email_layout` with the reserved
+  `email_layout` context (no new table): versioned, published, restored, audited
+  and edited through the existing editor. Its html and text parts need exactly
+  one top-level `{content}` slot (not in a section, not in an attribute) and go
+  through the same sanitizer and scanner rules as any part.
+- `configure_brand(BrandSpec(variables, resolver, url=, optional=))`: the product
+  registers brand variable names and a `resolver(db, tenant_id) -> {name: str}`
+  at assembly time. `url` names are scheme-checked; undeclared or missing
+  non-optional values refuse. With no spec the layout vocabulary is `{content}`
+  only, so a layout using any brand variable fails validation (fail closed).
+- Migration `ts_0005_layout_slug`: nullable `template_versions.layout_slug` (a
+  revision opts in to a layout; default none, no backfill, down drops it).
+- Assembly: the message is rendered and validated first; the layout is rendered
+  with a random per-render token for the slot and the finished content is spliced
+  in. Html content must be a strictly nested fragment (no wrapper, comment or
+  unbalanced tag). A missing, inactive or unpublished layout, or a failing
+  resolver, refuses the render (never an unwrapped send). Revisions without a
+  layout render byte-identically.
+- Publishing a revision or layout dry-runs the assembly (a layout publish also
+  re-checks every published message using it). `deploycheck` validates layouts
+  and each opt-in against the current brand spec and resolver.
+- API: `VersionCreate`/`VersionUpdate`/`VersionRead.layout_slug`;
+  `service.list_layouts`, `service.layout_problems`.
+
 ### Editor, deploy check and optional maker-checker (S3; ADR-0006 § 5h)
 
 Still source-only at the `0.2.0a6+dev` marker.

@@ -41,6 +41,9 @@ Assembly contract:
   the last row examined. An owner refusal raises ``FundedChargeStepFailed``; the
   transport rolls back, calls ``record_funded_charge_attention`` and returns
   normally so the event is not poisoned.
+* ``reevaluate_account_terms`` is called by the assembly when an account's
+  contract terms change, and is routed for ``money_flows.funded_charge.
+  terms_recheck.v1``. It only withdraws (or sends to attention); it never pays.
 * ``retry_funded_charge`` is human-triggered: gate it with a permission and pass
   the actor as ``actor_ref``.
 * Lock order, always within one account: the Billing account first (via the
@@ -87,6 +90,7 @@ from sqlalchemy.orm import Session
 
 from dotmac_money_flows.contracts import (
     FUNDED_CHARGE_DEFINITION_VERSION,
+    AccountTermsChangedV1,
     FundedChargeCursorV1,
     FundedChargeInstanceV1,
     FundedChargeOutcomeV1,
@@ -105,6 +109,7 @@ from dotmac_money_flows.events import (
     FUNDED_CHARGE_ATTENTION_EVENT_TYPE,
     FUNDED_CHARGE_DISCHARGED_EVENT_TYPE,
     FUNDED_CHARGE_REEVALUATE_EVENT_TYPE,
+    FUNDED_CHARGE_TERMS_RECHECK_EVENT_TYPE,
 )
 from dotmac_money_flows.models import FundedChargeInstance
 
@@ -346,6 +351,29 @@ def _enqueue_reevaluate(
         event_type=FUNDED_CHARGE_REEVALUATE_EVENT_TYPE,
         payload=payload,
         correlation_id=f"funded-charge:reevaluate:{settlement_id}:{marker}",
+    )
+
+
+def _enqueue_terms_recheck(
+    db: Session,
+    tenant_id: UUID,
+    account_id: UUID,
+    at: datetime,
+    after: FundedChargeCursorV1 | None,
+) -> None:
+    payload: dict[str, object] = {
+        "billing_account_id": str(account_id),
+        "at": at.isoformat(),
+        "after_created_at": None if after is None else after.created_at.isoformat(),
+        "after_id": None if after is None else str(after.id),
+    }
+    marker = "start" if after is None else str(after.id)
+    enqueue_event(
+        db,
+        tenant_id=tenant_id,
+        event_type=FUNDED_CHARGE_TERMS_RECHECK_EVENT_TYPE,
+        payload=payload,
+        correlation_id=f"funded-charge:terms-recheck:{account_id}:{at.isoformat()}:{marker}",
     )
 
 
@@ -684,8 +712,9 @@ def start_funded_charge(
     """Start one charge at its due time, in the caller's transaction.
 
     See the module docstring: replay first, no row for an unknown or non-prepaid
-    charge, the balance covering the whole charge discharges it at ``due_at``,
-    otherwise it is held ``pending``. An owner exception propagates.
+    charge (the contract type is read again after the account lock is taken), the
+    balance covering the whole charge discharges it at ``due_at``, otherwise it is
+    held ``pending``. An owner exception propagates.
     """
     tenant_id = _tenant(scope)
     charge_ref = charge_ref_for(command.key)
@@ -695,6 +724,8 @@ def start_funded_charge(
     charge = ports.charges.read(db, scope=scope, key=command.key)
     if charge is None:
         raise FundedChargeRefused("charge_not_found")
+    # Fast path, no lock and no funds read for a postpaid account; the check
+    # under the lock below is the authoritative one.
     if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
         raise FundedChargeRefused("not_prepaid")
     ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope).version)
@@ -703,6 +734,11 @@ def start_funded_charge(
     if winner is not None:
         # A duplicate that won the race has committed: its row is the answer.
         return _outcome(winner, replayed=True)
+    # The terms are read only now, under the account lock: a terms switch (and
+    # its re-check) that committed while this start waited is seen, so a pending
+    # row is never inserted behind a re-check that has already run.
+    if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
+        raise FundedChargeRefused("not_prepaid")
     was_active = _begin_service(ctx, charge.service_ref)
     if funded:
         row = _discharge(
@@ -832,6 +868,117 @@ def on_settlement_settled(
             tenant_id,
             event.billing_account_id,
             event.settlement_id,
+            FundedChargeCursorV1(last.created_at, last.id),
+        )
+    return tuple(changed)
+
+
+def _recheck_terms(
+    ctx: _Ctx, row: FundedChargeInstance, at: datetime
+) -> FundedChargeInstance | None:
+    """Re-check one pending row against the terms at ``max(due_at, at)``.
+
+    Never pays or issues: a row the gate does not decide is left unchanged
+    (None), for the next settlement or retry.
+    """
+    key = key_for_charge_ref(row.charge_ref)
+    try:
+        charge = ctx.ports.charges.read(ctx.db, scope=ctx.scope, key=key)
+    except Exception as exc:
+        raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
+    was_active = _begin_service(ctx, row.service_ref)
+    if charge is None:
+        _write(
+            ctx,
+            row,
+            charge_ref=row.charge_ref,
+            charge=None,
+            state=FundedChargeState.WITHDRAWN,
+            reason_code="charge_withdrawn",
+        )
+        _signal(ctx, row, was_active, None)
+        return row
+    issue_at = max(charge.due_at, at)
+    decided = _gate(
+        ctx,
+        row,
+        charge,
+        charge_ref=row.charge_ref,
+        issue_at=issue_at,
+        funding_settlement_id=None,
+    )
+    if decided is None:
+        return None
+    _signal(ctx, row, was_active, issue_at)
+    return row
+
+
+def reevaluate_account_terms(
+    db: Session,
+    *,
+    scope: TenantScope,
+    request: AccountTermsChangedV1,
+    ports: FundedChargePorts,
+) -> tuple[FundedChargeOutcomeV1, ...]:
+    """Re-check an account's pending charges after its contract terms changed.
+
+    Each pending row is checked at ``max(due_at, request.at)`` through the same
+    gate as settlement re-evaluation: a row whose account is no longer prepaid is
+    withdrawn (``contract_type_changed``) and the service resumes; a row whose
+    charge the source no longer holds is withdrawn (``charge_withdrawn``); a
+    mismatch goes to attention. Nothing is ever paid or issued here, and
+    ``attention_required`` rows are not touched. Idempotent: a repeat finds no
+    pending row to change and returns ``()``. The caller must not call before
+    ``request.at`` has passed (flows reads no clock). Locks as
+    ``on_settlement_settled``; at most ``reevaluation_batch_cap`` rows are
+    examined and a ``terms_recheck.v1`` event resumes after the last.
+    """
+    tenant_id = _tenant(scope)
+    at = request.at
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise FundedChargeRefused("at_not_timezone_aware")
+    policy = ports.policy.read(db, scope=scope)
+    cap = policy.reevaluation_batch_cap
+    if cap < 1:
+        raise ValueError("reevaluation_batch_cap must be at least 1")
+    account_id = request.billing_account_id
+    get_funding_availability(
+        db,
+        scope=scope,
+        request=GetFundingAvailabilityV1(scope, account_id),
+    )  # account lock
+    ctx = _Ctx(db, scope, tenant_id, ports, policy.version)
+    statement = select(FundedChargeInstance).where(
+        FundedChargeInstance.tenant_id == tenant_id,
+        FundedChargeInstance.billing_account_id == account_id,
+        FundedChargeInstance.state == FundedChargeState.PENDING.value,
+    )
+    if request.after is not None:
+        statement = statement.where(_after(request.after))
+    rows = list(
+        db.execute(
+            statement.order_by(FundedChargeInstance.created_at, FundedChargeInstance.id)
+            .limit(cap + 1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalars()
+    )
+    batch = rows[:cap]
+    changed: list[FundedChargeOutcomeV1] = []
+    for row in batch:
+        try:
+            result = _recheck_terms(ctx, row, at)
+        except (BillingError, IdempotencyConflict) as exc:
+            raise FundedChargeStepFailed(row.id, _step_code(exc)) from exc
+        if result is not None:
+            changed.append(_outcome(result, replayed=False))
+    if len(rows) > cap:
+        last = batch[-1]
+        _enqueue_terms_recheck(
+            db,
+            tenant_id,
+            account_id,
+            at,
             FundedChargeCursorV1(last.created_at, last.id),
         )
     return tuple(changed)
@@ -1108,6 +1255,7 @@ __all__ = [
     "list_funded_charge_attention",
     "list_pending_funded_charges",
     "on_settlement_settled",
+    "reevaluate_account_terms",
     "record_funded_charge_attention",
     "retry_funded_charge",
     "start_funded_charge",

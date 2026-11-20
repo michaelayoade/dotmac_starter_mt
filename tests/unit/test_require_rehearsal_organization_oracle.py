@@ -55,14 +55,29 @@ def _build(held_subject, **overrides):
     )
 
 
-def _archive(receipt, ciphertext=CIPHERTEXT):
+def _status_for(receipt):
+    """The status document as the runner derives it; synthetic if unparseable."""
+    from dotmac_deployment_foundation.errors import SpecError
+    from dotmac_deployment_foundation.rehearsal import (
+        RehearsalReceiptV2,
+        render_status_document,
+    )
+
+    try:
+        return render_status_document(RehearsalReceiptV2.from_json(receipt)).encode()
+    except SpecError:
+        return b"synthetic status\n"
+
+
+def _archive(receipt, ciphertext=CIPHERTEXT, status=None):
+    status = _status_for(receipt) if status is None else status
     storage = io.BytesIO()
     with zipfile.ZipFile(storage, "w") as archive:
         archive.writestr("receipt.json", receipt)
         archive.writestr("evidence-bundle.age", ciphertext)
         archive.writestr(
             "docs/inventories/deployment-exposure-rehearsal-status.md",
-            b"synthetic status\n",
+            status,
         )
     return storage.getvalue()
 
@@ -178,7 +193,14 @@ def test_a_green_receipt_cannot_replace_an_authenticated_offline_result(
     captured = capsys.readouterr()
     assert "authenticated_offline_result_unavailable" in captured.err
     assert captured.out == ""
-    assert (tmp_path / "receipt.json").read_bytes() == receipt.canonical_bytes()
+    # Nothing is retained until authentication passes.
+    for name in (
+        "receipt.json",
+        "evidence-bundle.age",
+        "source-status.md",
+        "source-artifact.json",
+    ):
+        assert not (tmp_path / name).exists()
 
 
 def test_a_receipt_from_another_attempt_of_the_selected_run_is_refused(

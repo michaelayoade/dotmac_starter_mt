@@ -1,0 +1,82 @@
+{
+  "product": "dotmac_starter_mt",
+  "root": "../..",
+  "families": {
+    "web_routes": [
+      "app/features"
+    ],
+    "assembly_and_runtime": [
+      "app"
+    ],
+    "modules_and_kernel": [
+      "packages"
+    ],
+    "scripts": [
+      "scripts"
+    ],
+    "tools": [
+      "tools"
+    ]
+  },
+  "allowed": [
+    {
+      "glob": "packages/dotmac-delivery-resend/src/**",
+      "kinds": [
+        "direct_smtp"
+      ],
+      "premise": "dotmac-delivery-resend is a delivery adapter: the one place its provider SDK may be used (ADR-0006 5f). An adapter owns a transport, never a queue or message copy"
+    },
+    {
+      "glob": "packages/dotmac-delivery-smtp/src/**",
+      "kinds": [
+        "direct_smtp"
+      ],
+      "premise": "dotmac-delivery-smtp is a delivery adapter: the one place smtplib may be used (ADR-0006 5f). An adapter owns a transport, never a queue or message copy"
+    }
+  ],
+  "exclude": [
+    {
+      "glob": "**/tests/**",
+      "kinds": [
+        "outbox_writer",
+        "direct_smtp",
+        "inline_copy"
+      ],
+      "premise": "test code is not product runtime"
+    },
+    {
+      "glob": "**/migrations/**",
+      "kinds": [
+        "outbox_writer"
+      ],
+      "premise": "migrations are DDL history of a table; a model class and enqueue function are the findings. Migrations are still scanned for direct_smtp and inline_copy"
+    },
+    {
+      "glob": "alembic/**",
+      "kinds": [
+        "outbox_writer"
+      ],
+      "premise": "assembly migration history; still scanned for direct_smtp and inline_copy"
+    },
+    {
+      "glob": ".venv/**",
+      "kinds": [
+        "outbox_writer",
+        "direct_smtp",
+        "inline_copy"
+      ],
+      "optional": true,
+      "premise": "installed third-party code is not product source; the directory exists only in some checkouts"
+    },
+    {
+      "glob": "node_modules/**",
+      "kinds": [
+        "outbox_writer",
+        "direct_smtp",
+        "inline_copy"
+      ],
+      "optional": true,
+      "premise": "vendored JavaScript tooling; the directory exists only in some checkouts"
+    }
+  ]
+}

@@ -173,7 +173,7 @@ def learning_graph(tmp_path, installed_graph):
     from dotmac_learning.migrations import versions_dir as learning_versions
 
     head, _ = installed_graph
-    assert head == "0031_rate_limit_buckets"
+    assert head == "0033_receipts_append_only"
     assert set(module.requires) == {
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,

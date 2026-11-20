@@ -355,6 +355,7 @@
     "dotmac_kernel.delivery": {
       "classification": "supported",
       "exports": [
+        "DeliveryDeferred",
         "DeliveryError",
         "latest_receipt_for_dispatch",
         "receipts_for_address",
@@ -362,10 +363,31 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.delivery_dispatch": {
+      "classification": "supported",
+      "exports": [
+        "DISPATCH_EVENT_TYPE",
+        "DispatchConflict",
+        "DispatchError",
+        "DispatchHistoryOnly",
+        "DispatchIntegrityError",
+        "DispatchNotFound",
+        "DispatchRedacted",
+        "DispatchResult",
+        "LoadedDispatch",
+        "create_dispatch",
+        "find_dispatch_by_key",
+        "import_history_key",
+        "import_pending",
+        "load_dispatch"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.delivery_models": {
       "classification": "supported",
       "exports": [
         "CommunicationDelivery",
+        "CommunicationDispatch",
         "DELIVERY_ACCEPTED",
         "DELIVERY_BOUNCED",
         "DELIVERY_COMPLAINT",
@@ -373,6 +395,14 @@
         "DELIVERY_FAILED",
         "DELIVERY_REJECTED",
         "DELIVERY_STATUSES",
+        "DISPATCH_DEAD",
+        "DISPATCH_FAILED",
+        "DISPATCH_HISTORY",
+        "DISPATCH_PENDING",
+        "DISPATCH_SENT",
+        "DISPATCH_STATUSES",
+        "DISPATCH_SUPPRESSED",
+        "DISPATCH_TERMINAL_STATUSES",
         "SUPPRESSING_STATUSES"
       ],
       "status": "declared"
@@ -392,6 +422,17 @@
         "Sent",
         "Suppressed",
         "send"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.delivery_requeue": {
+      "classification": "supported",
+      "exports": [
+        "AUDIT_ACTION_REQUEUED",
+        "MAX_REASON_LENGTH",
+        "RequeueRefused",
+        "RequeueResult",
+        "requeue_dead_dispatch"
       ],
       "status": "declared"
     },
@@ -801,9 +842,11 @@
       "classification": "supported",
       "exports": [
         "ClaimedEvent",
+        "DeferralOutcome",
         "FailureOutcome",
         "RelayPolicy",
         "claim_batch",
+        "record_deferral",
         "record_failure",
         "record_success"
       ],
@@ -2135,8 +2178,10 @@
     "dotmac_kernel.database_catalog_comparator",
     "dotmac_kernel.db",
     "dotmac_kernel.delivery",
+    "dotmac_kernel.delivery_dispatch",
     "dotmac_kernel.delivery_models",
     "dotmac_kernel.delivery_providers",
+    "dotmac_kernel.delivery_requeue",
     "dotmac_kernel.deps",
     "dotmac_kernel.entitlements",
     "dotmac_kernel.errors",

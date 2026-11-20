@@ -173,6 +173,11 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "calls settle_outbox_event",
     ),
     Facility(
+        "messaging/relay:record_deferral",
+        "outbox_relay.v1",
+        "calls settle_outbox_event",
+    ),
+    Facility(
         "messaging/platform_relay:claim_platform_batch",
         "outbox_relay.v1",
         "calls claim_platform_outbox_batch",
@@ -416,6 +421,14 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "entitlements": "kernel-owned grants; modules read decisions, not tables",
     "consent": "kernel-owned suppression; delivery reads decisions",
     "delivery": "kernel-owned receipts",
+    "delivery_dispatch": (
+        "kernel-owned dispatch identity, same tenant-RLS storage owner as "
+        "delivery receipts"
+    ),
+    "delivery_requeue": (
+        "kernel-owned dispatch requeue, same tenant-RLS storage owner as "
+        "dispatch identity"
+    ),
     "delivery_providers": "provider transport, not storage of a module's own",
     "branding": "assembly presentation seam",
     "display": "assembly presentation seam",

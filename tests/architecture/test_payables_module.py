@@ -12,6 +12,7 @@ from dotmac_payables.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/pa_0001_payables.py"
+SIXTH_MIGRATION = ROOT / "migrations/versions/pa_0006_tax_release_hist_credit.py"
 FIFTH_MIGRATION = ROOT / "migrations/versions/pa_0005_reversal_settled_history.py"
 FOURTH_MIGRATION = ROOT / "migrations/versions/pa_0004_supplier_payments.py"
 # Tables created by a later revision carry their own RLS/immutability tests.
@@ -22,6 +23,13 @@ _LATER_MIGRATION_TABLES = {
     "supplier_payment_withholdings",
     "invoice_recognitions",
     "historical_settlements",
+    "tax_deferral_policies",
+    "supplier_payment_tax_releases",
+    "historical_tax_deferrals",
+    "historical_credit_receipts",
+    "historical_credit_settlements",
+    "credit_note_tax_splits",
+    "credit_application_tax_releases",
 }
 SECOND_MIGRATION = ROOT / "migrations/versions/pa_0002_optional_supplier_doc.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -131,7 +139,7 @@ def test_payables_lineage_loads_as_one_alembic_head() -> None:
     config.set_main_option("script_location", str(ROOT / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["pa_0005_reversal_settled_history"]
+    assert scripts.get_heads() == ["pa_0006_tax_release_hist_credit"]
     assert scripts.get_bases() == ["pa_0001_payables"]
 
 
@@ -237,3 +245,39 @@ def test_supplier_payment_commands_never_post_to_accounting_or_move_money() -> N
     source = Path(inspect.getfile(service)).read_text(encoding="utf-8")
     for forbidden in ("transfer(", "dotmac_accounting", "post_journal"):
         assert forbidden not in source
+
+
+def test_a6_migration_is_additive_tenant_safe_and_forward_only() -> None:
+    source = SIXTH_MIGRATION.read_text(encoding="utf-8")
+    assert 'down_revision = "pa_0005_reversal_settled_history"' in source
+    assert len("pa_0006_tax_release_hist_credit") <= 32  # alembic_version.version_num
+    new_tables = (
+        "tax_deferral_policies",
+        "supplier_payment_tax_releases",
+        "historical_tax_deferrals",
+        "historical_credit_receipts",
+        "historical_credit_settlements",
+        "credit_note_tax_splits",
+        "credit_application_tax_releases",
+    )
+    for table in new_tables:
+        assert table in module.tables
+        assert "FORCE ROW LEVEL SECURITY" in source
+        assert f'"{table}"' in source
+        assert f"mod_payables.{table})" in source
+    assert "_tenant_isolation ON mod_payables.{table}" in source
+    # Append-only evidence with SELECT and INSERT grants only.
+    assert "GRANT SELECT, INSERT ON mod_payables.{table} TO app_user" in source
+    assert "UPDATE, DELETE" not in source
+    # Additive: no released table or column is altered or dropped on upgrade.
+    upgrade = source.split("def upgrade")[1].split("def downgrade")[0]
+    assert "op.alter_column" not in upgrade
+    assert "op.drop_column" not in upgrade
+    assert "op.drop_table" not in upgrade
+    assert "RuntimeError" in source.split("def downgrade")[1]
+    # The release rows are the frozen source of every consequence line, so the
+    # policy accounts are copied onto the row rather than joined at build time.
+    columns = models.SupplierPaymentTaxRelease.__table__.c
+    assert {"deferral_account_ref", "release_account_ref", "amount"} <= set(
+        columns.keys()
+    )

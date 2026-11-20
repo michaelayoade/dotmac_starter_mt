@@ -8794,16 +8794,25 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `dotmac-service-access-policy` 0.1.0a2 is tagged.
     "dotmac-service-access-policy": frozenset(),
     "dotmac-services": frozenset(),
-    # `ts_0004` adds the nullable html part column; still editable until a
-    # release tags a template-studio version carrying it.
-    "dotmac-template-studio": frozenset({"ts_0004_html_body.py"}),
+    # `ts_0004` adds the nullable html part column and `ts_0005` the nullable
+    # layout opt-in column; still editable until a release tags a
+    # template-studio version carrying them.
+    "dotmac-template-studio": frozenset(
+        {"ts_0004_html_body.py", "ts_0005_layout_slug.py"}
+    ),
     "dotmac-commercial-agreements": frozenset(),
     "dotmac-people": frozenset(),
     "dotmac-inbox": frozenset(),
-    # `0031_rate_limit_buckets` (the shared anonymous-route rate-limit counters)
-    # remains editable until a verified published tag carries it and its digest
-    # is recorded above.
-    "dotmac-kernel": frozenset(),
+    # `0032_communication_dispatches` (dispatch identity, K-3) and
+    # `0033_receipts_append_only` (K-6) remain editable until a verified
+    # published tag carries them and their digests are recorded above.
+    # (`0031_rate_limit_buckets` is released: see its digest above.)
+    "dotmac-kernel": frozenset(
+        {
+            "20261118_0032_communication_dispatches.py",
+            "20261119_0033_receipts_append_only.py",
+        }
+    ),
     "dotmac-accounting": frozenset(),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
@@ -8831,9 +8840,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    # `pa_0005` adds payment reversal, settled historical admission and invoice
-    # recognition; still editable until `dotmac-payables` 0.1.0a5 is tagged.
-    "dotmac-payables": frozenset(),
+    # `pa_0006` adds the deferred-VAT release policy and rows, the historical
+    # deferral position and the historical supplier credit; still editable until
+    # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
+    # by the 0.1.0a5 entry.
+    "dotmac-payables": frozenset({"pa_0006_tax_release_hist_credit.py"}),
     # `py_0004` adds audited liability adjustments; editable until
     # `dotmac-payroll` 0.1.0a6 is tagged.
     "dotmac-payroll": frozenset({"py_0004_liability_adjustments.py"}),

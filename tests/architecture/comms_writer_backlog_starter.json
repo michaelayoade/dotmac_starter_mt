@@ -1,0 +1,6 @@
+{
+  "_comment": "Frozen product-writer debt (ADR-0006 5f, ADR-0018). Two-directional ratchet: fails if a finding appears OR a listed finding disappears without this file being regenerated in the same change. Retire entries by moving the send to kernel delivery + template-studio, then run --write-backlog. Do not hand-edit.",
+  "product": "dotmac_starter_mt",
+  "total": 0,
+  "findings": []
+}

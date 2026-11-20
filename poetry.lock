@@ -1046,6 +1046,23 @@ type = "directory"
 url = "packages/dotmac-delivery-resend"
 
 [[package]]
+name = "dotmac-delivery-smtp"
+version = "0.1.0a1"
+description = "SMTP delivery adapter for the kernel delivery-provider seam: STARTTLS-required, classified outcomes, UI-entered settings"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a109"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-delivery-smtp"
+
+[[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a2"
 description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0057 § 3)"
@@ -1665,7 +1682,7 @@ url = "packages/dotmac-party"
 
 [[package]]
 name = "dotmac-payables"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "Tenant supplier-liability and payment-obligation authority"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4582,4 +4599,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "c5fe28a3e11a9740f7e846ab5c3bbc10ed3bdec5635bf536cbcd1511653849dd"
+content-hash = "e3ea42c3c7d5007953929adc1fab51ac5603be6618cfba554b8389121efcef53"

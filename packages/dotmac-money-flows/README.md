@@ -25,3 +25,90 @@ compose it; the intended consumer is the Sub thin-client deployment.
 
 FundedCharge rows are never pruned: the access signal's `source_version` is a sum
 over a service's rows.
+
+## Terms re-check (F2 D3) and the tenant-default runbook
+
+`reevaluate_account_terms(db, scope=..., request=AccountTermsChangedV1(account,
+at), ports=...)` re-checks one account's pending charges after its contract terms
+changed. `at` is the `effective_from` of the terms version that caused the call;
+it must be timezone-aware, and **the caller must not call before `at` has
+passed** (flows reads no clock and cannot check this). Each pending row is
+checked at `max(due_at, at)`; an account no longer prepaid withdraws the row
+(`contract_type_changed`) and the service resumes. The re-check never pays or
+issues anything, and `attention_required` rows are not touched. A repeat is a
+no-op. The assembly routes `money_flows.funded_charge.terms_recheck.v1` back to
+the same function when the batch cap leaves rows over.
+
+**Start and re-check (N1).** `start_funded_charge` reads the account's contract
+type only after it holds the account lock, so a switch to postpaid that commits
+while a start waits is seen: the start is refused (`not_prepaid`) and leaves no
+pending row. That closes the race, but not a *late start*: a charge due before
+the switch's `at` that is first started after the re-check ran is still prepaid
+at its `due_at`, so the start holds it `pending` and the service off, and the
+re-check that already ran cannot see it. The caller (Sub-thin) must therefore
+re-run `reevaluate_account_terms` for the account whenever a start returns `pending`, including a replayed `pending`
+outcome (a duplicate that won the race), after the start's transaction commits.
+Use `at` = the `effective_from` of the latest terms version already in effect
+(`effective_from` <= now; tenant-default versions count for an account with no
+own terms); skip the call if there is none. Never use a future switch's `at`: it
+would withdraw a valid unfunded prepaid charge now. The call withdraws the row
+and resumes the service.
+
+Changing the tenant default contract type is a runbook event, not code in this
+package: the caller re-checks each prepaid account that falls back to the default
+(no own terms), one account per transaction, with `reevaluate_account_terms`.
+
+## Balance pays new postpaid invoices (GAP-3)
+
+`apply_balance_on_invoice_issued(db, scope=..., request=InvoiceIssuedV1(document_id),
+ports=SettlePorts)` runs the deposit pass when Billing issues an invoice: every open
+invoice of the account, oldest due first, whole invoices only, skipping any that do
+not fit. It takes the Billing account lock first (the same order as F2 and Settle),
+then reads each gate fresh: `deposit_application` is not `none` (the one setting for
+"the balance pays invoices"; there is no separate switch), the new invoice is still
+open, the balance is positive, and the account is postpaid at the invoice's issue
+date (a prepaid account is an explicit no-op). It creates no flows row, no
+attention item and no event; Billing's own allocation facts are the record.
+
+A business no-op posts nothing and returns `BalanceAppliedOutcomeV1` with an empty
+`applied_document_ids` and a `reason_code` (`deposit_application_off`,
+`invoice_not_open`, `no_balance`, `account_not_postpaid`, `no_invoice_fits`). A
+technical fault **raises**; nothing is written. `BalancePassFailed(code)` is the
+flows fault (open-document list unreadable, the new invoice missing from the open
+list while its balance is positive, a document of another account); Billing
+exceptions propagate unchanged. Source references are deterministic
+(`money-flows:settle:issue:{trigger}:{document}:{source_version}`, the document's
+Billing `source_version`), so a replay of the same state never pays twice, a
+reversal (which bumps the version) can be paid again by a rerun, and the next
+invoice or deposit pass completes any missed work.
+
+**Application date.** Each application is dated the latest of the new invoice's
+issue date, the paid invoice's issue date and the newest cash received since those
+dates, spent or not (the latest `settlement_accepted` statement line that adds
+credit, from Billing's account statement over `[earliest base, 9999-12-31)`;
+opening lots post none). Flows reads no clock. Billing caps one statement at 5000 posting groups; when
+the window overflows (`statement_too_large`) flows splits it at the midpoint and
+searches the newer half first, then the older, recursively, so the newest cash
+wins and the pass never wedges on a busy account. Only a window that cannot be
+split further (over the cap at a single instant) raises
+`BalancePassFailed("statement_unsplittable")`.
+
+Duties of the caller (Sub-thin):
+
+- Route each Billing invoice-issued document fact (`billing.invoice.document.fact`
+  v1/v2/v3 with `document_kind=invoice`, `document_state=issued`, `fact_version=1`)
+  to this command, in its own transaction per event.
+- Treat `BalancePassFailed` and Billing exceptions as retryable. Let the failure
+  propagate so the transport rolls back and its event delivery retries
+  automatically. A persistent failure (retries exhausted) is a technical
+  ops alert, never a billing staff queue.
+- Date postpaid invoices at the real issue instant. An application is dated the
+  later of the new invoice's issue date and the paid invoice's issue date and
+  flows reads no clock, so a back-dated `issued_at` (for example a period-end
+  date set by a later run) would apply cash before it was received.
+- Postpaid timing (advance or arrears) is the Billing account-terms setting
+  (`postpaid_billing_timing`), not fixed here; this command only needs the
+  contract type, read at the invoice's issue date.
+
+Credit-note excess and reversals trigger no pass of their own; the next invoice
+issue or deposit picks them up.

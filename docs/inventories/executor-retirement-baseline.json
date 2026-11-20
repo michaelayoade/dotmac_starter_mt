@@ -163,7 +163,7 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:961bdc950f021ede0c5b698734103ab6f87aa8c88f88c9606d5336e0f7cf7b88",
+      "inventory_digest": "sha256:4125a03a508516733247f228a5c4b37e72fbeb64de66c74af1d4dd1cfd3eb677",
       "measured_from": "working tree",
       "retired_total": 0,
       "revision": "4568b79048b266af370a84ca0da96fcd573a0ec0",
