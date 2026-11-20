@@ -1043,6 +1043,6 @@ def test_the_kernel_is_at_least_every_module_floor() -> None:
         *STATELESS_CAPABILITY_FLOORS.values(),
     }
     for release in floors:
-        assert _alpha(declared) >= _alpha(release), (
-            f"kernel is {declared} but a module floors at {release}"
-        )
+        assert _alpha(declared) >= _alpha(
+            release
+        ), f"kernel is {declared} but a module floors at {release}"

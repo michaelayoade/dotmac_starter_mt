@@ -382,7 +382,7 @@ and the next gate.
 ### [`dotmac-customers`](../packages/dotmac-customers/README.md)
 
 - **Owner:** Tenant customer account identity, narrow profile, lifecycle, and typed Party references
-- **Contract:** Own customer account numbers, account lifecycle, display/profile attributes (display name changed only through the governed `rename_account` command), and typed opaque references to Party identities. NOT person/organization identity, authentication, contact reachability, addresses, qualification, offers, prices, subscriptions, service lifecycle, billing, collections, usage, or network state.
+- **Contract:** Own customer account numbers, account lifecycle, display/profile attributes, and typed opaque references to Party identities. NOT person/organization identity, authentication, contact reachability, addresses, qualification, offers, prices, subscriptions, service lifecycle, billing, collections, usage, or network state.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-customers/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.
