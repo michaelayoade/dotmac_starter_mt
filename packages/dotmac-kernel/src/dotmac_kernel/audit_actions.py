@@ -102,6 +102,7 @@ class AuditActionRegistry:
                 "identity.history_imported",
                 "credential.password.assigned",
                 "communication.dispatch.requeued",
+                "communication.dispatch.outcome_unknown",
             ),
         )
 

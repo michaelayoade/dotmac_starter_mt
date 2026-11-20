@@ -29,11 +29,14 @@ from typing import Protocol
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from dotmac_kernel.delivery import DeliveryDeferred
+from dotmac_kernel.delivery import DeliveryDeferred, DeliveryTerminal
 from dotmac_kernel.messaging.relay import (
     ClaimedEvent,
     RelayPolicy,
     claim_batch,
+    deferral_dead_letters,
+    failure_dead_letters,
+    record_dead_letter,
     record_deferral,
     record_failure,
     record_success,
@@ -47,11 +50,26 @@ SessionFactory = Callable[[], Session]
 class DeliveryTransport(Protocol):
     """Delivers one outbox event to its destination. Raises on failure (the
     worker then backs off / dead-letters); raises `DeliveryDeferred` for a hold,
-    which reschedules without charging an attempt. `tenant_db` is a tenant-scoped
+    which reschedules without charging an attempt; raises `DeliveryTerminal` to
+    dead-letter at once with no retry (K-8). `tenant_db` is a tenant-scoped
     session already RLS-restored to `event.tenant_id` — use it for any product read the
     delivery needs; most transports deliver the payload and ignore it."""
 
     def deliver(self, event: ClaimedEvent, tenant_db: Session) -> None: ...
+
+
+class DeadLetterAware(Protocol):
+    """Optional second half of a transport (K-8): told, in a tenant-scoped
+    session, that the event is about to be dead-lettered, so the product state
+    the event stands for can be put in its terminal state too (a dispatch goes
+    `dead`). Must be idempotent. A transport without it simply gets no call.
+
+    The worker runs it and commits BEFORE settling the outbox row dead. If it
+    fails, the outbox row is NOT settled (the lease is left to expire and the
+    event is reclaimed), so the two can never disagree with the outbox row dead
+    and the product state still live."""
+
+    def dead_letter(self, event: ClaimedEvent, tenant_db: Session) -> None: ...
 
 
 class LoggingTransport:
@@ -60,6 +78,38 @@ class LoggingTransport:
 
     def deliver(self, event: ClaimedEvent, tenant_db: Session) -> None:
         logger.info("relay delivered %s (%s)", event.id, event.event_type)
+
+
+def _mark_dead(
+    *,
+    tenant_session_factory: SessionFactory,
+    transport: DeliveryTransport,
+    event: ClaimedEvent,
+) -> bool:
+    """Run the transport's optional `dead_letter` in a fresh tenant-scoped
+    session and commit. True when it is safe to settle the outbox row dead."""
+    hook = getattr(transport, "dead_letter", None)
+    if hook is None:
+        return True
+    tenant_db = tenant_session_factory()
+    try:
+        tenant_db.execute(
+            text("SELECT set_config('app.current_tenant', :t, true)"),
+            {"t": str(event.tenant_id)},
+        )
+        hook(event, tenant_db)
+        tenant_db.commit()
+        return True
+    except Exception as exc:  # leave the lease; the event is reclaimed
+        tenant_db.rollback()
+        logger.error(
+            "relay could not mark %s dead (%s); leaving the lease to expire",
+            event.id,
+            type(exc).__name__,
+        )
+        return False
+    finally:
+        tenant_db.close()
 
 
 def _deliver_one(
@@ -88,6 +138,12 @@ def _deliver_one(
         # a relay attempt, bounded by `policy.max_deferrals` (K-4).
         tenant_db.rollback()
         logger.info("relay delivery deferred for %s", event.id)
+        if deferral_dead_letters(event.deferrals, policy) and not _mark_dead(
+            tenant_session_factory=tenant_session_factory,
+            transport=transport,
+            event=event,
+        ):
+            return
         record_deferral(
             dispatcher_db,
             event_id=event.id,
@@ -99,9 +155,34 @@ def _deliver_one(
             policy=policy,
         )
         dispatcher_db.commit()
+    except DeliveryTerminal as verdict:
+        # The transport says this must NOT be retried (K-8: e.g. an unknown
+        # provider outcome that a retry could double-send). Dead-letter now.
+        tenant_db.rollback()
+        logger.warning("relay delivery terminal for %s", event.id)
+        if not _mark_dead(
+            tenant_session_factory=tenant_session_factory,
+            transport=transport,
+            event=event,
+        ):
+            return
+        record_dead_letter(
+            dispatcher_db,
+            event_id=event.id,
+            worker_id=worker_id,
+            attempts=event.attempts,
+            error=f"terminal: {verdict.reason}",
+        )
+        dispatcher_db.commit()
     except Exception as exc:  # any delivery failure retries / dead-letters
         tenant_db.rollback()
         logger.warning("relay delivery failed for %s: %r", event.id, exc)
+        if failure_dead_letters(event.attempts, policy) and not _mark_dead(
+            tenant_session_factory=tenant_session_factory,
+            transport=transport,
+            event=event,
+        ):
+            return
         record_failure(
             dispatcher_db,
             event_id=event.id,
@@ -173,6 +254,7 @@ def run_forever(
 
 
 __all__ = [
+    "DeadLetterAware",
     "DeliveryTransport",
     "LoggingTransport",
     "SessionFactory",

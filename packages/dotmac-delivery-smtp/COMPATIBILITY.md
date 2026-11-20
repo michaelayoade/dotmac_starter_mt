@@ -8,7 +8,7 @@
   allocation PR before S12 (release). S8 (K-4) adds one more: `SmtpAdmissionRefused`
   subclasses `dotmac_kernel.delivery.DeliveryDeferred`, which exists only from
   the first kernel release containing S8 (migration `0033_receipts_append_only`);
-  the declared floor is deliberately NOT raised in S8 (a later step raises it),
+  S10 (K-8) adds the same for `DeliveryOutcomeUnknown` (`SmtpOutcomeUnknown` subclasses it); the declared floor is deliberately NOT raised in S8 or S10 (a later step raises it),
   so installing this package against an older kernel fails at import.
 - Standard library only (`smtplib`, `ssl`, `email`). No third-party dependency.
 - STARTTLS submission only (no implicit-TLS port 465 mode in 0.1).
