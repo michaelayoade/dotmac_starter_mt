@@ -117,6 +117,11 @@
       "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
     },
+    "dotmac-customers": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 is published and tagged (dotmac-customers-v0.1.0a1) and its cu_0001 migration bytes are unchanged. 0.1.0a2 adds the governed rename_account command (display name; required, at most 200 characters, idempotent, refused on a CLOSED account); no migration. Publication happens only through the release lane after review and Michael's separate release go; ERP adoption must wait for verified publication of this exact version; remove this row only when the publication tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-delivery-smtp": {
       "declared": "0.1.0a1",
       "reason": "Unpublished SMTP delivery adapter (S11, P-1): source and tests only, extracted product-first from Academy. No release is authorized and the package is not allowlisted. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
