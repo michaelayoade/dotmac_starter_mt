@@ -34,6 +34,16 @@ Source only; not published, not composed into any assembly.
 - A database test applies the schema vocabulary rule to the live `mod_mflows`
   catalog.
 
+- GAP-L1: `on_account_credit_changed` pays a prepaid account's pending charges when
+  credit arrives without a deposit (opening lot, admitted held partition, reversed
+  refund or allocation), routed for every `billing.receivable.position.v2`. Dated
+  `max(due_at, newest credit line since due_at)`. New contracts
+  `AccountCreditChangedV1` / `CreditRecheckOutcomeV1`, event
+  `money_flows.funded_charge.credit_recheck.v1`, and
+  `record_funded_charge_attention(continue_credit_recheck=True)`. The account
+  statement read moves to the private `_credit_dating` module (read-only allowlist
+  entry); Settle is unchanged. No Billing change, no migration.
+
 ### Before release
 
 - Measure the oldest-due-first page walk of `list_open_receivable_documents`
