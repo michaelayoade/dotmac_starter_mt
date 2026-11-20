@@ -161,6 +161,7 @@
           "dotmac_accounting/migrations/versions/ac_0001_accounting.py",
           "dotmac_accounting/migrations/versions/ac_0002_posted_content.py",
           "dotmac_accounting/migrations/versions/ac_0003_draft_void.py",
+          "dotmac_accounting/migrations/versions/ac_0004_account_maintenance.py",
           "dotmac_accounting/models.py",
           "dotmac_accounting/service.py"
         ],
