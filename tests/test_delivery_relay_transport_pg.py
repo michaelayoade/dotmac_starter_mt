@@ -724,3 +724,23 @@ def test_requeue_gate_fails_closed_when_the_unknown_audit_row_was_lost(
         _requeue(factories, tenant_a, did)
     res = _requeue(factories, tenant_a, did, acknowledge_possible_duplicate=True)
     assert res.requeued
+
+
+def test_requeue_gate_ignores_a_dead_event_with_a_null_last_error(
+    admin_session, tenant_a, factories, audit_registry, relay_registries, cleanup
+) -> None:
+    """A dead outbox event with NULL `last_error` is not the terminal marker, so
+    the gate does not fire on that signal (and must not crash on it)."""
+    did = make_dispatch(factories, tenant_a)
+    admin_session.execute(
+        text(
+            "UPDATE communication_dispatches SET status='dead', terminal_at=now() "
+            "WHERE dispatch_id = :d"
+        ),
+        {"d": str(did)},
+    )
+    admin_session.execute(
+        text("UPDATE outbox_events SET status='dead', last_error=NULL")
+    )
+    admin_session.commit()
+    assert _requeue(factories, tenant_a, did).requeued

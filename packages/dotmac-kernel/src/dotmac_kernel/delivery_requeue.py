@@ -116,7 +116,8 @@ def _unknown_outcome_pending(db: Session, tenant_id: UUID, dispatch_id: UUID) ->
         .order_by(OutboxEvent.created_at.desc())
         .limit(1)
     ).scalar_one_or_none()
-    return bool(last_error) and last_error.startswith("terminal:")
+    # NULL means "not the terminal marker"; the audit-row signal still applies.
+    return last_error is not None and last_error.startswith("terminal:")
 
 
 def requeue_dead_dispatch(

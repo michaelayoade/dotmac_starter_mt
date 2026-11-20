@@ -417,7 +417,7 @@ class _TrackedProvider:
             if hasattr(inner, attr):
                 setattr(self, attr, getattr(inner, attr))
 
-    def send(self, message):  # type: ignore[no-untyped-def]
+    def send(self, message):
         result = self._inner.send(message)
         self.returned = True
         return result
