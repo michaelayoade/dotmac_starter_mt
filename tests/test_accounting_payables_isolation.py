@@ -857,10 +857,16 @@ def test_supplier_payment_migration_downgrade_refuses_once_populated(
     migration = import_module(
         "dotmac_payables.migrations.versions.pa_0004_supplier_payments"
     )
+    # pa_0006's release rows reference supplier_payments, so a later revision must
+    # be rolled back first (empty here: allowed) before pa_0004 can be.
+    later = import_module(
+        "dotmac_payables.migrations.versions.pa_0006_tax_release_hist_credit"
+    )
     engine = create_engine(admin_url)
     with engine.connect() as conn:
         transaction = conn.begin()
         with Operations.context(MigrationContext.configure(conn)):
+            later.downgrade()
             migration.downgrade()  # empty: allowed
         assert (
             conn.scalar(text("SELECT to_regclass('mod_payables.supplier_payments')"))
@@ -871,6 +877,7 @@ def test_supplier_payment_migration_downgrade_refuses_once_populated(
     with engine.connect() as conn:
         transaction = conn.begin()
         with Operations.context(MigrationContext.configure(conn)):
+            later.downgrade()
             with pytest.raises(RuntimeError, match="forward correction"):
                 migration.downgrade()
         transaction.rollback()
