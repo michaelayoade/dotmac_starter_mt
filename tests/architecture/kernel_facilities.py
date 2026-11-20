@@ -178,6 +178,11 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "calls settle_outbox_event",
     ),
     Facility(
+        "messaging/relay:record_dead_letter",
+        "outbox_relay.v1",
+        "calls settle_outbox_event",
+    ),
+    Facility(
         "messaging/platform_relay:claim_platform_batch",
         "outbox_relay.v1",
         "calls claim_platform_outbox_batch",
@@ -424,6 +429,10 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "delivery_dispatch": (
         "kernel-owned dispatch identity, same tenant-RLS storage owner as "
         "delivery receipts"
+    ),
+    "delivery_relay": (
+        "kernel-owned dispatch relay transport, same tenant-RLS storage owner "
+        "as dispatch identity"
     ),
     "delivery_requeue": (
         "kernel-owned dispatch requeue, same tenant-RLS storage owner as "

@@ -113,6 +113,41 @@ class DeliveryDeferred(Exception):
         self.retry_after = retry_after
 
 
+class DeliveryOutcomeUnknown(Exception):
+    """The provider may or may not have taken the message (ADR-0006 § 5g, K-8).
+
+    Raised by an adapter when a request was sent and the answer was lost (for
+    SMTP, a timeout or disconnect after the DATA payload). It is the fourth
+    outcome beside a receipt, a hold and a transient failure, and it is NOT
+    retryable: most providers, SMTP included, do not honour the dispatch
+    idempotency key, so a retry can double-send.
+
+    The relay transport maps it to a terminal, operator-visible state (the
+    dispatch is `dead`, the outbox event is dead-lettered at once and one audit
+    row names it); it is never retried automatically. No receipt is written,
+    because nothing the provider said can be recorded. `reason` is stored on
+    the outbox row: never put an address, body or secret in it.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class DeliveryTerminal(Exception):
+    """A relay transport's verdict that this event must not be retried.
+
+    The worker dead-letters the outbox event immediately (attempts are not
+    charged further) instead of backing off. The transport has already put the
+    dispatch in its own terminal state before raising. `reason` is stored on
+    the outbox row: never put an address, body or secret in it.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 #: Which suppression reason a suppressing verdict records.
 _REASON_FOR_STATUS = {
     DELIVERY_BOUNCED: REASON_BOUNCE,
@@ -371,6 +406,8 @@ def receipts_for_address(
 __all__ = [
     "DeliveryDeferred",
     "DeliveryError",
+    "DeliveryOutcomeUnknown",
+    "DeliveryTerminal",
     "latest_receipt_for_dispatch",
     "receipts_for_address",
     "record_receipt",

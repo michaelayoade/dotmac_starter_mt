@@ -23,13 +23,16 @@ leaves the dispatch `pending` and the outbox relay retries it; the K-2 receipt
 status `failed` (retryable) is a different thing. The allowlist is enforced by a
 database trigger (see migration 0032 and `CommunicationDispatch`).
 
-## TODO for K-8 (the relay transport) and release
+## The relay transport (K-8)
 
-- Never let a database error that echoes parameters (bodies, addresses) reach
-  outbox `last_error`: `worker.py` writes `repr(exc)` there.
-- Consider `SELECT ... FOR UPDATE` in the tenant session when loading.
-- `delivery.dispatch.v1` is declared on a manifest by K-8; S7 must not be
-  released without K-8.
+`dotmac_kernel.delivery_relay.DispatchRelayTransport` consumes the event, loads
+the dispatch in the tenant session, sends through `delivery_providers.send` and
+settles the dispatch with `settle_dispatch`. It reduces every unexpected error to
+its type name, so a database error that echoes parameters never reaches the outbox
+`last_error` (`worker.py` writes `repr(exc)` there), and it row-locks the dispatch
+while it works. `delivery.dispatch.v1` is an outbox routing code owned by the
+module that consumes it: the composing product declares it in its manifest's
+`outbox_event_types`, as for any other consumed event. S7 and K-8 ship together.
 
 ## Duplicate keys
 
@@ -71,8 +74,12 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.delivery import DeliveryError
 from dotmac_kernel.delivery_models import (
+    DISPATCH_DEAD,
+    DISPATCH_FAILED,
     DISPATCH_HISTORY,
     DISPATCH_PENDING,
+    DISPATCH_SENT,
+    DISPATCH_SUPPRESSED,
     CommunicationDispatch,
 )
 from dotmac_kernel.delivery_providers import AttachmentRef, OutboundMessage
@@ -474,6 +481,42 @@ def load_dispatch(db: Session, tenant_id: UUID, dispatch_id: UUID) -> LoadedDisp
     return LoadedDispatch(dispatch=row, message=message)
 
 
+#: The terminal states the relay transport (K-8) may record from `pending`.
+_SETTLE_TARGETS = frozenset(
+    {DISPATCH_SENT, DISPATCH_FAILED, DISPATCH_DEAD, DISPATCH_SUPPRESSED}
+)
+
+
+def settle_dispatch(
+    db: Session, tenant_id: UUID, dispatch_id: UUID, status: str
+) -> bool:
+    """Move one `pending` dispatch to a terminal `status` (K-8).
+
+    Returns True when THIS call changed it. A dispatch that is not `pending`
+    (already terminal, a history row, another tenant's, unknown) is left alone
+    and returns False, so a repeated or racing call is a no-op and a terminal
+    state is never overwritten. Takes the row lock; flush-only, the caller owns
+    the transaction. The database guard trigger enforces the same transitions.
+    """
+    if status not in _SETTLE_TARGETS:
+        raise ValueError(f"cannot settle a dispatch to {status!r}")
+    row = db.execute(
+        select(CommunicationDispatch)
+        .where(
+            CommunicationDispatch.tenant_id == tenant_id,
+            CommunicationDispatch.dispatch_id == dispatch_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if row is None or row.status != DISPATCH_PENDING:
+        return False
+    row.status = status
+    row.terminal_at = func.now()
+    db.flush()
+    return True
+
+
 __all__ = [
     "DISPATCH_EVENT_TYPE",
     "DispatchConflict",
@@ -489,4 +532,5 @@ __all__ = [
     "import_history_key",
     "import_pending",
     "load_dispatch",
+    "settle_dispatch",
 ]
