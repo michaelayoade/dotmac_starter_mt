@@ -2,6 +2,7 @@
 
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.prerequisites import (
+    IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     PARTY_PERSON_CATALOG_V1,
     TENANT_SCOPE_CATALOG_V1,
@@ -11,7 +12,7 @@ from dotmac_expenses.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="expenses",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="expenses",
     migration_prefix="ex",
@@ -22,6 +23,8 @@ module = ModuleManifest(
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,
         PARTY_PERSON_CATALOG_V1.name,
+        # a2: every claim liability command runs in `execute_once`.
+        IDEMPOTENCY_LEDGER_V1.name,
     ),
 )
 

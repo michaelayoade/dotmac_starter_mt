@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-expenses"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant expense requests, claims, receipt evidence, policy evaluation and reimbursement eligibility"
 authors = ["DotMac"]
 readme = "README.md"
@@ -12,7 +12,7 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a85"
+dotmac-kernel = ">=0.1.0a103"
 sqlalchemy = "^2.0"
 
 [build-system]
