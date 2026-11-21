@@ -1,5 +1,34 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a7 — unreleased
+
+Publication happens only through the release lane after review and Michael's separate
+release go. No assembly adopts this candidate by this change. Billing is untouched.
+
+D-9 (Michael, 2026-11-17/18: two-person approval is never compulsory; separation of
+duties is an optional per-tenant policy, default off).
+
+- `separation_of_duties: bool = True` (keyword-only) on `create_supplier_payment`,
+  `approve_supplier_payment`, `record_supplier_payment` and
+  `reverse_supplier_payment`. The default keeps a5/a6 behaviour for any caller that
+  does not name it; an assembly passes its tenant policy explicitly.
+- `create_supplier_payment` stamps the policy in force on the row
+  (`supplier_payments.separation_enforced`, NOT NULL, default true). Approve, record
+  and reverse enforce the separation when `row.separation_enforced or
+  separation_of_duties` (the stricter value wins). The flag is part of each command's
+  idempotency fingerprint; a replay of `create_supplier_payment` for an existing
+  number under a different policy is a `Conflict`.
+- Migration `pa_0007_separation_policy`: adds the column, rewrites
+  `ck_supplier_payments_sod` as `NOT separation_enforced OR (<a6 predicate>)`, and adds
+  the `supplier_payments_guard_policy` UPDATE trigger that refuses any change of the
+  stamp. Downgrade refuses while any row has `separation_enforced = false`.
+- WIDENING, stated plainly: the owner's separation-of-duties rule and the
+  database CHECK `ck_supplier_payments_sod` are relaxed PER ROW when that row's stamp
+  is false. Rows stamped true (every pre-a7 row, and every row prepared with the
+  default) are enforced exactly as in a6, in the service and in the database.
+- Forbidden and not done: no synthetic distinct actor strings; the audit trail names
+  the one real actor.
+
 ## 0.1.0a6 — unreleased
 
 Publication is authorized by Michael (register v1516, D-9 and the a6 VAT-release and
