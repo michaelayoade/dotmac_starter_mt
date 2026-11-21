@@ -505,8 +505,7 @@ class World:
         return orchestrator.NegativeTargetInputs(
             execution_plan=self.plan,
             export_bytes=canonical(self.export),
-            expected_e10_receipt_digest=self.e10_override
-            or cp6.receipt_digest(row),
+            expected_e10_receipt_digest=self.e10_override or cp6.receipt_digest(row),
             candidate_envelope_bytes=self.candidate_bytes,
             installed_envelope_bytes=self.installed_bytes,
             host_admission_bytes=admission_bytes,
