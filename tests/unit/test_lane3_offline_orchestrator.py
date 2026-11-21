@@ -501,7 +501,7 @@ class World:
     def cp(self) -> dict[str, Any]:
         return self.export["cp_lane3"]
 
-    def run(self, *, refresh_digest: bool = True, **overrides: Any):
+    def verify_values(self, *, refresh_digest: bool = True) -> dict[str, Any]:
         row = self.cp["e10_receipt"]
         if refresh_digest:
             self.cp["e10_receipt_digest"] = cp6.receipt_digest(row)
@@ -526,6 +526,10 @@ class World:
             "now": self.now,
         }
         values.update(self.kwargs)
+        return values
+
+    def run(self, *, refresh_digest: bool = True, **overrides: Any):
+        values = self.verify_values(refresh_digest=refresh_digest)
         values.update(overrides)
         return orchestrator.verify_offline(**values)
 
