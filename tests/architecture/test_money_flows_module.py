@@ -117,9 +117,11 @@ FUNDED_CHARGE_ONLY = frozenset({"funded_charge.py"})
 # the account terms and the balance to pay a new postpaid invoice. Read-only
 # names; the single widening beyond FundedCharge.
 FUNDED_CHARGE_AND_SETTLE = frozenset({"funded_charge.py", "settle.py"})
-# GAP-3 dating: Settle alone reads the account statement (read-only, one account,
-# no lock) to find the newest cash received since the invoice dates.
-SETTLE_ONLY = frozenset({"settle.py"})
+# GAP-3 / GAP-L1 dating: only the private ``_credit_dating.py`` reads the account
+# statement (read-only, one account, no lock) to find the newest credit that
+# reached the account; Settle and FundedCharge call it and never read the
+# statement themselves.
+CREDIT_DATING_ONLY = frozenset({"_credit_dating.py"})
 # The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
 # narrow this to modules; PR E adds the F3/F5 modules to the restricted names.
 OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
@@ -147,8 +149,8 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "AccountTermsV1": FUNDED_CHARGE_AND_SETTLE,
     "get_funding_availability": FUNDED_CHARGE_AND_SETTLE,
     "GetFundingAvailabilityV1": FUNDED_CHARGE_AND_SETTLE,
-    "get_account_statement": SETTLE_ONLY,
-    "GetAccountStatementV1": SETTLE_ONLY,
+    "get_account_statement": CREDIT_DATING_ONLY,
+    "GetAccountStatementV1": CREDIT_DATING_ONLY,
     "get_confirmed_settlement": FUNDED_CHARGE_ONLY,
     "GetConfirmedSettlementV1": FUNDED_CHARGE_ONLY,
     "IssueRatedInvoiceV3": FUNDED_CHARGE_ONLY,
@@ -688,6 +690,7 @@ def test_manifest_declares_a_tenant_only_money_flows_lineage() -> None:
         "money_flows.funded_charge.access.v1",
         "money_flows.funded_charge.reevaluate.v1",
         "money_flows.funded_charge.terms_recheck.v1",
+        "money_flows.funded_charge.credit_recheck.v1",
     }
     assert set(module.requires) == {"module_database_roles.v1", "outbox_relay.v1"}
     assert module.tenant_requires == ("tenant_scope_catalog.v1",)
@@ -722,6 +725,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "DEFAULT_ACCEPTED_SOURCES",
         "FUNDED_CHARGE_ACCESS_EVENT_TYPE",
         "FUNDED_CHARGE_ATTENTION_EVENT_TYPE",
+        "FUNDED_CHARGE_CREDIT_RECHECK_EVENT_TYPE",
         "FUNDED_CHARGE_DEFINITION_VERSION",
         "FUNDED_CHARGE_DISCHARGED_EVENT_TYPE",
         "FUNDED_CHARGE_REEVALUATE_EVENT_TYPE",
@@ -729,9 +733,11 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "FUNDED_CHARGE_TRANSITIONS",
         "SETTLE_ATTENTION_EVENT_TYPE",
         "SETTLE_SETTLED_EVENT_TYPE",
+        "AccountCreditChangedV1",
         "AccountTermsChangedV1",
         "BalanceAppliedOutcomeV1",
         "BalancePassFailed",
+        "CreditRecheckOutcomeV1",
         "DepositApplication",
         "FundedChargeCursorV1",
         "FundedChargeInstanceV1",
@@ -772,6 +778,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "list_pending_funded_charges",
         "list_settle_attention",
         "module",
+        "on_account_credit_changed",
         "on_settlement_settled",
         "reevaluate_account_terms",
         "record_funded_charge_attention",
@@ -1273,12 +1280,59 @@ def test_terms_and_availability_reads_are_settle_and_funded_charge_only() -> Non
         assert forbidden_call_violations(source, "adjust.py"), name
 
 
-def test_the_account_statement_read_is_settle_only() -> None:
+#: The only modules that may use the dating module (and so the statement read).
+DATING_CALLERS = frozenset({"settle.py", "funded_charge.py"})
+DATING_NAMES = frozenset({"_credit_dating", "newest_credit_at"})
+
+
+def dating_reference_violations(source: str, relative_path: str) -> list[str]:
+    """A module outside ``DATING_CALLERS`` may not reach the statement read through
+    the dating module (``newest_credit_at``)."""
+    if relative_path in DATING_CALLERS | {"_credit_dating.py"}:
+        return []
+    return [
+        f"{name}: only {sorted(DATING_CALLERS)} may use the credit dating module"
+        for name in sorted(referenced_names(source) & DATING_NAMES)
+    ]
+
+
+def test_only_settle_and_funded_charge_reach_the_credit_dating_module() -> None:
+    for source in (
+        "from dotmac_money_flows import _credit_dating",
+        "from dotmac_money_flows._credit_dating import newest_credit_at",
+        "import dotmac_money_flows._credit_dating",
+        "newest_credit_at(db)",
+        "dating.newest_credit_at(db)",
+    ):
+        assert dating_reference_violations(source, "adjust.py"), source
+        assert dating_reference_violations(source, "settle.py") == [], source
+        assert dating_reference_violations(source, "funded_charge.py") == [], source
+    modules = {
+        _relative(path)
+        for path in _source_files()
+        if referenced_names(path.read_text("utf-8")) & DATING_NAMES
+    }
+    assert modules <= DATING_CALLERS | {"_credit_dating.py"}
+    assert DATING_CALLERS <= modules  # non-vacuous: both really use it
+    for path in _source_files():
+        assert (
+            dating_reference_violations(path.read_text("utf-8"), _relative(path)) == []
+        )
+
+
+def test_the_account_statement_read_is_credit_dating_only() -> None:
     for name in ("get_account_statement", "GetAccountStatementV1"):
         source = f"from dotmac_billing import {name}\n"
-        assert forbidden_call_violations(source, "settle.py") == [], name
+        assert forbidden_call_violations(source, "_credit_dating.py") == [], name
+        assert forbidden_call_violations(source, "settle.py"), name
         assert forbidden_call_violations(source, "funded_charge.py"), name
         assert forbidden_call_violations(source, "adjust.py"), name
+    # The real tree: no module but the dating module names the statement read.
+    for path in _source_files():
+        if _relative(path) == "_credit_dating.py":
+            continue
+        names = referenced_names(path.read_text("utf-8"))
+        assert not names & {"get_account_statement", "GetAccountStatementV1"}, path
 
 
 def test_the_listed_owner_calls_are_accepted() -> None:

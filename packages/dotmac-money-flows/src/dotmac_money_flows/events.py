@@ -16,6 +16,10 @@ FUNDED_CHARGE_REEVALUATE_EVENT_TYPE = "money_flows.funded_charge.reevaluate.v1"
 #: back to ``reevaluate_account_terms``.
 FUNDED_CHARGE_TERMS_RECHECK_EVENT_TYPE = "money_flows.funded_charge.terms_recheck.v1"
 
+#: Continuation of a capped account-credit re-check; the assembly routes it back
+#: to ``on_account_credit_changed``.
+FUNDED_CHARGE_CREDIT_RECHECK_EVENT_TYPE = "money_flows.funded_charge.credit_recheck.v1"
+
 EVENT_TYPES = (
     SETTLE_SETTLED_EVENT_TYPE,
     SETTLE_ATTENTION_EVENT_TYPE,
@@ -24,12 +28,14 @@ EVENT_TYPES = (
     FUNDED_CHARGE_ACCESS_EVENT_TYPE,
     FUNDED_CHARGE_REEVALUATE_EVENT_TYPE,
     FUNDED_CHARGE_TERMS_RECHECK_EVENT_TYPE,
+    FUNDED_CHARGE_CREDIT_RECHECK_EVENT_TYPE,
 )
 
 __all__ = [
     "EVENT_TYPES",
     "FUNDED_CHARGE_ACCESS_EVENT_TYPE",
     "FUNDED_CHARGE_ATTENTION_EVENT_TYPE",
+    "FUNDED_CHARGE_CREDIT_RECHECK_EVENT_TYPE",
     "FUNDED_CHARGE_DISCHARGED_EVENT_TYPE",
     "FUNDED_CHARGE_REEVALUATE_EVENT_TYPE",
     "FUNDED_CHARGE_TERMS_RECHECK_EVENT_TYPE",

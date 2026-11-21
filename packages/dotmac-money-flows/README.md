@@ -112,3 +112,71 @@ Duties of the caller (Sub-thin):
 
 Credit-note excess and reversals trigger no pass of their own; the next invoice
 issue or deposit picks them up.
+
+## Credit that arrives without a deposit pays pending prepaid charges (GAP-L1)
+
+A pending F2 charge keeps the service off until funds cover it. A deposit re-checks
+it (`on_settlement_settled`), but credit also reaches an account in other ways: an
+opening cash lot, a held partition admitted after the seal, a refund or an
+allocation reversed, an opening refund corrected. None of those settles anything, so
+without this command a prepaid customer could hold credit and stay cut off.
+
+`on_account_credit_changed(db, scope=..., request=AccountCreditChangedV1(account),
+ports=FundedChargePorts)` returns a `CreditRecheckOutcomeV1(billing_account_id,
+changed, reason_code)`. Order: no pending row returns `no_pending_charges` with one
+indexed `EXISTS` and no lock; otherwise the Billing account lock is taken first (as
+every F2 command does) and no unrestricted credit returns `no_balance`; then the
+pending rows are locked oldest first (at most `reevaluation_batch_cap`) and each goes
+through the same re-evaluation as a settlement: withdrawn if the source no longer
+holds the charge or the account is no longer prepaid at the period start, whole
+charges only, a misfit is skipped (`nothing_fits` if none fit). The payload carries
+only the account; everything else is re-read from Billing, so a mis-routed event
+causes at most an early, harmless re-check. There is no new source reference: the
+pending to discharged change under the row lock is the exactly-once guard, and the
+discharge keeps its own `money-flows:funded-charge:{instance}:{invoice}` reference.
+
+**Dating.** A charge is dated `max(due_at, newest credit line since due_at)`: the
+latest Billing account-statement line of any group kind that adds available credit,
+in `[due_at, 9999-12-31)` (`issue_at = due_at` when there is none). The charge is
+never dated before the money that paid it reached the account. The statement is read
+through the private `_credit_dating` module after the account lock, once per distinct
+due time per call, with the same split-on-`statement_too_large` rule as GAP-3; Settle
+passes the `settlement_accepted` kind filter so its behaviour is unchanged.
+
+A technical fault (an unreadable or unsplittable statement) raises
+(`BalancePassFailed`) and writes nothing; the caller rolls back and event delivery
+retries. An owner refusal on a covered charge raises `FundedChargeStepFailed` as in
+`on_settlement_settled`; the transport rolls back and calls
+`record_funded_charge_attention(..., continue_credit_recheck=True)`, which enqueues
+`money_flows.funded_charge.credit_recheck.v1` (account, no cursor) while pending rows
+remain, so rows rolled back with the failed one are not stranded. There is no loop:
+the failed row is no longer pending.
+
+Duties of the caller (Sub-thin):
+
+- Route **every tenant `billing.receivable.position.v2`** to `on_account_credit_changed`
+  (account id only), in its own transaction per event, and route
+  `money_flows.funded_charge.credit_recheck.v1` back to the same command with its
+  cursor. A generic route is deliberate: a list of group kinds kept in Sub-thin would
+  silently miss a source. F2's own draw emits `position.v2`; that run is a no-op.
+- Run the step-failure transport with `continue_credit_recheck=True` (the
+  `record_funded_charge_attention` call after a `FundedChargeStepFailed` from this
+  command). Let a `BalancePassFailed` or Billing exception propagate so the relay
+  retries and dead-letters after its attempts: an ops alert, never a billing queue.
+- Start F2 charges only after the authority switch. A pending row writes nothing to
+  Billing, so one can exist before its account's opening credit lands; this command
+  closes that gap, but a start before the switch would price the account on the
+  wrong authority.
+- Q1 dating duty (opening lane): the opening import command's `occurred_at` is the
+  date of the lot, and Billing does not check it. Date an admitted held partition at
+  its **admission instant**, so the customer never pays for the days they were cut
+  off and nothing is back-dated across a month end. A lot dated before the charge's
+  due time pays at the due time.
+- Q3 (census duty, no code): a held prepaid account goes off at its first due date
+  after the seal; if the customer pays before admission the account is no longer
+  pristine and the admission is refused for good, stranding the legacy credit. Count
+  held prepaid accounts with credit in the dry-run census and admit them within the
+  first billing day (D-9 makes approval default off).
+
+Out of scope: an earmark release raises credit with no posting group (only
+`settlement.earmark.changed.v1`) and has no caller outside Billing tests.
