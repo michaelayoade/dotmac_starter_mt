@@ -13,6 +13,7 @@ from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from dotmac_billing import BillingRuleViolation
@@ -32,6 +33,7 @@ from dotmac_money_flows import (
     StartFundedChargeV1,
 )
 from dotmac_money_flows import funded_charge as flows
+from dotmac_money_flows._service_period import period_end
 from dotmac_money_flows.contracts import (
     FUNDED_CHARGE_INSERT_STATES,
     FUNDED_CHARGE_TRANSITIONS,
@@ -162,9 +164,31 @@ def test_nothing_else_is_a_replay_not_even_by_message():
 # --------------------------------------------------------------------------
 # Command checks and the period instant
 # --------------------------------------------------------------------------
-def _command(*, key=KEY, account=ACCOUNT, total="10.00", status="verified", start=DUE):
+ZONE = ZoneInfo("UTC")
+
+
+def _end(start):
+    """The monthly period end under the UTC policy (GAP-5)."""
+    return None if start is None else period_end(start, "monthly", ZONE)
+
+
+def _command(
+    *,
+    key=KEY,
+    account=ACCOUNT,
+    total="10.00",
+    status="verified",
+    start=DUE,
+    end="monthly",
+    timing="advance",
+    due_at="issue",
+    timezone="UTC",
+):
     return SimpleNamespace(
+        timezone=timezone,
+        due_at=start if due_at == "issue" else due_at,
         obligation=SimpleNamespace(
+            collection_timing=timing,
             source_system=key.source_system,
             source_kind=key.source_kind,
             source_fact_id=key.source_fact_id,
@@ -172,14 +196,31 @@ def _command(*, key=KEY, account=ACCOUNT, total="10.00", status="verified", star
             billing_account_id=account,
             total_amount=_money(total),
             service_period=SimpleNamespace(
-                status=SimpleNamespace(value=status), starts_at=start
+                status=SimpleNamespace(value=status),
+                starts_at=start,
+                ends_at=_end(start) if end == "monthly" else end,
             ),
-        )
+        ),
     )
 
 
+@pytest.fixture(autouse=True)
+def _monthly_terms(monkeypatch):
+    """The Billing terms every command check reads: monthly."""
+    monkeypatch.setattr(
+        flows,
+        "_terms",
+        lambda *a, **k: SimpleNamespace(period=SimpleNamespace(value="monthly")),
+    )
+
+
+def _matches(command, charge=None):
+    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, None, FundedChargePolicyV1("p1"))
+    return flows._command_matches(ctx, command, KEY, ACCOUNT, charge or _charge(), DUE)
+
+
 def test_a_command_that_is_the_charges_own_passes():
-    assert flows._command_matches(_command(), KEY, ACCOUNT, _charge(), DUE)
+    assert _matches(_command())
 
 
 @pytest.mark.parametrize(
@@ -192,10 +233,14 @@ def test_a_command_that_is_the_charges_own_passes():
         _command(status="unknown_unverified"),
         _command(start=DUE + timedelta(seconds=1)),
         _command(start=None),
+        _command(end=DUE + timedelta(days=29)),  # not the terms period
+        _command(timing="arrears"),
+        _command(due_at=DUE + timedelta(days=1)),
+        _command(timezone="Africa/Lagos"),  # the policy says UTC
     ],
 )
 def test_a_command_that_is_not_the_charges_own_is_refused(command):
-    assert not flows._command_matches(command, KEY, ACCOUNT, _charge(), DUE)
+    assert not _matches(command)
 
 
 class _Policy:
@@ -289,7 +334,13 @@ def test_a_re_evaluated_charge_is_issued_at_the_later_of_due_and_the_cash(
         service_ref="service:one",
         billing_account_id=ACCOUNT,
     )
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges(_charge())), "p1")
+    ctx = flows._Ctx(
+        None,
+        SCOPE,
+        SCOPE.tenant_id,
+        _ports(_Charges(_charge())),
+        FundedChargePolicyV1("p1"),
+    )
 
     flows._reevaluate(ctx, row, settlement)
 
@@ -456,7 +507,9 @@ def test_a_re_evaluated_row_that_is_no_longer_prepaid_is_withdrawn_unposted(
     )
     monkeypatch.setattr(flows, "issue_rated_invoice", _boom)
     charges = _Charges(_charge())
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(charges), "p1")
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(charges), FundedChargePolicyV1("p1")
+    )
     row = SimpleNamespace(billing_account_id=ACCOUNT)
 
     flows._discharge(
@@ -485,7 +538,9 @@ def test_a_command_that_is_not_the_charges_own_goes_to_attention_with_no_post(
     monkeypatch.setattr(flows, "issue_rated_invoice", _boom)
     charges = _Charges(_charge())
     charges.issue_command = lambda *a, **k: _command(start=DUE + timedelta(days=1))
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(charges), "p1")
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(charges), FundedChargePolicyV1("p1")
+    )
 
     flows._discharge(
         ctx,
@@ -578,7 +633,7 @@ def _evaluate(monkeypatch, rows, balance, cap):
     remaining = [Money.of(balance, NGN)]
     order, funded, events = [], [], []
 
-    def fits(ctx, charge, account_id):
+    def fits(ctx, charge, account_id, issue_at):
         order.append(charge.key.source_fact_id)
         return remaining[0] >= charge.total
 
@@ -683,7 +738,9 @@ def test_a_withdrawn_charge_is_recorded_and_the_loop_moves_on(monkeypatch):
         service_ref=None,
         billing_account_id=ACCOUNT,
     )
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges()), "p1")
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(_Charges()), FundedChargePolicyV1("p1")
+    )
 
     assert flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE)) is row
 
@@ -760,7 +817,9 @@ def test_the_source_version_is_the_sum_of_version_plus_one_and_only_rises(db):
 
 
 def _signal_ctx(db):
-    return flows._Ctx(db, SCOPE, SCOPE.tenant_id, _ports(_Charges()), "p1")
+    return flows._Ctx(
+        db, SCOPE, SCOPE.tenant_id, _ports(_Charges()), FundedChargePolicyV1("p1")
+    )
 
 
 def test_the_signal_is_emitted_only_when_the_service_state_changes(db, monkeypatch):
@@ -859,7 +918,13 @@ def test_a_re_evaluated_row_that_became_postpaid_is_withdrawn_before_funds(
 ):
     written = _written(monkeypatch)
     monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: False)
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(_Charges(_charge())), "p1")
+    ctx = flows._Ctx(
+        None,
+        SCOPE,
+        SCOPE.tenant_id,
+        _ports(_Charges(_charge())),
+        FundedChargePolicyV1("p1"),
+    )
 
     flows._reevaluate(
         ctx, _pending_row(), SimpleNamespace(observed_at=DUE, settlement_id=uuid4())
@@ -886,7 +951,9 @@ def test_a_charge_the_port_reports_under_another_account_or_key_is_attention(
     if other == "key":
         row = _pending_row(charge_ref=flows.charge_ref_for(row_key))
         charges.charges[row_key] = charge  # the port answers with a different key
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(charges), "p1")
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(charges), FundedChargePolicyV1("p1")
+    )
 
     flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE, settlement_id=uuid4()))
 
@@ -904,7 +971,9 @@ def test_a_charge_source_failure_on_one_row_is_a_step_failure_for_that_row(
             raise RuntimeError("source down")
 
     row = _pending_row()
-    ctx = flows._Ctx(None, SCOPE, SCOPE.tenant_id, _ports(Broken()), "p1")
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(Broken()), FundedChargePolicyV1("p1")
+    )
     with pytest.raises(FundedChargeStepFailed) as failed:
         flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE))
     assert failed.value.instance_id == row.id

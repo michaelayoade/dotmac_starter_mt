@@ -691,12 +691,12 @@ def _command_matches(
     account_id: UUID,
     charge: RatedChargeV1,
     issue_at: datetime,
-    terms: AccountTermsV1,
 ) -> bool:
     """The port's invoice command must be this charge, for this period.
 
-    ``terms`` are the terms at ``issue_at``. A prorated charge is checked against
-    the terms at its own enclosing start (immutable: terms cannot be back-dated).
+    The period length is the terms period at ``issue_at``. A prorated charge is
+    checked against the terms at its own enclosing start (immutable: terms cannot
+    be back-dated).
     """
     obligation = command.obligation
     period = obligation.service_period
@@ -707,6 +707,7 @@ def _command_matches(
         return False
     enclosing = _enclosing(charge)
     if enclosing is None:
+        terms = _terms(ctx.db, ctx.scope, account_id, issue_at)
         expected_end = period_end(issue_at, terms.period.value, zone)
     else:
         start_terms = _terms(ctx.db, ctx.scope, account_id, enclosing[0])
@@ -800,8 +801,7 @@ def _discharge(
     """Issue the invoice and pay it from credit, or record why not (lock held)."""
     key = key_for_charge_ref(charge_ref)
     account_id = charge.billing_account_id if row is None else row.billing_account_id
-    terms = _terms(ctx.db, ctx.scope, account_id, issue_at)
-    if terms.contract_type.value != _PREPAID:
+    if not _is_prepaid(ctx.db, ctx.scope, account_id, issue_at):
         if row is None:
             raise FundedChargeRefused("not_prepaid")
         return _write(
@@ -831,7 +831,7 @@ def _discharge(
         if row is None:
             raise
         raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
-    if not _command_matches(ctx, command, key, account_id, charge, issue_at, terms):
+    if not _command_matches(ctx, command, key, account_id, charge, issue_at):
         return _write(
             ctx,
             row,
