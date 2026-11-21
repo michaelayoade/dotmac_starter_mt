@@ -223,6 +223,9 @@ STDLIB_ALLOWED = frozenset(
         "collections",
         "datetime",
         "pathlib",
+        # GAP-5: a pure stdlib time-zone lookup (reads tzdata only), used by the
+        # private period verifier. Own commit, for architect sign-off.
+        "zoneinfo",
     }
 )
 
