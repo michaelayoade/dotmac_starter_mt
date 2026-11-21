@@ -27,6 +27,8 @@ from dotmac_collections import (
     CollectionPolicyService,
     CreateCollectionPolicyV1,
     FakeCollectionsTimer,
+    HoldLifted,
+    LiftCollectionHoldV1,
     PlaceCollectionHoldV1,
     PolicyPublicationV1,
     PolicyStepDraftV1,
@@ -36,6 +38,7 @@ from dotmac_collections import (
     ProcessCollectionAccessHoldDueV1,
     TimerTriggerV1,
     TriggerProvenanceV1,
+    get_collection_case,
     get_collection_subject_state,
 )
 from dotmac_kernel.messaging.models import OutboxEvent
@@ -228,6 +231,17 @@ def _publish_policy(scratch, scope) -> UUID:
     return version_id
 
 
+def _trigger_of(handle) -> TimerTriggerV1:
+    return TimerTriggerV1(
+        handle.timer_id,
+        handle.identity,
+        handle.generation,
+        handle.due_at,
+        handle.output_event_type,
+        handle.expected_source_version,
+    )
+
+
 class _Chain:
     """What the assembly does, one transaction per step."""
 
@@ -261,7 +275,7 @@ class _Chain:
             ),
         )
 
-    def assess(self, at: datetime):
+    def assess(self, at: datetime, wake=None):
         observation = _read(self.scratch, self.scope, self.document_id).position
         with session(self.scratch, self.scope) as db:
             result = CollectionCaseService.assess(
@@ -271,6 +285,7 @@ class _Chain:
                 reader=BillingReceivablesReader(db),
                 timer=self.timer,
                 assessed_at=at,
+                exposure_wake=wake,
             )
             db.commit()
         return result
@@ -286,12 +301,21 @@ class _Chain:
         assert handle is not None
         return handle
 
-    def balance_pass(self):
+    def balance_pass(self, case_id: UUID):
+        """The assembly's step before the hold wake: its own transaction.
+
+        The invoice comes from the public case read, not from fixture knowledge.
+        """
+
+        with session(self.scratch, self.scope) as db:
+            view = get_collection_case(db, scope=self.scope, case_id=case_id)
+        prefix, _, identity = view.exposure_ref.partition(":")
+        assert (view.source_owner, prefix) == (OWNER, "document")
         with session(self.scratch, self.scope) as db:
             outcome = apply_balance_on_invoice_issued(
                 db,
                 scope=self.scope,
-                request=InvoiceIssuedV1(self.document_id),
+                request=InvoiceIssuedV1(UUID(identity)),
                 ports=make_ports(RecordingTargets()),
             )
             db.commit()
@@ -376,14 +400,16 @@ def test_chain_not_due_then_due_then_hold_then_payment_lifts(scratch) -> None:
     due_wake = chain.wake("due", f"{OWNER}:{chain.ref}")
     assert due_wake.due_at == DUE
 
-    opened = chain.assess(DUE)
+    opened = chain.assess(DUE, wake=_trigger_of(due_wake))
     assert isinstance(opened, CaseAssessed) and opened.opened
+    with session(scratch, scope) as db:  # the fired wake is consumed, none scheduled
+        assert chain.timer.current(db, due_wake.identity) is None
     hold_wake = chain.wake("access_hold", str(opened.case_id))
     assert hold_wake.due_at == DUE + DEFAULT_GRACE
     assert chain.events() == []
 
     # No balance: the pass is a quiet no-op and the hold wake holds the account.
-    assert chain.balance_pass().applied_document_ids == ()
+    assert chain.balance_pass(opened.case_id).applied_document_ids == ()
     evaluated = chain.hold_wake(opened.case_id, DUE + DEFAULT_GRACE)
     assert evaluated.subject_state == "held"
     assert len(chain.events()) == 1
@@ -408,7 +434,7 @@ def test_chain_balance_pass_before_the_hold_prevents_the_hold(scratch) -> None:
     chain = _Chain(scratch, scope, document_id)
     opened = chain.assess(DUE)
     assert isinstance(opened, CaseAssessed)
-    assert chain.balance_pass().applied_document_ids == (document_id,)
+    assert chain.balance_pass(opened.case_id).applied_document_ids == (document_id,)
     evaluated = chain.hold_wake(opened.case_id, DUE + DEFAULT_GRACE)
     assert evaluated.lifecycle == "resolved"
     assert evaluated.subject_state == "clear"
@@ -443,3 +469,94 @@ def test_chain_a_collection_hold_restores_service_and_a_lift_cuts_it_again(
         db.commit()
     assert chain.fan_out("service:example") is DesiredAccess.ALLOW
     assert [e.payload["active"] for e in chain.events()].count(False) == 1
+
+    # Lifting the hold cuts the still-overdue account again (the hold stays engaged).
+    with session(scratch, scope) as db:
+        lifted = CollectionHoldService.lift(
+            db,
+            LiftCollectionHoldV1(
+                command_id=uuid4(),
+                idempotency_key=f"chain-lift:{document_id}",
+                scope=scope,
+                subject_ref=subject,
+                external_ref="payment_arrangement:chain",
+                reason_code="arrangement_ended",
+                evidence_ref="arrangement:chain",
+                actor_ref="system:sub-thin",
+                lifted_at=DUE + DEFAULT_GRACE + timedelta(hours=2),
+            ),
+            chain.timer,
+        )
+        db.commit()
+    assert isinstance(lifted, HoldLifted)
+    assert chain.fan_out("service:example") is DesiredAccess.DENY
+    assert [e.payload["active"] for e in chain.events()] == [True, False, True]
+
+
+def test_chain_late_opened_case_balance_pass_runs_before_the_hold_engages(
+    scratch,
+) -> None:
+    scope, account_id, document_id = _world(scratch, balance="500.00")
+    chain = _Chain(scratch, scope, document_id)
+    late = DUE + timedelta(days=30)  # long past due + grace
+    opened = chain.assess(late)
+    assert isinstance(opened, CaseAssessed) and opened.opened
+    # Past its instant but not engaged: nothing is cut yet, and the wake is due now.
+    assert chain.events() == []
+    assert chain.wake("access_hold", str(opened.case_id)).due_at == late
+    assert chain.fan_out("service:example") is DesiredAccess.ALLOW
+    # The balance pass pays the invoice, then the wake finds it closed: never held.
+    assert chain.balance_pass(opened.case_id).applied_document_ids == (document_id,)
+    evaluated = chain.hold_wake(opened.case_id, late)
+    assert (evaluated.lifecycle, evaluated.subject_state) == ("resolved", "clear")
+    assert chain.events() == []
+
+
+def test_chain_late_opened_case_without_a_balance_is_held_by_the_wake(
+    scratch,
+) -> None:
+    scope, account_id, document_id = _world(scratch)
+    chain = _Chain(scratch, scope, document_id)
+    late = DUE + timedelta(days=30)
+    opened = chain.assess(late)
+    assert chain.events() == []
+    assert chain.balance_pass(opened.case_id).applied_document_ids == ()
+    assert chain.hold_wake(opened.case_id, late).subject_state == "held"
+    assert len(chain.events()) == 1
+    assert chain.fan_out("service:example") is DesiredAccess.DENY
+
+
+def test_an_item_issued_before_the_flip_reads_terms_at_the_floor(scratch) -> None:
+    scope = new_scope(scratch)
+    before_flip = BASE - timedelta(days=3)  # the fixture's terms start at BASE - 12h
+    with session(scratch, scope) as db:
+        seed_default_terms(db, scope, contract_type="postpaid")
+        account = seed_account(db, scope)
+        invoice = seed_invoice(
+            db,
+            scope,
+            SimpleNamespace(id=account.id),
+            net="100.00",
+            issued_at=before_flip,
+        )
+        db.commit()
+        document_id = invoice.id
+
+    def read(floor):
+        with session(scratch, scope) as db:
+            return BillingReceivablesReader(db, terms_floor_at=floor).read(
+                scope=scope,
+                source_owner=OWNER,
+                exposure_ref=f"document:{document_id}",
+                as_of=before_flip,
+            )
+
+    # No floor, or a floor still before any terms: blocked, not a poison message.
+    assert read(None) == PositionUnavailable("account_terms_missing", None)
+    assert read(before_flip) == PositionUnavailable("account_terms_missing", None)
+    # With the flip as the floor the item is chased on the terms in force then.
+    result = read(BASE)
+    assert isinstance(result, PositionReadOk)
+    due = before_flip + timedelta(days=30)
+    assert result.position.due_at == due
+    assert result.position.access_hold_from == due + DEFAULT_GRACE

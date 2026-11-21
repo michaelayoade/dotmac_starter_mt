@@ -22,16 +22,31 @@ from dotmac_collections.holds import (
     HoldPlaced,
     LiftCollectionHoldV1,
     PlaceCollectionHoldV1,
+    RepublishSubjectStateV1,
 )
 from dotmac_collections.manifest import module
-from dotmac_collections.models import PLATFORM_TABLES, TENANT_TABLES
+from dotmac_collections.models import (
+    PLATFORM_TABLES,
+    TENANT_TABLES,
+    CollectionNoticeRequest,
+)
 from dotmac_collections.service import (
     CaseAssessed,
     CollectionCaseService,
     CollectionHoldService,
     CollectionsConflict,
+    ProcessCollectionAccessHoldDueV1,
+    ProcessCollectionStepDueV1,
+    StepDueBlocked,
     _lock_key,
+    get_collection_case,
     get_collection_subject_state,
+    republish_subject_state,
+)
+from dotmac_collections.timers import (
+    FakeCollectionsTimer,
+    TimerIdentityV1,
+    TimerTriggerV1,
 )
 from dotmac_kernel.cache import PlatformScope, TenantScope, scope_segment
 from dotmac_kernel.messaging.models import OutboxEvent, PlatformOutboxEvent
@@ -63,6 +78,55 @@ def _held_position(scope, *, version=1, amount="100.00", state="open"):
         _position(scope, source_version=version, amount=amount, financial_state=state),
         access_hold_from=DUE,
     )
+
+
+def _trigger(timer, session, scope, case_id, purpose):
+    identity = TimerIdentityV1(
+        scope, "collections.case", "collection_case", str(case_id), purpose
+    )
+    handle = timer.current(session, identity)
+    assert handle is not None, purpose
+    return TimerTriggerV1(
+        handle.timer_id,
+        handle.identity,
+        handle.generation,
+        handle.due_at,
+        handle.output_event_type,
+        handle.expected_source_version,
+    )
+
+
+def _engage(session, scope, timer, case_id, at, position=None):
+    """The access-hold wake (the balance pass would have run first)."""
+
+    return CollectionCaseService.process_access_hold_due(
+        session,
+        command=ProcessCollectionAccessHoldDueV1(
+            scope=scope,
+            trigger=_trigger(timer, session, scope, case_id, "access_hold"),
+            processed_at=at,
+        ),
+        reader=_reader(position or _held_position(scope)),
+        timer=timer,
+    )
+
+
+def _open_held(session, scope, policy, timer=None, *, at=NOW):
+    """Open the overdue case and engage its hold: the subject is held."""
+
+    timer = timer or FakeCollectionsTimer()
+    opened = CollectionCaseService.assess(
+        session,
+        command=_command(scope, 1),
+        policy_version_id=policy,
+        reader=_reader(_held_position(scope)),
+        timer=timer,
+        assessed_at=at,
+    )
+    assert isinstance(opened, CaseAssessed)
+    engaged = _engage(session, scope, timer, opened.case_id, at)
+    assert engaged.subject_state == "held"
+    return opened, timer
 
 
 def _place_command(scope, subject, ref, *, key=None):
@@ -259,13 +323,7 @@ def test_the_hold_path_holds_once_and_place_and_lift_are_idempotent(
     subject = "subscriber:concurrency"
     with _tenant_session(app_url, tenant_id) as session:
         policy = _publish_policy(session, scope)
-        opened = CollectionCaseService.assess(
-            session,
-            command=_command(scope, 1),
-            policy_version_id=policy,
-            reader=_reader(_held_position(scope)),
-            assessed_at=NOW,
-        )
+        opened, timer = _open_held(session, scope, policy)
         session.commit()
         assert isinstance(opened, CaseAssessed)
         assert len(_events(session, True)) == 1
@@ -290,10 +348,10 @@ def test_the_hold_path_holds_once_and_place_and_lift_are_idempotent(
         assert len(_events(session, False)) == 1
 
         lift = _lift_command(scope, subject, "dispute:pg-1")
-        assert isinstance(CollectionHoldService.lift(session, lift), HoldLifted)
-        assert CollectionHoldService.lift(session, lift).replayed
+        assert isinstance(CollectionHoldService.lift(session, lift, timer), HoldLifted)
+        assert CollectionHoldService.lift(session, lift, timer).replayed
         gone = CollectionHoldService.lift(
-            session, _lift_command(scope, subject, "dispute:pg-1")
+            session, _lift_command(scope, subject, "dispute:pg-1"), timer
         )
         assert isinstance(gone, HoldNotLive)
         session.commit()
@@ -316,13 +374,7 @@ def test_versions_rise_across_tenants_from_one_plane_sequence(
         scope = TenantScope(tenant)
         with _tenant_session(app_url, tenant) as session:
             policy = _publish_policy(session, scope)
-            CollectionCaseService.assess(
-                session,
-                command=_command(scope, 1),
-                policy_version_id=policy,
-                reader=_reader(_held_position(scope)),
-                assessed_at=NOW,
-            )
+            _open_held(session, scope, policy)
             session.commit()
             state = get_collection_subject_state(
                 session, scope=scope, subject_ref="subscriber:concurrency"
@@ -341,13 +393,7 @@ def test_race_between_resolve_and_place_blocks_on_the_subject_lock_and_flips_onc
     subject = "subscriber:concurrency"
     with _tenant_session(app_url, tenant_id) as session:
         policy = _publish_policy(session, scope)
-        CollectionCaseService.assess(
-            session,
-            command=_command(scope, 1),
-            policy_version_id=policy,
-            reader=_reader(_held_position(scope)),
-            assessed_at=NOW,
-        )
+        _open_held(session, scope, policy)
         session.commit()
         assert len(_events(session, True)) == 1
 
@@ -438,13 +484,7 @@ def test_platform_plane_holds_and_flips_on_the_platform_role(
     try:
         with Session(engine) as session:
             policy = _publish_policy(session, scope)
-            opened = CollectionCaseService.assess(
-                session,
-                command=_command(scope, 1),
-                policy_version_id=policy,
-                reader=_reader(_held_position(scope)),
-                assessed_at=NOW,
-            )
+            opened, _ = _open_held(session, scope, policy)
             session.commit()
             assert isinstance(opened, CaseAssessed)
             events = [
@@ -463,3 +503,276 @@ def test_platform_plane_holds_and_flips_on_the_platform_role(
             assert state.state == "suppressed"
     finally:
         engine.dispose()
+
+
+def _assess_open(session, scope, policy, timer, at):
+    return CollectionCaseService.assess(
+        session,
+        command=_command(scope, 1),
+        policy_version_id=policy,
+        reader=_reader(_held_position(scope)),
+        timer=timer,
+        assessed_at=at,
+    )
+
+
+def test_a_late_opened_case_is_held_only_when_its_wake_engages(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    late = NOW + timedelta(days=30)  # long past the hold instant
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, late)
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        assert _events(session) == []  # past the instant, but not engaged
+        view = get_collection_case(session, scope=scope, case_id=opened.case_id)
+        assert view.access_hold_engaged_at is None
+        assert view.access_hold_from == DUE
+        wake = _trigger(timer, session, scope, opened.case_id, "access_hold")
+        assert wake.due_at == late  # the later of the instant and now
+
+        # A paid invoice means nothing engages (the balance pass ran before the wake).
+        paid = _held_position(scope, version=2, amount="0.00", state="resolved")
+        done = _engage(session, scope, timer, opened.case_id, late, paid)
+        session.commit()
+        assert (done.lifecycle, done.subject_state) == ("resolved", "clear")
+        assert _events(session) == []
+
+
+def test_the_wake_engages_an_open_invoice_once(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, NOW + timedelta(days=30))
+        assert isinstance(opened, CaseAssessed)
+        _engage(session, scope, timer, opened.case_id, NOW + timedelta(days=30))
+        session.commit()
+        assert len(_events(session, True)) == 1
+        view = get_collection_case(session, scope=scope, case_id=opened.case_id)
+        assert view.access_hold_engaged_at == NOW + timedelta(days=30)
+        assert view.due_at == DUE
+
+
+def test_step_due_under_a_live_hold_writes_no_notice(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, NOW)
+        assert isinstance(opened, CaseAssessed)
+        CollectionHoldService.place(
+            session, _place_command(scope, "subscriber:concurrency", "dispute:step")
+        )
+        result = CollectionCaseService.process_step_due(
+            session,
+            command=ProcessCollectionStepDueV1(
+                scope=scope,
+                trigger=_trigger(timer, session, scope, opened.case_id, "next_step"),
+                processed_at=NOW,
+            ),
+            reader=_reader(_held_position(scope)),
+            timer=timer,
+        )
+        session.commit()
+        assert isinstance(result, StepDueBlocked)
+        assert result.reason_code == "collection_hold_active"
+        assert session.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_the_last_lift_re_arms_the_ladder_of_each_active_case(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    subject = "subscriber:concurrency"
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        timer = FakeCollectionsTimer()
+        CollectionHoldService.place(
+            session, _place_command(scope, subject, "dispute:a")
+        )
+        opened = _assess_open(session, scope, policy, timer, NOW)
+        assert isinstance(opened, CaseAssessed)
+        step = TimerIdentityV1(
+            scope,
+            "collections.case",
+            "collection_case",
+            str(opened.case_id),
+            "next_step",
+        )
+        assert timer.current(session, step) is None  # no ladder under a hold
+        lifted = CollectionHoldService.lift(
+            session, _lift_command(scope, subject, "dispute:a"), timer
+        )
+        session.commit()
+        assert isinstance(lifted, HoldLifted)
+        assert timer.current(session, step) is not None
+
+
+def test_two_simultaneous_last_lifts_still_re_arm_the_ladder(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    subject = "subscriber:concurrency"
+    timer = FakeCollectionsTimer()
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        for ref in ("dispute:one", "dispute:two"):
+            CollectionHoldService.place(session, _place_command(scope, subject, ref))
+        opened = _assess_open(session, scope, policy, timer, NOW)
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        case_id = opened.case_id
+    step = TimerIdentityV1(
+        scope, "collections.case", "collection_case", str(case_id), "next_step"
+    )
+
+    key = _lock_key("collections", scope_segment(scope), "subject", subject)
+    holder = create_engine(app_url)
+    observer = create_engine(_superuser_url())
+    database = create_engine(admin_url).url.database
+    barrier = threading.Barrier(3)
+
+    def waiting() -> int:
+        with observer.connect() as connection:
+            return int(
+                connection.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = :d "
+                        "AND wait_event_type = 'Lock' AND wait_event = 'advisory'"
+                    ),
+                    {"d": database},
+                )
+                or 0
+            )
+
+    def lift(ref: str):
+        with _tenant_session(app_url, tenant_id) as session:
+            barrier.wait(timeout=20)
+            result = CollectionHoldService.lift(
+                session, _lift_command(scope, subject, ref), timer
+            )
+            session.commit()
+            return result
+
+    blocked = 0
+    try:
+        with holder.connect() as connection:
+            transaction = connection.begin()
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                {"k": key},
+            )
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(lift, "dispute:one"),
+                    pool.submit(lift, "dispute:two"),
+                ]
+                try:
+                    barrier.wait(timeout=20)
+                    deadline = time.monotonic() + 20
+                    while blocked < 2 and time.monotonic() < deadline:
+                        time.sleep(0.2)
+                        blocked = waiting()
+                finally:
+                    transaction.commit()
+                results = [future.result(timeout=30) for future in futures]
+    finally:
+        holder.dispose()
+        observer.dispose()
+    assert blocked >= 2, "both lifts must wait on the shared locks"
+    assert all(isinstance(r, HoldLifted) for r in results)
+    with _tenant_session(app_url, tenant_id) as session:
+        # The second lift saw the first one committed, so exactly one re-armed it.
+        assert timer.current(session, step) is not None
+        state = get_collection_subject_state(session, scope=scope, subject_ref=subject)
+        assert state.live_external_refs == ()
+
+
+def test_the_placement_ordinal_is_unique_per_reference_and_counts_re_placements(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    subject = "billing-account:ordinal"
+    timer = FakeCollectionsTimer()
+    with _tenant_session(app_url, tenant_id) as session:
+        CollectionHoldService.place(session, _place_command(scope, subject, "kind:ord"))
+        CollectionHoldService.lift(
+            session, _lift_command(scope, subject, "kind:ord"), timer
+        )
+        CollectionHoldService.place(session, _place_command(scope, subject, "kind:ord"))
+        session.commit()
+    admin = create_engine(admin_url)
+    try:
+        with admin.connect() as connection:
+            ordinals = connection.scalars(
+                text(
+                    "SELECT placement_ordinal FROM mod_coll.collection_holds "
+                    "WHERE tenant_id = :t AND external_ref = 'kind:ord' "
+                    "ORDER BY placement_ordinal"
+                ),
+                {"t": tenant_id},
+            ).all()
+            assert ordinals == [1, 2]
+        with admin.begin() as connection, pytest.raises(DBAPIError):
+            connection.execute(
+                text(
+                    "INSERT INTO mod_coll.collection_holds (id, tenant_id, "
+                    "subject_ref, external_ref, placement_ordinal, reason_code, "
+                    "evidence_ref, actor_ref, placed_at) VALUES (:id, :t, 's', "
+                    "'kind:ord', 2, 'r', 'e', 'a', now())"
+                ),
+                {"id": uuid.uuid4(), "t": tenant_id},
+            )
+    finally:
+        admin.dispose()
+
+
+def test_republish_allocates_a_fresh_version_from_the_plane_sequence(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    subject = "subscriber:concurrency"
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        _open_held(session, scope, policy)
+        before = get_collection_subject_state(session, scope=scope, subject_ref=subject)
+        command = RepublishSubjectStateV1(
+            command_id=uuid.uuid4(),
+            idempotency_key="republish-1",
+            scope=scope,
+            subject_ref=subject,
+            requested_at=NOW + timedelta(days=1),
+        )
+        first = republish_subject_state(session, command)
+        again = republish_subject_state(session, command)
+        session.commit()
+        assert first.state == "held" and before.version is not None
+        assert first.version > before.version
+        assert again.replayed and again.version == first.version
+        events = _events(session, True)
+        assert sorted(e.payload["source_version"] for e in events) == [
+            before.version,
+            first.version,
+        ]
