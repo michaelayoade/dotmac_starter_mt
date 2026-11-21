@@ -251,6 +251,12 @@ def require_database_time(store: object) -> LeaseStore:
         raise StoreRefused("store-lacks-database-time")
     try:
         instant = store.database_time()
+    except StoreRefused as exc:
+        # A lost connection is NOT "no database time": keep its own code so the
+        # caller can tell an unreachable store from a store that cannot judge.
+        if exc.code in (STORE_UNREACHABLE, STORE_COMMIT_UNKNOWN):
+            raise
+        raise StoreRefused("store-lacks-database-time") from None
     except Exception:
         raise StoreRefused("store-lacks-database-time") from None
     if not isinstance(instant, datetime) or instant.tzinfo is None:

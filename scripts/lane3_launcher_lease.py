@@ -53,6 +53,7 @@ from lane3_e10_receipt import E10ReceiptRef
 from lane3_lease_store import (
     HeldLease,
     LeaseStore,
+    ReprovisionMarker,
     StoreRefused,
     require_database_time,
 )
@@ -92,11 +93,29 @@ def take_custody(
     controller_identity: ControllerSshFingerprintV1,
     ttl_seconds: int,
     e10_receipt: E10ReceiptRef,
+    reprovision: ReprovisionMarker | None = None,
 ) -> HeldLease:
     """The exclusively held lease, or a refusal. The store is a required input.
 
     A store that cannot supply database time is refused before anything is taken.
+    The receipt must be for this host. An optional :class:`ReprovisionMarker` is
+    passed through only when it is typed, names this host and cites THIS receipt
+    (the one the new lease is taken under); anything else is refused before the
+    store is touched. The store still decides whether the receipt is a newer
+    incarnation. The lease the store returns must carry the receipt it was
+    asked to take it under.
     """
+    if not isinstance(e10_receipt, E10ReceiptRef):
+        raise LeaseCustodyRefused("e10-receipt-required")
+    if e10_receipt.host_id != host_id:
+        raise LeaseCustodyRefused("receipt-host-id-mismatch")
+    if reprovision is not None:
+        if not isinstance(reprovision, ReprovisionMarker):
+            raise LeaseCustodyRefused("reprovision-marker-untyped")
+        if reprovision.host_id != host_id:
+            raise LeaseCustodyRefused("reprovision-marker-for-another-host")
+        if reprovision.e10_receipt != e10_receipt:
+            raise LeaseCustodyRefused("reprovision-receipt-mismatch")
     try:
         checked = require_database_time(store)
         held = checked.acquire_exclusive(
@@ -105,9 +124,12 @@ def take_custody(
             controller_identity=controller_identity,
             ttl_seconds=ttl_seconds,
             e10_receipt=e10_receipt,
+            reprovision=reprovision,
         )
     except StoreRefused as exc:
         raise LeaseCustodyRefused(exc.code) from None
+    if held.e10_receipt != e10_receipt:
+        raise LeaseCustodyRefused("lease-receipt-mismatch")
     if controller_identity != held.lease.controller_identity_fingerprint:
         raise LeaseCustodyRefused("lease-names-another-controller")
     return held

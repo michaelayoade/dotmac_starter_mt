@@ -626,7 +626,7 @@ def test_a_run_directory_outside_run_lane3_is_refused_everywhere(
     with pytest.raises(stage.StageRefused):
         stage.clock_skew_argv(**bad, extra_env={})
     with pytest.raises(stage.StageRefused):
-        stage.teardown_argv(**bad)
+        stage.teardown_argv(**bad, host_id="host-a", run_id="run-1")
 
 
 # ── U3 (option B): the SSH host key is pinned on its own ────────────────────
@@ -1024,3 +1024,53 @@ def test_an_identity_changed_in_place_is_caught_at_use(tmp_path: pathlib.Path) -
     with pytest.raises(stage.StageRefused) as refusal:
         _launch(other, identity=identity, host_id="host-b", skew=proof)
     assert refusal.value.code == "identity-not-built-for-the-lease"
+
+
+# ── S5: the identity must be the one built for this host AND run ────────────
+
+
+@pytest.mark.parametrize(
+    ("host_id", "run_id"), [("host-b", "run-1"), ("host-a", "run-2")]
+)
+def test_the_skew_check_refuses_an_identity_built_for_another_lease(
+    tmp_path: pathlib.Path, host_id: str, run_id: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, host_id=host_id, run_id=run_id)
+    assert refusal.value.code == "identity-built-for-another-lease"
+    # refused BEFORE anything ran on the target
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("host_id", "run_id"), [("host-b", "run-1"), ("host-a", "run-2")]
+)
+def test_teardown_refuses_an_identity_built_for_another_lease(
+    tmp_path: pathlib.Path, host_id: str, run_id: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.teardown_argv(**_common(tmp_path), host_id=host_id, run_id=run_id)
+    assert refusal.value.code == "identity-built-for-another-lease"
+
+
+def test_teardown_for_the_leases_own_host_and_run_removes_the_directory(
+    tmp_path: pathlib.Path,
+) -> None:
+    argv = stage.teardown_argv(**_common(tmp_path), host_id="host-a", run_id="run-1")
+    assert argv[-1].startswith("rm -rf -- ")
+
+
+@pytest.mark.parametrize("call", ["skew", "teardown"])
+def test_a_non_identity_is_refused_at_skew_and_teardown(
+    tmp_path: pathlib.Path, call: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        if call == "skew":
+            _skew(tmp_path, 0, identity=object())
+        else:
+            stage.teardown_argv(
+                **{**_common(tmp_path), "identity": object()},
+                host_id="host-a",
+                run_id="run-1",
+            )
+    assert refusal.value.code == "ssh-identity-required"

@@ -702,6 +702,11 @@ def require_clock_skew(
     """
     if not run_id or not host_id:
         raise StageRefused("clock-skew-binding-required")
+    # The identity must be the one built for THIS lease: its host and its run.
+    # Refused BEFORE anything is run on the target.
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    identity.require_for(host_id=host_id, run_id=run_id)
     result = run(
         clock_skew_argv(
             run_dir=run_dir,
@@ -773,8 +778,17 @@ def teardown_argv(
     identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
+    host_id: str,
+    run_id: str,
 ) -> list[str]:
-    """Remove the per-run directory. Best effort; the run's verdict is fixed."""
+    """Remove the per-run directory. Best effort; the run's verdict is fixed.
+
+    The identity must be the one built for this host AND run, so a key that was
+    proven for another lease can never remove this run's directory.
+    """
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    identity.require_for(host_id=host_id, run_id=run_id)
     if not _RUN_DIR.fullmatch(run_dir):
         raise StageRefused("run-directory-unexpected")
     return ssh_argv(

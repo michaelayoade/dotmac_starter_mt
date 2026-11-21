@@ -32,6 +32,7 @@ import pathlib
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -103,6 +104,11 @@ class DriveInputs:
     #: The exact `execution-context.json` that was staged: its
     #: `host_enrolment_ref` must be the receipt's enrolment UUID.
     execution_context: lane3_stage.StagedFile
+    #: The mapping `stage_artifacts` was given. `drive` requires its
+    #: `execution-context.json` to be this very `execution_context` (same sha256),
+    #: so the context checked against the receipt is the one that reached the
+    #: target, never a second file.
+    staged_artifacts: Mapping[str, lane3_stage.StagedFile]
     store: lane3_lease_store.LeaseStore
     held: lane3_lease_store.HeldLease
     plan: SessionPlan
@@ -157,6 +163,22 @@ class DriveResult:
     #: The target reported `ready`: it was on a host with a plan in hand.
     ready_seen: bool = False
     plan_digest: str = ""
+    #: `store-unreachable` or `store-commit-unknown` when the store dropped
+    #: during the drive, else "". Never retried (design 3.6).
+    store_failure: str = ""
+
+
+_STORE_DROPS = (
+    lane3_lease_store.STORE_UNREACHABLE,
+    lane3_lease_store.STORE_COMMIT_UNKNOWN,
+)
+
+
+def _store_refused(result: DriveResult, exc: lane3_lease_store.StoreRefused) -> None:
+    """Record a store refusal; a dropped connection is named as such."""
+    result.refusal_code = result.refusal_code or exc.code
+    if exc.code in _STORE_DROPS and not result.store_failure:
+        result.store_failure = exc.code
 
 
 def _abort(channel: Channel, reason: str) -> None:
@@ -190,7 +212,9 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             lane3_lease_store.require_database_time(inputs.store)
             store_time = inputs.store.database_time()
         except lane3_lease_store.StoreRefused as exc:
-            result.refusal_code = exc.code
+            # Before `start`: nothing was sent, the target is untouched. A dropped
+            # store ends here; the lease is left to expire on store time.
+            _store_refused(result, exc)
             return result
         held = inputs.held
         if not held.acquired_at <= store_time < held.expires_at:
@@ -199,6 +223,24 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         # The E10 receipt must agree with every independent input BEFORE anything
         # is sent to the target: the pinned SSH key and alias, the incarnation
         # input and the lease's host.
+        # The context the receipt is checked against must be the file that was
+        # staged to the target, byte for byte.
+        staged = inputs.staged_artifacts.get("execution-context.json")
+        try:
+            if staged is None:
+                raise lane3_e10_receipt.ReceiptRefused("execution-context-not-staged")
+            for candidate in (staged, inputs.execution_context):
+                lane3_stage._require_staged("execution-context.json", candidate)
+            if staged.sha256 != inputs.execution_context.sha256:
+                raise lane3_e10_receipt.ReceiptRefused(
+                    "execution-context-not-the-staged-file"
+                )
+        except lane3_stage.StageRefused:
+            result.refusal_code = "execution-context-digest-mismatch"
+            return result
+        except lane3_e10_receipt.ReceiptRefused as exc:
+            result.refusal_code = exc.code
+            return result
         try:
             inputs.e10.require_matches(
                 ssh_fingerprint=inputs.pin.fingerprint,
@@ -237,6 +279,9 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
                 inputs.held, authorization_run=inputs.held.lease.authorization_run_id
             )
         except lane3_lease_store.StoreRefused as exc:
+            # After `start`, before `proceed`: the target unwinds through its own
+            # cleanup and consumes nothing; the lease expires as mutated.
+            _store_refused(result, exc)
             _abort(channel, "lease-not-covering")
             return _terminal(channel, inputs.terminal_seconds, result, exc.code)
         # The gate: the target takes no grant and no lock until it reads this.
@@ -345,8 +390,11 @@ def conclude(
     """Release if there is a reconcilable terminal report, and ALWAYS leave records.
 
     Outcomes: `released`, `refused` (a terminal report the launcher would not
-    reconcile or could not write), `no_release` (a report naming no member of the
-    closed vocabulary) and `no_terminal` (the target never reported). In every
+    reconcile or could not write), `store_unreachable` and `store_commit_unknown`
+    (the release write hit a dropped store; sent once, never retried, and for the
+    second the release may exist, so standing must be read), `no_release` (a
+    report naming no member of the closed vocabulary) and `no_terminal` (the
+    target never reported). In every
     one the create-only evidence file is written, so a refusal, a release and a
     no-release are each on record and absence is never silent. When no release is
     written the lease is left to EXPIRE on store time as a mutated host.
@@ -369,9 +417,20 @@ def conclude(
             outcome = "released" if digest else "no_release"
         except launcher_lease.LeaseCustodyRefused as exc:
             outcome, custody_code = "refused", exc.code
+            # The release write is sent once and never retried (design 3.6). A
+            # dropped store is its own outcome; for `store-commit-unknown` the
+            # release MAY have committed, so standing is read afterwards through
+            # the ceremony's owner session and nothing further is written here.
+            if exc.code == lane3_lease_store.STORE_UNREACHABLE:
+                outcome = "store_unreachable"
+            elif exc.code == lane3_lease_store.STORE_COMMIT_UNKNOWN:
+                outcome = "store_commit_unknown"
         except Exception as exc:
             outcome, error = "error", exc
     terminal = result.terminal
+    store_failure = result.store_failure or (
+        custody_code if custody_code in _STORE_DROPS else ""
+    )
     evidence = {
         "document": "lane3-launcher-terminal",
         "version": 1,
@@ -381,6 +440,9 @@ def conclude(
         "release_written": bool(digest),
         "release_digest": digest,
         "lease_left_to_expire_as_mutated": not digest,
+        "store_failure": store_failure,
+        "standing_read_required": store_failure
+        == lane3_lease_store.STORE_COMMIT_UNKNOWN,
         "ready_seen": result.ready_seen,
         "plan_digest": result.plan_digest,
         "receipt_digest": verified,

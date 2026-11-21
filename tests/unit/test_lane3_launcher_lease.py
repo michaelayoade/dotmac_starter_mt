@@ -19,9 +19,12 @@ from dotmac_deployment_foundation.lease_release import (  # noqa: E402
     CleanupDisposition,
     TerminalRefusal,
 )
-from lane3_lease_store import LeaseStanding  # noqa: E402
+from lane3_lease_store import LeaseStanding, ReprovisionMarker  # noqa: E402
 
-from tests.unit.lane3_e10_support import make_receipt  # noqa: E402
+from tests.unit.lane3_e10_support import (  # noqa: E402
+    make_generation_receipt,
+    make_receipt,
+)
 from tests.unit.lane3_store_support import FakeStore, release_for  # noqa: E402
 
 MACHINE = "0123456789abcdef0123456789abcdef"
@@ -437,3 +440,119 @@ def test_the_record_itself_is_not_mutated_by_the_stamp(tmp_path: pathlib.Path) -
         tmp_path, evidence={}, release_record=record, released_at="store"
     )
     assert original == {"released_at": "runner-clock"}
+
+
+# ── S5: the receipt and the optional ReprovisionMarker ─────────────────────
+
+
+def test_a_receipt_for_another_host_is_refused_before_the_store_is_touched() -> None:
+    store = FakeStore()
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, e10_receipt=make_receipt(host_id="host-b"))
+    assert refusal.value.code == "receipt-host-id-mismatch"
+    assert not store._rows
+
+
+@pytest.mark.parametrize("receipt", [None, "e10-receipt-0001", object()])
+def test_the_receipt_must_be_typed(receipt: Any) -> None:
+    store = FakeStore()
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, e10_receipt=receipt)
+    assert refusal.value.code == "e10-receipt-required"
+    assert not store._rows
+
+
+@pytest.mark.parametrize("marker", ["e10-receipt-0002", {"host_id": "host-a"}])
+def test_a_marker_that_is_not_a_typed_marker_is_refused(marker: Any) -> None:
+    store = FakeStore()
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, reprovision=marker)
+    assert refusal.value.code == "reprovision-marker-untyped"
+    assert not store._rows
+
+
+def test_a_marker_for_another_host_is_refused_before_the_store_is_touched() -> None:
+    store = FakeStore()
+    other = make_generation_receipt("host-b", 2)
+    marker = ReprovisionMarker("host-b", other)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, reprovision=marker)
+    assert refusal.value.code == "reprovision-marker-for-another-host"
+    assert not store._rows
+
+
+def test_a_marker_citing_a_different_receipt_than_the_one_given_is_refused() -> None:
+    store = FakeStore()
+    marker = ReprovisionMarker("host-a", make_generation_receipt("host-a", 2))
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(
+            store, e10_receipt=make_generation_receipt("host-a", 3), reprovision=marker
+        )
+    assert refusal.value.code == "reprovision-receipt-mismatch"
+    assert not store._rows
+
+
+def test_a_marker_is_passed_through_and_reopens_a_mutated_host() -> None:
+    store = FakeStore()
+    first = make_generation_receipt("host-a", 1)
+    _custody(store, ttl_seconds=60, e10_receipt=first)
+    store.advance(61)
+    assert store.standing("host-a") is LeaseStanding.EXPIRED_MUTATED
+    # without the marker the host stays closed
+    second = make_generation_receipt("host-a", 2)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, authorization_run="run-2", e10_receipt=second)
+    assert refusal.value.code == "lease-host-mutated"
+    held = _custody(
+        store,
+        authorization_run="run-2",
+        e10_receipt=second,
+        reprovision=ReprovisionMarker("host-a", second),
+    )
+    assert held.e10_receipt == second
+
+
+def test_the_store_still_judges_whether_the_marker_is_newer() -> None:
+    store = FakeStore()
+    _custody(store, ttl_seconds=60, e10_receipt=make_generation_receipt("host-a", 2))
+    store.advance(61)
+    older = make_generation_receipt("host-a", 1)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(
+            store,
+            authorization_run="run-2",
+            e10_receipt=older,
+            reprovision=ReprovisionMarker("host-a", older),
+        )
+    assert refusal.value.code == "reprovision-receipt-not-newer"
+
+
+def test_a_lease_that_does_not_carry_the_receipt_it_was_taken_under_is_refused() -> (
+    None
+):
+    class Other(FakeStore):
+        def acquire_exclusive(self, **kwargs):
+            held = super().acquire_exclusive(**kwargs)
+            return type(held)(
+                lease=held.lease,
+                handle=held.handle,
+                e10_receipt=make_generation_receipt("host-a", 2),
+                acquired_at=held.acquired_at,
+                expires_at=held.expires_at,
+            )
+
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(Other())
+    assert refusal.value.code == "lease-receipt-mismatch"
+
+
+@pytest.mark.parametrize("when", ["before_write", "after_commit"])
+def test_a_dropped_store_at_custody_is_refused_with_its_own_code_and_not_retried(
+    when: str,
+) -> None:
+    store = FakeStore()
+    store.sever(when)
+    code = "store-unreachable" if when == "before_write" else "store-commit-unknown"
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store)
+    assert refusal.value.code == code
