@@ -501,9 +501,9 @@ class World:
     def cp(self) -> dict[str, Any]:
         return self.export["cp_lane3"]
 
-    def run(self, *, refresh_digest: bool = True, **overrides: Any):
+    def verify_values(self, *, rederive_e10_digest: bool = True) -> dict[str, Any]:
         row = self.cp["e10_receipt"]
-        if refresh_digest:
+        if rederive_e10_digest:
             self.cp["e10_receipt_digest"] = cp6.receipt_digest(row)
         values: dict[str, Any] = {
             "receipt_bytes": self.receipt.canonical_bytes(),
@@ -526,6 +526,33 @@ class World:
             "now": self.now,
         }
         values.update(self.kwargs)
+        values["anchor"] = self.anchor()
+        values["refresh_digest"] = hashlib.sha256(
+            values["host_admission_bytes"]
+        ).hexdigest()
+        return values
+
+    def anchor(self, **changes: Any) -> orchestrator.PresentationKeyAnchor:
+        """Control's recorded ACTIVE credential: the genuine presentation key."""
+        values: dict[str, Any] = {
+            "key_id": "presentation-key-1",
+            "key_fingerprint": digest(
+                base64.urlsafe_b64decode(
+                    self.pres_pub + "=" * (-len(self.pres_pub) % 4)
+                )
+            ),
+            "host_id": HOST_ID,
+            "record_version": 70,
+        }
+        values.update(changes)
+        return orchestrator.PresentationKeyAnchor(**values)
+
+    def run(self, *, rederive_e10_digest: bool = True, **overrides: Any):
+        values = self.verify_values(rederive_e10_digest=rederive_e10_digest)
+        if "host_admission_bytes" in overrides and "refresh_digest" not in overrides:
+            overrides["refresh_digest"] = hashlib.sha256(
+                overrides["host_admission_bytes"]
+            ).hexdigest()
         values.update(overrides)
         return orchestrator.verify_offline(**values)
 
@@ -698,6 +725,11 @@ def test_a_standard_base64_signature_is_not_the_wire_form(world: World) -> None:
 def test_dispatch_naming_another_id_is_refused(world: World) -> None:
     world.resign(dispatch_id="11111111-2222-4333-8444-555555555555")
     refused(world, "dispatch-id-mismatch")
+
+
+def test_dispatch_for_another_descriptor_is_refused(world: World) -> None:
+    world.resign(descriptor_digest="sha256:" + "8" * 64)
+    refused(world, "dispatch-descriptor-mismatch")
 
 
 def test_dispatch_for_another_plan_is_refused(world: World) -> None:
@@ -921,7 +953,7 @@ def test_e10_receipt_digest_mismatch_is_refused(world: World) -> None:
 
 def test_exported_receipt_digest_must_match_the_recomputation(world: World) -> None:
     world.cp["e10_receipt"]["vm_alias"] = "vm-b"
-    refused(world, "e10-receipt-export-digest-mismatch", refresh_digest=False)
+    refused(world, "e10-receipt-export-digest-mismatch", rederive_e10_digest=False)
 
 
 def test_e10_receipt_row_edited_after_the_pin_is_refused(world: World) -> None:

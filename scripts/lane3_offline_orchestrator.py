@@ -28,7 +28,11 @@ the encrypted manifest; there is one newest run per SHA.
 DEPENDS ON S2 (`lane3_host_admission.py`): `read_host_admission` below CALLS S2's
 `parse_host_admission` (no parsing or signature logic is restated here). The
 presentation signature is verified against a caller-supplied PINNED presentation
-public key (the one `key-init` printed at E10.4).
+public key, which must be the public key of Control's ACTIVE E10.6 credential
+(never the E10.4 `key-init` printout). `verify_offline` itself refuses unless the
+presentation's key fingerprint and key_id equal the credential recorded in the
+Gate 2 record (`PresentationKeyAnchor`) and `host-admission.json`'s sha256 equals
+the launcher's step-13 `present --refresh` digest.
 """
 
 from __future__ import annotations
@@ -115,7 +119,10 @@ from lane3_offline_signature import _require_tool, require_authenticated_result
 from lane3_receipt_v2 import evidence_bundle_digest
 
 __all__ = [
+    "ANCHOR_RECORD_SLUG",
+    "AnchorRefused",
     "CANDIDATE_AUDIENCE",
+    "PresentationKeyAnchor",
     "JoinRefused",
     "OfflineVerification",
     "PinnedIdentity",
@@ -142,6 +149,76 @@ class JoinRefused(ValueError):
 
 def _refuse(code: str) -> None:
     raise JoinRefused(f"offline-join-{code}")
+
+
+class AnchorRefused(JoinRefused):
+    """The presentation-key anchor or refresh digest failed (`offline-anchor-*`)."""
+
+
+def _refuse_anchor(code: str) -> None:
+    raise AnchorRefused(f"offline-anchor-{code}")
+
+
+#: The Gate 2 Knowledge record the anchor must be recorded in (operator step).
+ANCHOR_RECORD_SLUG: Final = "dotmac-foundation-gate2-040a2-20261106"
+_FINGERPRINT: Final = re.compile(r"sha256:[0-9a-f]{64}")
+_FILE_SHA256: Final = re.compile(r"[0-9a-f]{64}")
+_ANCHOR_TEXT: Final = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PresentationKeyAnchor:
+    """Control's ACTIVE E10.6 presentation credential as recorded in Gate 2.
+
+    `record_slug`/`record_version` are CLAIMED provenance (the operator's word;
+    nothing here reads Knowledge). `host_id` joins the credential to the plan.
+    """
+
+    key_id: str
+    key_fingerprint: str
+    host_id: str
+    record_version: int
+    record_slug: str = ANCHOR_RECORD_SLUG
+
+
+def _check_anchor_shape(
+    anchor: object, refresh_digest: object
+) -> PresentationKeyAnchor:
+    if type(anchor) is not PresentationKeyAnchor:
+        _refuse_anchor("required")
+    assert isinstance(anchor, PresentationKeyAnchor)
+    if anchor.record_slug != ANCHOR_RECORD_SLUG:
+        _refuse_anchor("record-slug-invalid")
+    if type(anchor.record_version) is not int or anchor.record_version < 1:
+        _refuse_anchor("provenance-invalid")
+    if type(anchor.key_id) is not str or not _ANCHOR_TEXT.fullmatch(anchor.key_id):
+        _refuse_anchor("key-id-invalid")
+    if type(anchor.host_id) is not str or not _ANCHOR_TEXT.fullmatch(anchor.host_id):
+        _refuse_anchor("host-id-invalid")
+    if type(anchor.key_fingerprint) is not str or not _FINGERPRINT.fullmatch(
+        anchor.key_fingerprint
+    ):
+        _refuse_anchor("fingerprint-invalid")
+    if type(refresh_digest) is not str or not _FILE_SHA256.fullmatch(refresh_digest):
+        _refuse_anchor("refresh-digest-invalid")
+    return anchor
+
+
+def _join_anchor(
+    admission: HostAdmissionDigest,
+    *,
+    anchor: PresentationKeyAnchor,
+    refresh_digest: str,
+    plan: FoundationExecutionPlanV3,
+) -> None:
+    if admission.file_sha256 != refresh_digest:
+        _refuse_anchor("refresh-digest-mismatch")
+    if admission.presentation_key_fingerprint != anchor.key_fingerprint:
+        _refuse_anchor("key-fingerprint-mismatch")
+    if admission.presentation_key_id != anchor.key_id:
+        _refuse_anchor("key-id-mismatch")
+    if anchor.host_id != plan.host_id:
+        _refuse_anchor("host-mismatch")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -322,6 +399,8 @@ def _join_control(
         _refuse("dispatch-id-mismatch")
     if statement.execution_plan_digest != str(plan.digest()):
         _refuse("dispatch-plan-mismatch")
+    if statement.descriptor_digest != plan.descriptor_digest:
+        _refuse("dispatch-descriptor-mismatch")
     if statement.target_id != plan.target_id or statement.target_ref != plan.target:
         _refuse("dispatch-target-mismatch")
     if (statement.execution_sequence, statement.attempt_no) != (
@@ -589,6 +668,8 @@ def verify_offline(
     installed_envelope_bytes: bytes,
     host_admission_bytes: bytes,
     presentation_public_key_b64url: str,
+    anchor: PresentationKeyAnchor,
+    refresh_digest: str,
     policy: VerificationPolicy,
     now: datetime,
     candidate_audience: str = CANDIDATE_AUDIENCE,
@@ -607,6 +688,7 @@ def verify_offline(
         _refuse("plan-required")
     if type(descriptor) is not ProductDeploymentSpec:
         _refuse("descriptor-required")
+    anchor = _check_anchor_shape(anchor, refresh_digest)
     try:
         receipt = RehearsalReceiptV2.from_json(receipt_bytes)
     except (SpecError, TypeError, ValueError):
@@ -657,6 +739,9 @@ def verify_offline(
         host_admission_bytes,
         presentation_public_key_b64url=presentation_public_key_b64url,
     )
+    _join_anchor(
+        admission, anchor=anchor, refresh_digest=refresh_digest, plan=execution_plan
+    )
     _join_control(
         export,
         receipt=receipt,
@@ -703,6 +788,9 @@ def verify_offline(
         input_digests={
             "cp6_export": export.export_digest,
             "e10_receipt": expected_e10_receipt_digest,
+            "presentation_anchor": f"{anchor.record_slug}@{anchor.record_version}"
+            f"|{anchor.key_id}|{anchor.key_fingerprint}|{anchor.host_id}",
+            "refresh_digest": "sha256:" + refresh_digest,
             "host_admission": "sha256:"
             + hashlib.sha256(host_admission_bytes).hexdigest(),
             "receipt": coordinates.receipt_digest,
