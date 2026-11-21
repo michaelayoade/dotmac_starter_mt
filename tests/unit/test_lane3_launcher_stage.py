@@ -543,6 +543,8 @@ def _staged(tmp_path: pathlib.Path, host: str = "host-a", run: str = "run-1"):
         identity=_identity(sub, host=host, run=run),
         host_id=host,
         run_id=run,
+        lease_filename=stage.expected_lease_filename(host),
+        receipt=_receipt(host_id=host),
     )
 
 
@@ -1203,8 +1205,10 @@ def test_launch_and_skew_require_a_staged_run(
     with pytest.raises(stage.StageRefused) as refusal:
         _launch(other, skew=proof, staged=staged)
     assert refusal.value.code == "staged-run-required"
+    third = tmp_path / "third"
+    third.mkdir()
     with pytest.raises(stage.StageRefused) as refusal:
-        _skew(other, 0, staged=staged)
+        _skew(third, 0, staged=staged)
     assert refusal.value.code == "staged-run-required"
     assert _skew.calls == []  # type: ignore[attr-defined]
 
