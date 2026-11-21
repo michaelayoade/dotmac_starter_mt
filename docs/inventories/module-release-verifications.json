@@ -1369,6 +1369,28 @@
           "sha256": "1e417146abad4420132d658c31045899fc48c397814fa3025521318091853963"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-billing",
+      "version": "0.1.0a13",
+      "tag": "dotmac-billing-v0.1.0a13",
+      "tag_object": "ad86ad894e86a2b496ae0ca8d77d0603abe5f971",
+      "peeled_commit": "1eff7918c0449e2f3e2f63f15d35fdfde1d1487a",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_billing-0.1.0a13-py3-none-any.whl": "8633eac71b141074d16cf3637e020b9624c910855f0d81474438a6ad648ec8b9"
+      },
+      "verification_run_id": "44876539294",
+      "source_run_id": "44876539294",
+      "release_authority_digest": "sha256:6d7510ac68cc8d8ac84f83d50bc21f1cd33b167abcdcc7c430bcfa9cc2fcf685",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_kernel-0.1.0a109+dev-py3-none-any.whl",
+          "sha256": "1e417146abad4420132d658c31045899fc48c397814fa3025521318091853963"
+        }
+      ]
     }
   ]
 }
