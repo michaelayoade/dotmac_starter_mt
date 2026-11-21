@@ -117,6 +117,12 @@ FUNDED_CHARGE_ONLY = frozenset({"funded_charge.py"})
 # the account terms and the balance to pay a new postpaid invoice. Read-only
 # names; the single widening beyond FundedCharge.
 FUNDED_CHARGE_AND_SETTLE = frozenset({"funded_charge.py", "settle.py"})
+# GAP-4: the stateless X1 reader (``receivables.py``) maps Billing's sealed document
+# exposure to Collections' observation. It reads the account terms (the contract type
+# at issue, the grace at the due date) and the two exposure types, read-only; Billing
+# stays a default-deny owner. Own commit, for architect sign-off.
+RECEIVABLES_ONLY = frozenset({"receivables.py"})
+FUNDED_CHARGE_SETTLE_AND_RECEIVABLES = FUNDED_CHARGE_AND_SETTLE | RECEIVABLES_ONLY
 # GAP-3 / GAP-L1 dating: only the private ``_credit_dating.py`` reads the account
 # statement (read-only, one account, no lock) to find the newest credit that
 # reached the account; Settle and FundedCharge call it and never read the
@@ -145,8 +151,11 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "AccessSignal": FUNDED_CHARGE_ONLY,
     # F2 FundedCharge (D2) reads these and nothing else beyond the restricted
     # commands below. Each is a deliberate, single-module entry.
-    "get_effective_account_terms": FUNDED_CHARGE_AND_SETTLE,
+    "get_effective_account_terms": FUNDED_CHARGE_SETTLE_AND_RECEIVABLES,
     "AccountTermsV1": FUNDED_CHARGE_AND_SETTLE,
+    "ReceivableExposureV1": RECEIVABLES_ONLY,
+    "ReceivableExposureV2": RECEIVABLES_ONLY,
+    "DueDateBasisStatus": RECEIVABLES_ONLY,
     "get_funding_availability": FUNDED_CHARGE_AND_SETTLE,
     "GetFundingAvailabilityV1": FUNDED_CHARGE_AND_SETTLE,
     "get_account_statement": CREDIT_DATING_ONLY,
