@@ -74,33 +74,40 @@ def _plan(**overrides: Any) -> launcher.SessionPlan:
     return launcher.SessionPlan(**values)
 
 
+def _default_receipt() -> Any:
+    return e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+    )
+
+
 def _staged_run(
     context: Any,
     *,
     run_dir: str = RUN_DIR,
     host: str = "host-a",
     run: str = "run-1",
+    receipt: Any = None,
 ) -> Any:
     """What `stage_artifacts` returns, for a context, without any SSH."""
     stage = launcher.lane3_stage
+    digest = (receipt if receipt is not None else _default_receipt()).digest()
     files = (("execution-context.json", context.sha256),)
     return stage.StagedRun(
         run_dir=run_dir,
         host_id=host,
         run_id=run,
+        receipt_digest=digest,
         files=files,
-        _token=stage._staged_token(run_dir, host, run, files),
+        _token=stage._staged_token(run_dir, host, run, digest, files),
     )
 
 
 def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
     store = overrides.pop("store", None) or FakeStore()
     # ONE receipt: the lease is taken under the very receipt drive is given.
-    receipt = e10_support.make_receipt(
-        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
-        vm_alias=stage_tests.ALIAS,
-        machine_id=MACHINE,
-    )
+    receipt = _default_receipt()
     held = overrides.pop("held", None) or store.acquire_exclusive(
         host_id="host-a",
         authorization_run="run-1",
@@ -1193,8 +1200,11 @@ def test_a_context_that_was_never_staged_sends_nothing(ends, tmp_path) -> None:
         run_dir=RUN_DIR,
         host_id="host-a",
         run_id="run-1",
+        receipt_digest=_default_receipt().digest(),
         files=(),
-        _token=stage._staged_token(RUN_DIR, "host-a", "run-1", ()),
+        _token=stage._staged_token(
+            RUN_DIR, "host-a", "run-1", _default_receipt().digest(), ()
+        ),
     )
     result, seen = _no_start(ends, tmp_path, staged=empty)
     assert seen["no_start"] is True
@@ -1461,3 +1471,73 @@ def test_a_receipt_with_no_vm_slot_sends_nothing(ends, tmp_path) -> None:
     result, seen = _no_start(ends, tmp_path, e10=receipt)
     assert seen["no_start"] is True
     assert result.refusal_code == "receipt-vm-slot-required"
+
+
+def test_a_staging_that_checked_another_receipt_sends_nothing(ends, tmp_path) -> None:
+    # Same pin, alias, host and machine; a different receipt (its ref differs).
+    other = e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+        receipt_ref="e10-receipt-0099",
+    )
+    context = _context()
+    result, seen = _no_start(
+        ends,
+        tmp_path,
+        execution_context=context,
+        staged=_staged_run(context, receipt=other),
+    )
+    assert seen["no_start"] is True
+    assert result.refusal_code == "receipt-not-the-stagings"
+
+
+def test_a_non_store_failure_reading_the_release_stamp_propagates_after_the_evidence(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    class Bug(FakeStore):
+        def released_at(self, host_id):
+            raise RuntimeError("a code bug, not a store drop")
+
+    store = Bug()
+    held = store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=600,
+        e10_receipt=e10_support.make_receipt(),
+    )
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()),
+        receipt=_Receipt(),
+        ready_seen=True,
+        plan_digest=PLAN,
+    )
+    with pytest.raises(RuntimeError):
+        _conclude(tmp_path, result, store, held=held)
+    # not mislabelled as a store drop, and the evidence is still on record
+    evidence = _evidence(tmp_path)
+    assert evidence["outcome"] == "error"
+    assert evidence["store_failure"] == ""
+    assert evidence["standing_read_required"] is False
+
+
+def test_the_evidence_survives_a_failure_building_the_unconfirmed_copy(
+    tmp_path,
+) -> None:
+    import lane3_launcher_lease as lease_module
+
+    class Broken:
+        def as_document(self):
+            raise ValueError("cannot serialise")
+
+    with pytest.raises(ValueError):
+        lease_module.write_terminal_records(
+            tmp_path / "out",
+            evidence={"document": "x"},
+            release_record=None,
+            unconfirmed_record=Broken(),
+        )
+    assert (tmp_path / "out" / "lane3-terminal-evidence.json").exists()

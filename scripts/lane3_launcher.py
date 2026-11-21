@@ -273,6 +273,12 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         if inputs.e10 != held.e10_receipt:
             result.refusal_code = "receipt-not-the-leases"
             return result
+        # ...and the very receipt staging checked (its digest is token-bound).
+        try:
+            inputs.staged.require_receipt(inputs.e10)
+        except lane3_stage.StageRefused as exc:
+            result.refusal_code = exc.code
+            return result
         channel.send("start", build_start(inputs, store_time))
         kind, data = channel.receive("ready", "terminal", timeout=inputs.ready_seconds)
         if kind == "terminal":
@@ -463,12 +469,17 @@ def conclude(
         try:
             stored = store.released_at(held.lease.target)
             stamp = stored.isoformat() if stored is not None else None
-        except Exception as exc:
+        except lane3_lease_store.StoreRefused as exc:
             stamp_unavailable = True
-            code = getattr(exc, "code", "")
             store_failure = store_failure or (
-                code if code in _STORE_DROPS else lane3_lease_store.STORE_UNREACHABLE
+                exc.code
+                if exc.code in _STORE_DROPS
+                else lane3_lease_store.STORE_UNREACHABLE
             )
+        except Exception as exc:
+            # A code bug is NOT a store drop: no stamp, the evidence is still
+            # written, and the original exception propagates after it.
+            outcome, error = "error", error or exc
     evidence = {
         "document": "lane3-launcher-terminal",
         "version": 1,

@@ -586,6 +586,7 @@ def _launch(tmp_path: pathlib.Path, **overrides):
             run=lambda argv, stdin: stage.RunResult(0),
             extra_env={},
             receipt=_receipt(),
+            execution_context=_artifacts()["execution-context.json"],
             **{k: arguments[k] for k in keys},
         )
     return stage.launch_argv(**arguments)
@@ -731,6 +732,7 @@ def _skew(tmp_path: pathlib.Path, exit_code: int, **overrides):
     arguments.update(overrides)
     arguments.setdefault("staged", _staged(tmp_path))
     arguments.setdefault("receipt", _receipt())
+    arguments.setdefault("execution_context", _artifacts()["execution-context.json"])
     try:
         return stage.require_clock_skew(run=run, extra_env={}, **arguments)
     finally:
@@ -1123,6 +1125,7 @@ def test_a_staged_run_cannot_be_constructed_by_a_caller() -> None:
         "run_dir": RUN_DIR,
         "host_id": "host-a",
         "run_id": "run-1",
+        "receipt_digest": "sha256:" + "0" * 64,
         "files": (("execution-context.json", "0" * 64),),
     }
     for extra in ({}, {"_token": "00"}, {"_token": "a" * 64}, {"_token": object()}):
@@ -1137,6 +1140,7 @@ def test_a_staged_run_cannot_be_constructed_by_a_caller() -> None:
         ("run_dir", "/run/lane3.OTHERRUN12"),
         ("host_id", "host-b"),
         ("run_id", "run-2"),
+        ("receipt_digest", "sha256:" + "1" * 64),
         ("files", (("execution-context.json", "1" * 64),)),
     ],
 )
@@ -1308,4 +1312,62 @@ def test_teardown_refuses_an_unset_run_id(
 ) -> None:
     with pytest.raises(stage.StageRefused) as refusal:
         stage.teardown_argv(**_common(tmp_path), host_id="host-a", run_id=run_id)  # type: ignore[arg-type]
+    assert refusal.value.code == "teardown-binding-required"
+
+
+# ── S5 review N1: the receipt staging checked is token-bound ────────────────
+
+
+def test_staging_binds_the_digest_of_the_receipt_it_checked(
+    tmp_path: pathlib.Path,
+) -> None:
+    receipt = _receipt()
+    staged = _stage(FakeTarget(), tmp_path, receipt=receipt)
+    assert staged.receipt_digest == receipt.digest()
+    staged.require_receipt(receipt)
+
+
+def test_the_skew_step_refuses_a_receipt_other_than_the_one_staging_checked(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Same pin, alias, host and enrolment; only the receipt ref differs.
+    other = _receipt(receipt_ref="e10-receipt-0099")
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, receipt=other)
+    assert refusal.value.code == "receipt-not-the-stagings"
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+def test_the_skew_step_checks_the_enrolment_like_staging_does(
+    tmp_path: pathlib.Path,
+) -> None:
+    other = _file(
+        json.dumps(
+            {"host_enrolment_ref": "11111111-2222-4333-8444-555555555555"}
+        ).encode()
+    )
+    # The context given to the skew step is not the one that was staged...
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, execution_context=other)
+    assert refusal.value.code == "execution-context-not-the-staged-file"
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+def test_the_skew_step_refuses_a_context_whose_bytes_do_not_hash(
+    tmp_path: pathlib.Path,
+) -> None:
+    good = _artifacts()["execution-context.json"]
+    forged = stage.StagedFile(data=b"{}", sha256=good.sha256)
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, execution_context=forged)
+    assert refusal.value.code == "execution-context-digest-mismatch"
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("host_id", [None, ""])
+def test_teardown_refuses_an_unset_host_id(
+    tmp_path: pathlib.Path, host_id: object
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.teardown_argv(**_common(tmp_path), host_id=host_id, run_id="run-1")  # type: ignore[arg-type]
     assert refusal.value.code == "teardown-binding-required"

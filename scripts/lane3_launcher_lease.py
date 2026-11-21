@@ -411,6 +411,11 @@ def write_terminal_records(
             document["released_at"] = released_at
         _create_only(path, json.dumps(document, indent=2, allow_nan=False))
         written.append(path)
+    path = directory / EVIDENCE_FILE
+    _create_only(path, json.dumps(evidence, indent=2, allow_nan=False) + "\n")
+    written.append(path)
+    # The evidence is on disk BEFORE the unconfirmed copy is built, so a failure
+    # in building the copy cannot lose it.
     if unconfirmed_record is not None:
         path = directory / UNCONFIRMED_RELEASE_FILE
         wrapper = {
@@ -420,7 +425,4 @@ def write_terminal_records(
         }
         _create_only(path, json.dumps(wrapper, indent=2, allow_nan=False))
         written.append(path)
-    path = directory / EVIDENCE_FILE
-    _create_only(path, json.dumps(evidence, indent=2, allow_nan=False) + "\n")
-    written.append(path)
     return written

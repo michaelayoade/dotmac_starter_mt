@@ -524,9 +524,13 @@ _STAGED_KEY: Final = os.urandom(32)
 
 
 def _staged_token(
-    run_dir: str, host_id: str, run_id: str, files: tuple[tuple[str, str], ...]
+    run_dir: str,
+    host_id: str,
+    run_id: str,
+    receipt_digest: str,
+    files: tuple[tuple[str, str], ...],
 ) -> str:
-    material = ["staged-run", run_dir, host_id, run_id]
+    material = ["staged-run", run_dir, host_id, run_id, receipt_digest]
     material += [f"{name}={digest}" for name, digest in files]
     return hmac.new(_STAGED_KEY, "\x00".join(material).encode(), "sha256").hexdigest()
 
@@ -544,6 +548,9 @@ class StagedRun:
     run_dir: str
     host_id: str
     run_id: str
+    #: `E10ReceiptRef.digest()` of the receipt staging checked. Token-covered, so
+    #: the skew step and `drive` can refuse a different receipt.
+    receipt_digest: str
     #: `(relative name, sha256)` for every file staged, sorted.
     files: tuple[tuple[str, str], ...]
     _token: str = dataclasses.field(default="", repr=False, compare=False)
@@ -554,7 +561,11 @@ class StagedRun:
     def verify(self) -> None:
         try:
             expected = _staged_token(
-                self.run_dir, self.host_id, self.run_id, tuple(self.files)
+                self.run_dir,
+                self.host_id,
+                self.run_id,
+                self.receipt_digest,
+                tuple(self.files),
             )
         except (TypeError, ValueError, AttributeError):
             raise StageRefused("staged-run-forged") from None
@@ -573,6 +584,14 @@ class StagedRun:
         self.verify()
         if (self.run_dir, self.host_id, self.run_id) != (run_dir, host_id, run_id):
             raise StageRefused("staged-run-not-this-lease")
+
+    def require_receipt(self, receipt: object) -> None:
+        """Refuse unless `receipt` is the very receipt staging checked."""
+        self.verify()
+        if not isinstance(receipt, lane3_e10_receipt.E10ReceiptRef):
+            raise StageRefused("e10-receipt-required")
+        if receipt.digest() != self.receipt_digest:
+            raise StageRefused("receipt-not-the-stagings")
 
 
 def stage_artifacts(
@@ -685,12 +704,14 @@ def stage_artifacts(
         "isolated-install",
     )
     files = tuple(sorted((relative, staged.sha256) for relative, staged, _ in plan))
+    receipt_digest = receipt.digest()
     return StagedRun(
         run_dir=run_dir,
         host_id=host_id,
         run_id=run_id,
+        receipt_digest=receipt_digest,
         files=files,
-        _token=_staged_token(run_dir, host_id, run_id, files),
+        _token=_staged_token(run_dir, host_id, run_id, receipt_digest, files),
     )
 
 
@@ -792,6 +813,7 @@ def require_clock_skew(
     extra_env: Mapping[str, str],
     staged: StagedRun,
     receipt: lane3_e10_receipt.E10ReceiptRef,
+    execution_context: StagedFile,
 ) -> ClockSkewPassed:
     """Run CP's skew check on the target; only exit 0 yields the proof.
 
@@ -811,9 +833,18 @@ def require_clock_skew(
     if not isinstance(staged, StagedRun):
         raise StageRefused("staged-run-required")
     staged.require_for(run_dir=run_dir, host_id=host_id, run_id=run_id)
+    # The same receipt staging checked, and the same context: the enrolment is
+    # checked here exactly as staging checked it.
+    try:
+        _require_staged("execution-context.json", execution_context)
+    except StageRefused:
+        raise StageRefused("execution-context-digest-mismatch") from None
+    if staged.digest_of("execution-context.json") != execution_context.sha256:
+        raise StageRefused("execution-context-not-the-staged-file")
     _require_receipt_for_target(
-        receipt, pin=pin, host_id=host_id, execution_context=None
+        receipt, pin=pin, host_id=host_id, execution_context=execution_context
     )
+    staged.require_receipt(receipt)
     result = run(
         clock_skew_argv(
             run_dir=run_dir,
