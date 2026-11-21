@@ -2458,6 +2458,15 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-customers ──
+    "dotmac-customers-v0.1.0a2": (
+        "dotmac-customers",
+        "236107be1e1565abfaa688379a71c0a64caf5aa5",
+        {
+            "cu_0001_customer_accounts.py": (
+                "0a6ba209d80c4dabf40e40dd4023b1d08803c92ed904fde95869ad9e480256c9"
+            ),
+        },
+    ),
     "dotmac-customers-v0.1.0a1": (
         "dotmac-customers",
         "2e2e0eff49aafc54a84885007402cd6012073330",
