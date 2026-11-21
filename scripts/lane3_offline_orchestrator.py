@@ -399,6 +399,8 @@ def _join_control(
         _refuse("dispatch-id-mismatch")
     if statement.execution_plan_digest != str(plan.digest()):
         _refuse("dispatch-plan-mismatch")
+    if statement.descriptor_digest != plan.descriptor_digest:
+        _refuse("dispatch-descriptor-mismatch")
     if statement.target_id != plan.target_id or statement.target_ref != plan.target:
         _refuse("dispatch-target-mismatch")
     if (statement.execution_sequence, statement.attempt_no) != (

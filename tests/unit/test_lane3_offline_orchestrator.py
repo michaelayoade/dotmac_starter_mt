@@ -727,6 +727,11 @@ def test_dispatch_naming_another_id_is_refused(world: World) -> None:
     refused(world, "dispatch-id-mismatch")
 
 
+def test_dispatch_for_another_descriptor_is_refused(world: World) -> None:
+    world.resign(descriptor_digest="sha256:" + "8" * 64)
+    refused(world, "dispatch-descriptor-mismatch")
+
+
 def test_dispatch_for_another_plan_is_refused(world: World) -> None:
     world.resign(execution_plan_digest="sha256:" + "9" * 64)
     refused(world, "dispatch-plan-mismatch")

@@ -199,6 +199,7 @@ class DispatchStatement:
     target_id: str
     target_ref: str
     execution_plan_digest: str
+    descriptor_digest: str
     purpose: str
     key_id: str
     algorithm: str
@@ -243,6 +244,7 @@ def verify_dispatch(
         target_id=statement["target_id"],
         target_ref=statement["target_ref"],
         execution_plan_digest=statement["execution_plan_digest"],
+        descriptor_digest=statement["descriptor_digest"],
         purpose=statement["purpose"],
         key_id=statement["key_id"],
         algorithm=statement["algorithm"],
