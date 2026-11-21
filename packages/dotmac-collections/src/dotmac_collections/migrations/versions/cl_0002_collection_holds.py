@@ -76,7 +76,7 @@ def _upgrade_tenant_plane() -> None:
             "placement_ordinal > 0", name="ck_collection_holds_placement_ordinal"
         ),
         sa.CheckConstraint(
-            "external_ref LIKE '%:%'", name="ck_collection_holds_external_ref"
+            "strpos(external_ref, ':') > 1", name="ck_collection_holds_external_ref"
         ),
         schema=_SCHEMA,
     )
@@ -170,7 +170,8 @@ def _upgrade_platform_plane() -> None:
             "placement_ordinal > 0", name="ck_platform_collection_holds_ordinal"
         ),
         sa.CheckConstraint(
-            "external_ref LIKE '%:%'", name="ck_platform_collection_holds_external_ref"
+            "strpos(external_ref, ':') > 1",
+            name="ck_platform_collection_holds_external_ref",
         ),
         schema=_SCHEMA,
     )
