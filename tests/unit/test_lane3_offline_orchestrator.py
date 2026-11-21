@@ -526,10 +526,33 @@ class World:
             "now": self.now,
         }
         values.update(self.kwargs)
+        values["anchor"] = self.anchor()
+        values["refresh_digest"] = hashlib.sha256(
+            values["host_admission_bytes"]
+        ).hexdigest()
         return values
+
+    def anchor(self, **changes: Any) -> orchestrator.PresentationKeyAnchor:
+        """Control's recorded ACTIVE credential: the genuine presentation key."""
+        values: dict[str, Any] = {
+            "key_id": "presentation-key-1",
+            "key_fingerprint": digest(
+                base64.urlsafe_b64decode(
+                    self.pres_pub + "=" * (-len(self.pres_pub) % 4)
+                )
+            ),
+            "host_id": HOST_ID,
+            "record_version": 70,
+        }
+        values.update(changes)
+        return orchestrator.PresentationKeyAnchor(**values)
 
     def run(self, *, refresh_digest: bool = True, **overrides: Any):
         values = self.verify_values(refresh_digest=refresh_digest)
+        if "host_admission_bytes" in overrides and "refresh_digest" not in overrides:
+            overrides["refresh_digest"] = hashlib.sha256(
+                overrides["host_admission_bytes"]
+            ).hexdigest()
         values.update(overrides)
         return orchestrator.verify_offline(**values)
 
