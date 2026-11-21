@@ -45,6 +45,7 @@ from dotmac_deployment_foundation.trusted_host_source import (
     candidate_subject_digest,
 )
 
+from tests.unit import lane3_negative_support as nsupport
 from tests.unit.foundation_v3_support import CONTROLLER, WHEEL, grant_for_plan
 from tests.unit.lane3_e10_support import MACHINE_ID, SSH_FINGERPRINT
 from tests.unit.test_lane3_exposure_evidence import _observation
@@ -54,8 +55,9 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import lane3_cp6_export as cp6  # noqa: E402
 import lane3_host_admission as ha  # noqa: E402
+import lane3_negative_proof as nproof  # noqa: E402
 import lane3_offline_orchestrator as orchestrator  # noqa: E402
-from lane3_evidence_finalization import _archive  # noqa: E402
+from lane3_evidence_finalization import _archive_v2  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
 from lane3_exposure_recording import ExposureCallRecord  # noqa: E402
 from lane3_offline_result import (  # noqa: E402
@@ -71,6 +73,11 @@ TARGET_ID = "3f2b8c1e-7a44-4d0b-9c55-0e1d2a3b4c5d"
 DISPATCH_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
 HOST_ID = "fleet-host-1"
 ENROL = "6f1c2f4e-52a8-4d0e-9a1b-2f0c7e6d9b11"
+# The NEGATIVE target (S8b): its own dispatch, target, host, incarnation, lease.
+NEG_TARGET_ID = "7d5e2a90-1b3c-4e8f-a6d7-0c9b8a7f6e5d"
+NEG_DISPATCH_ID = "5c4d3e2f-1a0b-4c9d-8e7f-6a5b4c3d2e1f"
+NEG_HOST_ID = "fleet-host-2"
+NEG_ENROL = "8a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 CAND_ENROL = "0b6c7d0e-3a41-4f7e-8d2e-6a5a0e6a7c22"
 RUN = ExecutionRunBindingV1(repository_id=1397614141, run_id=4242, run_attempt=1)
 EXPECTED_PACKAGE = "dotmac-deployment-foundation"
@@ -155,12 +162,24 @@ def make_policy(now: datetime):
 class World:
     """One consistent rehearsal; tests mutate one piece and call `run()`."""
 
-    def __init__(self) -> None:
-        self.cp_key = Ed25519PrivateKey.generate()
-        self.cand_key = Ed25519PrivateKey.generate()
+    def __init__(self, pair: World | None = None) -> None:
+        """`pair` makes this the NEGATIVE target of `pair`'s pair: the same CP
+        identity, candidate and policy, with its own everything else."""
+        self.negative = pair is not None
+        #: Planted overrides for this target's pinned inputs (S8b tests).
+        self.anchor_changes: dict[str, Any] = {}
+        self.refresh_override: str | None = None
+        self.e10_override: str | None = None
+        self.host_id = NEG_HOST_ID if self.negative else HOST_ID
+        self.enrol = NEG_ENROL if self.negative else ENROL
+        self.lease_run = "lease-2" if self.negative else "lease-1"
+        target_id = NEG_TARGET_ID if self.negative else TARGET_ID
+        wanted_dispatch = NEG_DISPATCH_ID if self.negative else DISPATCH_ID
+        self.cp_key = pair.cp_key if pair else Ed25519PrivateKey.generate()
+        self.cand_key = pair.cand_key if pair else Ed25519PrivateKey.generate()
         self.inst_key = Ed25519PrivateKey.generate()
-        self.now = datetime.now(UTC).replace(microsecond=0)
-        self.policy = make_policy(self.now)
+        self.now = pair.now if pair else datetime.now(UTC).replace(microsecond=0)
+        self.policy = pair.policy if pair else make_policy(self.now)
 
         spec = ProductDeploymentSpec.loads(
             (REPO / "scripts/exposure-rehearsal/product.toml").read_text("utf-8"),
@@ -183,71 +202,22 @@ class World:
                 base, exposure_reconciliations=exposure_reconciliations_for_spec(spec)
             ),
             candidate_wheel_digest=WHEEL,
-            target_id=TARGET_ID,
+            target_id=target_id,
             controller_ssh_fingerprint=CONTROLLER,
-            host_id=HOST_ID,
+            host_id=self.host_id,
             host_incarnation=self.inst_fp,
-            host_enrolment_ref=ENROL,
+            host_enrolment_ref=self.enrol,
         )
-        records = [ExposureCallRecord(0, "observe", observation=_observation())]
-        for item in self.plan.exposure_reconciliations:
-            records.append(
-                ExposureCallRecord(
-                    len(records),
-                    "replace_rules",
-                    family=item.family,
-                    chain=item.chain,
-                    rules=tuple(
-                        rule
-                        for rule in build_firewall_plan(spec)
-                        if rule.family == item.family
-                    ),
-                )
-            )
-        self.archive = _archive(
-            b'{"probe":"synthetic"}', serialize_exposure_calls(records)
-        )
-        self.ciphertext = FAKE_CIPHERTEXT
-        self.decrypt = lambda _ciphertext: self.archive
-
         grant = grant_for_plan(
-            spec, self.plan, receipt_overrides={"dispatch_id": DISPATCH_ID}
+            spec, self.plan, receipt_overrides={"dispatch_id": wanted_dispatch}
         )
-        outcome = DeploymentOutcome(
-            plan=build_plan(spec),
-            succeeded=True,
-            execution_plan_digest=self.plan.digest(),
-            descriptor_digest=descriptor_digest,
-            execution_sequence=grant.execution_sequence,
-            attempt_no=grant.attempt_no,
-        )
-        self.receipt = build_receipt_v2(
-            foundation_revision=REVISION,
-            foundation_artifact_digest=WHEEL,
-            descriptor_digest=descriptor_digest,
-            execution_plan=self.plan,
-            grant=grant,
-            execution_outcome=outcome,
-            fixture_digest="sha256:" + "d" * 64,
-            evidence_bundle_digest=digest(self.ciphertext),
-            controller_identity=CONTROLLER,
-            lease_id="lease-1",
-            probe_vantage_ref="inside-vantage@7",
-            execution_run=RUN,
-            started_at="2026-11-19T10:02:00+00:00",
-            finished_at="2026-11-19T10:09:00+00:00",
-            results=[
-                RequirementResult(
-                    code=item.code,
-                    status=RequirementStatus.EXECUTED_PASSED,
-                    detail=f"{item.title} - measured",
-                    evidence=(f"bundle:{item.code}",),
-                )
-                for item in REQUIRED_ITEMS
-            ],
-        )
-        self.dispatch_id = self.receipt.content["control_dispatch"]["dispatch_id"]
-        coordinate = self.receipt.content["control_dispatch"]
+        self.dispatch_id = wanted_dispatch
+        coordinate = {
+            "dispatch_id": wanted_dispatch,
+            "execution_sequence": grant.execution_sequence,
+            "attempt_no": grant.attempt_no,
+        }
+        self.coordinate = coordinate
 
         subject = {
             "package": EXPECTED_PACKAGE,
@@ -258,32 +228,39 @@ class World:
             "run_id": "1",
             "artifact_id": "2",
         }
-        candidate, self.candidate_bytes = sign_envelope(
-            self.cand_key,
-            purpose=CANDIDATE_ATTESTATION_PURPOSE,
-            issuer="urn:example:candidate-ceremony",
-            key_id="cand-key",
-            custody_domain="candidate_release_signer",
-            trust_root_version=CAND_ENROL,
-            issued_at="2026-11-18T00:00:00Z",
-            expires_at="2026-12-31T00:00:00Z",
-            audience=orchestrator.CANDIDATE_AUDIENCE,
-            observation_id="candidate-1",
-            subject=subject,
-        )
+        if pair is None:
+            candidate, self.candidate_bytes = sign_envelope(
+                self.cand_key,
+                purpose=CANDIDATE_ATTESTATION_PURPOSE,
+                issuer="urn:example:candidate-ceremony",
+                key_id="cand-key",
+                custody_domain="candidate_release_signer",
+                trust_root_version=CAND_ENROL,
+                issued_at="2026-11-18T00:00:00Z",
+                expires_at="2026-12-31T00:00:00Z",
+                audience=orchestrator.CANDIDATE_AUDIENCE,
+                observation_id="candidate-1",
+                subject=subject,
+            )
+        else:
+            # ONE candidate for the pair: the same signed envelope.
+            self.candidate_bytes = pair.candidate_bytes
+            candidate = AttestationEnvelopeV2.from_mapping(
+                json.loads(pair.candidate_bytes)
+            )
         installed, self.installed_bytes = sign_envelope(
             self.inst_key,
             purpose=INSTALLED_OBSERVATION_PURPOSE,
             issuer="urn:example:installed-ceremony",
             key_id="inst-key",
             custody_domain="host_attester",
-            trust_root_version=ENROL,
+            trust_root_version=self.enrol,
             issued_at="2026-11-19T09:59:00Z",
             expires_at="2026-11-19T12:00:00Z",
-            audience=HOST_ID,
+            audience=self.host_id,
             observation_id=self.dispatch_id,
             subject={
-                "host_identity": HOST_ID,
+                "host_identity": self.host_id,
                 "package": EXPECTED_PACKAGE,
                 "version": "0.4.0a2",
                 "wheel_sha256": WHEEL,
@@ -296,6 +273,52 @@ class World:
         )
         self.installed_digest = str(attestation_envelope_digest(installed))
         self.candidate_digest = str(attestation_envelope_digest(candidate))
+
+        if pair is None:
+            # The NEGATIVE target of the pair, then the proof that binds it.
+            self.neg = World(pair=self)
+            records = nsupport.negative_records(spec, self.neg.plan)
+            self.proof_bytes = nproof.build_proof(
+                positive_dispatch_id=self.dispatch_id,
+                dispatch_id=self.neg.dispatch_id,
+                target_id=self.neg.plan.target_id,
+                host_id=NEG_HOST_ID,
+                execution_sequence=self.neg.coordinate["execution_sequence"],
+                attempt_no=self.neg.coordinate["attempt_no"],
+                lease_authorization_run=self.neg.lease_run,
+                terminal_refusal=nproof.NEGATIVE_TERMINAL_REFUSAL,
+                host_mutated=True,
+                exit_status=nproof.NEGATIVE_EXIT_STATUS,
+                exposure_calls=serialize_exposure_calls(records),
+                probe_bytes=nsupport.probe_bytes(
+                    self.neg.dispatch_id, NEG_HOST_ID, T + timedelta(minutes=7)
+                ),
+            )
+            self.records = [
+                ExposureCallRecord(0, "observe", observation=_observation())
+            ]
+            for item in self.plan.exposure_reconciliations:
+                self.records.append(
+                    ExposureCallRecord(
+                        len(self.records),
+                        "replace_rules",
+                        family=item.family,
+                        chain=item.chain,
+                        rules=tuple(
+                            rule
+                            for rule in build_firewall_plan(spec)
+                            if rule.family == item.family
+                        ),
+                    )
+                )
+            self.archive = _archive_v2(
+                b'{"probe":"synthetic"}',
+                serialize_exposure_calls(self.records),
+                self.proof_bytes,
+            )
+            self.ciphertext = FAKE_CIPHERTEXT
+            self.decrypt = lambda _ciphertext: self.archive
+            self.build_receipt(grant, descriptor_digest)
         # S2's own document shape; the presentation is signed with a synthetic
         # presentation key whose public half is the PINNED input of the run.
         self.pres_key = Ed25519PrivateKey.generate()
@@ -323,7 +346,7 @@ class World:
         self.export: dict[str, Any] = {
             "schema": cp6.EXPORT_SCHEMA,
             "dispatch_id": self.dispatch_id,
-            "host_id": HOST_ID,
+            "host_id": self.host_id,
             "control": {
                 "dispatch": self._dispatch_block(coordinate),
                 "ledger": {
@@ -341,13 +364,13 @@ class World:
                 "e10_receipt": {
                     "receipt_ref": "e10-0001",
                     "vm_alias": "vm-a",
-                    "host_id": HOST_ID,
+                    "host_id": self.host_id,
                     "machine_id": MACHINE_ID,
                     "ssh_host_key_fingerprint": SSH_FINGERPRINT,
                     "vm_slot": None,
                     "incarnation_public_key_b64url": b64url(public_raw(self.inst_key)),
                     "incarnation_fingerprint": self.inst_fp,
-                    "enrolment_uuid": ENROL,
+                    "enrolment_uuid": self.enrol,
                     "key_custody_pointer": "bao://transit-a2-hi-vm-a-1/keys/incarnation",
                     "recorded_by": "ceremony",
                     "recorded_at": ts(T - timedelta(minutes=30)),
@@ -364,8 +387,8 @@ class World:
                 },
                 "lease": {
                     "lease_id": "lease-row-1",
-                    "host_id": HOST_ID,
-                    "authorization_run": "lease-1",
+                    "host_id": self.host_id,
+                    "authorization_run": self.lease_run,
                     "e10_receipt_ref": "e10-0001",
                     "acquired_at": ts(T + timedelta(minutes=1)),
                     "expires_at": ts(T + timedelta(minutes=61)),
@@ -387,7 +410,7 @@ class World:
                 },
                 "installed_root": {
                     **root_common,
-                    "enrolment_uuid": ENROL,
+                    "enrolment_uuid": self.enrol,
                     "custody_domain": "host_attester",
                     "issuer": "urn:example:installed-ceremony",
                     "key_id": "inst-key",
@@ -400,6 +423,84 @@ class World:
         self.kwargs: dict[str, Any] = {}
         self.cp["e10_receipt_digest"] = cp6.receipt_digest(self.cp["e10_receipt"])
         self.refresh_ledger()
+
+    def build_receipt(
+        self,
+        grant: Any,
+        descriptor_digest: str,
+        *,
+        row8_evidence: tuple[str, ...] | None = None,
+        row8_status: RequirementStatus = RequirementStatus.EXECUTED_PASSED,
+    ) -> None:
+        """The positive receipt; row 8 binds the proof member's digest."""
+        self._grant, self._descriptor_digest = grant, descriptor_digest
+        outcome = DeploymentOutcome(
+            plan=build_plan(self.spec),
+            succeeded=True,
+            execution_plan_digest=self.plan.digest(),
+            descriptor_digest=descriptor_digest,
+            execution_sequence=grant.execution_sequence,
+            attempt_no=grant.attempt_no,
+        )
+        results = []
+        for item in REQUIRED_ITEMS:
+            if item.code == nproof.ROW_CODE:
+                results.append(
+                    RequirementResult(
+                        code=item.code,
+                        status=row8_status,
+                        detail=f"{item.title} - launcher-asserted",
+                        evidence=row8_evidence
+                        if row8_evidence is not None
+                        else (nproof.row_evidence(self.proof_bytes),),
+                    )
+                )
+            else:
+                results.append(
+                    RequirementResult(
+                        code=item.code,
+                        status=RequirementStatus.EXECUTED_PASSED,
+                        detail=f"{item.title} - measured",
+                        evidence=(f"bundle:{item.code}",),
+                    )
+                )
+        self.receipt = build_receipt_v2(
+            foundation_revision=REVISION,
+            foundation_artifact_digest=WHEEL,
+            descriptor_digest=descriptor_digest,
+            execution_plan=self.plan,
+            grant=grant,
+            execution_outcome=outcome,
+            fixture_digest="sha256:" + "d" * 64,
+            evidence_bundle_digest=digest(self.ciphertext),
+            controller_identity=CONTROLLER,
+            lease_id="lease-1",
+            probe_vantage_ref="inside-vantage@7",
+            execution_run=RUN,
+            started_at="2026-11-19T10:02:00+00:00",
+            finished_at="2026-11-19T10:09:00+00:00",
+            results=results,
+        )
+
+    def negative_inputs(self) -> orchestrator.NegativeTargetInputs:
+        """This (negative) world's own inputs, as E9 receives them."""
+        row = self.cp["e10_receipt"]
+        if self.negative:
+            self.cp["e10_receipt_digest"] = cp6.receipt_digest(row)
+        admission_bytes = json.dumps(self.admission).encode()
+        return orchestrator.NegativeTargetInputs(
+            execution_plan=self.plan,
+            export_bytes=canonical(self.export),
+            expected_e10_receipt_digest=self.e10_override
+            or cp6.receipt_digest(row),
+            candidate_envelope_bytes=self.candidate_bytes,
+            installed_envelope_bytes=self.installed_bytes,
+            host_admission_bytes=admission_bytes,
+            presentation_public_key_b64url=self.pres_pub,
+            anchor=self.anchor(),
+            refresh_digest=self.refresh_override
+            or hashlib.sha256(admission_bytes).hexdigest(),
+        )
 
     def _dispatch_block(self, coordinate: dict[str, Any]) -> dict[str, Any]:
         statement = {
@@ -525,6 +626,7 @@ class World:
             "policy": self.policy,
             "now": self.now,
         }
+        values["negative"] = self.neg.negative_inputs()
         values.update(self.kwargs)
         values["anchor"] = self.anchor()
         values["refresh_digest"] = hashlib.sha256(
@@ -541,9 +643,10 @@ class World:
                     self.pres_pub + "=" * (-len(self.pres_pub) % 4)
                 )
             ),
-            "host_id": HOST_ID,
+            "host_id": self.host_id,
             "record_version": 70,
         }
+        values.update(self.anchor_changes)
         values.update(changes)
         return orchestrator.PresentationKeyAnchor(**values)
 

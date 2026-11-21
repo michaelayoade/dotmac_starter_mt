@@ -62,7 +62,9 @@ def test_the_vocabulary_is_partitioned_by_sender() -> None:
         "external_results",
         "evidence_ciphertext",
         "abort",
+        "compensation_probe_done",
     } == LAUNCHER_TO_TARGET
+    assert "compensation_window_open" in TARGET_TO_LAUNCHER
 
 
 def test_a_frame_round_trips_in_both_directions(pair) -> None:
@@ -285,3 +287,34 @@ def test_the_ready_frame_must_carry_the_hosts_incarnation(pair) -> None:
     assert launcher.receive("ready", timeout=2)[1]["host_incarnation"].startswith(
         "sha256:"
     )
+
+
+def test_the_compensation_window_frames_are_closed_and_directional(pair) -> None:
+    launcher, target, _, _ = pair
+    target.send(
+        "compensation_window_open",
+        {"deadline_seconds": 5, "exposure_calls_b64": "e30="},
+    )
+    kind, data = launcher.receive("compensation_window_open", timeout=2)
+    assert (kind, data["deadline_seconds"]) == ("compensation_window_open", 5)
+    launcher.send("compensation_probe_done", {})
+    assert target.receive("compensation_probe_done", timeout=2) == (
+        "compensation_probe_done",
+        {},
+    )
+    with pytest.raises(ChannelRefused) as extra:
+        launcher.send("compensation_probe_done", {"probe": "bytes stay here"})
+    assert extra.value.code == "frame-data-keys"
+    with pytest.raises(ChannelRefused) as wrong_sender:
+        target.send("compensation_probe_done", {})
+    assert wrong_sender.value.code == "frame-kind-not-sendable"
+    with pytest.raises(ChannelRefused) as missing:
+        target.send("compensation_window_open", {"deadline_seconds": 5})
+    assert missing.value.code == "frame-data-keys"
+
+
+def test_the_start_frame_must_carry_the_role(pair) -> None:
+    launcher, _, _, _ = pair
+    with pytest.raises(ChannelRefused) as caught:
+        launcher.send("start", {})
+    assert caught.value.code == "frame-data-keys"

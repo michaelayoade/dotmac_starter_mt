@@ -21,9 +21,16 @@ Joins (each refusal is a stable code, never supplied text):
 * candidate: the candidate (and installed) envelope verifies against the
   enrolled roots, the candidate root pinned by fingerprint.
 
-NOT built here (S8b): the two-target / negative-target compensation proof. The
-archive's outer carrier stays fixed at three members; that proof belongs inside
-the encrypted manifest; there is one newest run per SHA.
+Two targets (S8b). One X1 run drives both, negative first; the oracle selects one
+run per SHA, so the NEGATIVE target's compensation proof
+(`lane3_negative_proof`, UNSIGNED) sits inside the positive ciphertext as the
+third member of the v2 evidence bundle. E9 accepts ONLY v2 (a v1 bundle is
+refused as `offline-join-bundle-version`) and joins, for the negative target,
+against its OWN inputs: N1 Control, N2 E10, N3 admission anchor, N4 candidate,
+N5 pair (distinct dispatch, target and host; identical descriptor), N6
+compensation (re-derived from the recorded observations with Foundation's own
+functions) and N7 post-compensation probe. Row 8 of the positive receipt must be
+`executed_passed` with evidence exactly the digest of the member bytes.
 
 DEPENDS ON S2 (`lane3_host_admission.py`): `read_host_admission` below CALLS S2's
 `parse_host_admission` (no parsing or signature logic is restated here). The
@@ -52,6 +59,7 @@ from typing import Any, Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import lane3_negative_proof as negative_proof
 from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.execution_plan_v3 import FoundationExecutionPlanV3
 from dotmac_deployment_foundation.rehearsal import (
@@ -74,7 +82,7 @@ from dotmac_deployment_foundation.trusted_host_source import (
 )
 from lane3_bundle_verification import (
     BundleVerificationRefused,
-    require_plaintext_exposure_bundle,
+    require_plaintext_exposure_bundle_v2,
 )
 from lane3_cp6_export import (
     CONSUME_SCOPE,
@@ -90,11 +98,13 @@ from lane3_cp6_export import (
     verify_dispatch,
 )
 from lane3_e10_receipt import E10ReceiptRef, ReceiptRefused
+from lane3_evidence_bundle import NEGATIVE_COMPENSATION_MEMBER
 from lane3_evidence_finalization import (
     MAX_ARCHIVE_BYTES,
     MAX_CIPHERTEXT_BYTES,
     FinalizationRefused,
     read_plaintext_evidence_archive,
+    read_plaintext_evidence_archive_v2,
 )
 from lane3_host_admission import HostAdmissionDigest, parse_host_admission
 from lane3_host_admission import Refused as HostAdmissionRefused
@@ -124,6 +134,7 @@ __all__ = [
     "CANDIDATE_AUDIENCE",
     "PresentationKeyAnchor",
     "JoinRefused",
+    "NegativeTargetInputs",
     "OfflineVerification",
     "PinnedIdentity",
     "age_decryptor",
@@ -219,6 +230,40 @@ def _join_anchor(
         _refuse_anchor("key-id-mismatch")
     if anchor.host_id != plan.host_id:
         _refuse_anchor("host-mismatch")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class NegativeTargetInputs:
+    """The NEGATIVE target's own inputs (S8b): everything N1-N7 join against.
+
+    None of these is read from the proof: the proof's claims are joined to them.
+    `execution_plan` is the typed plan the verify CLI re-rendered from the
+    release checkout (never parsed from supplied bytes).
+    """
+
+    execution_plan: FoundationExecutionPlanV3
+    export_bytes: bytes
+    expected_e10_receipt_digest: str
+    candidate_envelope_bytes: bytes
+    installed_envelope_bytes: bytes
+    host_admission_bytes: bytes
+    presentation_public_key_b64url: str
+    anchor: PresentationKeyAnchor
+    refresh_digest: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Coordinates:
+    """The Control coordinates one target's join compares to the signed dispatch.
+
+    The positive struct is built from the receipt, the negative one from the
+    proof's CLAIMS; the join is the same function for both."""
+
+    dispatch_id: str
+    execution_sequence: int
+    attempt_no: int
+    authorization_run: str
+    host_id: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -378,14 +423,14 @@ def _join_receipt(
 def _join_control(
     export: Cp6Export,
     *,
-    receipt: RehearsalReceiptV2,
+    coordinates: _Coordinates,
     plan: FoundationExecutionPlanV3,
     pinned: Sequence[PinnedIdentity],
     admission: HostAdmissionDigest,
+    require_release: bool = False,
 ) -> None:
     """Control join: signed dispatch, ledger row, lease bracket."""
-    dispatch = receipt.content["control_dispatch"]
-    wanted = dispatch["dispatch_id"]
+    wanted = coordinates.dispatch_id
     if export.dispatch_id != wanted:
         _refuse("export-dispatch-mismatch")
     try:
@@ -404,8 +449,8 @@ def _join_control(
     if statement.target_id != plan.target_id or statement.target_ref != plan.target:
         _refuse("dispatch-target-mismatch")
     if (statement.execution_sequence, statement.attempt_no) != (
-        dispatch["execution_sequence"],
-        dispatch["attempt_no"],
+        coordinates.execution_sequence,
+        coordinates.attempt_no,
     ):
         _refuse("dispatch-coordinate-mismatch")
     if admission.attempt_id != wanted:
@@ -429,7 +474,7 @@ def _join_control(
     if ledger.fingerprint != expected_fingerprint:
         _refuse("ledger-fingerprint-mismatch")
 
-    _join_lease_bracket(export, receipt)
+    _join_lease_bracket(export, coordinates, require_release=require_release)
     _join_presentation_freshness(export, admission)
 
 
@@ -452,20 +497,26 @@ def _join_presentation_freshness(
         _refuse("host-admission-presentation-not-fresh")
 
 
-def _join_lease_bracket(export: Cp6Export, receipt: RehearsalReceiptV2) -> None:
+def _join_lease_bracket(
+    export: Cp6Export, coordinates: _Coordinates, *, require_release: bool = False
+) -> None:
     """Lease identity and the launcher-observed DB-time bracket."""
     ledger = export.ledger
     lease = export.lease
     # The receipt's `lease_id` is the launcher's authorization run id.
     if (
-        lease.authorization_run != receipt.content["lease_id"]
-        or lease.host_id != receipt.content["host_id"]
+        lease.authorization_run != coordinates.authorization_run
+        or lease.host_id != coordinates.host_id
         or export.host_id != lease.host_id
         or (export.release is not None and export.release.lease_id != lease.lease_id)
     ):
         _refuse("lease-mismatch")
     if lease.expires_at <= lease.acquired_at:
         _refuse("lease-mismatch")
+    if export.release is None and require_release:
+        # The negative target's probe window closes before its release is
+        # written; a lease left to expire cannot bracket the probe.
+        _refuse("release-missing")
     if export.release is None:
         # Foundation `covers` treats now >= expires_at as expired.
         if not lease.acquired_at <= ledger.created_at < lease.expires_at:
@@ -625,6 +676,166 @@ def _join_candidate(
         raise JoinRefused("offline-join-" + _pair_code(exc)) from None
 
 
+def _candidate_subject(candidate_bytes: bytes) -> CandidateAttestationSubjectV2:
+    candidate = _envelope(candidate_bytes, "candidate-envelope-invalid")
+    try:
+        return CandidateAttestationSubjectV2.from_mapping(candidate.subject_mapping())
+    except SpecError:
+        _refuse("candidate-envelope-invalid")
+    raise AssertionError  # pragma: no cover
+
+
+def _proof_refusal(exc: negative_proof.ProofRefused) -> JoinRefused:
+    return JoinRefused(f"offline-join-{exc.code}")
+
+
+def _join_row8(receipt: RehearsalReceiptV2, member: bytes) -> None:
+    """Row 8 is `executed_passed` and its evidence is exactly the member digest."""
+    rows = [r for r in receipt.results if r.code == negative_proof.ROW_CODE]
+    if len(rows) != 1:
+        _refuse("compensation-row-mismatch")
+    row = rows[0]
+    if row.status.value != "executed_passed" or row.evidence != (
+        negative_proof.row_evidence(member),
+    ):
+        _refuse("compensation-row-mismatch")
+
+
+def _join_pair(
+    proof: negative_proof.NegativeProof,
+    *,
+    receipt: RehearsalReceiptV2,
+    positive_plan: FoundationExecutionPlanV3,
+    negative_plan: FoundationExecutionPlanV3,
+    negative_export: Cp6Export,
+    descriptor: ProductDeploymentSpec,
+) -> None:
+    """N5: two genuinely distinct targets of ONE candidate and ONE descriptor."""
+    positive_dispatch = receipt.content["control_dispatch"]["dispatch_id"]
+    if proof.positive_dispatch_id != positive_dispatch:
+        _refuse("pair-positive-dispatch-mismatch")
+    if (
+        proof.dispatch_id == positive_dispatch
+        or negative_export.dispatch_id == positive_dispatch
+    ):
+        _refuse("pair-dispatch-same")
+    if proof.target_id == positive_plan.target_id or (
+        negative_plan.target_id == positive_plan.target_id
+    ):
+        _refuse("pair-target-same")
+    if proof.host_id == positive_plan.host_id or (
+        negative_plan.host_id == positive_plan.host_id
+    ):
+        _refuse("pair-host-same")
+    # The proof's identity claims are joined to the negative target's own plan.
+    if (
+        proof.target_id != negative_plan.target_id
+        or proof.host_id != negative_plan.host_id
+    ):
+        _refuse("pair-claim-mismatch")
+    # The provocation lives in the negative baseline (prepared before its lease),
+    # never in the descriptor: both plans carry the verifier checkout's descriptor.
+    wanted = str(descriptor.to_canonical_document().sha256_digest())
+    if positive_plan.descriptor_digest != wanted or (
+        negative_plan.descriptor_digest != wanted
+    ):
+        _refuse("pair-descriptor-mismatch")
+
+
+def _join_negative(
+    negative: NegativeTargetInputs,
+    proof: negative_proof.NegativeProof,
+    *,
+    receipt: RehearsalReceiptV2,
+    positive_plan: FoundationExecutionPlanV3,
+    positive_admission: HostAdmissionDigest,
+    positive_candidate_bytes: bytes,
+    descriptor: ProductDeploymentSpec,
+    pinned_cp_identities: Sequence[PinnedIdentity],
+    pinned_candidate_root_fingerprint: str,
+    candidate_audience: str,
+) -> Cp6Export:
+    """N1-N7 for the negative target, against ITS OWN inputs."""
+    plan = negative.execution_plan
+    if type(plan) is not FoundationExecutionPlanV3:
+        _refuse("plan-required")
+    anchor = _check_anchor_shape(negative.anchor, negative.refresh_digest)
+    try:
+        export = parse_cp6_export(negative.export_bytes)
+    except Cp6ExportRefused:
+        _refuse("export-invalid")
+    _join_pair(
+        proof,
+        receipt=receipt,
+        positive_plan=positive_plan,
+        negative_plan=plan,
+        negative_export=export,
+        descriptor=descriptor,
+    )
+    admission = read_host_admission(
+        negative.host_admission_bytes,
+        presentation_public_key_b64url=negative.presentation_public_key_b64url,
+    )
+    # N3: the negative target's OWN anchor and step-13 refresh digest.
+    _join_anchor(
+        admission, anchor=anchor, refresh_digest=negative.refresh_digest, plan=plan
+    )
+    # N1: the same Control join, from the proof's claims.
+    _join_control(
+        export,
+        coordinates=_Coordinates(
+            dispatch_id=proof.dispatch_id,
+            execution_sequence=proof.execution_sequence,
+            attempt_no=proof.attempt_no,
+            authorization_run=proof.lease_authorization_run,
+            host_id=proof.host_id,
+        ),
+        plan=plan,
+        pinned=pinned_cp_identities,
+        admission=admission,
+        require_release=True,
+    )
+    # N2: E10 over the negative export, with the negative expected digest.
+    _join_e10(
+        export,
+        plan=plan,
+        expected_receipt_digest=negative.expected_e10_receipt_digest,
+        admission=admission,
+    )
+    # N4: the same candidate; its own installed envelope.
+    _join_candidate(
+        export,
+        plan=plan,
+        candidate_bytes=negative.candidate_envelope_bytes,
+        installed_bytes=negative.installed_envelope_bytes,
+        admission=admission,
+        pinned_candidate_root_fingerprint=pinned_candidate_root_fingerprint,
+        candidate_audience=candidate_audience,
+    )
+    if (
+        admission.candidate_attestation_digest
+        != positive_admission.candidate_attestation_digest
+        or _candidate_subject(negative.candidate_envelope_bytes).source_revision
+        != _candidate_subject(positive_candidate_bytes).source_revision
+        or plan.candidate_wheel_digest != positive_plan.candidate_wheel_digest
+    ):
+        _refuse("candidate-pair-mismatch")
+    # N6: compensation, re-derived offline; N7: the probe.
+    try:
+        negative_proof.require_compensation(
+            proof, execution_plan=plan, descriptor=descriptor
+        )
+        assert export.release is not None
+        negative_proof.require_probe(
+            proof,
+            ledger_created_at=export.ledger.created_at,
+            released_at=export.release.released_at,
+        )
+    except negative_proof.ProofRefused as exc:
+        raise _proof_refusal(exc) from None
+    return export
+
+
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -670,6 +881,7 @@ def verify_offline(
     presentation_public_key_b64url: str,
     anchor: PresentationKeyAnchor,
     refresh_digest: str,
+    negative: NegativeTargetInputs,
     policy: VerificationPolicy,
     now: datetime,
     candidate_audience: str = CANDIDATE_AUDIENCE,
@@ -678,7 +890,8 @@ def verify_offline(
 
     `execution_plan` and `descriptor` are trusted inputs the caller holds; the
     private evidence never chooses its own authority. Everything is refused
-    with a stable code; private text is never quoted.
+    with a stable code; private text is never quoted. The bundle MUST be v2; the
+    caller chooses the version and it is never sniffed.
     """
     if policy.state != "enrolled":
         _refuse("policy-unenrolled")
@@ -688,6 +901,8 @@ def verify_offline(
         _refuse("plan-required")
     if type(descriptor) is not ProductDeploymentSpec:
         _refuse("descriptor-required")
+    if type(negative) is not NegativeTargetInputs:
+        _refuse("negative-required")
     anchor = _check_anchor_shape(anchor, refresh_digest)
     try:
         receipt = RehearsalReceiptV2.from_json(receipt_bytes)
@@ -724,12 +939,26 @@ def verify_offline(
     if type(plaintext) is not bytes or not 0 < len(plaintext) <= MAX_ARCHIVE_BYTES:
         _refuse("decrypt-failed")
     try:
-        manifest, members = read_plaintext_evidence_archive(plaintext)
-        require_plaintext_exposure_bundle(
+        manifest, members = read_plaintext_evidence_archive_v2(plaintext)
+    except FinalizationRefused:
+        try:
+            read_plaintext_evidence_archive(plaintext)
+        except FinalizationRefused:
+            _refuse("bundle-inconsistent")
+        # A well-formed v1 bundle offered to a v2-only verifier: a downgrade.
+        _refuse("bundle-version")
+    try:
+        require_plaintext_exposure_bundle_v2(
             manifest, members, execution_plan=execution_plan, descriptor=descriptor
         )
-    except (FinalizationRefused, BundleVerificationRefused):
+    except BundleVerificationRefused:
         _refuse("bundle-inconsistent")
+    member = members[NEGATIVE_COMPENSATION_MEMBER]
+    try:
+        proof = negative_proof.parse_proof(member)
+    except negative_proof.ProofRefused as exc:
+        raise _proof_refusal(exc) from None
+    _join_row8(receipt, member)
 
     try:
         export = parse_cp6_export(export_bytes)
@@ -742,9 +971,16 @@ def verify_offline(
     _join_anchor(
         admission, anchor=anchor, refresh_digest=refresh_digest, plan=execution_plan
     )
+    dispatch = receipt.content["control_dispatch"]
     _join_control(
         export,
-        receipt=receipt,
+        coordinates=_Coordinates(
+            dispatch_id=dispatch["dispatch_id"],
+            execution_sequence=dispatch["execution_sequence"],
+            attempt_no=dispatch["attempt_no"],
+            authorization_run=receipt.content["lease_id"],
+            host_id=receipt.content["host_id"],
+        ),
         plan=execution_plan,
         pinned=pinned_cp_identities,
         admission=admission,
@@ -761,6 +997,18 @@ def verify_offline(
         candidate_bytes=candidate_envelope_bytes,
         installed_bytes=installed_envelope_bytes,
         admission=admission,
+        pinned_candidate_root_fingerprint=pinned_candidate_root_fingerprint,
+        candidate_audience=candidate_audience,
+    )
+    negative_export = _join_negative(
+        negative,
+        proof,
+        receipt=receipt,
+        positive_plan=execution_plan,
+        positive_admission=admission,
+        positive_candidate_bytes=candidate_envelope_bytes,
+        descriptor=descriptor,
+        pinned_cp_identities=pinned_cp_identities,
         pinned_candidate_root_fingerprint=pinned_candidate_root_fingerprint,
         candidate_audience=candidate_audience,
     )
@@ -795,6 +1043,15 @@ def verify_offline(
             + hashlib.sha256(host_admission_bytes).hexdigest(),
             "receipt": coordinates.receipt_digest,
             "ciphertext": ciphertext_digest,
+            "negative_cp6_export": negative_export.export_digest,
+            "negative_e10_receipt": negative.expected_e10_receipt_digest,
+            "negative_presentation_anchor": f"{negative.anchor.record_slug}"
+            f"@{negative.anchor.record_version}|{negative.anchor.key_id}"
+            f"|{negative.anchor.key_fingerprint}|{negative.anchor.host_id}",
+            "negative_refresh_digest": "sha256:" + negative.refresh_digest,
+            "negative_host_admission": "sha256:"
+            + hashlib.sha256(negative.host_admission_bytes).hexdigest(),
+            "negative_compensation": "sha256:" + proof.member_digest,
         },
     )
 

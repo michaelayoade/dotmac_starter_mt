@@ -112,6 +112,7 @@ _SPEC: Final[dict[str, tuple[str, frozenset[str], int]]] = {
                 "evidence_seconds",
                 "proceed_seconds",
                 "store_time",
+                "role",
             }
         ),
         DEFAULT_FRAME_LIMIT,
@@ -124,6 +125,9 @@ _SPEC: Final[dict[str, tuple[str, frozenset[str], int]]] = {
         EVIDENCE_FRAME_LIMIT,
     ),
     "abort": ("launcher", frozenset({"reason"}), DEFAULT_FRAME_LIMIT),
+    # S8b: the negative target's post-compensation probe window. `done` carries
+    # no payload: the probe bytes stay with the launcher only.
+    "compensation_probe_done": ("launcher", frozenset(), DEFAULT_FRAME_LIMIT),
     # target -> launcher
     "ready": (
         "target",
@@ -131,6 +135,11 @@ _SPEC: Final[dict[str, tuple[str, frozenset[str], int]]] = {
         DEFAULT_FRAME_LIMIT,
     ),
     "window_open": ("target", frozenset({"deadline_seconds"}), DEFAULT_FRAME_LIMIT),
+    "compensation_window_open": (
+        "target",
+        frozenset({"deadline_seconds", "exposure_calls_b64"}),
+        EVIDENCE_FRAME_LIMIT,
+    ),
     "evidence_request": (
         "target",
         frozenset({"exposure_calls_b64"}),
