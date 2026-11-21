@@ -7,15 +7,17 @@ public contracts of ``settle_confirmation`` and the F2 commands describe.
 
 from __future__ import annotations
 
+import calendar
 import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from dotmac_billing import (
@@ -25,6 +27,7 @@ from dotmac_billing import (
     RecordDefaultTermsV1,
     ServicePeriodEvidenceV1,
     ServicePeriodStatus,
+    get_effective_account_terms,
     get_funding_availability,
     record_account_terms,
     record_default_terms,
@@ -479,7 +482,9 @@ def assert_state(outcome: SettleOutcomeV1, state: SettleState, reason=None) -> N
 # --------------------------------------------------------------------------
 # F2 FundedCharge: terms, the charge source, ports and the assembly wrappers
 # --------------------------------------------------------------------------
-def seed_default_terms(db, scope, *, contract_type: str = "prepaid") -> None:
+def seed_default_terms(
+    db, scope, *, contract_type: str = "prepaid", period: str = "monthly"
+) -> None:
     """The tenant default terms, effective half a day before ``BASE``."""
     record_default_terms(
         db,
@@ -487,7 +492,7 @@ def seed_default_terms(db, scope, *, contract_type: str = "prepaid") -> None:
             scope=scope,
             effective_from=BASE - timedelta(hours=12),
             contract_type=contract_type,
-            period="monthly",
+            period=period,
             postpaid_billing_timing="period_end",
             postpaid_grace=timedelta(days=3),
             actor_ref="fixture",
@@ -497,7 +502,13 @@ def seed_default_terms(db, scope, *, contract_type: str = "prepaid") -> None:
 
 
 def seed_customer_terms(
-    db, scope, account_id: UUID, *, contract_type: str, effective_from: datetime
+    db,
+    scope,
+    account_id: UUID,
+    *,
+    contract_type: str,
+    effective_from: datetime,
+    period: str | None = None,
 ) -> None:
     record_account_terms(
         db,
@@ -508,8 +519,48 @@ def seed_customer_terms(
             actor_ref="fixture",
             reason="funded charge fixture",
             contract_type=contract_type,
+            period=period,
         ),
     )
+
+
+# The period rule and the prorated amount, written independently of the flows
+# verifier (calendar arithmetic by hand), so the tests are not circular.
+LAGOS = "Africa/Lagos"
+
+
+def add_months_local(moment: datetime, months: int, zone: str = LAGOS) -> datetime:
+    """``moment`` plus calendar months at the same local wall clock, clamped."""
+    local = moment.astimezone(ZoneInfo(zone))
+    index = local.year * 12 + local.month - 1 + months
+    year, month = divmod(index, 12)
+    month += 1
+    day = min(local.day, calendar.monthrange(year, month)[1])
+    return local.replace(year=year, month=month, day=day, fold=0).astimezone(UTC)
+
+
+def end_for_terms(moment: datetime, period: str, zone: str = LAGOS) -> datetime:
+    """The end of the period starting at ``moment`` under a Billing terms period."""
+    if period == "daily":
+        local = moment.astimezone(ZoneInfo(zone))
+        return (local + timedelta(days=1)).replace(fold=0).astimezone(UTC)
+    months = {"monthly": 1, "quarterly": 3, "annually": 12}[period]
+    return add_months_local(moment, months, zone)
+
+
+def local_days(start: datetime, end: datetime, zone: str = LAGOS) -> int:
+    z = ZoneInfo(zone)
+    return (end.astimezone(z).date() - start.astimezone(z).date()).days
+
+
+def prorated_amount(
+    total: str, issue_at: datetime, start: datetime, end: datetime, zone: str = LAGOS
+) -> str:
+    """Full price x used days / days in the enclosing period, half-up once."""
+    value = (
+        Decimal(total) * local_days(issue_at, end, zone) / local_days(start, end, zone)
+    )
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 class ObligationSources:
@@ -535,6 +586,17 @@ class FakeChargeSource:
         self.mutators: dict[RatedChargeKeyV1, object] = {}
         self.reads: list[RatedChargeKeyV1] = []
         self.issues: list[tuple[RatedChargeKeyV1, datetime]] = []
+        #: The billing time zone the source puts on its commands (the policy's).
+        self.timezone = LAGOS
+
+    @property
+    def zone(self) -> str:
+        """The zone the source counts periods in (an unknown policy zone falls back)."""
+        try:
+            ZoneInfo(self.timezone)
+        except Exception:
+            return LAGOS
+        return self.timezone
 
     def add(
         self,
@@ -545,6 +607,8 @@ class FakeChargeSource:
         total: str = "107.50",
         due_at: datetime = BASE,
         service_ref: str | None = "service:one",
+        period_starts_at: datetime | None = None,
+        period_ends_at: datetime | None = None,
     ) -> RatedChargeKeyV1:
         key = RatedChargeKeyV1(
             "subscriptions", "recurring_charge_occurrence", fact, "1"
@@ -555,6 +619,8 @@ class FakeChargeSource:
             service_ref=service_ref,
             total=b._money(total),
             due_at=due_at,
+            period_starts_at=period_starts_at,
+            period_ends_at=period_ends_at,
         )
         if total == "107.50":
             self.evidence[key] = (
@@ -577,6 +643,26 @@ class FakeChargeSource:
     def issue_command(self, db, *, scope, key, issue_at):
         self.issues.append((key, issue_at))
         charge = self.charges[key]
+        if charge.period_ends_at is None or charge.period_starts_at is None:
+            # An ordinary period: the Billing terms period at ``issue_at``.
+            terms = get_effective_account_terms(
+                db, scope=scope, account_id=charge.billing_account_id, at=issue_at
+            )
+            period_end = end_for_terms(issue_at, terms.period.value, self.zone)
+            amount = charge.total.amount
+        else:
+            # A prorated charge: co-terminous with the enclosing period.
+            assert not self.evidence[key], "prorated fixtures use zero-tax totals"
+            period_end = charge.period_ends_at
+            amount = Decimal(
+                prorated_amount(
+                    str(charge.total.amount),
+                    issue_at,
+                    charge.period_starts_at,
+                    period_end,
+                    self.zone,
+                )
+            )
         command = tax_dependency._command(
             charge.billing_account_id, scope, self.evidence[key]
         )
@@ -589,19 +675,21 @@ class FakeChargeSource:
             source_fact_version=key.source_fact_version,
             service_ref=charge.service_ref,
             service_period=ServicePeriodEvidenceV1(
-                ServicePeriodStatus.VERIFIED, issue_at, issue_at + timedelta(days=30)
+                ServicePeriodStatus.VERIFIED, issue_at, period_end
             ),
             collection_timing="advance",
         )
         if not self.evidence[key]:
+            due = b._money(str(amount))
             obligation = replace(
                 obligation,
-                pre_tax_amount=charge.total,
+                pre_tax_amount=due,
                 tax_amount=b._money("0"),
-                total_amount=charge.total,
+                total_amount=due,
             )
         command = replace(
             command,
+            timezone=self.timezone,
             obligation=obligation,
             reference_date=issue_at.date(),
             due_at=issue_at,
@@ -627,11 +715,19 @@ class CountingFundedPolicy:
 
 
 def make_funded_ports(
-    source: FakeChargeSource, *, cap: int = 20, barrier=None
+    source: FakeChargeSource,
+    *,
+    cap: int = 20,
+    barrier=None,
+    proration: str = "actual_calendar_days",
+    timezone: str = LAGOS,
 ) -> FundedChargePorts:
+    source.timezone = timezone
     return FundedChargePorts(
         charges=source,
-        policy=CountingFundedPolicy(FundedChargePolicyV1("fp1", cap), barrier),
+        policy=CountingFundedPolicy(
+            FundedChargePolicyV1("fp1", cap, proration, timezone), barrier
+        ),
         obligation_sources=ObligationSources(),
         numbering=b.NUMBERING,
     )

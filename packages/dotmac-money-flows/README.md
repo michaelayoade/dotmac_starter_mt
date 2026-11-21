@@ -180,3 +180,65 @@ Duties of the caller (Sub-thin):
 
 Out of scope: an earmark release raises credit with no posting group (only
 `settlement.earmark.changed.v1`) and has no caller outside Billing tests.
+
+## The billing period comes from the account terms; proration is a setting (GAP-5)
+
+F2 no longer takes the invoice period on trust. For `issue_at` the period is
+`[issue_at, end)` where `end` counts the Billing `period` term (read at `issue_at`:
+the account value, otherwise the tenant default, per field) from `issue_at` in the
+policy's billing time zone. Periods are built from two units: daily = 1 day,
+monthly = 1 month, quarterly = 3, annually = 12. Each period is counted from its
+own start (so a 31 January start ends 28 February and the next runs 28 February to
+28 March), at the same wall-clock time, with a day missing from the target month
+clamped to the month end (`fold=0`). A private verifier (`_service_period`, parity
+tested against Subscriptions cadence) does the arithmetic; Billing still does none.
+
+F2 refuses (`charge_command_mismatch`: attention, no document, no VAT, no draw) a
+command whose period end, `collection_timing` (must be `advance`), `due_at` (must be
+`issue_at`) or `timezone` (must equal the policy's) is wrong. An unknown zone refuses
+every charge. A mismatch is a deterministic source defect: raise an ops alert on that
+code, not a billing queue.
+
+**Policy.** `FundedChargePolicyV1` gains `proration` (`actual_calendar_days`,
+default, or `none`; any other value counts as `none`) and `billing_timezone`
+(default `UTC`). Sub-thin enters the tenant values, **`Africa/Lagos`** for the
+estate, and uses the same two values for postpaid rating.
+
+**Proration.** `RatedChargeV1` gains optional `period_starts_at` and
+`period_ends_at`: the enclosing service period a mid-period charge co-terminates
+with. `total` is always the full-period tax-inclusive price. Both None is an
+ordinary charge. Both set is a prorated charge: the amount due at `issue_at` is
+`total` x (local calendar dates from `issue_at` to the period end) / (local dates in
+the enclosing period), rounded half-up once to the currency's minor units
+(100.01 x 15/30 = 50.01). F2 checks proration is on, the enclosing end equals the
+terms period counted from the enclosing start, the command period is
+`[issue_at, enclosing end)` and the obligation total is that amount. A late payment
+pays only the remaining days. No day left (`issue_at` at or after the end, or zero
+local days) withdraws a pending row as `period_elapsed` and posts nothing;
+`start_funded_charge` refuses it and writes no row. Refunds and credits for unused
+time stay out of scope (existing `refund_policy`).
+
+Duties of the caller (Sub-thin):
+
+- Enter the two policy values above and make the command's `timezone` equal
+  `billing_timezone`. Derive `Subscription.billing_cycle` from the terms and never
+  write it independently.
+- **P5b trap.** An account terms version restates ALL of the account's overrides.
+  Recording a type-only change with `period=None` silently drops the account's
+  period to the tenant default. Read the current account version and change only
+  the field the user changed.
+- **Period change while a charge is pending (Q2).** In one transaction: record the
+  terms, supersede the pending charge (its key then reads `None`), call
+  `reevaluate_account_terms` (D3 withdraws it as `charge_withdrawn`), then start the
+  replacement priced for the new period. If the supersede is skipped, F2 fails safe
+  (mismatch).
+- **Plan-change preview (R2-Q3).** A pending F2 charge turns the service off, so the
+  plan-change preview must refuse a mid-period prepaid change the balance does not
+  cover rather than start it. No flows change.
+- **Postpaid period duty (Q4).** Postpaid invoices do not pass through F2 and Billing
+  accepts any verified period, so Sub-thin must build postpaid periods and partial
+  periods with the same rule, the same day counting and the same rounding, and
+  refuse a partial period when proration is `none`. Cover it with an assembly test.
+- Migrated accounts: the first Starter charge is due at the legacy paid-through end;
+  nothing is realigned or prorated at cutover. Count weekly subscriptions and accounts
+  with more than one cycle in the dry-run census (the terms have no weekly value).

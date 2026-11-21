@@ -23,8 +23,21 @@ the charge's ``due_at`` at start, ``max(due_at, settlement.observed_at)`` on
 re-evaluation, and ``max(due_at, settlement.observed_at)`` (or ``due_at``) on
 retry; every posting instant comes from an owner fact. The charge source builds
 the invoice command for that instant; F2 refuses it unless it carries the charge's
-own identity, account and total and a verified service period starting at
-``issue_at``. The contract type is a Billing account term, read at ``issue_at``.
+own identity and account, the amount due at ``issue_at`` and a verified service
+period starting at ``issue_at``. The contract type and the period length are
+Billing account terms, read at ``issue_at``.
+
+GAP-5, the period rule: the period is ``[issue_at, end)`` where ``end`` counts the
+terms period (day or month units) from ``issue_at`` in the policy's billing time
+zone, clamped to the month end (private ``_service_period``). The command must be
+``advance``, due at ``issue_at``, in the policy's time zone. A charge carrying an
+enclosing period (``period_starts_at``/``period_ends_at``) is prorated by actual
+calendar days when ``policy.proration`` allows: the amount is ``total`` x the days
+from ``issue_at`` to the enclosing end / the days in it, rounded half-up once, and
+the period is ``[issue_at, enclosing end)``. An enclosing period that disagrees
+with the terms at its start, proration off, a wrong amount, a wrong zone or any
+other period is ``charge_command_mismatch``. No day left is withdrawn as
+``period_elapsed`` (``start_funded_charge`` refuses it and writes no row).
 
 Assembly contract:
 
@@ -91,12 +104,19 @@ from dotmac_billing import (
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.messaging import enqueue_event
+from dotmac_kernel.money import Money
 from dotmac_service_access_policy import AccessSignal, RecordAccessInputV2
 from sqlalchemy import BigInteger, Text, and_, exists, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_money_flows._credit_dating import newest_credit_at
+from dotmac_money_flows._service_period import (
+    day_span,
+    period_end,
+    prorated,
+    zone_of,
+)
 from dotmac_money_flows.contracts import (
     FUNDED_CHARGE_DEFINITION_VERSION,
     AccountCreditChangedV1,
@@ -106,6 +126,7 @@ from dotmac_money_flows.contracts import (
     FundedChargeCursorV1,
     FundedChargeInstanceV1,
     FundedChargeOutcomeV1,
+    FundedChargePolicyV1,
     FundedChargePorts,
     FundedChargeRefused,
     FundedChargeState,
@@ -144,8 +165,11 @@ _CHARGE_REF_MAX_BYTES = 1024
 _INSTANCE_NAMESPACE = uuid5(NAMESPACE_URL, "urn:dotmac:money-flows:funded-charge:v1")
 _PREPAID = "prepaid"
 _MISMATCH = "charge_command_mismatch"
+_ELAPSED = "period_elapsed"
 _SOURCE_ERROR = "charge_source_error"
 _VERIFIED = "verified"
+_ADVANCE = "advance"
+_PRORATE = "actual_calendar_days"
 _CODE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 
 
@@ -215,12 +239,16 @@ class _Ctx:
     scope: TenantScope
     tenant_id: UUID
     ports: FundedChargePorts
-    policy_version: str
+    policy: FundedChargePolicyV1
     actor_ref: str | None = None
     #: Newest-credit instants read this call, keyed by (window start, currency).
     credit_dates: dict[tuple[datetime, str], datetime | None] = field(
         default_factory=dict
     )
+
+    @property
+    def policy_version(self) -> str:
+        return self.policy.version
 
 
 # --------------------------------------------------------------------------
@@ -560,40 +588,131 @@ def _write(
 # --------------------------------------------------------------------------
 # Owner steps
 # --------------------------------------------------------------------------
+def _terms(
+    db: Session, scope: TenantScope, account_id: UUID, at: datetime
+) -> AccountTermsV1:
+    """The Billing account terms in force at ``at``."""
+    return get_effective_account_terms(db, scope=scope, account_id=account_id, at=at)
+
+
 def _is_prepaid(
     db: Session, scope: TenantScope, account_id: UUID, at: datetime
 ) -> bool:
     """The contract type is a Billing account term, read at the period start."""
-    terms: AccountTermsV1 = get_effective_account_terms(
-        db, scope=scope, account_id=account_id, at=at
+    return _terms(db, scope, account_id, at).contract_type.value == _PREPAID
+
+
+def _enclosing(charge: RatedChargeV1) -> tuple[datetime, datetime] | None:
+    """The enclosing period of a prorated charge; None for an ordinary one."""
+    if charge.period_starts_at is None or charge.period_ends_at is None:
+        return None
+    return charge.period_starts_at, charge.period_ends_at
+
+
+def _enclosing_valid(charge: RatedChargeV1) -> bool:
+    """Both ends or neither, timezone-aware, and a forward interval."""
+    ends = (charge.period_starts_at, charge.period_ends_at)
+    if ends == (None, None):
+        return True
+    if None in ends:
+        return False
+    start, end = charge.period_starts_at, charge.period_ends_at
+    return bool(
+        start is not None
+        and end is not None
+        and start.utcoffset() is not None
+        and end.utcoffset() is not None
+        and start < end
     )
-    return terms.contract_type.value == _PREPAID
 
 
-def _fits(ctx: _Ctx, charge: RatedChargeV1, account_id: UUID) -> bool:
-    """Whether the account's spendable credit covers the whole charge now.
+def _elapsed(
+    charge: RatedChargeV1, issue_at: datetime, policy: FundedChargePolicyV1
+) -> bool:
+    """Nothing left to bill: a prorated charge whose enclosing period is over."""
+    enclosing = _enclosing(charge)
+    zone = zone_of(policy.billing_timezone)
+    if enclosing is None or zone is None or not _enclosing_valid(charge):
+        return False
+    return issue_at >= enclosing[1] or day_span(issue_at, enclosing[1], zone) < 1
+
+
+def _amount_at(
+    charge: RatedChargeV1, issue_at: datetime, policy: FundedChargePolicyV1
+) -> Money | None:
+    """The amount due at ``issue_at``: ``total``, or its share of the days left.
+
+    A pure function of (total, enclosing period, ``issue_at``, policy). None when
+    the charge cannot be priced (a malformed or elapsed enclosing period, an
+    unknown zone, proration off): F2 then refuses the command, or withdraws an
+    elapsed charge, and never guesses an amount.
+    """
+    enclosing = _enclosing(charge)
+    if enclosing is None:
+        return charge.total if _enclosing_valid(charge) else None
+    zone = zone_of(policy.billing_timezone)
+    if (
+        zone is None
+        or policy.proration != _PRORATE
+        or not _enclosing_valid(charge)
+        or not enclosing[0] <= issue_at < enclosing[1]
+    ):
+        return None
+    used = day_span(issue_at, enclosing[1], zone)
+    whole = day_span(enclosing[0], enclosing[1], zone)
+    if used < 1 or whole < 1:
+        return None
+    return prorated(charge.total, used, whole)
+
+
+def _fits(
+    ctx: _Ctx, charge: RatedChargeV1, account_id: UUID, issue_at: datetime
+) -> bool:
+    """Whether the account's spendable credit covers the amount due now.
 
     ``account_id`` is the instance's own account, never the port's. Reading the
-    availability also takes the Billing account lock.
+    availability also takes the Billing account lock. A charge that cannot be
+    priced "fits": the discharge refuses or withdraws it, so it is never held
+    pending behind an amount nobody can compute.
     """
     availability = get_funding_availability(
         ctx.db,
         scope=ctx.scope,
         request=GetFundingAvailabilityV1(ctx.scope, account_id),
     )
-    return bool(availability.unrestricted >= charge.total)
+    amount = _amount_at(charge, issue_at, ctx.policy)
+    return amount is None or bool(availability.unrestricted >= amount)
 
 
 def _command_matches(
+    ctx: _Ctx,
     command: IssueRatedInvoiceV3,
     key: RatedChargeKeyV1,
     account_id: UUID,
     charge: RatedChargeV1,
     issue_at: datetime,
+    terms: AccountTermsV1,
 ) -> bool:
-    """The port's invoice command must be this charge, for this period start."""
+    """The port's invoice command must be this charge, for this period.
+
+    ``terms`` are the terms at ``issue_at``. A prorated charge is checked against
+    the terms at its own enclosing start (immutable: terms cannot be back-dated).
+    """
     obligation = command.obligation
     period = obligation.service_period
+    policy = ctx.policy
+    zone = zone_of(policy.billing_timezone)
+    amount = _amount_at(charge, issue_at, policy)
+    if zone is None or amount is None or command.timezone != policy.billing_timezone:
+        return False
+    enclosing = _enclosing(charge)
+    if enclosing is None:
+        expected_end = period_end(issue_at, terms.period.value, zone)
+    else:
+        start_terms = _terms(ctx.db, ctx.scope, account_id, enclosing[0])
+        expected_end = enclosing[1]
+        if period_end(enclosing[0], start_terms.period.value, zone) != expected_end:
+            return False
     return bool(
         (
             obligation.source_system,
@@ -608,9 +727,13 @@ def _command_matches(
             key.source_fact_version,
         )
         and obligation.billing_account_id == account_id == charge.billing_account_id
-        and obligation.total_amount == charge.total
+        and obligation.total_amount == amount
         and period.status.value == _VERIFIED
         and period.starts_at == issue_at
+        and expected_end is not None
+        and period.ends_at == expected_end
+        and obligation.collection_timing == _ADVANCE
+        and command.due_at == issue_at
     )
 
 
@@ -630,8 +753,10 @@ def _gate(
     locked. An account that is no longer prepaid at the period start withdraws
     the row whatever the balance. None means: go on to the funds check.
     """
-    if charge.key != key_for_charge_ref(charge_ref) or (
-        charge.billing_account_id != row.billing_account_id
+    if (
+        charge.key != key_for_charge_ref(charge_ref)
+        or charge.billing_account_id != row.billing_account_id
+        or not _enclosing_valid(charge)
     ):
         return _write(
             ctx,
@@ -651,6 +776,15 @@ def _gate(
             state=FundedChargeState.WITHDRAWN,
             reason_code="contract_type_changed",
         )
+    if _elapsed(charge, issue_at, ctx.policy):
+        return _write(
+            ctx,
+            row,
+            charge_ref=charge_ref,
+            charge=charge,
+            state=FundedChargeState.WITHDRAWN,
+            reason_code=_ELAPSED,
+        )
     return None
 
 
@@ -666,7 +800,8 @@ def _discharge(
     """Issue the invoice and pay it from credit, or record why not (lock held)."""
     key = key_for_charge_ref(charge_ref)
     account_id = charge.billing_account_id if row is None else row.billing_account_id
-    if not _is_prepaid(ctx.db, ctx.scope, account_id, issue_at):
+    terms = _terms(ctx.db, ctx.scope, account_id, issue_at)
+    if terms.contract_type.value != _PREPAID:
         if row is None:
             raise FundedChargeRefused("not_prepaid")
         return _write(
@@ -677,6 +812,17 @@ def _discharge(
             state=FundedChargeState.WITHDRAWN,
             reason_code="contract_type_changed",
         )
+    if _elapsed(charge, issue_at, ctx.policy):
+        if row is None:
+            raise FundedChargeRefused(_ELAPSED)
+        return _write(
+            ctx,
+            row,
+            charge_ref=charge_ref,
+            charge=charge,
+            state=FundedChargeState.WITHDRAWN,
+            reason_code=_ELAPSED,
+        )
     try:
         command: IssueRatedInvoiceV3 = ctx.ports.charges.issue_command(
             ctx.db, scope=ctx.scope, key=key, issue_at=issue_at
@@ -685,7 +831,7 @@ def _discharge(
         if row is None:
             raise
         raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
-    if not _command_matches(command, key, account_id, charge, issue_at):
+    if not _command_matches(ctx, command, key, account_id, charge, issue_at, terms):
         return _write(
             ctx,
             row,
@@ -766,8 +912,8 @@ def start_funded_charge(
     # under the lock below is the authoritative one.
     if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
         raise FundedChargeRefused("not_prepaid")
-    ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope).version)
-    funded = _fits(ctx, charge, charge.billing_account_id)  # takes the lock
+    ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope))
+    funded = _fits(ctx, charge, charge.billing_account_id, charge.due_at)  # lock
     winner = _find(db, tenant_id, charge_ref=charge_ref)
     if winner is not None:
         # A duplicate that won the race has committed: its row is the answer.
@@ -840,7 +986,7 @@ def _reevaluate_funded(
         issue_at=issue_at,
         funding_settlement_id=funding_id,
     )
-    if decided is None and not _fits(ctx, charge, row.billing_account_id):
+    if decided is None and not _fits(ctx, charge, row.billing_account_id, issue_at):
         return None
     if decided is not None:
         _signal(ctx, row, was_active, _observed(row, charge, issue_at))
@@ -893,7 +1039,7 @@ def on_settlement_settled(
             scope, event.billing_account_id, event.settlement_id
         ),
     )
-    ctx = _Ctx(db, scope, tenant_id, ports, policy.version)
+    ctx = _Ctx(db, scope, tenant_id, ports, policy)
     statement = select(FundedChargeInstance).where(
         FundedChargeInstance.tenant_id == tenant_id,
         FundedChargeInstance.billing_account_id == event.billing_account_id,
@@ -983,7 +1129,7 @@ def on_account_credit_changed(
     )  # account lock
     if not availability.unrestricted.is_positive:
         return done(reason="no_balance")
-    ctx = _Ctx(db, scope, tenant_id, ports, policy.version)
+    ctx = _Ctx(db, scope, tenant_id, ports, policy)
     statement = select(FundedChargeInstance).where(
         FundedChargeInstance.tenant_id == tenant_id,
         FundedChargeInstance.billing_account_id == account_id,
@@ -1110,7 +1256,7 @@ def reevaluate_account_terms(
         scope=scope,
         request=GetFundingAvailabilityV1(scope, account_id),
     )  # account lock
-    ctx = _Ctx(db, scope, tenant_id, ports, policy.version)
+    ctx = _Ctx(db, scope, tenant_id, ports, policy)
     statement = select(FundedChargeInstance).where(
         FundedChargeInstance.tenant_id == tenant_id,
         FundedChargeInstance.billing_account_id == account_id,
@@ -1200,7 +1346,7 @@ def record_funded_charge_attention(
         scope,
         tenant_id,
         ports,
-        ports.policy.read(db, scope=scope).version,
+        ports.policy.read(db, scope=scope),
         actor_ref,
     )
     if row is not None:
@@ -1276,7 +1422,7 @@ def retry_funded_charge(
         scope,
         tenant_id,
         ports,
-        ports.policy.read(db, scope=scope).version,
+        ports.policy.read(db, scope=scope),
         actor_ref,
     )
     try:
@@ -1317,7 +1463,7 @@ def retry_funded_charge(
     )
     if decided is not None:
         pass
-    elif _fits(ctx, charge, row.billing_account_id):
+    elif _fits(ctx, charge, row.billing_account_id, issue_at):
         _discharge(
             ctx,
             row,

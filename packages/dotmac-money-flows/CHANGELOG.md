@@ -155,3 +155,13 @@ Source only; not published, not composed into any assembly.
   reference carries the document's Billing `source_version`; faults raise the
   new `BalancePassFailed`. An overflowing statement window is split (newer half
   first) rather than failing.
+- GAP-5: F2 takes the invoice period from the Billing account terms. The period is
+  built from day or month units counted from its own start in the policy's billing
+  time zone, clamped to the month end (private `_service_period`); F2 also requires
+  `advance`, `due_at == issue_at` and the policy time zone. `FundedChargePolicyV1`
+  gains `proration` (`actual_calendar_days` default, or `none`) and
+  `billing_timezone` (default `UTC`); `RatedChargeV1` gains optional
+  `period_starts_at`/`period_ends_at` for a prorated charge (full price in `total`,
+  amount due by actual calendar days, half-up once). No day left is withdrawn as
+  `period_elapsed`. No migration, no Billing change; the flows stdlib allowlist adds
+  `zoneinfo`.
