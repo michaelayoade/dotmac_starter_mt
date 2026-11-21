@@ -360,14 +360,26 @@ def test_p8_an_arrears_command_or_a_due_date_after_issue_is_a_mismatch(
     _refused_with_nothing_posted(scratch, scope, account, outcome, before)
 
 
-def test_p13_an_unknown_policy_zone_is_a_mismatch(scratch):
-    scope, (account,), source, ports = _fixture(scratch, timezone="Mars/Olympus")
+@pytest.mark.parametrize(
+    "bad", [{"timezone": "Mars/Olympus"}, {"proration": "actual_elapsed_time"}]
+)
+def test_p13_an_unknown_policy_zone_or_proration_is_refused_and_writes_nothing(
+    scratch, bad
+):
+    scope, (account,), source, ports = _fixture(scratch, **bad)
     key = source.add(scope, account, "r1", due_at=BASE)
     before = unrestricted(scratch, scope, account)
 
-    outcome = assembly_start(scratch, scope, key, ports)
+    with session(scratch, scope) as db:
+        with pytest.raises(ValueError):
+            start_funded_charge(
+                db, scope=scope, command=StartFundedChargeV1(key), ports=ports
+            )
+        db.rollback()
 
-    _refused_with_nothing_posted(scratch, scope, account, outcome, before)
+    assert _rows(scratch, scope) == []
+    assert _documents(scratch, scope) == 0 and _draws(scratch, scope) == 0
+    assert unrestricted(scratch, scope, account) == before
 
 
 def test_p13_a_command_zone_that_is_not_the_policys_is_a_mismatch(scratch):
@@ -734,7 +746,11 @@ def test_p16_replay_of_a_prorated_discharge_is_one_obligation_at_the_same_amount
     assert view is not None and view.document_id == document.id
 
 
-def test_p17_the_credit_recheck_pays_a_prorated_charge_at_the_credit_instant(scratch):
+def _pending_behind_an_allocation(scratch):
+    """A prorated charge pending while 120.00 of the 200.00 credit is allocated.
+
+    Returns the world and the instant the allocation is reversed (20 April).
+    """
     scope, (account,), source, ports = _fixture(scratch, funded=None)
     cash_in = deposit(scratch, scope, account, "200.00")
     with session(scratch, scope) as db:
@@ -764,6 +780,11 @@ def test_p17_the_credit_recheck_pays_a_prorated_charge_at_the_credit_instant(scr
             ),
         )
         db.commit()
+    return scope, account, source, ports, key, freed
+
+
+def test_p17_the_credit_recheck_pays_a_prorated_charge_at_the_credit_instant(scratch):
+    scope, account, source, ports, key, freed = _pending_behind_an_allocation(scratch)
 
     outcome = assembly_credit(scratch, scope, AccountCreditChangedV1(account), ports)
 
@@ -773,3 +794,52 @@ def test_p17_the_credit_recheck_pays_a_prorated_charge_at_the_credit_instant(scr
     assert document.grand_total == Decimal("110.00")  # 11 days left, not 16
     assert (obligation.period_start, obligation.period_end) == (freed, APRIL[1])
     assert source.issues == [(key, freed)]
+
+
+def test_p17b_retrying_a_credit_recheck_attention_row_is_dated_at_the_credit(scratch):
+    scope, account, source, ports, key, freed = _pending_behind_an_allocation(scratch)
+    source.mutators[key] = lambda command: replace(command, due_at=freed + timedelta(1))
+    outcome = assembly_credit(scratch, scope, AccountCreditChangedV1(account), ports)
+    assert outcome is not None
+    (row,) = _rows(scratch, scope)
+    assert (row.state, row.reason_code) == ("attention_required", MISMATCH)
+    assert row.funding_settlement_id is None  # a credit re-check, not a deposit
+    assert _documents(scratch, scope) == 1  # only the seeded invoice
+
+    del source.mutators[key]
+    with session(scratch, scope) as db:
+        retried = retry_funded_charge(
+            db,
+            scope=scope,
+            instance_id=row.id,
+            expected_version=row.version,
+            actor_ref="ops:example",
+            ports=ports,
+        )
+        db.commit()
+
+    assert retried.state is FundedChargeState.DISCHARGED
+    ((document, obligation),) = (
+        pair for pair in _invoices(scratch, scope) if pair[1].period_start == freed
+    )
+    # Dated at the credit (20 April), not at the order (15 April): 11 days, not 16.
+    assert document.grand_total == Decimal("110.00")
+    assert (obligation.period_start, obligation.period_end) == (freed, APRIL[1])
+    assert source.issues[-1] == (key, freed)
+
+
+def test_p18_a_terms_recheck_withdraws_a_prorated_charge_whose_period_is_over(scratch):
+    scope, (account,), source, ports = _fixture(scratch, funded=None)
+    key = _prorated(source, scope, account)
+    assert assembly_start(scratch, scope, key, ports).state is FundedChargeState.PENDING
+
+    # Still inside the period: the re-check leaves the row pending.
+    assembly_recheck(scratch, scope, _request(account, at(YEAR, 4, 20, 10)), ports)
+    assert [row.state for row in _rows(scratch, scope)] == ["pending"]
+
+    assembly_recheck(scratch, scope, _request(account, APRIL[1]), ports)
+
+    (row,) = _rows(scratch, scope)
+    assert (row.state, row.reason_code) == ("withdrawn", "period_elapsed")
+    assert _documents(scratch, scope) == 0 and _draws(scratch, scope) == 0
+    assert [event["active"] for event in _access(scratch, scope)] == [True, False]

@@ -200,9 +200,16 @@ every charge. A mismatch is a deterministic source defect: raise an ops alert on
 code, not a billing queue.
 
 **Policy.** `FundedChargePolicyV1` gains `proration` (`actual_calendar_days`,
-default, or `none`; any other value counts as `none`) and `billing_timezone`
-(default `UTC`). Sub-thin enters the tenant values, **`Africa/Lagos`** for the
+default, or `none`) and `billing_timezone` (default `UTC`). Every F2 command reads the
+policy through one check: an unknown `proration` value or time zone raises `ValueError`
+before anything is written, so the event is redelivered (as for a `reevaluation_batch_cap`
+below 1). Sub-thin enters the tenant values, **`Africa/Lagos`** for the
 estate, and uses the same two values for postpaid rating.
+
+**Retry dating.** `retry_funded_charge` dates an attention row at `max(due_at,
+funding settlement observed_at)` when it has a funding settlement, otherwise at
+`max(due_at, newest credit line since due_at)`, so a charge paid by a credit
+re-check is never billed for days the customer was cut off.
 
 **Proration.** `RatedChargeV1` gains optional `period_starts_at` and
 `period_ends_at`: the enclosing service period a mid-period charge co-terminates
@@ -230,8 +237,15 @@ Duties of the caller (Sub-thin):
 - **Period change while a charge is pending (Q2).** In one transaction: record the
   terms, supersede the pending charge (its key then reads `None`), call
   `reevaluate_account_terms` (D3 withdraws it as `charge_withdrawn`), then start the
-  replacement priced for the new period. If the supersede is skipped, F2 fails safe
-  (mismatch).
+  replacement priced for the new period. Do not skip the supersede: F2 then
+  refuses the command as a mismatch only if the source prices it for the new length
+  while the pending charge still carries the old total; a source that keeps the old
+  length would pass.
+- **Retire the charge after `period_elapsed`.** `start_funded_charge` refuses a
+  charge whose enclosing period is already over with `period_elapsed` and writes no
+  row; a pending row is withdrawn with that reason. Either way the charge is dead:
+  the source must retire it (the next renewal carries the change) and not start it
+  again.
 - **Plan-change preview (R2-Q3).** A pending F2 charge turns the service off, so the
   plan-change preview must refuse a mid-period prepaid change the balance does not
   cover rather than start it. No flows change.

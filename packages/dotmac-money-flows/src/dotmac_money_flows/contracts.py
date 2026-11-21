@@ -388,10 +388,11 @@ class FundedChargePolicyV1:
 
     ``proration`` is ``actual_calendar_days`` (default: a charge carrying an
     enclosing period is prorated by actual calendar days) or ``none`` (F2 refuses
-    a partial period); any other value counts as ``none``. ``billing_timezone`` is
-    the IANA zone the periods are counted in (default ``UTC``); the invoice
-    command's ``timezone`` must equal it, and an unknown zone refuses every
-    charge as a mismatch.
+    a partial period); any other value is refused. ``billing_timezone`` is the
+    IANA zone the periods are counted in (default ``UTC``) and must be a known
+    zone; the invoice command's ``timezone`` must equal it. Every F2 command
+    reads the policy through one check that raises ``ValueError`` for an unknown
+    value before anything is written, so the event is redelivered.
     """
 
     version: str

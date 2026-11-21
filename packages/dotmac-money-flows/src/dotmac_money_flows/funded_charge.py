@@ -43,8 +43,10 @@ Assembly contract:
 
 * The caller owns the transaction. An existing instance for the charge is a
   replay: its outcome is returned and no owner is called.
-* ``start_funded_charge`` writes no row for a charge the source does not hold or
-  whose account is not prepaid; an owner exception propagates untouched. The
+* ``start_funded_charge`` writes no row for a charge the source does not hold,
+  whose account is not prepaid, or whose enclosing period is already over (refused
+  ``period_elapsed``: the source must retire the charge); an owner exception
+  propagates untouched. The
   caller rolls back, then calls ``record_funded_charge_attention`` in a NEW
   transaction.
 * ``on_settlement_settled`` is routed by the assembly for
@@ -85,6 +87,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
+from zoneinfo import ZoneInfo
 
 from dotmac_billing import (
     AccountTermsV1,
@@ -170,6 +173,7 @@ _SOURCE_ERROR = "charge_source_error"
 _VERIFIED = "verified"
 _ADVANCE = "advance"
 _PRORATE = "actual_calendar_days"
+_PRORATIONS = frozenset({_PRORATE, "none"})
 _CODE_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 
 
@@ -177,6 +181,30 @@ def _tenant(scope: TenantScope) -> UUID:
     if not isinstance(scope, TenantScope):
         raise TypeError("money flows requires a TenantScope")
     return scope.tenant_id
+
+
+def _read_policy(
+    db: Session, scope: TenantScope, ports: FundedChargePorts
+) -> FundedChargePolicyV1:
+    """Read the tenant policy and refuse a value F2 cannot honour.
+
+    An unknown ``proration`` or ``billing_timezone`` raises ``ValueError`` before
+    anything is written (as the ``reevaluation_batch_cap`` check does), so the
+    event is redelivered rather than a charge being priced on a guess.
+    """
+    policy = ports.policy.read(db, scope=scope)
+    if policy.proration not in _PRORATIONS:
+        raise ValueError("proration must be actual_calendar_days or none")
+    if zone_of(policy.billing_timezone) is None:
+        raise ValueError("billing_timezone must be a known IANA time zone")
+    return policy
+
+
+def _zone(policy: FundedChargePolicyV1) -> ZoneInfo:
+    zone = zone_of(policy.billing_timezone)
+    if zone is None:  # unreachable behind _read_policy
+        raise ValueError("billing_timezone must be a known IANA time zone")
+    return zone
 
 
 def _length_prefixed(*parts: str) -> str:
@@ -631,10 +659,11 @@ def _elapsed(
 ) -> bool:
     """Nothing left to bill: a prorated charge whose enclosing period is over."""
     enclosing = _enclosing(charge)
-    zone = zone_of(policy.billing_timezone)
-    if enclosing is None or zone is None or not _enclosing_valid(charge):
+    if enclosing is None or not _enclosing_valid(charge):
         return False
-    return issue_at >= enclosing[1] or day_span(issue_at, enclosing[1], zone) < 1
+    return (
+        issue_at >= enclosing[1] or day_span(issue_at, enclosing[1], _zone(policy)) < 1
+    )
 
 
 def _amount_at(
@@ -643,17 +672,17 @@ def _amount_at(
     """The amount due at ``issue_at``: ``total``, or its share of the days left.
 
     A pure function of (total, enclosing period, ``issue_at``, policy). None when
-    the charge cannot be priced (a malformed or elapsed enclosing period, an
-    unknown zone, proration off): F2 then refuses the command, or withdraws an
-    elapsed charge, and never guesses an amount.
+    the charge cannot be priced (a malformed or elapsed enclosing period, or
+    proration off): F2 then refuses the command, or withdraws an elapsed charge,
+    and never guesses an amount. The policy is already validated by
+    ``_read_policy``.
     """
     enclosing = _enclosing(charge)
     if enclosing is None:
         return charge.total if _enclosing_valid(charge) else None
-    zone = zone_of(policy.billing_timezone)
+    zone = _zone(policy)
     if (
-        zone is None
-        or policy.proration != _PRORATE
+        policy.proration != _PRORATE
         or not _enclosing_valid(charge)
         or not enclosing[0] <= issue_at < enclosing[1]
     ):
@@ -701,9 +730,9 @@ def _command_matches(
     obligation = command.obligation
     period = obligation.service_period
     policy = ctx.policy
-    zone = zone_of(policy.billing_timezone)
+    zone = _zone(policy)
     amount = _amount_at(charge, issue_at, policy)
-    if zone is None or amount is None or command.timezone != policy.billing_timezone:
+    if amount is None or command.timezone != policy.billing_timezone:
         return False
     enclosing = _enclosing(charge)
     if enclosing is None:
@@ -912,7 +941,7 @@ def start_funded_charge(
     # under the lock below is the authoritative one.
     if not _is_prepaid(db, scope, charge.billing_account_id, charge.due_at):
         raise FundedChargeRefused("not_prepaid")
-    ctx = _Ctx(db, scope, tenant_id, ports, ports.policy.read(db, scope=scope))
+    ctx = _Ctx(db, scope, tenant_id, ports, _read_policy(db, scope, ports))
     funded = _fits(ctx, charge, charge.billing_account_id, charge.due_at)  # lock
     winner = _find(db, tenant_id, charge_ref=charge_ref)
     if winner is not None:
@@ -1028,7 +1057,7 @@ def on_settlement_settled(
     refuses a settlement that does not belong to the account.
     """
     tenant_id = _tenant(scope)
-    policy = ports.policy.read(db, scope=scope)
+    policy = _read_policy(db, scope, ports)
     cap = policy.reevaluation_batch_cap
     if cap < 1:
         raise ValueError("reevaluation_batch_cap must be at least 1")
@@ -1120,7 +1149,7 @@ def on_account_credit_changed(
 
     if not _has_pending(db, tenant_id, account_id):
         return done(reason="no_pending_charges")
-    policy = ports.policy.read(db, scope=scope)
+    policy = _read_policy(db, scope, ports)
     cap = policy.reevaluation_batch_cap
     if cap < 1:
         raise ValueError("reevaluation_batch_cap must be at least 1")
@@ -1235,7 +1264,9 @@ def reevaluate_account_terms(
     gate as settlement re-evaluation: a row whose account is no longer prepaid is
     withdrawn (``contract_type_changed``) and the service resumes; a row whose
     charge the source no longer holds is withdrawn (``charge_withdrawn``); a
-    mismatch goes to attention. Nothing is ever paid or issued here, and
+    mismatch goes to attention; a prorated row whose enclosing period is over at
+    that instant is withdrawn (``period_elapsed``). Nothing is ever paid or
+    issued here, and
     ``attention_required`` rows are not touched. Idempotent: a repeat finds no
     pending row to change and returns ``()``. The caller must not call before
     ``request.at`` has passed (flows reads no clock). Locks as
@@ -1246,7 +1277,7 @@ def reevaluate_account_terms(
     at = request.at
     if at.tzinfo is None or at.utcoffset() is None:
         raise FundedChargeRefused("at_not_timezone_aware")
-    policy = ports.policy.read(db, scope=scope)
+    policy = _read_policy(db, scope, ports)
     cap = policy.reevaluation_batch_cap
     if cap < 1:
         raise ValueError("reevaluation_batch_cap must be at least 1")
@@ -1346,7 +1377,7 @@ def record_funded_charge_attention(
         scope,
         tenant_id,
         ports,
-        ports.policy.read(db, scope=scope),
+        _read_policy(db, scope, ports),
         actor_ref,
     )
     if row is not None:
@@ -1396,8 +1427,9 @@ def retry_funded_charge(
     Takes the account lock, then the row ``FOR UPDATE``, and checks
     ``expected_version`` before the charge source, the terms or any owner write
     is touched. The period starts at ``max(due_at, funding settlement
-    observed_at)`` when a funding settlement is recorded, else at ``due_at``. A
-    funded charge is discharged; otherwise it returns to ``pending``.
+    observed_at)`` when a funding settlement is recorded, else at ``max(due_at,
+    newest credit line since due_at)`` (``due_at`` when there is none). A funded
+    charge is discharged; otherwise it returns to ``pending``.
     """
     tenant_id = _tenant(scope)
     if not actor_ref or not actor_ref.strip():
@@ -1422,7 +1454,7 @@ def retry_funded_charge(
         scope,
         tenant_id,
         ports,
-        ports.policy.read(db, scope=scope),
+        _read_policy(db, scope, ports),
         actor_ref,
     )
     try:
@@ -1453,6 +1485,15 @@ def retry_funded_charge(
             ),
         )
         issue_at = max(charge.due_at, settlement.observed_at)
+    else:
+        # No funding settlement (a credit re-check, or a start): date it at the
+        # newest credit since the due time, so days the customer was cut off are
+        # never billed (GAP-L1 Q1).
+        newest = newest_credit_at(
+            db, scope, row.billing_account_id, charge.total.currency, charge.due_at
+        )
+        if newest is not None:
+            issue_at = max(charge.due_at, newest)
     decided = _gate(
         ctx,
         row,

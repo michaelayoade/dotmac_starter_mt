@@ -204,9 +204,13 @@ def _command(
     )
 
 
-@pytest.fixture(autouse=True)
-def _monthly_terms(monkeypatch):
-    """The Billing terms every command check reads: monthly."""
+@pytest.fixture
+def monthly_terms(monkeypatch):
+    """The Billing terms a command check reads: monthly.
+
+    Not autouse: the ``_boom`` guards elsewhere in this file rely on
+    ``get_effective_account_terms`` staying reachable to fail the test.
+    """
     monkeypatch.setattr(
         flows,
         "_terms",
@@ -219,7 +223,7 @@ def _matches(command, charge=None):
     return flows._command_matches(ctx, command, KEY, ACCOUNT, charge or _charge(), DUE)
 
 
-def test_a_command_that_is_the_charges_own_passes():
+def test_a_command_that_is_the_charges_own_passes(monthly_terms):
     assert _matches(_command())
 
 
@@ -239,7 +243,7 @@ def test_a_command_that_is_the_charges_own_passes():
         _command(timezone="Africa/Lagos"),  # the policy says UTC
     ],
 )
-def test_a_command_that_is_not_the_charges_own_is_refused(command):
+def test_a_command_that_is_not_the_charges_own_is_refused(command, monthly_terms):
     assert not _matches(command)
 
 
@@ -347,9 +351,22 @@ def test_a_re_evaluated_charge_is_issued_at_the_later_of_due_and_the_cash(
     assert seen == [(expected, settlement.settlement_id)]
 
 
-@pytest.mark.parametrize("funded_by", [None, 3])
-def test_a_retry_is_issued_at_due_or_the_later_funding_cash(monkeypatch, funded_by):
+@pytest.mark.parametrize(
+    ("funded_by", "credit_days"),
+    [(None, None), (3, None), (None, 5), (None, -2)],
+    ids=["due", "settlement", "credit_after_due", "credit_before_due"],
+)
+def test_a_retry_is_issued_at_due_or_the_later_funding_cash_or_credit(
+    monkeypatch, funded_by, credit_days
+):
     seen = _spy_discharge(monkeypatch)
+    monkeypatch.setattr(
+        flows,
+        "newest_credit_at",
+        lambda *a, **k: None
+        if credit_days is None
+        else DUE + timedelta(days=credit_days),
+    )
     row = SimpleNamespace(
         id=uuid4(),
         tenant_id=SCOPE.tenant_id,
@@ -382,7 +399,69 @@ def test_a_retry_is_issued_at_due_or_the_later_funding_cash(monkeypatch, funded_
         ports=_ports(_Charges(_charge())),
     )
 
-    assert seen == [(DUE + timedelta(days=funded_by or 0), None)]
+    expected = DUE + timedelta(days=max(funded_by or 0, credit_days or 0))
+    assert seen == [(expected, None)]
+
+
+def test_the_terms_read_reaches_the_billing_owner_so_the_boom_guards_can_fire(
+    monkeypatch,
+):
+    # No autouse terms stub: a guard that makes ``get_effective_account_terms``
+    # raise must be reachable through ``_terms`` and ``_is_prepaid``.
+    monkeypatch.setattr(flows, "get_effective_account_terms", _boom)
+    with pytest.raises(AssertionError, match="an owner was called"):
+        flows._terms(None, SCOPE, ACCOUNT, DUE)
+    with pytest.raises(AssertionError, match="an owner was called"):
+        flows._is_prepaid(None, SCOPE, ACCOUNT, DUE)
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        FundedChargePolicyV1("p1", proration="actual_elapsed_time"),
+        FundedChargePolicyV1("p1", proration=""),
+        FundedChargePolicyV1("p1", billing_timezone="Mars/Olympus"),
+        FundedChargePolicyV1("p1", billing_timezone=""),
+        FundedChargePolicyV1("p1", billing_timezone="Africa"),
+    ],
+    ids=["proration", "proration_empty", "zone", "zone_empty", "zone_directory"],
+)
+def test_an_unknown_proration_or_zone_is_refused_before_any_owner_call(
+    monkeypatch, policy
+):
+    for name in ("get_funding_availability", "get_effective_account_terms", "_write"):
+        monkeypatch.setattr(flows, name, _boom)
+    monkeypatch.setattr(flows, "_find", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
+    ports = _ports(_Charges(_charge()))
+    ports.policy.policy = policy
+    with pytest.raises(ValueError):
+        flows.start_funded_charge(
+            None, scope=SCOPE, command=StartFundedChargeV1(KEY), ports=ports
+        )
+    with pytest.raises(ValueError):
+        flows.on_settlement_settled(
+            None,
+            scope=SCOPE,
+            event=SettledFundsV1(ACCOUNT, uuid4()),
+            ports=ports,
+        )
+    with pytest.raises(ValueError):
+        flows.reevaluate_account_terms(
+            None,
+            scope=SCOPE,
+            request=AccountTermsChangedV1(ACCOUNT, AT),
+            ports=ports,
+        )
+
+
+def test_a_known_proration_and_zone_pass_the_policy_check():
+    for proration in ("actual_calendar_days", "none"):
+        ports = _ports(_Charges())
+        ports.policy.policy = FundedChargePolicyV1(
+            "p1", proration=proration, billing_timezone="Africa/Lagos"
+        )
+        assert flows._read_policy(None, SCOPE, ports).proration == proration
 
 
 # --------------------------------------------------------------------------
@@ -528,7 +607,7 @@ def test_a_re_evaluated_row_that_is_no_longer_prepaid_is_withdrawn_unposted(
 
 
 def test_a_command_that_is_not_the_charges_own_goes_to_attention_with_no_post(
-    monkeypatch,
+    monkeypatch, monthly_terms
 ):
     written = []
     monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)

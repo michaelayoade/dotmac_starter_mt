@@ -165,3 +165,8 @@ Source only; not published, not composed into any assembly.
   amount due by actual calendar days, half-up once). No day left is withdrawn as
   `period_elapsed`. No migration, no Billing change; the flows stdlib allowlist adds
   `zoneinfo`.
+- GAP-5 review: every F2 command reads the policy through one check that refuses
+  an unknown `proration` value or time zone (`ValueError`, nothing written);
+  `retry_funded_charge` without a funding settlement dates the charge at the newest
+  credit since `due_at`; the flows architecture rules ban `zoneinfo.reset_tzpath`,
+  `clear_cache` and `from_file`.

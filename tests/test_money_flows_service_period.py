@@ -252,10 +252,10 @@ def test_a_charge_that_cannot_be_priced_has_no_amount():
     assert _amount_at(charge, inside, off) is None
     assert _amount_at(charge, APRIL[1], UTC_POLICY) is None  # elapsed
     assert _amount_at(charge, _utc(2027, 3, 31), UTC_POLICY) is None  # not begun
-    assert (
+    # An unknown zone is refused when the policy is read (``_read_policy``); the
+    # pure helper never prices against it.
+    with pytest.raises(ValueError):
         _amount_at(charge, inside, FundedChargePolicyV1("p", billing_timezone="Mars"))
-        is None
-    )
     one_sided = _charge("300.00", APRIL[0], None)
     assert _amount_at(one_sided, inside, UTC_POLICY) is None
     reversed_ = _charge("300.00", APRIL[1], APRIL[0])
