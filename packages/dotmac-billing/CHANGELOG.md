@@ -38,6 +38,14 @@ Account terms (approved 2026-11-16; new owner work). a12 was published (tag
   map by constraint name. README documents the cutover order.
 - No behaviour change to any existing Billing command.
 
+R9 public reads of V2 and V3 accounting facts (approved 2026-11-20).
+
+- `get_accounting_fact_v2(db, scope=, fact_id=) -> AccountingFactV2` and
+  `get_accounting_fact_v3(...) -> AccountingFactV3`: pure reads of the stored facts
+  (no migration, no write), verified like V1 (digest, envelope, posting group,
+  posting effects) plus withholding-discharge or non-cash-effect rows. A wrong-version
+  id is `not_found`. For ERP's GL mapper.
+
 Receivable control position and optional opening two-person approval (approved
 2026-11-19).
 

@@ -367,6 +367,15 @@ rows. Linked reversals leave the original fact readable. Assemblies can bind
 receipts to the original allocation without using mutable current capacity;
 this read authorizes no new financial movement.
 
+`get_accounting_fact_v2(db, scope=..., fact_id=...) -> AccountingFactV2` (withholding
+accepted/reversed, non-cash discharge) and `get_accounting_fact_v3(...) ->
+AccountingFactV3` (non-cash credit) read the stored fact by id, with the same
+verification as V1 plus the version's own child rows (withholding discharges or
+non-cash effects) against the posting group. They are pure reads over existing
+evidence: no table, no migration, no write. The version is part of the lookup, so an
+id of any other version, another tenant's id, or an unknown id is `not_found`;
+tampered evidence is `accounting_fact_integrity`.
+
 
 Dependency-aware Tax evidence uses `InvoiceTaxEvidenceV2` with complete public
 `TaxDeterminationSetEvidenceV2` results, including original commercial identity,
