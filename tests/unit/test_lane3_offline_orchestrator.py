@@ -358,6 +358,20 @@ class World:
                     "execution_sequence": coordinate["execution_sequence"],
                     "attempt_no": coordinate["attempt_no"],
                 },
+                # CP-6 v2: Control's registry row for the presentation key, live
+                # at consumption and revoked at step 15 (well after the ledger).
+                "presentation_credential": {
+                    "target_id": self.plan.target_id,
+                    "key_id": "presentation-key-1",
+                    "algorithm": "ed25519",
+                    "purpose": cp6.PRESENTATION_PURPOSE,
+                    "public_key_b64url": self.pres_pub,
+                    "public_key_fingerprint": digest(public_raw(self.pres_key)),
+                    "status": "revoked",
+                    "activated_at": ts(T - timedelta(hours=1)),
+                    "retired_at": None,
+                    "revoked_at": ts(T + timedelta(hours=3)),
+                },
             },
             "cp_lane3": {
                 "e10_receipt_digest": "sha256:" + "0" * 64,

@@ -87,6 +87,7 @@ from lane3_bundle_verification import (
 from lane3_cp6_export import (
     CONSUME_SCOPE,
     CONSUME_STATUS,
+    PRESENTATION_PURPOSE,
     Cp6Export,
     Cp6ExportRefused,
     PinnedIdentity,
@@ -474,8 +475,48 @@ def _join_control(
     if ledger.fingerprint != expected_fingerprint:
         _refuse("ledger-fingerprint-mismatch")
 
+    _join_presentation_credential(export, statement=statement, admission=admission)
     _join_lease_bracket(export, coordinates, require_release=require_release)
     _join_presentation_freshness(export, admission)
+
+
+def _refuse_credential(code: str) -> None:
+    raise JoinRefused(f"offline-join-presentation-credential-{code}")
+
+
+def _join_presentation_credential(
+    export: Cp6Export, *, statement: Any, admission: HostAdmissionDigest
+) -> None:
+    """J1-J7: Control's own registry row for the presentation key (CP-6 v2).
+
+    Reads only the SIGNED statement, the S2-parsed admission (whose key facts are
+    derived from the caller-PINNED key; the export never supplies a verifying key)
+    and the ledger time. The credential must have been live at consumption and is
+    revoked NOW (step 15 precedes E9), so "ACTIVE at export time" is never the rule.
+    This complements the mandatory Gate 2 anchor; it does not replace it.
+    """
+    credential = export.presentation_credential
+    if credential.target_id != statement.target_id:
+        _refuse_credential("target-mismatch")
+    if credential.purpose != PRESENTATION_PURPOSE:
+        _refuse_credential("purpose-mismatch")
+    if credential.algorithm != "ed25519":
+        _refuse_credential("algorithm-mismatch")
+    if credential.public_key_fingerprint != admission.presentation_key_fingerprint:
+        _refuse_credential("key-mismatch")
+    if credential.key_id != admission.presentation_key_id:
+        _refuse_credential("key-id-mismatch")
+    created = export.ledger.created_at
+    if (
+        credential.activated_at > created
+        or (credential.retired_at is not None and created >= credential.retired_at)
+        or (credential.revoked_at is not None and created >= credential.revoked_at)
+    ):
+        _refuse_credential("not-active-at-consumption")
+    # J7 (step-15 revocation required before E9; pending Michael's confirmation,
+    # built with no switch): revoked, with the revocation instant on record.
+    if credential.revoked_at is None or credential.status != "revoked":
+        _refuse_credential("not-revoked")
 
 
 def _presentation_instant(value: str) -> datetime:
