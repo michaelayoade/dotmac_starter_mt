@@ -149,3 +149,32 @@ def test_no_column_or_migration_carries_the_policy() -> None:
 
     for model in models.TENANT_MODELS:
         assert "separation_enforced" not in model.__table__.c
+
+
+@pytest.mark.parametrize("bad", [None, 0, "", 1, "false"])
+def test_a_non_bool_policy_is_refused_and_changes_nothing(db, bad) -> None:
+    tenant, run = _draft(db)
+    with pytest.raises(TypeError, match="must be bool"):
+        _approve(db, tenant, run, by=ONE, sod=bad)
+    assert run.status == "draft" and run.approved_by_id is None
+    _approve(db, tenant, run, by=uuid4(), sod=True)
+    with pytest.raises(TypeError, match="must be bool"):
+        _finalize(db, tenant, run, by=run.approved_by_id, sod=bad)
+    assert run.status == "approved" and run.finalized_by_id is None
+    _finalize(db, tenant, run, by=uuid4(), sod=True)
+    net = next(
+        x for x in _liabilities(db, run) if x.liability_key == "employee-net-pay"
+    )
+    settlement = record_liability_settlement(
+        db,
+        tenant_id=tenant.id,
+        liability_id=net.id,
+        amount=Money.of(str(net.amount), NGN),
+        settlement_ref="PAY-1",
+        evidence_ref="bank:1",
+        recorded_by_id=ONE,
+        recorded_at=NOW,
+    )
+    with pytest.raises(TypeError, match="must be bool"):
+        _reverse(db, tenant, settlement, sod=bad)
+    assert net.status == "settled"

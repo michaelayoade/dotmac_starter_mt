@@ -14,6 +14,11 @@ duties is an optional per-tenant policy, default off).
 - No migration and no column: payroll has no database separation CHECK and nothing is
   stamped on the row (the caller supplies the policy at each step). Payroll emits no
   lifecycle event or idempotency payload, so there is nothing to carry the flag.
+- `separation_of_duties` must be a real `bool`: None, 0, "" and other values raise
+  `TypeError` before any state is read or written, so a falsy non-bool never relaxes
+  a check.
+- The per-row database relaxation of `ck_supplier_payments_sod` is in payables 0.1.0a7
+  (#1129); payroll has no database separation check and nothing is stamped.
 - WIDENING, stated plainly: the owner's separation-of-duties checks in the three
   commands above are relaxed when the caller passes `separation_of_duties=False`.
   Synthetic distinct actor identifiers are not a substitute and must not be used.

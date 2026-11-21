@@ -699,6 +699,8 @@ def approve_payroll_run(
     name it; an assembly passes its policy explicitly. Nothing is stamped on the
     row: the caller supplies the policy at each step.
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     run = _run(db, tenant_id, run_id)
     if run.status != "draft":
         raise PayrollConflict("only a draft payroll run can be approved")
@@ -728,6 +730,8 @@ def finalize_payroll_run(
     ``separation_of_duties`` is the tenant policy in force (D-9); default ``True``
     keeps a6 behaviour, and an assembly passes its policy explicitly.
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     run = _run(db, tenant_id, run_id)
     if run.status != "approved":
         raise PayrollConflict("only an approved payroll run can be finalized")
@@ -994,6 +998,8 @@ def reverse_liability_settlement(
     Refuse a mismatch, route a now-retired cash GL to the manual exception
     queue, and post on a date not earlier than the settlement's posting date.
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     ref = _clean(return_ref, "bank return reference")
     why = _clean(reason, "reversal reason")
     settlement = db.scalar(
