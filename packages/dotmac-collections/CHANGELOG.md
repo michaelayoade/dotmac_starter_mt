@@ -1,5 +1,57 @@
 # Changelog
 
+## UNRELEASED — 0.1.0a3 proposal (GAP-4: the per-account access hold)
+
+Source only; not built or published. a2 is published and its `cl_0001` migration is
+unchanged.
+
+- Migration `cl_0002_collection_holds` (both planes): the nullable
+  `collection_cases.access_hold_from`, the insert-only `collection_holds` and
+  `collection_hold_lifts` tables (R10), the single-writer `collection_subject_access`
+  state row and one version sequence per plane
+  (`collection_subject_access_version_seq`, `platform_...`). Forced RLS on the tenant
+  plane; the platform plane is revoked from `app_user`. A hold is live until a lift
+  row names it; `(external_ref, placement_ordinal)` is unique.
+- `ReceivableObservationV1.access_hold_from` (optional trailing field, default
+  `None`): the instant the subject's service goes off. It needs a verified due date
+  and must not precede `due_at`. `None` never demands a hold (an adopter with no
+  services only gets reminders).
+- Subject access state per `subject_ref` (one billing account): `clear`, `held`
+  (some active case has `access_hold_from <= now` and no live hold) or `suppressed`
+  (demanded but a live hold exists). Only `held` turns service off. Every governed
+  command recomputes it under the subject lock; a change into or out of `held`
+  allocates the next sequence value and emits one
+  `collections.subject.access_hold.v1` outbox event
+  (`subject_ref`, `active`, `source_version`, `source_reference`, `observed_at`,
+  `policy_version`, `reason_code`) whose payload is fixed at decision time.
+- Two wakes through the existing timer port: `collections.exposure.due.v1` (armed by
+  `assess` when it blocks on `receivable_not_due` or `service_period_not_started`;
+  the assembly routes it back to `assess`; identity entity id is
+  `{source_owner}:{exposure_ref}`) and `collections.case.access_hold_due.v1` (armed
+  when a case opens or advances with a future `access_hold_from`, cancelled when the
+  case leaves `active`). New `CollectionCaseService.process_access_hold_due`
+  (`ProcessCollectionAccessHoldDueV1`): rereads the exposure, updates the case and
+  recomputes the subject. The assembly runs the Billing balance pass in an earlier
+  transaction first.
+- R10 holds: `PlaceCollectionHoldV1` / `LiftCollectionHoldV1`,
+  `CollectionHoldService.place` / `.lift(db, command, timer)` returning
+  `HoldPlaced | HoldLifted | HoldNotLive`, and `get_collection_subject_state`.
+  Place and lift are idempotent by `external_ref`; a live reference on another
+  subject is refused (`hold_subject_conflict`). While a hold is live `assess` arms no
+  ladder step and `process_step_due` writes no notice or action request
+  (`StepDueBlocked("collection_hold_active")`, the fired wake is consumed); cases
+  still open and resolve. The last lift re-arms the next ladder step of each active
+  case and recomputes the subject, so a still-overdue subject goes off again at once.
+  `approval_ref` is stored only; approval is optional and off by default (the caller
+  enforces it for staff-placed holds).
+- Lock order: case lock, then hold-reference lock, then subject lock; `lift` takes
+  the locks of the subject's active cases before the subject lock. Collections takes
+  no Billing lock. An architecture test scans the order with planted violations.
+- Manifest: three new outbox types (`collections.exposure.due.v1`,
+  `collections.case.access_hold_due.v1`, `collections.subject.access_hold.v1`).
+- Policy values (due days, grace, notice offsets) stay settings of the adopter and
+  of Billing's account terms; nothing is hard-coded here.
+
 ## UNRELEASED — 0.1.0a2 proposal
 
 Proposed successor for a fresh build through the modern release provenance

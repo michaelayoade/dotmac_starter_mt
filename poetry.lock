@@ -724,7 +724,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane collections policy and case owner"
 optional = false
 python-versions = ">=3.11,<3.14"

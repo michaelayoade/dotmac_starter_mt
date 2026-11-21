@@ -27,6 +27,8 @@ from dotmac_collections.models import (
     CollectionCaseExposure,
     CollectionCaseTransition,
     CollectionGraceGrant,
+    CollectionHold,
+    CollectionHoldLift,
     CollectionNoticeReceipt,
     CollectionNoticeRequest,
     CollectionPolicy,
@@ -34,6 +36,7 @@ from dotmac_collections.models import (
     CollectionPolicyVersion,
     CollectionReconciliation,
     CollectionStepAttempt,
+    CollectionSubjectAccess,
     PaymentArrangement,
     PaymentArrangementExposure,
     PaymentArrangementInstallment,
@@ -44,6 +47,8 @@ from dotmac_collections.models import (
     PlatformCollectionCaseExposure,
     PlatformCollectionCaseTransition,
     PlatformCollectionGraceGrant,
+    PlatformCollectionHold,
+    PlatformCollectionHoldLift,
     PlatformCollectionNoticeReceipt,
     PlatformCollectionNoticeRequest,
     PlatformCollectionPolicy,
@@ -51,6 +56,7 @@ from dotmac_collections.models import (
     PlatformCollectionPolicyVersion,
     PlatformCollectionReconciliation,
     PlatformCollectionStepAttempt,
+    PlatformCollectionSubjectAccess,
     PlatformPaymentArrangement,
     PlatformPaymentArrangementExposure,
     PlatformPaymentArrangementInstallment,
@@ -119,6 +125,9 @@ COLLECTION_TABLES = (
     CollectionActionRequest,
     CollectionActionReceipt,
     CollectionReconciliation,
+    CollectionHold,
+    CollectionHoldLift,
+    CollectionSubjectAccess,
 )
 PLATFORM_COLLECTION_TABLES = (
     PlatformCollectionPolicy,
@@ -138,6 +147,9 @@ PLATFORM_COLLECTION_TABLES = (
     PlatformCollectionActionRequest,
     PlatformCollectionActionReceipt,
     PlatformCollectionReconciliation,
+    PlatformCollectionHold,
+    PlatformCollectionHoldLift,
+    PlatformCollectionSubjectAccess,
 )
 
 

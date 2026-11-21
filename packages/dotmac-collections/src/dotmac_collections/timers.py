@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from dotmac_collections._validation import require_aware, require_text
 
 STEP_DUE_EVENT_TYPE = "collections.case.step_due.v1"
+EXPOSURE_DUE_EVENT_TYPE = "collections.exposure.due.v1"
+ACCESS_HOLD_DUE_EVENT_TYPE = "collections.case.access_hold_due.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,11 +340,13 @@ def assert_collections_timer_conformance(
 
 
 __all__ = [
+    "ACCESS_HOLD_DUE_EVENT_TYPE",
     "AlreadyFired",
     "Canceled",
     "CancelTimerV1",
     "CollectionsTimer",
     "Current",
+    "EXPOSURE_DUE_EVENT_TYPE",
     "FakeCollectionsTimer",
     "NothingScheduled",
     "Stale",
