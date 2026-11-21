@@ -129,10 +129,10 @@ def _ledger_receipt(db: Session, payment) -> None:
         service.reverse_supplier_payment,
     ],
 )
-def test_parameter_is_keyword_only_and_defaults_to_enforced(func) -> None:
+def test_parameter_is_keyword_only_and_defaults_to_off(func) -> None:
     parameter = inspect.signature(func).parameters["separation_of_duties"]
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameter.default is True
+    assert parameter.default is False
 
 
 # --- policy ON: the same person is refused ------------------------------------
@@ -356,3 +356,70 @@ def test_the_flag_joins_the_fingerprint_only_when_relaxed(db: Session) -> None:
     assert record.fingerprint != fingerprint_of(
         {**a6_payload, "payment_id": str(relaxed.id), "approved_by": ONE}
     )
+
+
+# --- default is OFF (Michael's no-compulsory-two-person ruling) ----------------
+
+
+def test_omitting_the_parameter_lets_one_person_complete_the_flow(db: Session) -> None:
+    ob = _obligation(db)
+    scope = TenantScope(TENANT)
+    payment = create_supplier_payment(
+        db,
+        scope=scope,
+        command=_command([(ob, "1000")], prepared_by=ONE),
+        idempotency_key="a7:def:create",
+        idempotency_expires_at=None,
+        prepared_at=NOW,
+    )
+    assert payment.separation_enforced is False
+    approve_supplier_payment(
+        db,
+        scope=scope,
+        payment_id=payment.id,
+        approval_reference="approval:a7",
+        approved_by=ONE,
+        idempotency_key="a7:def:approve",
+        idempotency_expires_at=None,
+        approved_at=NOW + timedelta(hours=1),
+    )
+    record_supplier_payment(
+        db,
+        scope=scope,
+        payment_id=payment.id,
+        bank_reference="BANK-DEF",
+        recorded_by=ONE,
+        idempotency_key="a7:def:record",
+        idempotency_expires_at=None,
+        recorded_at=NOW + timedelta(hours=2),
+    )
+    assert payment.status == SupplierPaymentStatus.RECORDED
+    _ledger_receipt(db, payment)
+    reverse_supplier_payment(
+        db,
+        scope=scope,
+        payment_id=payment.id,
+        reason="bounced",
+        reversal_date=payment.value_date,
+        reversed_by=ONE,
+        idempotency_key="a7:def:reverse",
+        idempotency_expires_at=None,
+        reversed_at=NOW + timedelta(hours=3),
+    )
+    assert payment.status == SupplierPaymentStatus.REVERSED
+
+
+def test_explicit_true_enforces_even_though_the_default_is_off(db: Session) -> None:
+    payment, _ = _prepare(db, sod=True, key="a7:def:true", number="SPAY-0009")
+    assert payment.separation_enforced is True
+    with pytest.raises(InvalidTransition, match="preparer"):
+        approve_supplier_payment(
+            db,
+            scope=TenantScope(TENANT),
+            payment_id=payment.id,
+            approval_reference="approval:a7",
+            approved_by=ONE,
+            idempotency_key="a7:def:true:approve",
+            idempotency_expires_at=None,
+            approved_at=NOW,
+        )  # default off cannot loosen a strict stamp

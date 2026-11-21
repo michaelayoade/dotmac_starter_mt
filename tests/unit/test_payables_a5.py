@@ -118,6 +118,7 @@ def _reverse(
         idempotency_key=key,
         idempotency_expires_at=None,
         reversed_at=LATER,
+        separation_of_duties=True,
     )
 
 

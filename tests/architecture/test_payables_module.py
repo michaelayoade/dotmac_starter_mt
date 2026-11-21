@@ -295,7 +295,7 @@ def test_a7_migration_stamps_the_policy_and_forbids_changing_it() -> None:
     assert 'down_revision = "pa_0006_tax_release_hist_credit"' in source
     assert len("pa_0007_separation_policy") <= 32  # alembic_version.version_num
     assert "separation_enforced" in models.SupplierPayment.__table__.c
-    # NOT NULL, default true: every existing row and every silent writer is strict.
+    # NOT NULL, column default true: existing rows stay strict.
     assert "nullable=False" in source
     assert "server_default=sa.true()" in source
     # The stamp cannot change once written.

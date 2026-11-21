@@ -1116,6 +1116,7 @@ def test_concurrent_creates_on_one_obligation_allow_exactly_one(
             idempotency_key=f"k:{number}",
             idempotency_expires_at=None,
             prepared_at=now,
+            separation_of_duties=True,
         ).id
 
     first, second = _run_pair(admin_url, make("SPAY-A"), make("SPAY-B"))
@@ -1150,6 +1151,7 @@ def _approved_payment(admin_url: str, tenant, obligation, number="SPAY-R"):
             idempotency_key=f"k:{number}",
             idempotency_expires_at=None,
             prepared_at=now,
+            separation_of_duties=True,
         )
         pid = payment.id
         approve_supplier_payment(
@@ -1244,6 +1246,7 @@ def test_approve_racing_cancel_leaves_a_consistent_reservation(
             idempotency_key="k:x",
             idempotency_expires_at=None,
             prepared_at=now,
+            separation_of_duties=True,
         ).id
         db.commit()
     engine.dispose()

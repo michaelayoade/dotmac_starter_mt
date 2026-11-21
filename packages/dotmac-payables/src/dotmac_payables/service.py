@@ -2569,22 +2569,22 @@ def create_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     prepared_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> SupplierPayment:
     """Prepare a DRAFT supplier payment against open obligations (no money moves).
 
     ``separation_of_duties`` is the tenant policy in force. It is stamped on the
     row (``separation_enforced``) and can never be changed afterwards; the later
-    approve/record/reverse steps enforce it per row. The default is ``True``
-    (separation enforced), so a caller that does not pass it keeps a5/a6
-    behaviour. The caller is expected to pass it explicitly.
+    approve/record/reverse steps enforce it per row. The default is ``False``
+    (separation OFF): two-person approval is never compulsory (Michael's
+    ruling, D-9). A caller that wants two-person approval passes ``True``.
     """
     if not isinstance(separation_of_duties, bool):
         raise TypeError("separation_of_duties must be bool")
     tenant_id = scope.tenant_id
     payload = command.fingerprint_payload()
     request_fingerprint = fingerprint_of(payload)
-    # The flag joins the fingerprint only when relaxed, so strict (default)
+    # The flag joins the fingerprint only when relaxed, so enforced
     # callers keep their a6 fingerprint bytes and replays.
     command_fingerprint = fingerprint_of(
         payload if separation_of_duties else {**payload, "separation_of_duties": False}
@@ -2769,12 +2769,13 @@ def approve_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     approved_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> SupplierPayment:
     """DRAFT -> APPROVED. The approver must differ from the preparer.
 
     The separation applies when the row was stamped ``separation_enforced`` at
     preparation or ``separation_of_duties`` is true (the stricter value wins).
+    The default is ``False`` (D-9: never compulsory); pass ``True`` to require it.
     """
     if not isinstance(separation_of_duties, bool):
         raise TypeError("separation_of_duties must be bool")
@@ -2832,7 +2833,7 @@ def record_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     recorded_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> SupplierPayment:
     """APPROVED -> RECORDED, settling every allocation in the caller's transaction.
 
@@ -2840,6 +2841,7 @@ def record_supplier_payment(
     money left through an external channel. The recorder must differ from both the
     preparer and the approver when separation applies (stamped on the row at
     preparation or ``separation_of_duties`` true; the stricter value wins).
+    The default is ``False`` (D-9: never compulsory); pass ``True`` to require it.
     Nothing here calls a bank or provider.
     """
     if not isinstance(separation_of_duties, bool):
@@ -3163,13 +3165,14 @@ def reverse_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     reversed_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> SupplierPayment:
     """RECORDED -> REVERSED (terminal): reopen what the payment settled.
 
     For a payment that did not clear (a bounced transfer, a wrong supplier). The
     reverser must differ from the recorder and the approver when separation
-    applies (stamped on the row or ``separation_of_duties`` true). Every allocation's
+    applies (stamped on the row or ``separation_of_duties`` true; the default
+    is ``False``, D-9: never compulsory). Every allocation's
     amount is returned to its obligation's outstanding balance and a positive
     ``settlement_reversed`` liability event is appended; settlement evidence is
     never edited. The GL reversal is exposed by

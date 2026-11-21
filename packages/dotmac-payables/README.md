@@ -8,7 +8,8 @@ Version `0.1.0a7` is an unpublished candidate and is not adopted by this change.
 It makes separation of duties on supplier payments an optional per-tenant policy
 (D-9; Michael's ruling that two-person approval is never compulsory). Prepare,
 approve, record and reverse take a keyword-only `separation_of_duties` (default
-`True`, so a caller that does not name it is unchanged; assemblies pass the tenant
+`False`: separation is OFF by default, per Michael's no-compulsory-two-person ruling;
+a caller that wants two-person approval passes `True`, and assemblies pass the tenant
 policy explicitly). `create_supplier_payment` stamps the policy in force on the row
 (`separation_enforced`, immutable, migration `pa_0007`) and the later steps enforce
 `stamp or parameter` (the stricter value wins). The database
