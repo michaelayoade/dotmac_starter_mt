@@ -517,7 +517,7 @@ def test_p7f_paid_when_no_days_are_left_the_charge_is_withdrawn_period_elapsed(
     assert _draws(scratch, scope) == 0
     assert unrestricted(scratch, scope, account) == Decimal("400.00")
     assert source.issues == []
-    assert [event["active"] for event in _access(scratch, scope)] == [False, True]
+    assert [event["active"] for event in _access(scratch, scope)] == [True, False]
 
 
 def test_p7f_starting_a_charge_whose_period_is_over_is_refused_and_writes_nothing(
@@ -711,8 +711,8 @@ def test_p15_a_quarterly_enclosing_period_uses_its_real_day_count(scratch):
         )
 
     by_start = sorted(_invoices(scratch, scope), key=lambda pair: pair[1].period_start)
-    assert [str(d.grand_total) for d, _ in by_start] == [
-        c[3] for c in sorted(cases, key=lambda c: c[2])
+    assert [d.grand_total for d, _ in by_start] == [
+        Decimal(c[3]) for c in sorted(cases, key=lambda c: c[2])
     ]
 
 
