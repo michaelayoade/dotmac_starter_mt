@@ -439,6 +439,9 @@ _CONTROL_ATTRS = frozenset({"commit", "rollback", "begin_nested", "connect"})
 _SESSION_FACTORIES = frozenset(
     {"Session", "sessionmaker", "scoped_session", "create_engine"}
 )
+# zoneinfo calls that change where the tz database comes from or throw its cache
+# away: a time-zone lookup may only read, never reconfigure (GAP-5).
+_TZ_ESCAPES = frozenset({"reset_tzpath", "clear_cache", "from_file"})
 _TRANSACTION_WORDS = re.compile(r"\b(COMMIT|ROLLBACK|SAVEPOINT|BEGIN)\b", re.IGNORECASE)
 _CLOCKS = frozenset(
     {
@@ -522,6 +525,10 @@ def transaction_and_clock_violations(
                 )
             if node.attr in {"utcnow", "today"}:
                 problems.append(f".{node.attr} reads the clock; instants are inputs")
+            if node.attr in _TZ_ESCAPES:
+                problems.append(f".{node.attr} reconfigures the tz database")
+        if isinstance(node, ast.Name) and node.id in _TZ_ESCAPES:
+            problems.append(f"{node.id} reconfigures the tz database")
         if isinstance(node, ast.Attribute | ast.Name):
             dotted = _dotted(node, aliases)
             if dotted in _CLOCKS:
@@ -1067,6 +1074,11 @@ def test_the_literal_scan_does_not_flag_ordinary_words() -> None:
         "from sqlalchemy.orm import sessionmaker\nsessionmaker(bind=e)",
         "from sqlalchemy.orm import Session as S\nS(e)",
         "create_engine(url)",
+        "import zoneinfo\nzoneinfo.reset_tzpath(['x'])",
+        "from zoneinfo import reset_tzpath\nreset_tzpath()",
+        "from zoneinfo import ZoneInfo\nZoneInfo.clear_cache()",
+        "from zoneinfo import ZoneInfo\nZoneInfo.from_file(f)",
+        "hook = zoneinfo.reset_tzpath",  # a reference, not a call
     ],
 )
 def test_planted_transaction_control_and_clock_reads_are_refused(source: str) -> None:
