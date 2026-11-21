@@ -71,6 +71,7 @@ from dotmac_money_flows.funded_charge import (
 )
 from dotmac_money_flows.manifest import module
 from dotmac_money_flows.migrations import versions_dir
+from dotmac_money_flows.receivables import BillingReceivablesReader, subject_ref_for
 from dotmac_money_flows.settle import (
     apply_balance_on_invoice_issued,
     get_settle_instance,
@@ -81,7 +82,7 @@ from dotmac_money_flows.settle import (
     settle_confirmation,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "DEFAULT_ACCEPTED_SOURCES",
@@ -99,6 +100,7 @@ __all__ = [
     "AccountTermsChangedV1",
     "BalanceAppliedOutcomeV1",
     "BalancePassFailed",
+    "BillingReceivablesReader",
     "CreditRecheckOutcomeV1",
     "DepositApplication",
     "FundedChargeCursorV1",
@@ -149,5 +151,6 @@ __all__ = [
     "retry_settle",
     "settle_confirmation",
     "start_funded_charge",
+    "subject_ref_for",
     "versions_dir",
 ]
