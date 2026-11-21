@@ -49,6 +49,16 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("access_hold_from", sa.DateTime(timezone=True)),
         schema=_SCHEMA,
     )
+    op.add_column(
+        "collection_cases",
+        sa.Column("access_hold_engaged_at", sa.DateTime(timezone=True)),
+        schema=_SCHEMA,
+    )
+    op.add_column(
+        "collection_cases",
+        sa.Column("due_at", sa.DateTime(timezone=True)),
+        schema=_SCHEMA,
+    )
     op.create_table(
         "collection_holds",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -147,6 +157,16 @@ def _upgrade_platform_plane() -> None:
     op.add_column(
         "platform_collection_cases",
         sa.Column("access_hold_from", sa.DateTime(timezone=True)),
+        schema=_SCHEMA,
+    )
+    op.add_column(
+        "platform_collection_cases",
+        sa.Column("access_hold_engaged_at", sa.DateTime(timezone=True)),
+        schema=_SCHEMA,
+    )
+    op.add_column(
+        "platform_collection_cases",
+        sa.Column("due_at", sa.DateTime(timezone=True)),
         schema=_SCHEMA,
     )
     op.create_table(
@@ -287,9 +307,15 @@ def downgrade() -> None:
         for table in reversed(PLATFORM_TABLES):
             op.drop_table(table, schema=_SCHEMA)
         op.execute(f"DROP SEQUENCE {_SCHEMA}.{PLATFORM_SEQUENCE};")
+        op.drop_column("platform_collection_cases", "due_at", schema=_SCHEMA)
+        op.drop_column(
+            "platform_collection_cases", "access_hold_engaged_at", schema=_SCHEMA
+        )
         op.drop_column("platform_collection_cases", "access_hold_from", schema=_SCHEMA)
     if ModulePlane.TENANT in planes:
         for table in reversed(TENANT_TABLES):
             op.drop_table(table, schema=_SCHEMA)
         op.execute(f"DROP SEQUENCE {_SCHEMA}.{TENANT_SEQUENCE};")
+        op.drop_column("collection_cases", "due_at", schema=_SCHEMA)
+        op.drop_column("collection_cases", "access_hold_engaged_at", schema=_SCHEMA)
         op.drop_column("collection_cases", "access_hold_from", schema=_SCHEMA)

@@ -1,4 +1,4 @@
-"""Collections takes the case lock before the subject lock, never the reverse.
+"""Collections takes locks in one order: hold reference, case, subject.
 
 The subject lock (``_serialize_identity(..., "subject", ...)``, and every call to
 ``_recompute_subject`` that takes it) is the innermost Collections lock. A command
@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+#: Acquisition order: a lock may be taken only if no later-ranked lock came before.
+RANK = {"hold": 0, "case": 1, "subject": 2}
+
 SERVICE = (
     Path(__file__).resolve().parents[2]
     / "packages/dotmac-collections/src/dotmac_collections/service.py"
@@ -30,7 +33,7 @@ def _lock_events(function: ast.AST) -> list[tuple[int, str]]:
         kind: str | None = None
         if name == "_serialize_identity" and len(node.args) >= 3:
             part = node.args[2]
-            if isinstance(part, ast.Constant) and part.value in {"case", "subject"}:
+            if isinstance(part, ast.Constant) and part.value in RANK:
                 kind = str(part.value)
         elif name == "_recompute_subject":
             kind = "subject"
@@ -53,13 +56,12 @@ def lock_order_violations(source: str) -> list[str]:
         if isinstance(node, ast.ClassDef):
             functions = [n for n in node.body if isinstance(n, ast.FunctionDef)]
         for function in functions:
-            seen_subject = False
+            highest = -1
             for _, kind in _lock_events(function):
-                if kind == "subject":
-                    seen_subject = True
-                elif seen_subject:
-                    problems.append(f"{function.name}: case lock after subject lock")
+                if RANK[kind] < highest:
+                    problems.append(f"{function.name}: {kind} lock after a later lock")
                     break
+                highest = max(highest, RANK[kind])
     return problems
 
 
@@ -68,6 +70,7 @@ def test_the_real_service_takes_case_locks_before_subject_locks() -> None:
     assert lock_order_violations(source) == []
     # Non-vacuous: the service really does take both.
     assert '"subject"' in source and "_recompute_subject(" in source
+    assert '"hold"' in source
 
 
 @pytest.mark.parametrize(
@@ -82,6 +85,12 @@ def test_the_real_service_takes_case_locks_before_subject_locks() -> None:
         "class C:\n    def f(db, scope):\n"
         "        _serialize_identity(db, scope, 'subject', 'x')\n"
         "        _live_case(db, scope, lock=True)\n",
+        "def f(db, scope):\n"
+        "    _serialize_identity(db, scope, 'case', 'y')\n"
+        "    _serialize_identity(db, scope, 'hold', 'z')\n",
+        "def f(db, scope):\n"
+        "    _recompute_subject(db, scope=scope)\n"
+        "    _serialize_identity(db, scope, 'hold', 'z')\n",
     ],
 )
 def test_the_detector_refuses_a_subject_lock_before_a_case_lock(source: str) -> None:
@@ -91,6 +100,7 @@ def test_the_detector_refuses_a_subject_lock_before_a_case_lock(source: str) -> 
 def test_the_detector_accepts_the_allowed_order() -> None:
     source = (
         "def f(db, scope):\n"
+        "    _serialize_identity(db, scope, 'hold', 'z')\n"
         "    _serialize_identity(db, scope, 'case', 'y')\n"
         "    _case(db, scope, 1, lock=True)\n"
         "    _recompute_subject(db, scope=scope)\n"

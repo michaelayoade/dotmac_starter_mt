@@ -692,7 +692,8 @@ def test_case_open_schedules_and_resolution_cancels_the_exact_timer(
     )
     assert isinstance(opened, CaseAssessed)
     trigger = _trigger(timer, db, opened.case_id)
-    assert trigger.due_at == NOW
+    # Reminders anchored on exposure_at count from the due date (a day before NOW).
+    assert trigger.due_at == NOW - timedelta(days=1)
     assert trigger.output_event_type == STEP_DUE_EVENT_TYPE
     assert trigger.expected_source_version == 1
 

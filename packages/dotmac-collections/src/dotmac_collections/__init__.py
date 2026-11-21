@@ -32,13 +32,16 @@ from dotmac_collections.grace import (
 )
 from dotmac_collections.holds import (
     SUBJECT_ACCESS_HOLD_EVENT_TYPE,
+    CollectionCaseViewV1,
     CollectionSubjectStateV1,
     HoldLifted,
     HoldNotLive,
     HoldPlaced,
     LiftCollectionHoldV1,
     PlaceCollectionHoldV1,
+    RepublishSubjectStateV1,
     SubjectAccessState,
+    SubjectStateRepublished,
     decide_subject_access,
 )
 from dotmac_collections.manifest import module
@@ -120,7 +123,9 @@ from dotmac_collections.service import (
     StepDueIgnored,
     StepDueResult,
     StepRequestWritten,
+    get_collection_case,
     get_collection_subject_state,
+    republish_subject_state,
 )
 from dotmac_collections.timers import (
     ACCESS_HOLD_DUE_EVENT_TYPE,
@@ -181,6 +186,7 @@ __all__ = [
     "CollectionNoticeService",
     "CollectionPolicyService",
     "CollectionReconciliationService",
+    "CollectionCaseViewV1",
     "CollectionSubjectStateV1",
     "CollectionTiming",
     "CollectionsConflict",
@@ -218,6 +224,7 @@ __all__ = [
     "PaymentArrangementService",
     "PersistGraceV1",
     "PlaceCollectionHoldV1",
+    "RepublishSubjectStateV1",
     "ProcessCollectionAccessHoldDueV1",
     "ProcessCollectionStepDueV1",
     "PolicyAnchorSetV1",
@@ -251,6 +258,7 @@ __all__ = [
     "StepRequestWritten",
     "StepWaiting",
     "SubjectAccessState",
+    "SubjectStateRepublished",
     "TimerDecision",
     "TimerHandleV1",
     "TimerIdentityV1",
@@ -263,8 +271,10 @@ __all__ = [
     "decide_subject_access",
     "evaluate_grace",
     "evaluate_policy_version",
+    "get_collection_case",
     "get_collection_subject_state",
     "module",
     "publish_policy_version",
+    "republish_subject_state",
     "versions_dir",
 ]

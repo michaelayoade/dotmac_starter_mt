@@ -116,12 +116,17 @@ Duties of the caller (the assembly / Sub-thin):
 1. Route `billing.receivable.exposure.v1/v2` and `collections.exposure.due.v1` to
    `assess` (the timer entity id is `{source_owner}:{exposure_ref}`), each in its own
    transaction, with one policy per `collection_timing` (reason `invoice_overdue`).
-2. Route `collections.case.access_hold_due.v1` to the money-flows balance pass
-   (`apply_balance_on_invoice_issued` for the invoice) in its own earlier
-   transaction, then to `process_access_hold_due`. A technical failure raises and is
+2. Route `collections.case.access_hold_due.v1`: read the case with
+   `get_collection_case(case_id)`, run the money-flows balance pass
+   (`apply_balance_on_invoice_issued` for its invoice) in its own earlier
+   transaction, then call `process_access_hold_due`. Only that command engages the
+   hold, so no other command can cut service before the balance pass. Pass the fired
+   `collections.exposure.due.v1` trigger to `assess(exposure_wake=...)`. A technical failure raises and is
    redelivered; there is no staff queue.
 3. Consume `collections.subject.access_hold.v1`: write COLLECTIONS_HOLD on every
-   postpaid service of the account, apply the current state on service activation,
+   postpaid service of the account; on service activation or transfer call
+   `republish_subject_state` and apply the event it emits (a fresh version, so SAP does
+   not drop it as STALE),
    drop a STALE reply and park a CONFLICT with an ops alert.
 4. Place and lift R10 holds for approved payment arrangements and service
    extensions.

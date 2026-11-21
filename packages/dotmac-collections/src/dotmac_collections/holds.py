@@ -124,6 +124,53 @@ class HoldNotLive:
 
 
 @dataclass(frozen=True, slots=True)
+class RepublishSubjectStateV1:
+    """Re-emit the subject's current state under a fresh version.
+
+    For an adopter that must apply the current state on its own (service activation
+    or transfer): the last flip's version may be lower than what the service has
+    seen, so the product would drop it as stale. A republish allocates the next
+    version from the same sequence and emits the same event type.
+    """
+
+    command_id: UUID
+    idempotency_key: str
+    scope: Scope
+    subject_ref: str
+    requested_at: datetime
+    reason_code: str = "state_republished"
+
+    def __post_init__(self) -> None:
+        for name in ("idempotency_key", "subject_ref", "reason_code"):
+            require_text(name, getattr(self, name))
+        require_aware("requested_at", self.requested_at)
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectStateRepublished:
+    subject_ref: str
+    state: SubjectAccessState
+    version: int
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionCaseViewV1:
+    """Read-only identity and hold evidence of one case (no money)."""
+
+    case_id: UUID
+    subject_ref: str
+    source_owner: str
+    exposure_ref: str
+    service_ref: str | None
+    lifecycle: str
+    source_version: int
+    due_at: datetime | None
+    access_hold_from: datetime | None
+    access_hold_engaged_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class CollectionSubjectStateV1:
     subject_ref: str
     state: SubjectAccessState
@@ -133,6 +180,7 @@ class CollectionSubjectStateV1:
 
 
 __all__ = [
+    "CollectionCaseViewV1",
     "CollectionSubjectStateV1",
     "EXTERNAL_REF_MAX_LENGTH",
     "HoldLifted",
@@ -140,8 +188,10 @@ __all__ = [
     "HoldPlaced",
     "LiftCollectionHoldV1",
     "PlaceCollectionHoldV1",
+    "RepublishSubjectStateV1",
     "SUBJECT_ACCESS_HOLD_EVENT_TYPE",
     "SUBJECT_ACCESS_POLICY_VERSION",
     "SubjectAccessState",
+    "SubjectStateRepublished",
     "decide_subject_access",
 ]

@@ -265,6 +265,13 @@ class _CollectionCaseColumns(_Fact):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # a3: the instant the subject's access hold is demanded; None never demands one.
     access_hold_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set only by process_access_hold_due: the hold counts once it is engaged, so the
+    # balance pass always runs before the service is cut.
+    access_hold_engaged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    # The exposure's verified due date; reminders anchored on exposure_at count from it.
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CollectionCase(Base, _TenantRow, _CollectionCaseColumns):

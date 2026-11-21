@@ -44,9 +44,28 @@ unchanged.
   case and recomputes the subject, so a still-overdue subject goes off again at once.
   `approval_ref` is stored only; approval is optional and off by default (the caller
   enforces it for staff-placed holds).
-- Lock order: case lock, then hold-reference lock, then subject lock; `lift` takes
-  the locks of the subject's active cases before the subject lock. Collections takes
-  no Billing lock. An architecture test scans the order with planted violations.
+- Lock order: hold-reference lock, then case locks (by id), then the subject lock.
+  Collections takes no Billing lock. An architecture test scans the order with
+  planted violations. `lift` takes the case locks, then the subject lock, and only
+  then decides whether it is the last live hold; an active case that appeared in
+  between is refused (`subject_cases_changed`) and redelivered, so two simultaneous
+  last lifts cannot both skip the ladder re-arm. `lift` now requires the timer.
+- The hold counts only once engaged: `collection_cases.access_hold_engaged_at` is set
+  only by `process_access_hold_due`, so no other command can cut service before the
+  assembly's balance pass ran. The wake is armed at the later of the hold instant and
+  now (a case that opens already past its instant, or a resumed case, gets a wake due
+  at once). A hold instant that moves later disengages; leaving `active` disengages.
+- `collection_cases.due_at` (the exposure's verified due date): reminders anchored on
+  `exposure_at` count from the due date, not from when the case opened.
+- `republish_subject_state` (`RepublishSubjectStateV1`): re-emits the subject's current
+  state under the next sequence version, for a product that must apply the state on
+  service activation or transfer and would otherwise see a stale version.
+- `get_collection_case` (`CollectionCaseViewV1`): a read-only view of a case (subject,
+  exposure, lifecycle, due and hold instants), so the assembly can run the balance
+  pass for the wake's case without private knowledge.
+- `assess(..., exposure_wake=...)` accepts the fired exposure-due wake, and cancels any
+  pending exposure wake once the exposure is actionable, so no timer row stays
+  scheduled.
 - Manifest: three new outbox types (`collections.exposure.due.v1`,
   `collections.case.access_hold_due.v1`, `collections.subject.access_hold.v1`).
 - Policy values (due days, grace, notice offsets) stay settings of the adopter and

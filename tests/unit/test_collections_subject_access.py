@@ -18,6 +18,7 @@ from dotmac_collections.holds import (
     HoldPlaced,
     LiftCollectionHoldV1,
     PlaceCollectionHoldV1,
+    RepublishSubjectStateV1,
     decide_subject_access,
 )
 from dotmac_collections.models import (
@@ -41,7 +42,9 @@ from dotmac_collections.service import (
     ProcessCollectionAccessHoldDueV1,
     ProcessCollectionStepDueV1,
     StepDueBlocked,
+    get_collection_case,
     get_collection_subject_state,
+    republish_subject_state,
 )
 from dotmac_collections.timers import (
     ACCESS_HOLD_DUE_EVENT_TYPE,
@@ -206,6 +209,7 @@ def _place(db, ref="dispute:d-1", subject=SUBJECT, key=None, at=NOW, **extra):
 
 def _lift(db, ref="dispute:d-1", subject=SUBJECT, key=None, at=NOW, timer=None):
     key = key or f"lift:{uuid4()}"
+    timer = timer or FakeCollectionsTimer()
     return CollectionHoldService.lift(
         db,
         LiftCollectionHoldV1(
@@ -445,7 +449,7 @@ def test_two_cases_of_one_subject_hold_until_both_resolve(db: Session) -> None:
     )
 
 
-def test_payment_after_the_hold_lifts_it_and_a_reversal_holds_at_once(
+def test_payment_after_the_hold_lifts_it_and_a_reversal_holds_once_engaged(
     db: Session,
 ) -> None:
     policy = _policy(db)
@@ -462,11 +466,16 @@ def test_payment_after_the_hold_lifts_it_and_a_reversal_holds_at_once(
     _assess(db, policy, paid, timer, later)
     assert len(_events(db, False)) == 1
     # A reversal reopens the invoice: a new case whose hold instant is in the past.
+    # It is not held until its wake engages the hold (after the balance pass).
     reopened = _observation(
         version=3, due_at=obs.due_at, hold_from=hold_from, amount="100.00"
     )
-    result = _assess(db, policy, reopened, timer, later + timedelta(days=1))
+    again = later + timedelta(days=1)
+    result = _assess(db, policy, reopened, timer, again)
     assert isinstance(result, CaseAssessed) and result.opened
+    assert len(_events(db, True)) == 1
+    engaged = _hold_wake(db, timer, result.case_id, reopened, again)
+    assert engaged.subject_state == "held"
     assert len(_events(db, True)) == 2
     state = get_collection_subject_state(db, scope=SCOPE, subject_ref=SUBJECT)
     assert state.state == "held"
@@ -496,7 +505,11 @@ def test_pause_clears_the_hold_and_resume_restores_it(db: Session) -> None:
 
     move("paused", hold_from + timedelta(hours=1))
     assert len(_events(db, False)) == 1
-    move("active", hold_from + timedelta(hours=2))
+    resumed = hold_from + timedelta(hours=2)
+    move("active", resumed)
+    # Resuming disengages the hold; the wake (after the balance pass) re-engages it.
+    assert len(_events(db, True)) == 1
+    _hold_wake(db, timer, opened.case_id, _observation(hold_from=hold_from), resumed)
     assert len(_events(db, True)) == 2
 
 
@@ -730,6 +743,7 @@ def test_platform_plane_places_and_lifts_holds(platform_db: Session) -> None:
             "staff:1",
             NOW,
         ),
+        FakeCollectionsTimer(),
     )
     assert isinstance(lifted, HoldLifted)
     assert len(platform_db.scalars(select(PlatformCollectionHold)).all()) == 1
@@ -742,3 +756,160 @@ def test_platform_plane_places_and_lifts_holds(platform_db: Session) -> None:
 
 
 platform_db = base.platform_db
+
+
+# --- engagement, republish, case read, wake retirement, due anchor ----------
+
+
+def test_a_case_opened_past_its_hold_instant_is_not_held_until_the_wake_engages(
+    db: Session,
+) -> None:
+    policy = _policy(db)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    hold_from = due + timedelta(days=3)
+    late = hold_from + timedelta(days=10)
+    obs = _observation(due_at=due, hold_from=hold_from)
+    opened = _assess(db, policy, obs, timer, late)
+    assert isinstance(opened, CaseAssessed)
+    # Past the instant but not engaged: no event, and the wake is due now.
+    assert _events(db) == []
+    handle = _handle(timer, db, "access_hold", str(opened.case_id))
+    assert handle is not None and handle.due_at == late
+    view = get_collection_case(db, scope=SCOPE, case_id=opened.case_id)
+    assert view.access_hold_engaged_at is None
+    assert view.access_hold_from == hold_from
+
+    # The balance pass ran in between and paid the invoice: the wake finds it closed.
+    paid = _observation(
+        version=2, amount="0.00", state="resolved", due_at=due, hold_from=hold_from
+    )
+    closed = _hold_wake(db, timer, opened.case_id, paid, late)
+    assert (closed.lifecycle, closed.subject_state) == ("resolved", "clear")
+    assert _events(db) == []
+
+
+def test_the_wake_engages_the_hold_when_the_invoice_is_still_open(db: Session) -> None:
+    policy = _policy(db)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    hold_from = due + timedelta(days=3)
+    late = hold_from + timedelta(days=10)
+    obs = _observation(due_at=due, hold_from=hold_from)
+    opened = _assess(db, policy, obs, timer, late)
+    engaged = _hold_wake(db, timer, opened.case_id, obs, late)
+    assert engaged.subject_state == "held"
+    assert len(_events(db, True)) == 1
+    view = get_collection_case(db, scope=SCOPE, case_id=opened.case_id)
+    assert view.access_hold_engaged_at == late
+
+
+def test_a_later_hold_instant_disengages_and_other_commands_never_engage(
+    db: Session,
+) -> None:
+    policy = _policy(db)
+    timer = FakeCollectionsTimer()
+    opened, obs, hold_from = _held_case(db, timer, policy)
+    # Billing now reports a later hold instant (terms were recorded differently).
+    moved = replace(obs, source_version=2, access_hold_from=hold_from + GRACE)
+    moved = replace(moved, state_fingerprint="sha256:moved")
+    _assess(db, policy, moved, timer, hold_from + timedelta(hours=1))
+    assert len(_events(db, False)) == 1
+    view = get_collection_case(db, scope=SCOPE, case_id=opened.case_id)
+    assert view.access_hold_engaged_at is None
+    handle = _handle(timer, db, "access_hold", str(opened.case_id))
+    assert handle is not None and handle.due_at == hold_from + GRACE
+
+
+def test_republish_allocates_the_next_version_and_is_idempotent(db: Session) -> None:
+    policy = _policy(db)
+    timer = FakeCollectionsTimer()
+    _held_case(db, timer, policy)
+    other = _observation(ref="invoice:b", subject=OTHER_SUBJECT)
+    del other  # a second subject only moves the shared sequence below
+
+    def republish(subject: str, key: str):
+        return republish_subject_state(
+            db,
+            RepublishSubjectStateV1(
+                command_id=uuid5(NAMESPACE_URL, key),
+                idempotency_key=key,
+                scope=SCOPE,
+                subject_ref=subject,
+                requested_at=NOW + timedelta(days=100),
+            ),
+        )
+
+    first = republish(SUBJECT, "r1")
+    assert (first.state, first.version) == ("held", 2)
+    assert republish(SUBJECT, "r1") == replace(first, replayed=True)
+    never = republish(OTHER_SUBJECT, "r2")
+    assert (never.state, never.version) == ("clear", 3)
+    events = sorted(_events(db), key=lambda e: e.payload["source_version"])
+    assert [(e.payload["subject_ref"], e.payload["active"]) for e in events] == [
+        (SUBJECT, True),
+        (SUBJECT, True),
+        (OTHER_SUBJECT, False),
+    ]
+    assert [e.payload["source_version"] for e in events] == [1, 2, 3]
+
+
+def test_the_case_read_is_read_only_and_refuses_an_unknown_case(db: Session) -> None:
+    from dotmac_collections.service import CollectionsNotFound
+
+    with pytest.raises(CollectionsNotFound):
+        get_collection_case(db, scope=SCOPE, case_id=uuid4())
+
+
+def test_the_exposure_wake_is_accepted_and_retired_once_actionable(
+    db: Session,
+) -> None:
+    policy = _policy(db)
+    timer = FakeCollectionsTimer()
+    obs = _observation()
+    _assess(db, policy, obs, timer, NOW)
+    identity = TimerIdentityV1(
+        SCOPE,
+        "collections.exposure",
+        "exposure",
+        "billing.receivables:invoice:inv-1",
+        "due",
+    )
+    handle = timer.current(db, identity)
+    assert handle is not None
+    due = obs.due_at
+    actionable = replace(obs, source_version=2, state_fingerprint="sha256:v2")
+    result = CollectionCaseService.assess(
+        db,
+        command=_command(actionable),
+        policy_version_id=policy,
+        reader=_reader(actionable),
+        timer=timer,
+        assessed_at=due,
+        exposure_wake=_trigger(handle),
+    )
+    assert isinstance(result, CaseAssessed) and result.opened
+    assert timer.current(db, identity) is None  # fired and consumed, none scheduled
+    with pytest.raises(ValueError, match="due wake"):
+        CollectionCaseService.assess(
+            db,
+            command=_command(replace(obs, exposure_ref="invoice:other")),
+            policy_version_id=policy,
+            reader=_reader(actionable),
+            timer=timer,
+            assessed_at=due,
+            exposure_wake=_trigger(handle),
+        )
+
+
+def test_reminders_count_from_the_due_date_not_from_when_the_case_opened(
+    db: Session,
+) -> None:
+    policy = _policy(db)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    late = due + timedelta(days=20)
+    obs = _observation(due_at=due, hold_from=None)
+    opened = _assess(db, policy, obs, timer, late)
+    step = _handle(timer, db, "next_step", str(opened.case_id))
+    assert step is not None and step.due_at == due
