@@ -8,6 +8,13 @@ the due date plus the account's ``postpaid_grace`` term read at the due date.
 
 Rules (fail closed):
 
+* Terms cannot be back-dated, so an item issued or due before the flip has no terms at
+  those instants. The reader takes the flip as ``terms_floor_at`` (a typed input
+  entered at ship time, never hard-coded), reads terms at the later of the instant and
+  the floor, and if none exist even then returns
+  ``PositionUnavailable("account_terms_missing")``: Collections blocks the exposure,
+  no poison message and no queue.
+
 * A prepaid account's exposure is refused (``not_postpaid``): Collections never
   chases prepaid, so such an exposure is an anomaly for the manual exceptions
   review, not something to script away. The contract type is read at the invoice's
@@ -16,9 +23,9 @@ Rules (fail closed):
 * ``access_hold_from`` reads the grace at the due date. Billing refuses back-dated
   terms, so once the due date has passed the value cannot move.
 * A document Billing does not know is ``PositionUnknown``; a source owner other than
-  Billing is an authority mismatch. Any other Billing refusal, and a missing terms
-  version, raise: the caller rolls back and its event delivery retries, so a fault
-  heals when the cause is fixed. No attention row, no queue.
+  Billing is an authority mismatch. Any other Billing refusal raises: the caller rolls
+  back and its event delivery retries, so a fault heals when the cause is fixed. No
+  attention row, no queue.
 
 The subject is the billing account, ``billing-account:{uuid}``, for native and
 imported exposures alike; it is also the key of every collection hold.
@@ -28,6 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from dotmac_billing import (
@@ -54,6 +62,7 @@ SUBJECT_PREFIX = "billing-account:"
 DOCUMENT_PREFIX = "document:"
 _OPEN_STATES = ("open", "partially_resolved")
 _POSTPAID = "postpaid"
+_TERMS_MISSING = "billing.terms_default_missing"
 _NOT_FOUND = "billing.not_found"  # Billing prefixes its stable error codes
 
 
@@ -79,6 +88,10 @@ class BillingReceivablesReader:
 
     db: Session
     reason_code: str = "invoice_overdue"
+    # The first instant Billing holds account terms (the flip), entered at ship time.
+    # Terms cannot be back-dated, so an item issued or due before it is read at the
+    # floor instead of failing for ever.
+    terms_floor_at: datetime | None = None
 
     def read(
         self,
@@ -108,6 +121,20 @@ class BillingReceivablesReader:
             raise
         return self._observe(scope, exposure)
 
+    def _terms(self, scope: TenantScope, account_id: UUID, at: datetime) -> Any | None:
+        """The account terms at ``at`` (not before the floor); None if none exist."""
+
+        if self.terms_floor_at is not None:
+            at = max(at, self.terms_floor_at)
+        try:
+            return get_effective_account_terms(
+                self.db, scope=scope, account_id=account_id, at=at
+            )
+        except BillingRuleViolation as exc:
+            if exc.code == _TERMS_MISSING:
+                return None
+            raise
+
     def _observe(
         self, scope: TenantScope, exposure: ReceivableExposureV1 | ReceivableExposureV2
     ) -> PositionReadOk | PositionUnavailable:
@@ -136,14 +163,14 @@ class BillingReceivablesReader:
         if live and status == DueDateBasisStatus.VERIFIED.value and due_at is not None:
             if basis.issued_at is None:
                 return PositionUnavailable("issue_instant_unknown", None)
-            at_issue = get_effective_account_terms(
-                self.db, scope=scope, account_id=account_id, at=basis.issued_at
-            )
+            at_issue = self._terms(scope, account_id, basis.issued_at)
+            if at_issue is None:
+                return PositionUnavailable("account_terms_missing", None)
             if at_issue.contract_type.value != _POSTPAID:
                 return PositionUnavailable("not_postpaid", None)
-            at_due = get_effective_account_terms(
-                self.db, scope=scope, account_id=account_id, at=due_at
-            )
+            at_due = self._terms(scope, account_id, due_at)
+            if at_due is None:
+                return PositionUnavailable("account_terms_missing", None)
             hold_from = due_at + at_due.postpaid_grace.value
         return PositionReadOk(
             ReceivableObservationV1(

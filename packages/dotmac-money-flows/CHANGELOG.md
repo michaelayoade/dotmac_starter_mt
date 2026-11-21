@@ -13,7 +13,12 @@ Source only. a1 is being published; this adds one stateless module on top of it.
   account's open exposure is `PositionUnavailable("not_postpaid")`; an unverified due
   date carries no due or hold instant; an unknown document is `PositionUnknown`; a
   source owner other than Billing is an authority mismatch. Any other Billing refusal
-  and a missing terms version raise, so the caller's event delivery retries.
+  raises, so the caller's event delivery retries.
+- `BillingReceivablesReader.terms_floor_at` (typed input, the flip instant entered at
+  ship time): terms are read at the later of the instant and the floor, because Billing
+  refuses back-dated terms and an item issued or due before the flip has none. If none
+  exist even then the reader returns `PositionUnavailable("account_terms_missing")`
+  (no poison message, no queue); any other Billing refusal still raises.
 - Depends on `dotmac-collections >=0.1.0a3` (contract classes only; no Collections
   function is imported). Own-commit allowlist widening: `receivables.py` may read
   `get_effective_account_terms`, `ReceivableExposureV1/V2` and `DueDateBasisStatus`.

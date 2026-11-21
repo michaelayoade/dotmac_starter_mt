@@ -150,11 +150,14 @@ class _Billing:
         monkeypatch.setattr(x1, "get_document_exposure", exposure_read)
         monkeypatch.setattr(x1, "get_effective_account_terms", terms)
 
-    def read(self, *, scope=SCOPE, owner="dotmac-billing", ref=None, reason=None):
-        reader = (
-            BillingReceivablesReader(object())  # type: ignore[arg-type]
-            if reason is None
-            else BillingReceivablesReader(object(), reason_code=reason)  # type: ignore[arg-type]
+    def read(
+        self, *, scope=SCOPE, owner="dotmac-billing", ref=None, reason=None, floor=None
+    ):
+        extra = {} if reason is None else {"reason_code": reason}
+        reader = BillingReceivablesReader(
+            object(),  # type: ignore[arg-type]
+            terms_floor_at=floor,
+            **extra,
         )
         return reader.read(
             scope=scope,
@@ -276,18 +279,57 @@ def test_unknown_document_authority_and_malformed_references(monkeypatch) -> Non
         assert isinstance(billing.read(ref=ref), PositionUnknown), ref
 
 
-def test_other_billing_refusals_and_a_missing_terms_version_raise(monkeypatch) -> None:
+def test_other_billing_refusals_raise_but_missing_terms_is_unavailable(
+    monkeypatch,
+) -> None:
     stale = BillingRuleViolation("exposure_fact_stale", "stale")
     with pytest.raises(BillingRuleViolation):
         _Billing(monkeypatch, stale).read()
     billing = _Billing(monkeypatch, _v1())
 
+    def other(db, *, scope, account_id, at):
+        raise BillingRuleViolation("invalid_account_id", "bad")
+
+    monkeypatch.setattr(x1, "get_effective_account_terms", other)
+    with pytest.raises(BillingRuleViolation):
+        billing.read()
+
     def no_terms(db, *, scope, account_id, at):
         raise BillingRuleViolation("terms_default_missing", "no default")
 
     monkeypatch.setattr(x1, "get_effective_account_terms", no_terms)
-    with pytest.raises(BillingRuleViolation):
-        billing.read()
+    assert billing.read() == PositionUnavailable("account_terms_missing", None)
+
+
+def test_terms_are_read_at_the_floor_for_an_item_issued_before_the_flip(
+    monkeypatch,
+) -> None:
+    flip = NOW + timedelta(days=5)
+    billing = _Billing(monkeypatch, _v1())
+    seen = billing.terms_at
+
+    def terms(db, *, scope, account_id, at):
+        seen.append(at)
+        if at < flip:  # nothing can be recorded before the flip
+            raise BillingRuleViolation("terms_default_missing", "no default")
+        return SimpleNamespace(
+            contract_type=SimpleNamespace(value="postpaid"),
+            postpaid_grace=SimpleNamespace(value=timedelta(days=60)),
+        )
+
+    monkeypatch.setattr(x1, "get_effective_account_terms", terms)
+    assert billing.read() == PositionUnavailable("account_terms_missing", None)
+    seen.clear()
+    result = billing.read(floor=flip)
+    assert isinstance(result, PositionReadOk)
+    assert seen == [flip, DUE]  # issued before the flip reads at the floor
+    assert result.position.access_hold_from == DUE + timedelta(days=60)
+
+
+def test_a_floor_earlier_than_the_instants_changes_nothing(monkeypatch) -> None:
+    billing = _Billing(monkeypatch, _v1())
+    assert isinstance(billing.read(floor=ISSUED - timedelta(days=9)), PositionReadOk)
+    assert billing.terms_at == [ISSUED, DUE]
 
 
 def test_the_reader_is_tenant_plane_only_and_requires_a_reason(monkeypatch) -> None:

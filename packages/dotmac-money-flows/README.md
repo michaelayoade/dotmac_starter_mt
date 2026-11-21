@@ -277,9 +277,13 @@ Duties of the caller (Sub-thin) beyond the Collections README:
    its own transaction first (it takes the Billing account lock), then
    `process_access_hold_due` in another. No Billing lock and Collections lock are ever
    held together.
-3. Treat a raised failure as redelivery, not as a queue item. A missing account-terms
-   version for an invoice's issue instant (for example an imported open item issued
-   before the first terms version) raises until terms are recorded.
+3. Give the reader the flip as `terms_floor_at` (a typed input entered at ship time, not
+   hard-coded). Account terms cannot be back-dated, so an item issued or due before the
+   flip has no terms at those instants; the reader reads terms at the later of the
+   instant and the floor. If none exist even then it returns
+   `PositionUnavailable("account_terms_missing")` and Collections blocks the exposure
+   (no case, no retry): record the terms and the next Billing event re-assesses it.
+   Treat any other raised failure as redelivery, not as a queue item.
 4. An open prepaid exposure is an anomaly: the reader refuses it (`not_postpaid`) and
    it goes to the manual exceptions review, not a script.
 
