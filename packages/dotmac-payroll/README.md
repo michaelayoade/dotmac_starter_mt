@@ -9,6 +9,12 @@ percentage rules—never expression evaluation. Employee identity, attendance,
 tax policy, bank transport, GL posting, and payment execution remain separate
 owners connected by the adopting application.
 
+Version `0.1.0a7` makes separation of duties optional (D-9). `approve_payroll_run`,
+`finalize_payroll_run` and `reverse_liability_settlement` take a keyword-only
+`separation_of_duties` (default `True`, so a caller that does not name it is
+unchanged); an assembly passes its tenant policy explicitly. There is no migration:
+payroll has no database separation check and nothing is stamped on the row.
+
 The optional package owns the `py` lineage and `mod_payroll` schema. See
 `EXTRACTION.toml` and `docs/inventories/payroll-sources.md` for the boundary.
 

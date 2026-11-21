@@ -690,11 +690,19 @@ def approve_payroll_run(
     run_id: UUID,
     approved_by_id: UUID,
     approved_at: datetime,
+    separation_of_duties: bool = True,
 ) -> PayrollRun:
+    """draft -> approved. The creator may not approve when separation applies.
+
+    ``separation_of_duties`` is the tenant policy in force (D-9: optional, never
+    compulsory). The default ``True`` keeps a6 behaviour for a caller that does not
+    name it; an assembly passes its policy explicitly. Nothing is stamped on the
+    row: the caller supplies the policy at each step.
+    """
     run = _run(db, tenant_id, run_id)
     if run.status != "draft":
         raise PayrollConflict("only a draft payroll run can be approved")
-    if run.created_by_id == approved_by_id:
+    if separation_of_duties and run.created_by_id == approved_by_id:
         raise PayrollRuleViolation("payroll run creator cannot approve")
     totals = read_payroll_run_totals(db, tenant_id=tenant_id, run_id=run.id)
     if not totals.calculation_count:
@@ -713,11 +721,17 @@ def finalize_payroll_run(
     run_id: UUID,
     finalized_by_id: UUID,
     finalized_at: datetime,
+    separation_of_duties: bool = True,
 ) -> PayrollRun:
+    """approved -> finalized. The approver may not finalize when separation applies.
+
+    ``separation_of_duties`` is the tenant policy in force (D-9); default ``True``
+    keeps a6 behaviour, and an assembly passes its policy explicitly.
+    """
     run = _run(db, tenant_id, run_id)
     if run.status != "approved":
         raise PayrollConflict("only an approved payroll run can be finalized")
-    if run.approved_by_id == finalized_by_id:
+    if separation_of_duties and run.approved_by_id == finalized_by_id:
         raise PayrollRuleViolation("payroll approver cannot finalize the run")
     calculations = db.scalars(
         select(PayrollCalculation).where(
@@ -958,6 +972,7 @@ def reverse_liability_settlement(
     reason: str,
     reversed_by_id: UUID,
     reversed_at: datetime,
+    separation_of_duties: bool = True,
 ) -> PayrollSettlementReversal:
     """Reverse one whole recorded settlement whose bank credit was returned.
 
@@ -965,12 +980,13 @@ def reverse_liability_settlement(
     re-payment. The settlement row is never updated: an append-only reversal
     row is inserted and the liability's settled amount is reduced by exactly
     the settlement amount (status back to ``outstanding``) in the caller's
-    transaction. Refuses the settlement's own recorder (a second person must
-    attest the bank return), internal recoveries, and a liability this
-    settlement does not fully settle. An identical replay (same return reference,
-    reason and reverser) returns the existing reversal; anything else is a
-    conflict. ``reversed_at`` must be timezone-aware and not before the
-    settlement's ``recorded_at``.
+    transaction. Refuses the settlement's own recorder when
+    ``separation_of_duties`` is true (the default; D-9 makes it an optional tenant
+    policy that an assembly passes explicitly), internal recoveries, and a
+    liability this settlement does not fully settle. An identical replay (same
+    return reference, reason and reverser) returns the existing reversal;
+    anything else is a conflict. ``reversed_at`` must be timezone-aware and not
+    before the settlement's ``recorded_at``.
 
     Caller duty (the ERP pin; this package cannot prove it): the bank account
     passed to ``build_settlement_reversal_consequence`` must be the cash GL of
@@ -1027,7 +1043,7 @@ def reverse_liability_settlement(
         raise PayrollRuleViolation(
             "internal recovery is recovered at finalize and cannot be reversed"
         )
-    if reversed_by_id == settlement.recorded_by_id:
+    if separation_of_duties and reversed_by_id == settlement.recorded_by_id:
         raise PayrollRuleViolation(
             "settlement reversal requires a different person than the recorder"
         )
