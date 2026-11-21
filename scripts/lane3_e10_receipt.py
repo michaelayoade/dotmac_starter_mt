@@ -143,14 +143,18 @@ class E10ReceiptRef:
             raise ReceiptRefused("receipt-destruction-time-invalid")
 
     def digest(self) -> str:
-        """A stable `sha256:` digest over every field, for binding to a staging."""
-        document = {
-            field.name: (value.isoformat() if isinstance(value, datetime) else value)
-            for field in dataclasses.fields(self)
-            for value in (getattr(self, field.name),)
-        }
-        raw = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-        return "sha256:" + hashlib.sha256(raw).hexdigest()
+        """A stable `sha256:` digest over every field, for binding to a staging.
+
+        A launcher-local binding token, not a document: the fields are joined
+        in declaration order (name and value, NUL-separated), nothing is
+        serialised as JSON.
+        """
+        parts: list[str] = []
+        for field in dataclasses.fields(self):
+            value = getattr(self, field.name)
+            text = value.isoformat() if isinstance(value, datetime) else value
+            parts.append(f"{field.name}={text}")
+        return "sha256:" + hashlib.sha256("\x00".join(parts).encode()).hexdigest()
 
     def require_pin_matches(
         self, *, ssh_fingerprint: str, alias: str, host_id: str
