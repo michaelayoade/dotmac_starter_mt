@@ -25,9 +25,21 @@ Three new kernel migrations ship in this release, in order:
 ### Operating caveat (K-8 relay worker)
 
 Do not run the K-8 relay worker (`DispatchRelayTransport`) on a tenant whose
-outbox carries event types other than `delivery.dispatch.v1` until M2 lands.
-The generic relay transport is only safe for the delivery-dispatch type; the
-other event types are not routed by it.
+outbox carries event types other than `delivery.dispatch.v1` until M2 (a
+type-scoped claim or router) ships. `claim_batch` claims every event type, the
+transport raises `DeliveryTerminal` for any type other than
+`delivery.dispatch.v1`, and the worker dead-letters that event at once. Other
+packages' outbox events on such a tenant are therefore claimed and
+dead-lettered immediately, not left for their own relay.
+
+### Breaking
+
+- Delivery receipts in `communication_deliveries` are append-only for both
+  application roles. Migration `0033_receipts_append_only` revokes UPDATE and
+  DELETE from `app_user`; migration `0034_receipts_platform_append_only`
+  (revision `0034_receipts_platform_ro`) revokes UPDATE and DELETE from
+  `platform_api`. Any adopter that updates or deletes receipt rows fails after
+  upgrading. Tenant deletion still cascades through the foreign key.
 
 ### Added
 
@@ -114,8 +126,8 @@ other event types are not routed by it.
   - K-6 migration `0033_receipts_append_only` revokes UPDATE and DELETE on
     `communication_deliveries` from `app_user`. No kernel path updates or
     deletes a receipt (`record_receipt` only inserts); tenant deletion still
-    cascades through the foreign key. `platform_api` keeps its 0020 grants.
-    No version is allocated.
+    cascades through the foreign key. `platform_api` is tightened separately
+    by migration `0034` (see the follow-up entry above).
 
 - Dispatch identity (ADR-0006 § 5g, K-3): kernel migration
   `0032_communication_dispatches` (additive; down drops the table only while it
@@ -137,7 +149,7 @@ other event types are not routed by it.
     `import_pending` are the D7 carry-forward primitives (history-only, never
     enqueued; pending content kept byte-for-byte with `legacy:` provenance).
     `load_dispatch` rebuilds the `OutboundMessage` and refuses a fingerprint
-    mismatch, a history-only row or a redacted row. No version is allocated.
+    mismatch, a history-only row or a redacted row.
 
 - Reserve `money_flows` / `mod_mflows` / `mf` / branch `money_flows` for the
   tenant-plane money-flows composition package before its release. This
