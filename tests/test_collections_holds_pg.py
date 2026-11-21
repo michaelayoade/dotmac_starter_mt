@@ -46,6 +46,7 @@ from tests.test_collections_isolation import (  # noqa: F401  (fixture import)
     _publish_policy,
     _reader,
     _seed_tenants,
+    _superuser_url,
     _tenant_session,
     scratch,
 )
@@ -353,17 +354,20 @@ def test_race_between_resolve_and_place_blocks_on_the_subject_lock_and_flips_onc
     key = _lock_key("collections", scope_segment(scope), "subject", subject)
     holder = create_engine(app_url)
     barrier = threading.Barrier(3)
-    admin = create_engine(admin_url)
+    # Wait events of other roles are visible only to a superuser.
+    observer = create_engine(_superuser_url())
+    database = create_engine(admin_url).url.database
 
     def blocked_sessions() -> int:
-        with admin.connect() as connection:
+        with observer.connect() as connection:
             return int(
                 connection.scalar(
                     text(
                         "SELECT count(*) FROM pg_stat_activity "
-                        "WHERE datname = current_database() "
+                        "WHERE datname = :d "
                         "AND wait_event_type = 'Lock' AND wait_event = 'advisory'"
-                    )
+                    ),
+                    {"d": database},
                 )
                 or 0
             )
@@ -399,19 +403,22 @@ def test_race_between_resolve_and_place_blocks_on_the_subject_lock_and_flips_onc
             )
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [pool.submit(resolve), pool.submit(place)]
-                barrier.wait(timeout=20)
-                deadline = time.monotonic() + 20
-                while blocked_sessions() < 2 and time.monotonic() < deadline:
-                    time.sleep(0.1)
-                assert (
-                    blocked_sessions() >= 2
-                ), "both commands must wait on the subject lock"
-                transaction.commit()
+                blocked = 0
+                try:
+                    barrier.wait(timeout=20)
+                    deadline = time.monotonic() + 20
+                    while blocked < 2 and time.monotonic() < deadline:
+                        time.sleep(0.2)
+                        blocked = blocked_sessions()
+                finally:
+                    # Always release the lock, or a failed proof would hang the pool.
+                    transaction.commit()
                 for future in futures:
                     future.result(timeout=30)
+            assert blocked >= 2, "both commands must wait on the subject lock"
     finally:
         holder.dispose()
-        admin.dispose()
+        observer.dispose()
 
     with _tenant_session(app_url, tenant_id) as session:
         # Either order ends clear with exactly one service-on event (a1 up, a1 down).
