@@ -556,3 +556,59 @@ def test_a_dropped_store_at_custody_is_refused_with_its_own_code_and_not_retried
     with pytest.raises(custody.LeaseCustodyRefused) as refusal:
         _custody(store)
     assert refusal.value.code == code
+
+
+# ── S5 / E4 R2: vm_slot comes from the receipt and is checked before launch ─
+
+
+@pytest.mark.parametrize(
+    ("slot", "code"),
+    [
+        (None, "receipt-vm-slot-required"),
+        ("Contabo/1", "receipt-vm-slot-invalid"),
+        ("contabo/0", "receipt-vm-slot-invalid"),
+        ("contabo/01", "receipt-vm-slot-invalid"),
+        ("contabo/1234567890", "receipt-vm-slot-invalid"),
+        ("contabo", "receipt-vm-slot-invalid"),
+        (" contabo/1", "receipt-vm-slot-invalid"),
+    ],
+)
+def test_a_receipt_without_a_valid_vm_slot_is_refused_before_the_lease_is_taken(
+    slot: Any, code: str
+) -> None:
+    import dataclasses
+
+    # Built valid, then rebound, so the receipt's own checks cannot pre-empt it.
+    receipt = dataclasses.replace(make_receipt(), vm_slot="contabo/1")
+    object.__setattr__(receipt, "vm_slot", slot)
+    store = FakeStore()
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        _custody(store, e10_receipt=receipt)
+    assert refusal.value.code == code
+    assert not store._rows
+
+
+def test_a_release_argument_that_disagrees_with_the_receipts_slot_writes_nothing() -> (
+    None
+):
+    from lane3_launcher_lease import parse_terminal
+
+    store = FakeStore()
+    held = _custody(store)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        custody.release_with_record(
+            parse_terminal(
+                terminal_data(
+                    receipt_digest="",
+                    refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED.value,
+                )
+            ),
+            store=store,
+            held=held,
+            controller_identity="fp-launch-key",
+            expected_machine_id=MACHINE,
+            verified_receipt_digest="",
+            ready_seen=True,
+            release_args=types.SimpleNamespace(vm_slot="contabo/9999"),
+        )
+    assert refusal.value.code == "release-vm-slot-mismatch"

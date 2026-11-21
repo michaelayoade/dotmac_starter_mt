@@ -1303,3 +1303,17 @@ def test_a_commit_that_is_unknown_is_reported_and_standing_is_read_later(
     evidence = _evidence(tmp_path)
     assert evidence["store_failure"] == "store-commit-unknown"
     assert evidence["standing_read_required"] is True
+
+
+def test_a_receipt_with_no_vm_slot_sends_nothing(ends, tmp_path) -> None:
+    import dataclasses
+
+    receipt = e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+    )
+    receipt = dataclasses.replace(receipt, vm_slot=None)
+    result, seen = _no_start(ends, tmp_path, e10=receipt)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "receipt-vm-slot-required"

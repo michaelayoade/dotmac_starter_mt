@@ -40,6 +40,7 @@ from typing import Any, Final
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import exposure_rehearsal_runner as controller_half
+import lane3_e10_receipt
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
@@ -109,6 +110,10 @@ def take_custody(
         raise LeaseCustodyRefused("e10-receipt-required")
     if e10_receipt.host_id != host_id:
         raise LeaseCustodyRefused("receipt-host-id-mismatch")
+    try:
+        lane3_e10_receipt.require_vm_slot(e10_receipt)
+    except lane3_e10_receipt.ReceiptRefused as exc:
+        raise LeaseCustodyRefused(exc.code) from None
     if reprovision is not None:
         if not isinstance(reprovision, ReprovisionMarker):
             raise LeaseCustodyRefused("reprovision-marker-untyped")
@@ -321,6 +326,14 @@ def release_with_record(
         outcome = TerminalOutcome(refusal=refusal)
     else:
         return "", None
+    # The release's `vm_slot` is the E10 receipt's, never a free argument.
+    slot = held.e10_receipt.vm_slot
+    if getattr(release_args, "vm_slot", slot) != slot:
+        raise LeaseCustodyRefused("release-vm-slot-mismatch")
+    try:
+        release_args.vm_slot = slot
+    except AttributeError:
+        pass
     ctx = controller_half.TerminalContext()
     ctx.lease = held.lease if terminal.lease_in_hand else None
     ctx.controller_identity = controller_identity

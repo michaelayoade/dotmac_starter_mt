@@ -242,6 +242,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             result.refusal_code = exc.code
             return result
         try:
+            lane3_e10_receipt.require_vm_slot(inputs.e10)
             inputs.e10.require_matches(
                 ssh_fingerprint=inputs.pin.fingerprint,
                 alias=inputs.pin.alias,
