@@ -32,7 +32,6 @@ import pathlib
 import subprocess
 import sys
 import threading
-from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
@@ -104,11 +103,11 @@ class DriveInputs:
     #: The exact `execution-context.json` that was staged: its
     #: `host_enrolment_ref` must be the receipt's enrolment UUID.
     execution_context: lane3_stage.StagedFile
-    #: The mapping `stage_artifacts` was given. `drive` requires its
-    #: `execution-context.json` to be this very `execution_context` (same sha256),
-    #: so the context checked against the receipt is the one that reached the
-    #: target, never a second file.
-    staged_artifacts: Mapping[str, lane3_stage.StagedFile]
+    #: What `stage_artifacts` returned (token-bound). `drive` requires it to be this
+    #: lease's staging and its `execution-context.json` digest to be
+    #: `execution_context`'s, so the context checked against the receipt is the
+    #: file that reached the target, never a second one.
+    staged: lane3_stage.StagedRun
     store: lane3_lease_store.LeaseStore
     held: lane3_lease_store.HeldLease
     plan: SessionPlan
@@ -181,6 +180,12 @@ def _store_refused(result: DriveResult, exc: lane3_lease_store.StoreRefused) -> 
         result.store_failure = exc.code
 
 
+_DROP_OUTCOMES = {
+    lane3_lease_store.STORE_UNREACHABLE: "store_unreachable",
+    lane3_lease_store.STORE_COMMIT_UNKNOWN: "store_commit_unknown",
+}
+
+
 def _abort(channel: Channel, reason: str) -> None:
     try:
         channel.send("abort", {"reason": reason[:200]})
@@ -220,25 +225,32 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         if not held.acquired_at <= store_time < held.expires_at:
             result.refusal_code = "store-time-outside-lease-window"
             return result
-        # The E10 receipt must agree with every independent input BEFORE anything
-        # is sent to the target: the pinned SSH key and alias, the incarnation
-        # input and the lease's host.
-        # The context the receipt is checked against must be the file that was
-        # staged to the target, byte for byte.
-        staged = inputs.staged_artifacts.get("execution-context.json")
+        # Everything below is checked BEFORE anything is sent to the target.
+        # The staging must be this lease's, and the context checked against the
+        # receipt must be the file that was staged, byte for byte.
         try:
-            if staged is None:
-                raise lane3_e10_receipt.ReceiptRefused("execution-context-not-staged")
-            for candidate in (staged, inputs.execution_context):
-                lane3_stage._require_staged("execution-context.json", candidate)
-            if staged.sha256 != inputs.execution_context.sha256:
-                raise lane3_e10_receipt.ReceiptRefused(
-                    "execution-context-not-the-staged-file"
+            staged = inputs.staged
+            if not isinstance(staged, lane3_stage.StagedRun):
+                raise lane3_stage.StageRefused("staged-run-required")
+            staged.require_for(
+                run_dir=inputs.plan.run_dir,
+                host_id=held.lease.target,
+                run_id=held.lease.authorization_run_id,
+            )
+            digest = staged.digest_of("execution-context.json")
+            if digest is None:
+                raise lane3_stage.StageRefused("execution-context-not-staged")
+            try:
+                lane3_stage._require_staged(
+                    "execution-context.json", inputs.execution_context
                 )
-        except lane3_stage.StageRefused:
-            result.refusal_code = "execution-context-digest-mismatch"
-            return result
-        except lane3_e10_receipt.ReceiptRefused as exc:
+            except lane3_stage.StageRefused:
+                raise lane3_stage.StageRefused(
+                    "execution-context-digest-mismatch"
+                ) from None
+            if digest != inputs.execution_context.sha256:
+                raise lane3_stage.StageRefused("execution-context-not-the-staged-file")
+        except lane3_stage.StageRefused as exc:
             result.refusal_code = exc.code
             return result
         try:
@@ -256,6 +268,10 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             )
         except lane3_e10_receipt.ReceiptRefused as exc:
             result.refusal_code = exc.code
+            return result
+        # The receipt is the one the lease was taken under, not a second receipt.
+        if inputs.e10 != held.e10_receipt:
+            result.refusal_code = "receipt-not-the-leases"
             return result
         channel.send("start", build_start(inputs, store_time))
         kind, data = channel.receive("ready", "terminal", timeout=inputs.ready_seconds)
@@ -401,9 +417,14 @@ def conclude(
     written the lease is left to EXPIRE on store time as a mutated host.
     """
     outcome, digest, custody_code, record = "no_terminal", "", "", None
+    unconfirmed: Any = None
     verified = result.receipt.sha256_digest() if result.receipt is not None else ""
     error: BaseException | None = None
-    if result.terminal is not None:
+    if result.terminal is not None and result.store_failure:
+        # The store already dropped during the drive: nothing further is sent to
+        # it (design 3.6). The lease is left to expire on store time.
+        outcome = _DROP_OUTCOMES[result.store_failure]
+    elif result.terminal is not None:
         try:
             digest, record = launcher_lease.release_with_record(
                 result.terminal,
@@ -421,29 +442,47 @@ def conclude(
             # The release write is sent once and never retried (design 3.6). A
             # dropped store is its own outcome; for `store-commit-unknown` the
             # release MAY have committed, so standing is read afterwards through
-            # the ceremony's owner session and nothing further is written here.
-            if exc.code == lane3_lease_store.STORE_UNREACHABLE:
-                outcome = "store_unreachable"
-            elif exc.code == lane3_lease_store.STORE_COMMIT_UNKNOWN:
-                outcome = "store_commit_unknown"
+            # the ceremony's owner session and nothing further is written to the
+            # store. The release that was sent is kept as an UNCONFIRMED copy.
+            if exc.code in _DROP_OUTCOMES:
+                outcome = _DROP_OUTCOMES[exc.code]
+            if exc.code == lane3_lease_store.STORE_COMMIT_UNKNOWN:
+                unconfirmed = exc.release_record
         except Exception as exc:
             outcome, error = "error", exc
     terminal = result.terminal
     store_failure = result.store_failure or (
         custody_code if custody_code in _STORE_DROPS else ""
     )
+    commit_unknown = custody_code == lane3_lease_store.STORE_COMMIT_UNKNOWN
+    stamp: str | None = None
+    stamp_unavailable = False
+    if digest:
+        # The release committed. The store's own stamp is read once; a drop here
+        # must not lose the evidence or the release copy.
+        try:
+            stored = store.released_at(held.lease.target)
+            stamp = stored.isoformat() if stored is not None else None
+        except Exception as exc:
+            stamp_unavailable = True
+            code = getattr(exc, "code", "")
+            store_failure = store_failure or (
+                code if code in _STORE_DROPS else lane3_lease_store.STORE_UNREACHABLE
+            )
     evidence = {
         "document": "lane3-launcher-terminal",
         "version": 1,
         "outcome": outcome,
         "drive_refusal_code": result.refusal_code,
         "custody_code": custody_code,
-        "release_written": bool(digest),
+        # `None` = unknown: the commit may or may not have happened.
+        "release_written": None if commit_unknown else bool(digest),
         "release_digest": digest,
-        "lease_left_to_expire_as_mutated": not digest,
+        "lease_left_to_expire_as_mutated": None if commit_unknown else not digest,
         "store_failure": store_failure,
-        "standing_read_required": store_failure
-        == lane3_lease_store.STORE_COMMIT_UNKNOWN,
+        "standing_read_required": (
+            store_failure == lane3_lease_store.STORE_COMMIT_UNKNOWN or stamp_unavailable
+        ),
         "ready_seen": result.ready_seen,
         "plan_digest": result.plan_digest,
         "receipt_digest": verified,
@@ -460,10 +499,7 @@ def conclude(
         "cleanup": terminal.cleanup.value if terminal is not None else "",
         "target_exit_status": terminal.exit_status if terminal is not None else None,
     }
-    stamp: str | None = None
     if digest:
-        stored = store.released_at(held.lease.target)
-        stamp = stored.isoformat() if stored is not None else None
         evidence["runner_released_at"] = str(getattr(record, "released_at", ""))
         evidence["store_released_at"] = stamp or ""
     try:
@@ -472,6 +508,7 @@ def conclude(
             evidence=evidence,
             release_record=record if digest else None,
             released_at=stamp,
+            unconfirmed_record=unconfirmed,
         )
     except Exception as write_error:
         if error is not None:

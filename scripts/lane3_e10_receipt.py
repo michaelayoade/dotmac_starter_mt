@@ -142,6 +142,21 @@ class E10ReceiptRef:
         if not isinstance(destroyed, datetime) or destroyed.tzinfo is None:
             raise ReceiptRefused("receipt-destruction-time-invalid")
 
+    def require_pin_matches(
+        self, *, ssh_fingerprint: str, alias: str, host_id: str
+    ) -> None:
+        """The pin/alias/host part of :meth:`require_matches`, with no store time.
+
+        Run BEFORE the first remote call, so a receipt for another VM is refused
+        while nothing (no DSN, no context) has been shipped to any host.
+        """
+        if ssh_fingerprint != self.ssh_host_key_fingerprint:
+            raise ReceiptRefused("receipt-ssh-fingerprint-mismatch")
+        if alias != self.vm_alias:
+            raise ReceiptRefused("receipt-alias-mismatch")
+        if host_id != self.host_id:
+            raise ReceiptRefused("receipt-host-id-mismatch")
+
     def require_matches(
         self,
         *,

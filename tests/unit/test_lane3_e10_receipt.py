@@ -284,3 +284,24 @@ def test_vm_slot_has_no_default_and_must_be_passed() -> None:
     with pytest.raises(TypeError):
         e10.E10ReceiptRef(**values)
     assert e10.E10ReceiptRef(**values, vm_slot=None).vm_slot is None
+
+
+def test_the_pin_alias_and_host_part_runs_without_a_store_time() -> None:
+    receipt = support.make_receipt()
+    receipt.require_pin_matches(
+        ssh_fingerprint=support.SSH_FINGERPRINT, alias="vm-alpha", host_id="host-a"
+    )
+    for override, code in (
+        ({"ssh_fingerprint": "SHA256:" + "C" * 43}, "receipt-ssh-fingerprint-mismatch"),
+        ({"alias": "vm-beta"}, "receipt-alias-mismatch"),
+        ({"host_id": "host-b"}, "receipt-host-id-mismatch"),
+    ):
+        arguments = {
+            "ssh_fingerprint": support.SSH_FINGERPRINT,
+            "alias": "vm-alpha",
+            "host_id": "host-a",
+            **override,
+        }
+        with pytest.raises(e10.ReceiptRefused) as refusal:
+            receipt.require_pin_matches(**arguments)
+        assert refusal.value.code == code

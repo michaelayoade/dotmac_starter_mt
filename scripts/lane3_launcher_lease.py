@@ -62,6 +62,7 @@ from lane3_lease_store import (
 __all__ = [
     "EVIDENCE_FILE",
     "RELEASE_FILE",
+    "UNCONFIRMED_RELEASE_FILE",
     "LeaseCustodyRefused",
     "Terminal",
     "parse_terminal",
@@ -84,6 +85,8 @@ class LeaseCustodyRefused(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+        #: Set only when a store refused a release that had been built.
+        self.release_record: Any = None
 
 
 def take_custody(
@@ -327,8 +330,12 @@ def release_with_record(
     else:
         return "", None
     # The release's `vm_slot` is the E10 receipt's, never a free argument.
+    # An argument of None is UNSET (it is replaced by the receipt's slot, which
+    # `take_custody` already required before launch); only a DIFFERENT value
+    # refuses.
     slot = held.e10_receipt.vm_slot
-    if getattr(release_args, "vm_slot", slot) != slot:
+    given = getattr(release_args, "vm_slot", None)
+    if given is not None and given != slot:
         raise LeaseCustodyRefused("release-vm-slot-mismatch")
     try:
         release_args.vm_slot = slot
@@ -352,7 +359,11 @@ def release_with_record(
     try:
         digest = store.release(held, release=release, host_mutated=host_mutated)
     except StoreRefused as exc:
-        raise LeaseCustodyRefused(exc.code) from None
+        refused = LeaseCustodyRefused(exc.code)
+        # The release that WAS sent, so a commit-unknown can still leave a copy
+        # (marked unconfirmed) for whoever reads standing afterwards.
+        refused.release_record = release
+        raise refused from None
     return digest, release
 
 
@@ -364,6 +375,8 @@ def release_for(terminal: Terminal, **kwargs: Any) -> str:
 # The names the existing `exposure-rehearsal.yml` upload step publishes
 # (`lane3-terminal-release`), so these records reach the store on every outcome.
 RELEASE_FILE: Final = "lane3-lease-release.json"
+#: A release whose commit is UNKNOWN (store dropped after the write was sent).
+UNCONFIRMED_RELEASE_FILE: Final = "lane3-lease-release-unconfirmed.json"
 EVIDENCE_FILE: Final = "lane3-terminal-evidence.json"
 
 
@@ -379,6 +392,7 @@ def write_terminal_records(
     evidence: dict[str, Any],
     release_record: Any | None,
     released_at: str | None = None,
+    unconfirmed_record: Any | None = None,
 ) -> list[pathlib.Path]:
     """Create-only terminal records for EVERY outcome. Never overwrites.
 
@@ -396,6 +410,15 @@ def write_terminal_records(
         if released_at is not None:
             document["released_at"] = released_at
         _create_only(path, json.dumps(document, indent=2, allow_nan=False))
+        written.append(path)
+    if unconfirmed_record is not None:
+        path = directory / UNCONFIRMED_RELEASE_FILE
+        wrapper = {
+            "unconfirmed": True,
+            "note": "store-commit-unknown: read standing before trusting this copy",
+            "release": dict(unconfirmed_record.as_document()),
+        }
+        _create_only(path, json.dumps(wrapper, indent=2, allow_nan=False))
         written.append(path)
     path = directory / EVIDENCE_FILE
     _create_only(path, json.dumps(evidence, indent=2, allow_nan=False) + "\n")

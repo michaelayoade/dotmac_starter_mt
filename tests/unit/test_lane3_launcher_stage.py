@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import pathlib
 import shlex
@@ -18,6 +19,8 @@ SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import lane3_launcher_stage as stage  # noqa: E402
+
+from tests.unit import lane3_e10_support as e10_support  # noqa: E402
 
 RAW_KEY = bytes(range(32))
 # An OpenSSH wire-format ed25519 blob: string "ssh-ed25519", string <32 raw bytes>.
@@ -345,7 +348,20 @@ def _file(content: bytes) -> stage.StagedFile:
 
 
 def _artifacts() -> dict[str, stage.StagedFile]:
-    return {name: _file(f"content of {name}".encode()) for name in stage.ARTIFACT_NAMES}
+    files = {
+        name: _file(f"content of {name}".encode()) for name in stage.ARTIFACT_NAMES
+    }
+    files["execution-context.json"] = _file(
+        json.dumps({"host_enrolment_ref": e10_support.ENROLMENT_UUID}).encode()
+    )
+    return files
+
+
+def _receipt(**overrides):
+    """The E10 receipt for the pinned VM: this pin's key and alias, host-a."""
+    values = {"ssh_host_key_fingerprint": FINGERPRINT, "vm_alias": ALIAS}
+    values.update(overrides)
+    return e10_support.make_receipt(**values)
 
 
 WHEELS = {
@@ -364,6 +380,8 @@ def _stage(target: FakeTarget, tmp_path: pathlib.Path, **overrides):
         "pin": _pin(tmp_path),
         "connect_timeout": 20,
         "host_id": "host-a",
+        "run_id": "run-1",
+        "receipt": _receipt(),
         "artifacts": _artifacts(),
         "lease": _file(b"lease record"),
         "lease_filename": "host-a.json",
@@ -377,7 +395,7 @@ def test_every_artifact_is_shipped_and_verified_by_digest(
     tmp_path: pathlib.Path,
 ) -> None:
     target = FakeTarget()
-    assert _stage(target, tmp_path) == RUN_DIR
+    assert _stage(target, tmp_path).run_dir == RUN_DIR
     expected = {f"{RUN_DIR}/{n}" for n in stage.ARTIFACT_NAMES}
     expected |= {f"{RUN_DIR}/wheelhouse/{n}" for n in WHEELS}
     expected |= {f"{RUN_DIR}/lease/host-a.json", f"{RUN_DIR}/requirements.txt"}
@@ -515,6 +533,19 @@ def _common(tmp_path: pathlib.Path) -> dict:
     }
 
 
+def _staged(tmp_path: pathlib.Path, host: str = "host-a", run: str = "run-1"):
+    """What `stage_artifacts` returns, obtained the only way there is."""
+    sub = tmp_path / f"staged{len(list(tmp_path.glob('staged*')))}"
+    sub.mkdir()
+    return _stage(
+        FakeTarget(),
+        sub,
+        identity=_identity(sub, host=host, run=run),
+        host_id=host,
+        run_id=run,
+    )
+
+
 def _proof(tmp_path: pathlib.Path, **overrides) -> stage.ClockSkewPassed:
     """A skew proof obtained the only way there is: through the check."""
     return _skew(tmp_path, 0, **overrides)
@@ -536,6 +567,8 @@ def _launch(tmp_path: pathlib.Path, **overrides):
         )
     if "pin" not in arguments:
         arguments["pin"] = _pin(tmp_path)
+    if "staged" not in arguments:
+        arguments["staged"] = _staged(tmp_path)
     if "skew" not in arguments:
         keys = (
             "run_dir",
@@ -545,10 +578,12 @@ def _launch(tmp_path: pathlib.Path, **overrides):
             "identity",
             "pin",
             "connect_timeout",
+            "staged",
         )
         arguments["skew"] = stage.require_clock_skew(
             run=lambda argv, stdin: stage.RunResult(0),
             extra_env={},
+            receipt=_receipt(),
             **{k: arguments[k] for k in keys},
         )
     return stage.launch_argv(**arguments)
@@ -692,6 +727,8 @@ def _skew(tmp_path: pathlib.Path, exit_code: int, **overrides):
 
     arguments = {"run_id": "run-1", "host_id": "host-a", **_common(tmp_path)}
     arguments.update(overrides)
+    arguments.setdefault("staged", _staged(tmp_path))
+    arguments.setdefault("receipt", _receipt())
     try:
         return stage.require_clock_skew(run=run, extra_env={}, **arguments)
     finally:
@@ -1074,3 +1111,197 @@ def test_a_non_identity_is_refused_at_skew_and_teardown(
                 run_id="run-1",
             )
     assert refusal.value.code == "ssh-identity-required"
+
+
+# ── S5 review: the staging result is token-bound ────────────────────────────
+
+
+def test_a_staged_run_cannot_be_constructed_by_a_caller() -> None:
+    base = {
+        "run_dir": RUN_DIR,
+        "host_id": "host-a",
+        "run_id": "run-1",
+        "files": (("execution-context.json", "0" * 64),),
+    }
+    for extra in ({}, {"_token": "00"}, {"_token": "a" * 64}, {"_token": object()}):
+        with pytest.raises(stage.StageRefused) as refusal:
+            stage.StagedRun(**base, **extra)  # type: ignore[arg-type]
+        assert refusal.value.code == "staged-run-forged"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_dir", "/run/lane3.OTHERRUN12"),
+        ("host_id", "host-b"),
+        ("run_id", "run-2"),
+        ("files", (("execution-context.json", "1" * 64),)),
+    ],
+)
+def test_a_staged_run_cannot_be_rebound_with_dataclasses_replace(
+    tmp_path: pathlib.Path, field: str, value: object
+) -> None:
+    import dataclasses
+
+    staged = _staged(tmp_path)
+    with pytest.raises(stage.StageRefused) as refusal:
+        dataclasses.replace(staged, **{field: value})
+    assert refusal.value.code == "staged-run-forged"
+
+
+def test_a_staged_run_mutated_in_place_is_caught_at_use(
+    tmp_path: pathlib.Path,
+) -> None:
+    staged = _staged(tmp_path)
+    object.__setattr__(staged, "files", (("execution-context.json", "2" * 64),))
+    with pytest.raises(stage.StageRefused) as refusal:
+        staged.digest_of("execution-context.json")
+    assert refusal.value.code == "staged-run-forged"
+
+
+def test_staging_returns_every_digest_it_shipped(tmp_path: pathlib.Path) -> None:
+    artifacts = _artifacts()
+    staged = _stage(FakeTarget(), tmp_path, artifacts=artifacts)
+    assert (staged.run_dir, staged.host_id, staged.run_id) == (
+        RUN_DIR,
+        "host-a",
+        "run-1",
+    )
+    assert staged.digest_of("execution-context.json") == (
+        artifacts["execution-context.json"].sha256
+    )
+    assert staged.digest_of("lease/host-a.json") is not None
+    assert staged.digest_of("nothing") is None
+
+
+@pytest.mark.parametrize(
+    "wrong",
+    [
+        ("host-b", "run-1"),
+        ("host-a", "run-9"),
+    ],
+)
+def test_launch_refuses_the_staging_of_another_host_or_run(
+    tmp_path: pathlib.Path, wrong: tuple[str, str]
+) -> None:
+    proof = _proof(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    foreign = _staged(other, *wrong)
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(other, skew=proof, staged=foreign)
+    assert refusal.value.code == "staged-run-not-this-lease"
+
+
+@pytest.mark.parametrize("staged", [None, {}, "x", object()])
+def test_launch_and_skew_require_a_staged_run(
+    tmp_path: pathlib.Path, staged: object
+) -> None:
+    proof = _proof(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _launch(other, skew=proof, staged=staged)
+    assert refusal.value.code == "staged-run-required"
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(other, 0, staged=staged)
+    assert refusal.value.code == "staged-run-required"
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+def test_the_skew_step_refuses_the_staging_of_another_run_before_it_runs(
+    tmp_path: pathlib.Path,
+) -> None:
+    foreign = _staged(tmp_path, "host-a", "run-9")
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, staged=foreign)
+    assert refusal.value.code == "staged-run-not-this-lease"
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+# ── S5 review: the receipt is checked before anything is shipped ────────────
+
+
+@pytest.mark.parametrize(
+    ("receipt_overrides", "code"),
+    [
+        (
+            {"ssh_host_key_fingerprint": OTHER_FINGERPRINT},
+            "receipt-ssh-fingerprint-mismatch",
+        ),
+        ({"vm_alias": "vm-beta"}, "receipt-alias-mismatch"),
+        ({"host_id": "host-b"}, "receipt-host-id-mismatch"),
+    ],
+)
+def test_a_crossed_pin_ships_nothing_to_the_wrong_host(
+    tmp_path: pathlib.Path, receipt_overrides: dict, code: str
+) -> None:
+    """Target B's receipt with target A's pin: A's DSN never reaches B's host."""
+    target_b = FakeTarget()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _stage(target_b, tmp_path, receipt=_receipt(**receipt_overrides))
+    assert refusal.value.code == code
+    assert not target_b.commands and not target_b.files and not target_b.argvs
+
+
+def test_a_context_naming_another_enrolment_ships_nothing(
+    tmp_path: pathlib.Path,
+) -> None:
+    artifacts = _artifacts()
+    artifacts["execution-context.json"] = _file(
+        json.dumps(
+            {"host_enrolment_ref": "11111111-2222-4333-8444-555555555555"}
+        ).encode()
+    )
+    target = FakeTarget()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _stage(target, tmp_path, artifacts=artifacts)
+    assert refusal.value.code == "receipt-enrolment-mismatch"
+    assert not target.commands
+
+
+@pytest.mark.parametrize("receipt", [None, "e10-receipt-0001", object()])
+def test_staging_requires_a_typed_receipt(
+    tmp_path: pathlib.Path, receipt: object
+) -> None:
+    target = FakeTarget()
+    with pytest.raises(stage.StageRefused) as refusal:
+        _stage(target, tmp_path, receipt=receipt)
+    assert refusal.value.code == "e10-receipt-required"
+    assert not target.commands
+
+
+@pytest.mark.parametrize(
+    ("receipt_overrides", "code"),
+    [
+        (
+            {"ssh_host_key_fingerprint": OTHER_FINGERPRINT},
+            "receipt-ssh-fingerprint-mismatch",
+        ),
+        ({"vm_alias": "vm-beta"}, "receipt-alias-mismatch"),
+        ({"host_id": "host-b"}, "receipt-host-id-mismatch"),
+    ],
+)
+def test_a_crossed_pin_never_reaches_the_skew_step_that_exports_the_dsn(
+    tmp_path: pathlib.Path, receipt_overrides: dict, code: str
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, receipt=_receipt(**receipt_overrides))
+    assert refusal.value.code == code
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+def test_the_skew_step_requires_a_typed_receipt(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        _skew(tmp_path, 0, receipt=None)
+    assert refusal.value.code == "e10-receipt-required"
+    assert _skew.calls == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("run_id", [None, ""])
+def test_teardown_refuses_an_unset_run_id(
+    tmp_path: pathlib.Path, run_id: object
+) -> None:
+    with pytest.raises(stage.StageRefused) as refusal:
+        stage.teardown_argv(**_common(tmp_path), host_id="host-a", run_id=run_id)  # type: ignore[arg-type]
+    assert refusal.value.code == "teardown-binding-required"

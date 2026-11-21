@@ -612,3 +612,39 @@ def test_a_release_argument_that_disagrees_with_the_receipts_slot_writes_nothing
             release_args=types.SimpleNamespace(vm_slot="contabo/9999"),
         )
     assert refusal.value.code == "release-vm-slot-mismatch"
+
+
+def test_an_unset_release_vm_slot_is_filled_from_the_receipt_not_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    seen: dict[str, Any] = {}
+
+    def stub(ctx, args, outcome):
+        seen["slot"] = args.vm_slot
+        raise custody.controller_half.ReleaseNotWritable("stub")
+
+    monkeypatch.setattr(custody.controller_half, "build_release", stub)
+    store = FakeStore()
+    held = _custody(store)
+    args = types.SimpleNamespace(vm_slot=None)
+    with pytest.raises(custody.LeaseCustodyRefused) as refusal:
+        custody.release_with_record(
+            parse_terminal(
+                terminal_data(
+                    receipt_digest="",
+                    refusal=TerminalRefusal.HOST_STATE_UNCERTIFIED.value,
+                )
+            ),
+            store=store,
+            held=held,
+            controller_identity="fp-launch-key",
+            expected_machine_id=MACHINE,
+            verified_receipt_digest="",
+            ready_seen=True,
+            release_args=args,
+        )
+    # got past the slot check, and the receipt's slot is what build_release read
+    assert refusal.value.code == "release-not-writable"
+    assert seen["slot"] == held.e10_receipt.vm_slot

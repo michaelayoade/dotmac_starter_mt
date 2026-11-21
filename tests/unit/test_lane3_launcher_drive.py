@@ -74,14 +74,39 @@ def _plan(**overrides: Any) -> launcher.SessionPlan:
     return launcher.SessionPlan(**values)
 
 
+def _staged_run(
+    context: Any,
+    *,
+    run_dir: str = RUN_DIR,
+    host: str = "host-a",
+    run: str = "run-1",
+) -> Any:
+    """What `stage_artifacts` returns, for a context, without any SSH."""
+    stage = launcher.lane3_stage
+    files = (("execution-context.json", context.sha256),)
+    return stage.StagedRun(
+        run_dir=run_dir,
+        host_id=host,
+        run_id=run,
+        files=files,
+        _token=stage._staged_token(run_dir, host, run, files),
+    )
+
+
 def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
     store = overrides.pop("store", None) or FakeStore()
+    # ONE receipt: the lease is taken under the very receipt drive is given.
+    receipt = e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+    )
     held = overrides.pop("held", None) or store.acquire_exclusive(
         host_id="host-a",
         authorization_run="run-1",
         controller_identity="SHA256:" + "A" * 43,
         ttl_seconds=600,
-        e10_receipt=e10_support.make_receipt(),
+        e10_receipt=receipt,
     )
     context = stage_tests._file(
         json.dumps({"host_enrolment_ref": e10_support.ENROLMENT_UUID}).encode()
@@ -89,13 +114,9 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
     values: dict[str, Any] = {
         "pin": stage_tests._pin(tmp_path),
         "expected_host_incarnation": e10_support.INCARNATION_FINGERPRINT,
-        "e10": e10_support.make_receipt(
-            ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
-            vm_alias=stage_tests.ALIAS,
-            machine_id=MACHINE,
-        ),
+        "e10": receipt,
         "execution_context": context,
-        "staged_artifacts": {"execution-context.json": context},
+        "staged": _staged_run(context),
         "store": store,
         "held": held,
         "plan": _plan(),
@@ -108,11 +129,9 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
         "terminal_seconds": 5.0,
         "measurers": _measurers(),
     }
-    if "execution_context" in overrides and "staged_artifacts" not in overrides:
+    if "execution_context" in overrides and "staged" not in overrides:
         # Unless a test says otherwise, the context under test IS the staged one.
-        overrides["staged_artifacts"] = {
-            "execution-context.json": overrides["execution_context"]
-        }
+        overrides["staged"] = _staged_run(overrides["execution_context"])
     values.update(overrides)
     return launcher.DriveInputs(**values)
 
@@ -597,7 +616,7 @@ def test_drive_inputs_have_no_free_start_dict_or_identity_fields() -> None:
         "authorization_run",
     ):
         assert derived not in names, derived
-    assert {"pin", "held", "store", "plan", "staged_artifacts"} <= names
+    assert {"pin", "held", "store", "plan", "staged"} <= names
     # ...except the incarnation, which is its own required typed input.
     assert {"expected_host_incarnation", "e10"} <= names
 
@@ -1156,54 +1175,93 @@ def _no_start(ends, tmp_path, **overrides) -> tuple[launcher.DriveResult, dict]:
     return _run(ends, _inputs(tmp_path, **overrides), script), seen
 
 
+def _context(**extra: Any) -> Any:
+    document = {"host_enrolment_ref": e10_support.ENROLMENT_UUID, **extra}
+    return stage_tests._file(json.dumps(document).encode())
+
+
 def test_a_context_that_is_not_the_staged_file_sends_nothing(ends, tmp_path) -> None:
-    other = stage_tests._file(
-        json.dumps({"host_enrolment_ref": e10_support.ENROLMENT_UUID, "x": 1}).encode()
-    )
-    result, seen = _no_start(
-        ends, tmp_path, staged_artifacts={"execution-context.json": other}
-    )
+    result, seen = _no_start(ends, tmp_path, staged=_staged_run(_context(x=1)))
     assert seen["no_start"] is True
     assert result.refusal_code == "execution-context-not-the-staged-file"
     assert result.ready_seen is False
 
 
 def test_a_context_that_was_never_staged_sends_nothing(ends, tmp_path) -> None:
-    result, seen = _no_start(ends, tmp_path, staged_artifacts={})
+    stage = launcher.lane3_stage
+    empty = stage.StagedRun(
+        run_dir=RUN_DIR,
+        host_id="host-a",
+        run_id="run-1",
+        files=(),
+        _token=stage._staged_token(RUN_DIR, "host-a", "run-1", ()),
+    )
+    result, seen = _no_start(ends, tmp_path, staged=empty)
     assert seen["no_start"] is True
     assert result.refusal_code == "execution-context-not-staged"
-
-
-def test_a_staged_file_whose_bytes_do_not_hash_to_its_digest_sends_nothing(
-    ends, tmp_path
-) -> None:
-    good = stage_tests._file(
-        json.dumps({"host_enrolment_ref": e10_support.ENROLMENT_UUID}).encode()
-    )
-    forged = launcher.lane3_stage.StagedFile(data=b"{}", sha256=good.sha256)
-    result, seen = _no_start(
-        ends,
-        tmp_path,
-        execution_context=good,
-        staged_artifacts={"execution-context.json": forged},
-    )
-    assert seen["no_start"] is True
-    assert result.refusal_code == "execution-context-digest-mismatch"
 
 
 def test_a_context_whose_bytes_do_not_hash_to_its_digest_sends_nothing(
     ends, tmp_path
 ) -> None:
-    good = stage_tests._file(b'{"host_enrolment_ref": "x"}')
+    good = _context()
     forged = launcher.lane3_stage.StagedFile(data=b"{}", sha256=good.sha256)
     result, seen = _no_start(
-        ends,
-        tmp_path,
-        execution_context=forged,
-        staged_artifacts={"execution-context.json": good},
+        ends, tmp_path, execution_context=forged, staged=_staged_run(good)
     )
     assert seen["no_start"] is True
     assert result.refusal_code == "execution-context-digest-mismatch"
+
+
+@pytest.mark.parametrize(
+    ("make", "code"),
+    [
+        (lambda c: _staged_run(c, host="host-b"), "staged-run-not-this-lease"),
+        (lambda c: _staged_run(c, run="run-9"), "staged-run-not-this-lease"),
+        (
+            lambda c: _staged_run(c, run_dir="/run/lane3.OTHERRUN12"),
+            "staged-run-not-this-lease",
+        ),
+        (lambda c: {"execution-context.json": c}, "staged-run-required"),
+        (lambda c: None, "staged-run-required"),
+    ],
+)
+def test_a_staging_that_is_not_this_leases_sends_nothing(
+    ends, tmp_path, make, code: str
+) -> None:
+    context = _context()
+    result, seen = _no_start(
+        ends, tmp_path, execution_context=context, staged=make(context)
+    )
+    assert seen["no_start"] is True
+    assert result.refusal_code == code
+
+
+def test_a_forged_staged_run_sends_nothing(ends, tmp_path) -> None:
+    context = _context()
+    staged = _staged_run(context)
+    object.__setattr__(
+        staged, "files", (("execution-context.json", _context(x=2).sha256),)
+    )
+    result, seen = _no_start(ends, tmp_path, execution_context=context, staged=staged)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "staged-run-forged"
+
+
+def test_a_receipt_that_is_not_the_one_the_lease_was_taken_under_sends_nothing(
+    ends, tmp_path
+) -> None:
+    # Agrees with the pin, alias, host, machine and incarnation; only its ref differs.
+    other = e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+        receipt_ref="e10-receipt-0099",
+    )
+    result, seen = _no_start(ends, tmp_path, e10=other)
+    assert seen["no_start"] is True
+    assert result.refusal_code == "receipt-not-the-leases"
+    assert result.ready_seen is False
 
 
 # ── S5: a dropped store maps to the fail-closed paths of design 3.6 ─────────
@@ -1304,10 +1362,91 @@ def test_a_commit_that_is_unknown_is_reported_and_standing_is_read_later(
     assert conclusion.custody_code == "store-commit-unknown"
     # exactly one write was sent; nothing further is written
     assert len(store.releases) == 1
-    assert [p.name for p in conclusion.paths] == ["lane3-terminal-evidence.json"]
+    assert {p.name for p in conclusion.paths} == {
+        "lane3-lease-release-unconfirmed.json",
+        "lane3-terminal-evidence.json",
+    }
+    assert not (tmp_path / "out" / "lane3-lease-release.json").exists()
+    copy = json.loads(
+        (tmp_path / "out" / "lane3-lease-release-unconfirmed.json").read_text()
+    )
+    assert copy["unconfirmed"] is True and "release" in copy
     evidence = _evidence(tmp_path)
     assert evidence["store_failure"] == "store-commit-unknown"
     assert evidence["standing_read_required"] is True
+    # unknown, not "false": the commit may have happened
+    assert evidence["release_written"] is None
+    assert evidence["lease_left_to_expire_as_mutated"] is None
+    assert evidence["release_digest"] == ""
+
+
+def test_conclude_sends_nothing_to_a_store_that_already_dropped(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+
+    store = FakeStore()
+    held = store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=600,
+        e10_receipt=e10_support.make_receipt(),
+    )
+    writes = store.backing.write_attempts
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()),
+        receipt=_Receipt(),
+        ready_seen=True,
+        plan_digest=PLAN,
+        store_failure="store-commit-unknown",
+    )
+    conclusion = _conclude(tmp_path, result, store, held=held)
+    assert conclusion.outcome == "store_commit_unknown"
+    assert store.backing.write_attempts == writes
+    assert not store.releases
+    assert {p.name for p in conclusion.paths} == {"lane3-terminal-evidence.json"}
+    evidence = _evidence(tmp_path)
+    assert evidence["store_failure"] == "store-commit-unknown"
+    assert evidence["standing_read_required"] is True
+    assert evidence["release_written"] is False
+
+
+def test_a_drop_after_the_release_committed_still_leaves_every_record(
+    tmp_path, builds
+) -> None:
+    from lane3_launcher_lease import parse_terminal
+    from lane3_lease_store import StoreRefused
+
+    class Drops(FakeStore):
+        def released_at(self, host_id):
+            raise StoreRefused("store-unreachable")
+
+    store = Drops()
+    held = store.acquire_exclusive(
+        host_id="host-a",
+        authorization_run="run-1",
+        controller_identity="SHA256:" + "A" * 43,
+        ttl_seconds=600,
+        e10_receipt=e10_support.make_receipt(),
+    )
+    result = launcher.DriveResult(
+        terminal=parse_terminal(terminal_data()),
+        receipt=_Receipt(),
+        ready_seen=True,
+        plan_digest=PLAN,
+    )
+    conclusion = _conclude(tmp_path, result, store, held=held)
+    assert conclusion.outcome == "released"
+    assert {p.name for p in conclusion.paths} == {
+        "lane3-lease-release.json",
+        "lane3-terminal-evidence.json",
+    }
+    evidence = _evidence(tmp_path)
+    assert evidence["release_written"] is True
+    assert evidence["store_failure"] == "store-unreachable"
+    assert evidence["standing_read_required"] is True
+    assert evidence["store_released_at"] == ""
 
 
 def test_a_receipt_with_no_vm_slot_sends_nothing(ends, tmp_path) -> None:
