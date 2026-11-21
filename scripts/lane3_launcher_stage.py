@@ -684,7 +684,14 @@ def stage_artifacts(
         ),
         "isolated-install",
     )
-    return run_dir
+    files = tuple(sorted((relative, staged.sha256) for relative, staged, _ in plan))
+    return StagedRun(
+        run_dir=run_dir,
+        host_id=host_id,
+        run_id=run_id,
+        files=files,
+        _token=_staged_token(run_dir, host_id, run_id, files),
+    )
 
 
 # ── clock and launch ────────────────────────────────────────────────────────
