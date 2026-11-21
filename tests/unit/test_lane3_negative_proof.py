@@ -337,3 +337,41 @@ def test_a_b64_field_must_be_canonical_base64() -> None:
     ).encode()
     with pytest.raises(nproof.ProofRefused):
         nproof.parse_proof(forged)
+
+
+# --- M1: the window acknowledgement; L4: the size cap ------------------------------
+
+
+def test_n7_requires_the_terminal_acknowledgement_that_done_closed_the_window() -> None:
+    proof = nproof.parse_proof(support.proof_bytes(window_done=False))
+    refused(
+        "probe-window-unacknowledged",
+        nproof.require_probe,
+        proof,
+        ledger_created_at=T + timedelta(minutes=5),
+        released_at=T + timedelta(minutes=10),
+    )
+
+
+def test_the_acknowledgement_is_a_closed_boolean_of_the_terminal_block() -> None:
+    document = json.loads(support.proof_bytes())
+    for bad in ("yes", 1, None):
+        document["negative"]["terminal"]["window_done"] = bad
+        forged = (
+            json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+        refused("proof-invalid", nproof.parse_proof, forged)
+    del document["negative"]["terminal"]["window_done"]
+    forged = (
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    refused("proof-invalid", nproof.parse_proof, forged)
+
+
+def test_the_proof_member_is_capped_as_a_whole() -> None:
+    """The calls ride inside the proof as base64: the effective raw cap is lower
+    than the 16 MiB member cap (about 12 MiB), and an oversize proof is refused."""
+    assert nproof.MAX_CALLS_BYTES == 16 * 1024 * 1024
+    refused("proof-invalid", nproof.parse_proof, b"x" * (nproof.MAX_CALLS_BYTES + 1))
+    effective = nproof.MAX_CALLS_BYTES * 3 // 4
+    assert effective < nproof.MAX_CALLS_BYTES

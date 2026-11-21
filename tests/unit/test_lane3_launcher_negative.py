@@ -41,6 +41,7 @@ REFUSED = terminal_data(
     receipt_digest="",
     refusal="host_state_uncertified",
     exit_status=1,
+    notes=["compensation-window-done"],
 )
 
 
@@ -276,3 +277,63 @@ def test_a_proof_the_launcher_cannot_parse_is_never_asserted(
     assert seen["kind"] == "abort"
     assert result.refusal_code == "negative-proof-invalid"
     assert PLAN
+
+
+# ── M1: the safety margin and the acknowledgement ───────────────────────────
+
+
+def _timed_drive(ends, tmp_path, elapsed: float, *, terminal=REFUSED):
+    launcher_end, target_end = ends
+    ticks = iter([0.0, elapsed])
+    seen: dict[str, Any] = {}
+
+    def script() -> None:
+        _window(target_end, deadline=5)
+        seen["answer"] = target_end.receive(
+            "compensation_probe_done", "abort", timeout=5
+        )[0]
+        target_end.send("terminal", terminal)
+
+    thread = threading.Thread(target=script, daemon=True)
+    thread.start()
+    result = launcher.DriveResult(terminal=None)
+    launcher_negative.drive_negative(
+        launcher_end,
+        _negative_inputs(tmp_path),
+        result,
+        monotonic=lambda: next(ticks),
+    )
+    thread.join(10)
+    return result, seen
+
+
+def test_a_probe_within_the_margin_is_sent_done(ends, tmp_path) -> None:
+    result, seen = _timed_drive(ends, tmp_path, elapsed=4.4)
+    assert seen["answer"] == "compensation_probe_done"
+    assert nproof.parse_proof(result.negative_proof).terminal.window_done is True
+
+
+def test_a_late_probe_inside_the_deadline_but_past_the_margin_is_aborted(
+    ends, tmp_path
+) -> None:
+    assert launcher_negative.DEADLINE_MARGIN == 0.9
+    result, seen = _timed_drive(ends, tmp_path, elapsed=4.6)  # 5s deadline
+    assert seen["answer"] == "abort"
+    assert result.negative_proof is None
+    assert result.refusal_code == "compensation-window-timeout"
+
+
+def test_a_terminal_without_the_acknowledgement_yields_an_unacknowledged_proof(
+    ends, tmp_path
+) -> None:
+    silent = terminal_data(
+        receipt_digest="", refusal="host_state_uncertified", exit_status=1
+    )
+    result, _ = _timed_drive(ends, tmp_path, elapsed=1.0, terminal=silent)
+    assert nproof.parse_proof(result.negative_proof).terminal.window_done is False
+
+
+def test_the_acknowledgement_note_is_one_string_in_both_modules() -> None:
+    import lane3_target_session as session
+
+    assert launcher_negative.WINDOW_DONE_NOTE == session.WINDOW_DONE_NOTE

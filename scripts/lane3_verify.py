@@ -110,10 +110,11 @@ def load_descriptor(
     *,
     git: Callable[..., str] = _git,
 ) -> ProductDeploymentSpec:
-    """The descriptor from the verifier's own checkout AT `revision`, unmodified.
+    """The descriptor as committed AT `revision`, via `git show <rev>:<path>`.
 
-    Refuses unless HEAD is exactly the release revision and the descriptor file
-    has no working-tree change against it.
+    The git object at the release revision is read directly, so neither the
+    working tree nor its state is trusted (an unrelated checkout of another
+    revision, or a locally edited file, cannot change the answer).
     """
     if (
         type(revision) is not str
@@ -121,21 +122,9 @@ def load_descriptor(
         or any(c not in "0123456789abcdef" for c in revision)
     ):
         _refuse("verify-revision-invalid")
-    if git(checkout, "rev-parse", "HEAD").strip() != revision:
-        _refuse("verify-checkout-revision-mismatch")
-    if git(
-        checkout,
-        "status",
-        "--porcelain",
-        "--untracked-files=no",
-        "--",
-        DESCRIPTOR_RELPATH,
-    ).strip():
-        _refuse("verify-descriptor-modified")
-    path = checkout / DESCRIPTOR_RELPATH
+    text = git(checkout, "show", f"{revision}:{DESCRIPTOR_RELPATH}")
     try:
-        text = path.read_text("utf-8")
-        return ProductDeploymentSpec.loads(text, source="<release-checkout>")
+        return ProductDeploymentSpec.loads(text, source="<release-revision>")
     except Exception:
         _refuse("verify-descriptor-unreadable")
     raise AssertionError  # pragma: no cover

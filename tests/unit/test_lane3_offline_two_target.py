@@ -68,6 +68,7 @@ def reproof(world: World, **changes: Any) -> bytes:  # noqa: F811
         "terminal_refusal": proof.terminal.refusal,
         "host_mutated": proof.terminal.host_mutated,
         "exit_status": proof.terminal.exit_status,
+        "window_done": proof.terminal.window_done,
         "exposure_calls": proof.exposure_calls,
         "probe_bytes": proof.probe_bytes,
     }
@@ -75,7 +76,7 @@ def reproof(world: World, **changes: Any) -> bytes:  # noqa: F811
     return nproof.build_proof(**values)
 
 
-# --- the positive path ---------------------------------------------------------
+# --- the positive path ----
 
 
 def test_the_pair_passes_and_both_targets_are_recorded(world: World) -> None:  # noqa: F811
@@ -95,7 +96,7 @@ def test_the_negative_inputs_are_a_required_argument(world: World) -> None:  # n
     refused(world, "negative-required", negative=None)
 
 
-# --- the v2 bundle ---------------------------------------------------------------
+# --- the v2 bundle ----
 
 
 def test_a_v1_bundle_offered_to_e9_is_refused_as_a_downgrade(world: World) -> None:  # noqa: F811
@@ -112,7 +113,7 @@ def test_a_forged_proof_that_is_not_canonical_is_refused(world: World) -> None: 
     refused(world, "bundle-inconsistent", decrypt=lambda _c: world.archive[:-512])
 
 
-# --- row 8 ------------------------------------------------------------------------
+# --- row 8 ----
 
 
 @pytest.mark.parametrize(
@@ -141,7 +142,7 @@ def test_a_proof_not_the_one_row_8_binds_is_refused(world: World) -> None:  # no
     refused(world, "compensation-row-mismatch")
 
 
-# --- N5: the pair ---------------------------------------------------------------
+# --- N5: the pair ----
 
 
 def test_the_negative_presented_as_the_positive_is_refused(world: World) -> None:  # noqa: F811
@@ -228,7 +229,7 @@ def test_both_plans_must_carry_the_checkouts_descriptor(world: World) -> None:  
     refused(world, "pair-descriptor-mismatch")
 
 
-# --- N1: Control, from the proof's claims --------------------------------------
+# --- N1: Control, from the proof's claims ----
 
 
 def test_n1_a_forged_coordinate_claim_is_refused(world: World) -> None:  # noqa: F811
@@ -253,7 +254,7 @@ def test_n1_an_unpinned_signer_is_refused(world: World) -> None:  # noqa: F811
 
 
 def test_n1_the_lease_run_claim_is_joined(world: World) -> None:  # noqa: F811
-    rebind(world, reproof(world, lease_authorization_run="lease-other"))
+    world.neg.cp["lease"]["authorization_run"] = "lease-other"
     refused(world, "lease-mismatch")
 
 
@@ -274,7 +275,7 @@ def test_n1_a_stale_presentation_is_refused(world: World) -> None:  # noqa: F811
     refused(world, "host-admission-presentation-not-fresh")
 
 
-# --- N2 / N3 / N4 ------------------------------------------------------------------
+# --- N2 / N3 / N4 ----
 
 
 def test_n2_the_negative_e10_digest_is_its_own(world: World) -> None:  # noqa: F811
@@ -315,7 +316,7 @@ def test_n4_the_candidate_root_is_checked_for_the_negative_too(world: World) -> 
     refused(world, "candidate-root-revoked")
 
 
-# --- N6: compensation, re-derived offline ----------------------------------------
+# --- N6: compensation, re-derived offline ----
 
 
 @pytest.mark.parametrize(
@@ -347,7 +348,7 @@ def test_n6_a_terminal_that_is_not_the_refusal_is_refused(world: World) -> None:
     refused(world, "compensation-terminal")
 
 
-# --- N7: the probe -------------------------------------------------------------------
+# --- N7: the probe ----
 
 
 def test_n7_a_probe_after_the_release_is_refused(world: World) -> None:  # noqa: F811
@@ -362,7 +363,7 @@ def test_n7_a_failed_probe_row_is_refused(world: World) -> None:  # noqa: F811
     failed = nsupport.probe_bytes(
         world.neg.dispatch_id,
         world.neg.host_id,
-        T + timedelta(minutes=7),
+        T + timedelta(seconds=40),
         statuses=("executed_passed", "executed_failed"),
     )
     rebind(world, reproof(world, probe_bytes=failed))
@@ -371,7 +372,7 @@ def test_n7_a_failed_probe_row_is_refused(world: World) -> None:  # noqa: F811
 
 def test_n7_a_probe_for_another_host_is_refused(world: World) -> None:  # noqa: F811
     other = nsupport.probe_bytes(
-        world.neg.dispatch_id, HOST_ID, T + timedelta(minutes=7)
+        world.neg.dispatch_id, HOST_ID, T + timedelta(seconds=40)
     )
     rebind(world, reproof(world, probe_bytes=other))
     refused(world, "probe-identity")
@@ -379,3 +380,101 @@ def test_n7_a_probe_for_another_host_is_refused(world: World) -> None:  # noqa: 
 
 def test_a_ledger_time_helper_is_consistent() -> None:
     assert cp6.CONSUME_STATUS == "executed"
+
+
+# --- H1: one run, negative first ----
+
+
+def test_h1_a_proof_from_another_run_is_refused(world: World) -> None:  # noqa: F811
+    rebind(world, reproof(world, lease_authorization_run="lease-other"))
+    refused(world, "pair-lease-run-mismatch")
+
+
+def test_h1_a_pair_spliced_from_two_runs_is_refused(world: World) -> None:  # noqa: F811
+    """The negative target's own lease row carries another run's authorization."""
+    world.neg.cp["lease"]["authorization_run"] = "lease-other"
+    rebind(world, reproof(world, lease_authorization_run="lease-other"))
+    refused(world, "pair-lease-run-mismatch")
+
+
+def test_h1_the_positive_must_not_be_consumed_before_the_negative_release(
+    world: World,  # noqa: F811
+) -> None:
+    world.neg.cp["release"]["released_at"] = ts(T + timedelta(minutes=6))
+    refused(world, "pair-order")
+
+
+def test_h1_equal_instants_are_negative_first(world: World) -> None:  # noqa: F811
+    positive_ledger = world.export["control"]["ledger"]["created_at"]
+    world.neg.cp["release"]["released_at"] = positive_ledger
+    world.neg.cp["lease"]["expires_at"] = ts(T + timedelta(minutes=61))
+    world.run()
+
+
+def test_h1_a_positive_driven_first_is_refused(world: World) -> None:  # noqa: F811
+    """Positive ledger before the negative's whole window: the reverse order."""
+    world.export["control"]["ledger"]["created_at"] = ts(T + timedelta(seconds=40))
+    world.store_time = T + timedelta(seconds=40)
+    world.resign_admission()
+    world.refresh_ledger()
+    world.cp["lease"]["acquired_at"] = ts(T)
+    refused(world, "pair-order")
+
+
+# --- L1: two hosts, not one twice ----
+
+
+def _with_negative_plan(world: World, **subject: Any) -> None:  # noqa: F811
+    plan = world.neg.plan
+    values = {
+        "candidate_wheel_digest": plan.candidate_wheel_digest,
+        "target_id": plan.target_id,
+        "controller_ssh_fingerprint": plan.controller_ssh_fingerprint,
+        "host_id": plan.host_id,
+        "host_incarnation": plan.host_incarnation,
+        "host_enrolment_ref": plan.host_enrolment_ref,
+    }
+    values.update(subject)
+    from dotmac_deployment_foundation.execution_plan_v3 import (
+        render_execution_plan_v3,
+    )
+
+    world.neg.plan = render_execution_plan_v3(plan.base, **values)
+
+
+def test_l1_the_same_incarnation_for_both_is_refused(world: World) -> None:  # noqa: F811
+    _with_negative_plan(world, host_incarnation=world.plan.host_incarnation)
+    refused(world, "pair-incarnation-same")
+
+
+def test_l1_the_same_enrolment_for_both_is_refused(world: World) -> None:  # noqa: F811
+    _with_negative_plan(world, host_enrolment_ref=world.plan.host_enrolment_ref)
+    refused(world, "pair-enrolment-same")
+
+
+def test_l1_the_same_presentation_key_for_both_is_refused(world: World) -> None:  # noqa: F811
+    world.neg.pres_key = world.pres_key
+    world.neg.pres_pub = world.pres_pub
+    world.neg.resign_admission()
+    world.neg.refresh_ledger()
+    world.neg.anchor_changes = {
+        "key_fingerprint": world.anchor().key_fingerprint,
+    }
+    refused(world, "pair-presentation-key-same")
+
+
+# --- L3 / M1 ----
+
+
+def test_l3_a_negative_export_without_a_release_is_an_explicit_refusal(
+    world: World,  # noqa: F811
+) -> None:
+    world.neg.cp["release"] = None
+    refused(world, "release-missing")
+
+
+def test_m1_a_proof_without_the_window_acknowledgement_fails_n7(
+    world: World,  # noqa: F811
+) -> None:
+    rebind(world, reproof(world, window_done=False))
+    refused(world, "probe-window-unacknowledged")

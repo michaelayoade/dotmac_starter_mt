@@ -748,10 +748,12 @@ def _join_pair(
     receipt: RehearsalReceiptV2,
     positive_plan: FoundationExecutionPlanV3,
     negative_plan: FoundationExecutionPlanV3,
+    positive_export: Cp6Export,
     negative_export: Cp6Export,
     descriptor: ProductDeploymentSpec,
 ) -> None:
-    """N5: two genuinely distinct targets of ONE candidate and ONE descriptor."""
+    """N5: two genuinely distinct targets of ONE candidate and ONE descriptor,
+    driven by ONE run, negative first."""
     positive_dispatch = receipt.content["control_dispatch"]["dispatch_id"]
     if proof.positive_dispatch_id != positive_dispatch:
         _refuse("pair-positive-dispatch-mismatch")
@@ -760,6 +762,16 @@ def _join_pair(
         or negative_export.dispatch_id == positive_dispatch
     ):
         _refuse("pair-dispatch-same")
+    # One X1 run drives both targets: the proof's lease run IS the positive
+    # receipt's (a pair spliced from two runs has two).
+    if proof.lease_authorization_run != receipt.content["lease_id"]:
+        _refuse("pair-lease-run-mismatch")
+    # Negative first, both in Control's database time: the negative target's
+    # release was written no later than the positive dispatch was consumed.
+    if negative_export.release is None:
+        _refuse("release-missing")
+    if negative_export.release.released_at > positive_export.ledger.created_at:
+        _refuse("pair-order")
     if proof.target_id == positive_plan.target_id or (
         negative_plan.target_id == positive_plan.target_id
     ):
@@ -768,6 +780,11 @@ def _join_pair(
         negative_plan.host_id == positive_plan.host_id
     ):
         _refuse("pair-host-same")
+    # Distinct incarnations and enrolments: two hosts, not one host twice.
+    if negative_plan.host_incarnation == positive_plan.host_incarnation:
+        _refuse("pair-incarnation-same")
+    if negative_plan.host_enrolment_ref == positive_plan.host_enrolment_ref:
+        _refuse("pair-enrolment-same")
     # The proof's identity claims are joined to the negative target's own plan.
     if (
         proof.target_id != negative_plan.target_id
@@ -790,6 +807,7 @@ def _join_negative(
     receipt: RehearsalReceiptV2,
     positive_plan: FoundationExecutionPlanV3,
     positive_admission: HostAdmissionDigest,
+    positive_export: Cp6Export,
     positive_candidate_bytes: bytes,
     descriptor: ProductDeploymentSpec,
     pinned_cp_identities: Sequence[PinnedIdentity],
@@ -810,6 +828,7 @@ def _join_negative(
         receipt=receipt,
         positive_plan=positive_plan,
         negative_plan=plan,
+        positive_export=positive_export,
         negative_export=export,
         descriptor=descriptor,
     )
@@ -817,6 +836,11 @@ def _join_negative(
         negative.host_admission_bytes,
         presentation_public_key_b64url=negative.presentation_public_key_b64url,
     )
+    if (
+        admission.presentation_key_fingerprint
+        == positive_admission.presentation_key_fingerprint
+    ):
+        _refuse("pair-presentation-key-same")
     # N3: the negative target's OWN anchor and step-13 refresh digest.
     _join_anchor(
         admission, anchor=anchor, refresh_digest=negative.refresh_digest, plan=plan
@@ -866,7 +890,8 @@ def _join_negative(
         negative_proof.require_compensation(
             proof, execution_plan=plan, descriptor=descriptor
         )
-        assert export.release is not None
+        if export.release is None:
+            _refuse("release-missing")
         negative_proof.require_probe(
             proof,
             ledger_created_at=export.ledger.created_at,
@@ -1047,6 +1072,7 @@ def verify_offline(
         receipt=receipt,
         positive_plan=execution_plan,
         positive_admission=admission,
+        positive_export=export,
         positive_candidate_bytes=candidate_envelope_bytes,
         descriptor=descriptor,
         pinned_cp_identities=pinned_cp_identities,

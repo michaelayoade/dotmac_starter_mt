@@ -407,7 +407,7 @@ def test_the_window_opens_after_a_compensation_and_waits_for_done(gate) -> None:
     live._compensation_window(_start(role="negative"))
     thread.join(5)
     assert seen["data"]["deadline_seconds"] == 300
-    assert live.ctx.notes == []
+    assert live.ctx.notes == [session.WINDOW_DONE_NOTE]
 
 
 def test_the_window_is_not_opened_without_a_compensation(gate) -> None:

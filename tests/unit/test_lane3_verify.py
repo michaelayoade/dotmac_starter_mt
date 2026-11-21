@@ -142,56 +142,64 @@ def test_an_unpinned_signer_is_refused_before_the_digest_is_compared(
 # --- the checkout ----------------------------------------------------------------
 
 
-def _git(head: str, dirty: str = ""):
+DESCRIPTOR_TEXT = (REPO / "scripts/exposure-rehearsal/product.toml").read_text("utf-8")
+
+
+def _git(text: str = DESCRIPTOR_TEXT, calls: list | None = None):
     def run(_checkout, *args: str) -> str:
-        return head if args[0] == "rev-parse" else dirty
+        if calls is not None:
+            calls.append(args)
+        return text
 
     return run
 
 
-def test_the_descriptor_is_read_from_the_checkout_at_the_release_revision() -> None:
-    spec = verify.load_descriptor(REPO, REVISION, git=_git(REVISION + "\n"))
+def test_the_descriptor_is_read_from_the_git_object_at_the_release_revision() -> None:
+    calls: list = []
+    spec = verify.load_descriptor(REPO, REVISION, git=_git(calls=calls))
+    assert spec.product == "lane3_exposure"
+    assert calls == [("show", f"{REVISION}:{verify.DESCRIPTOR_RELPATH}")]
+
+
+def test_the_worktree_is_never_read(tmp_path) -> None:
+    """A checkout with no descriptor file still answers from the git object."""
+    spec = verify.load_descriptor(tmp_path, REVISION, git=_git())
     assert spec.product == "lane3_exposure"
 
 
-@pytest.mark.parametrize("revision", ["", "c" * 39, "C" * 40, "g" * 40])
+@pytest.mark.parametrize("revision", ["", "c" * 39, "C" * 40, "g" * 40, "HEAD"])
 def test_a_malformed_release_revision_is_refused(revision: str) -> None:
     refused(
         "verify-revision-invalid",
         verify.load_descriptor,
         REPO,
         revision,
-        git=_git(REVISION),
+        git=_git(),
     )
 
 
-def test_a_checkout_at_another_revision_is_refused() -> None:
+def test_a_revision_git_cannot_show_is_refused() -> None:
+    def unavailable(_checkout, *_args: str) -> str:
+        verify._refuse("verify-checkout-unavailable")
+        raise AssertionError
+
     refused(
-        "verify-checkout-revision-mismatch",
+        "verify-checkout-unavailable",
         verify.load_descriptor,
         REPO,
         REVISION,
-        git=_git("d" * 40),
+        git=unavailable,
     )
 
 
-def test_a_modified_descriptor_is_refused() -> None:
-    refused(
-        "verify-descriptor-modified",
-        verify.load_descriptor,
-        REPO,
-        REVISION,
-        git=_git(REVISION, dirty=" M scripts/exposure-rehearsal/product.toml"),
-    )
-
-
-def test_an_unreadable_descriptor_is_refused(tmp_path) -> None:
+@pytest.mark.parametrize("text", ["", "not = [valid", "schema = 'nope'"])
+def test_an_unreadable_descriptor_is_refused(text: str) -> None:
     refused(
         "verify-descriptor-unreadable",
         verify.load_descriptor,
-        tmp_path,
+        REPO,
         REVISION,
-        git=_git(REVISION),
+        git=_git(text),
     )
 
 

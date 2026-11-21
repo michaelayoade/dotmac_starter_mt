@@ -33,7 +33,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -43,9 +43,17 @@ import lane3_launcher_probe as launcher_probe
 import lane3_negative_proof as negative_proof
 from lane3_session_channel import Channel, ChannelRefused
 
-__all__ = ["NegativeClaims", "PositivePair", "drive_negative"]
+__all__ = ["DEADLINE_MARGIN", "NegativeClaims", "PositivePair", "drive_negative"]
+
+#: Mirrors `lane3_target_session.WINDOW_DONE_NOTE` (the launcher does not import
+#: the target session); a test pins equality.
+WINDOW_DONE_NOTE: Final = "compensation-window-done"
 
 _MAX_CALLS = negative_proof.MAX_CALLS_BYTES
+
+#: The launcher sends `done` only within this fraction of the target's deadline, so
+#: a `done` can never arrive after the target gave up and began its cleanup.
+DEADLINE_MARGIN: Final = 0.9
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -157,7 +165,7 @@ def drive_negative(
             channel, inputs.terminal_seconds, result, "probe-measurement-refused"
         )
         return result
-    if monotonic() - started > deadline:
+    if monotonic() - started > deadline * DEADLINE_MARGIN:
         # The target has stopped waiting and is (or soon will be) in cleanup: a
         # late probe would measure the wrong instant. It is no probe.
         _abort(channel, "compensation-window-timeout")
@@ -183,6 +191,7 @@ def drive_negative(
             ),
             host_mutated=bool(terminal.host_mutated),
             exit_status=terminal.exit_status,
+            window_done=WINDOW_DONE_NOTE in terminal.notes,
             exposure_calls=calls,
             probe_bytes=probe_bytes,
         )

@@ -134,6 +134,9 @@ EXTERNAL_CODES: Final = frozenset(
 #: row 8 from the launcher.
 ROLES: Final = frozenset({"positive", "negative"})
 
+#: The terminal note stating the compensation window closed with `done`.
+WINDOW_DONE_NOTE: Final = "compensation-window-done"
+
 #: The product lock lives where every other deployer on this host looks for it.
 LOCK_ROOT: Final = pathlib.PurePosixPath("/var/lock")
 
@@ -772,6 +775,9 @@ class Session:
             return
         if kind == "abort":
             self.ctx.notes.append("compensation-window-aborted")
+            return
+        # Acknowledged in the terminal report: the window closed with `done`.
+        self.ctx.notes.append(WINDOW_DONE_NOTE)
 
     def _await_external_rows(self, start: Start) -> list[RequirementResult]:
         """Open the window and wait, bounded, for the launcher's six rows.

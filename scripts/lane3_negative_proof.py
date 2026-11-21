@@ -24,6 +24,10 @@ host admission, envelopes and canonical plan (`lane3_offline_orchestrator`). The
 compensation is re-derived HERE from the recorded observations with Foundation's
 own public functions, never from the target's text (`require_compensation`).
 
+Size: the proof member is capped at `MAX_CALLS_BYTES` (16 MiB) as a whole and the
+exposure calls ride inside it as base64, so the EFFECTIVE cap on the raw exposure
+calls is about 12 MiB (minus the probe); an oversize proof is refused.
+
 Refusals carry a stable code and never any supplied text.
 """
 
@@ -320,6 +324,9 @@ class ProofTerminal:
     refusal: str
     host_mutated: bool
     exit_status: int
+    #: The target's terminal report acknowledged that the compensation window
+    #: closed with `compensation_probe_done` (never with a timeout or an abort).
+    window_done: bool
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -357,6 +364,7 @@ def _proof_document(
     refusal: str,
     host_mutated: bool,
     exit_status: int,
+    window_done: bool,
     exposure_calls: bytes,
     probe_bytes: bytes,
 ) -> dict[str, Any]:
@@ -374,6 +382,7 @@ def _proof_document(
                 "refusal": refusal,
                 "host_mutated": host_mutated,
                 "exit_status": exit_status,
+                "window_done": window_done,
             },
             "exposure_calls_b64": base64.b64encode(exposure_calls).decode("ascii"),
             "post_compensation_probe_b64": base64.b64encode(probe_bytes).decode(
@@ -411,13 +420,14 @@ def parse_proof(data: bytes) -> NegativeProof:
     )
     terminal = _closed(
         negative["terminal"],
-        frozenset({"refusal", "host_mutated", "exit_status"}),
+        frozenset({"refusal", "host_mutated", "exit_status", "window_done"}),
         "proof-invalid",
     )
     if (
         type(terminal["refusal"]) is not str
         or len(terminal["refusal"]) > 64
         or type(terminal["host_mutated"]) is not bool
+        or type(terminal["window_done"]) is not bool
         or type(terminal["exit_status"]) is not int
         or not 0 <= terminal["exit_status"] <= 255
     ):
@@ -442,7 +452,10 @@ def parse_proof(data: bytes) -> NegativeProof:
             negative["lease_authorization_run"], "proof-invalid"
         ),
         terminal=ProofTerminal(
-            terminal["refusal"], terminal["host_mutated"], terminal["exit_status"]
+            terminal["refusal"],
+            terminal["host_mutated"],
+            terminal["exit_status"],
+            terminal["window_done"],
         ),
         exposure_calls=calls,
         records=records,
@@ -462,6 +475,7 @@ def parse_proof(data: bytes) -> NegativeProof:
             refusal=proof.terminal.refusal,
             host_mutated=proof.terminal.host_mutated,
             exit_status=proof.terminal.exit_status,
+            window_done=proof.terminal.window_done,
             exposure_calls=calls,
             probe_bytes=probe_bytes,
         )
@@ -483,6 +497,7 @@ def build_proof(
     terminal_refusal: str,
     host_mutated: bool,
     exit_status: int,
+    window_done: bool,
     exposure_calls: bytes,
     probe_bytes: bytes,
 ) -> bytes:
@@ -503,6 +518,7 @@ def build_proof(
             refusal=terminal_refusal,
             host_mutated=host_mutated,
             exit_status=exit_status,
+            window_done=window_done,
             exposure_calls=exposure_calls,
             probe_bytes=probe_bytes,
         )
@@ -646,6 +662,10 @@ def require_probe(
     A timeout, an abort or a malformed frame yields no probe, so no proof can
     carry one and this join (or the bundle join before it) refuses.
     """
+    if proof.terminal.window_done is not True:
+        # The target never acknowledged that the window closed with `done`: the
+        # probe may have been taken after its cleanup began.
+        _refuse("probe-window-unacknowledged")
     probe = proof.probe
     if probe.dispatch_id != proof.dispatch_id or probe.host_id != proof.host_id:
         _refuse("probe-identity")

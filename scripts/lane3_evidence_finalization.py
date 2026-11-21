@@ -400,7 +400,9 @@ def finalize_evidence(
     """Encrypt exactly the two v1 members (the legacy controller-half runner).
 
     Its bundle is v1, which E9 refuses as `offline-join-bundle-version`: it can
-    never be published. The launcher uses `finalize_evidence_v2`.
+    never be published. The launcher uses `finalize_evidence_v2`. A STATED
+    deviation from "v2 only" (architect ruling Q2): this retires with the legacy
+    controller-half runner, and no `lane3_launcher*` module may call it.
     """
     return _finalize(
         lambda: _archive(probe_evidence, exposure_calls),

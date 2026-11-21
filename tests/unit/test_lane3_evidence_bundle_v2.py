@@ -197,3 +197,21 @@ def test_finalize_evidence_v2_refuses_a_bad_proof_member_before_any_process(
             output=tmp_path / "x.age",
         )
     assert not (tmp_path / "x.age").exists()
+
+
+def test_no_launcher_module_calls_the_v1_finalizer() -> None:
+    """Stated deviation (architect ruling Q2): v1 `finalize_evidence` stays for the
+    legacy controller-half runner only and retires with it. Its bundle can never
+    publish (E9 refuses v1), and no `lane3_launcher*` module may call it."""
+    import ast
+
+    modules = sorted((REPO / "scripts").glob("lane3_launcher*.py"))
+    assert modules
+    for path in modules:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "attr", None) or getattr(
+                    node.func, "id", None
+                )
+                assert name != "finalize_evidence", path.name

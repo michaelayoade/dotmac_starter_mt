@@ -255,6 +255,7 @@ def proof_bytes(
     terminal_refusal: str = nproof.NEGATIVE_TERMINAL_REFUSAL,
     host_mutated: bool = True,
     exit_status: int = nproof.NEGATIVE_EXIT_STATUS,
+    window_done: bool = True,
     exposure_calls: bytes | None = None,
     probe: bytes | None = None,
     measured_at: datetime | None = None,
@@ -272,6 +273,7 @@ def proof_bytes(
         terminal_refusal=terminal_refusal,
         host_mutated=host_mutated,
         exit_status=exit_status,
+        window_done=window_done,
         exposure_calls=exposure_calls
         if exposure_calls is not None
         else serialize_exposure_calls(()),

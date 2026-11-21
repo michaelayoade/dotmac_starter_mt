@@ -73,12 +73,15 @@ def finalize(
     *,
     probe_bytes: bytes,
     exposure_calls_b64: object,
-    negative_compensation: bytes,
+    negative_compensation: bytes | None,
     encryption: evidence_finalization.EncryptionContext,
     output: pathlib.Path,
 ) -> bytes:
     """Encrypt the launcher's probe bytes with the target's exposure calls and the
-    negative-target compensation proof (the v2 bundle, S8b).
+    negative-target compensation proof (the v2 bundle, S8b). `None` is refused.
+
+    Size: the proof member is capped at 16 MiB as a whole and carries the exposure
+    calls as base64, so the effective cap on the raw calls is about 12 MiB.
 
     Returns the ciphertext exactly as written to `output`. `output` is
     create-only: `finalize_evidence` refuses an existing name.

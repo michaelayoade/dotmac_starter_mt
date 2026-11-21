@@ -172,7 +172,7 @@ class World:
         self.e10_override: str | None = None
         self.host_id = NEG_HOST_ID if self.negative else HOST_ID
         self.enrol = NEG_ENROL if self.negative else ENROL
-        self.lease_run = "lease-2" if self.negative else "lease-1"
+        self.lease_run = "lease-1"  # ONE run drives both targets
         target_id = NEG_TARGET_ID if self.negative else TARGET_ID
         wanted_dispatch = NEG_DISPATCH_ID if self.negative else DISPATCH_ID
         self.cp_key = pair.cp_key if pair else Ed25519PrivateKey.generate()
@@ -289,9 +289,10 @@ class World:
                 terminal_refusal=nproof.NEGATIVE_TERMINAL_REFUSAL,
                 host_mutated=True,
                 exit_status=nproof.NEGATIVE_EXIT_STATUS,
+                window_done=True,
                 exposure_calls=serialize_exposure_calls(records),
                 probe_bytes=nsupport.probe_bytes(
-                    self.neg.dispatch_id, NEG_HOST_ID, T + timedelta(minutes=7)
+                    self.neg.dispatch_id, NEG_HOST_ID, T + timedelta(seconds=40)
                 ),
             )
             self.records = [
@@ -325,7 +326,11 @@ class World:
         self.pres_pub = b64url(public_raw(self.pres_key))
         # Presentation live window is [store_time - 2s, store_time + 298s]; the
         # default ledger time is T + 5m.
-        self.store_time = T + timedelta(minutes=5)
+        # The NEGATIVE target is driven first: its whole window (lease T, ledger
+        # T+30s, release T+45s) precedes the positive ledger (T+5m).
+        self.store_time = T + (
+            timedelta(seconds=30) if self.negative else timedelta(minutes=5)
+        )
         self.admission: dict[str, Any] = {
             "attempt_id": self.dispatch_id,
             "presentation": None,
@@ -354,7 +359,14 @@ class World:
                     "scope": cp6.CONSUME_SCOPE,
                     "status": cp6.CONSUME_STATUS,
                     "fingerprint": "0" * 64,
-                    "created_at": ts(T + timedelta(minutes=5, microseconds=123456)),
+                    "created_at": ts(
+                        T
+                        + (
+                            timedelta(seconds=30, microseconds=123456)
+                            if self.negative
+                            else timedelta(minutes=5, microseconds=123456)
+                        )
+                    ),
                     "execution_sequence": coordinate["execution_sequence"],
                     "attempt_no": coordinate["attempt_no"],
                 },
@@ -404,12 +416,16 @@ class World:
                     "host_id": self.host_id,
                     "authorization_run": self.lease_run,
                     "e10_receipt_ref": "e10-0001",
-                    "acquired_at": ts(T + timedelta(minutes=1)),
+                    "acquired_at": ts(T if self.negative else T + timedelta(minutes=1)),
                     "expires_at": ts(T + timedelta(minutes=61)),
                 },
                 "release": {
                     "lease_id": "lease-row-1",
-                    "released_at": ts(T + timedelta(minutes=10)),
+                    "released_at": ts(
+                        T + timedelta(seconds=45)
+                        if self.negative
+                        else T + timedelta(minutes=10)
+                    ),
                     "host_mutated": True,
                 },
                 "candidate_root": {
