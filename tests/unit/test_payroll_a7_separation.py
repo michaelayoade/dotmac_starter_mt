@@ -62,10 +62,10 @@ def _finalize(db, tenant, run, *, by, sod):
 @pytest.mark.parametrize(
     "func", [approve_payroll_run, finalize_payroll_run, reverse_liability_settlement]
 )
-def test_parameter_is_keyword_only_and_defaults_to_enforced(func) -> None:
+def test_parameter_is_keyword_only_and_defaults_to_off(func) -> None:
     parameter = inspect.signature(func).parameters["separation_of_duties"]
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameter.default is True
+    assert parameter.default is False
 
 
 def test_on_refuses_creator_approval_and_approver_finalization(db) -> None:
@@ -79,16 +79,23 @@ def test_on_refuses_creator_approval_and_approver_finalization(db) -> None:
     assert run.status == "approved"
 
 
-def test_omitting_the_parameter_keeps_the_a6_refusals(db) -> None:
+def test_omitting_the_parameter_lets_one_operator_approve_and_finalize(db) -> None:
     tenant, run = _draft(db)
-    with pytest.raises(PayrollRuleViolation, match="creator cannot approve"):
-        approve_payroll_run(
-            db,
-            tenant_id=tenant.id,
-            run_id=run.id,
-            approved_by_id=ONE,
-            approved_at=NOW,
-        )
+    approve_payroll_run(
+        db,
+        tenant_id=tenant.id,
+        run_id=run.id,
+        approved_by_id=ONE,
+        approved_at=NOW,
+    )
+    finalize_payroll_run(
+        db,
+        tenant_id=tenant.id,
+        run_id=run.id,
+        finalized_by_id=ONE,
+        finalized_at=NOW,
+    )
+    assert run.status == "finalized"
 
 
 def test_off_lets_one_operator_create_approve_and_finalize(db) -> None:

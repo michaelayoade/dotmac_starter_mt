@@ -5,12 +5,14 @@
 D-9 (Michael, 2026-11-17/18: two-person approval is never compulsory; separation of
 duties is an optional per-tenant policy, default off).
 
-- `separation_of_duties: bool = True` (keyword-only) on `approve_payroll_run`,
+- `separation_of_duties: bool = False` (keyword-only) on `approve_payroll_run`,
   `finalize_payroll_run` and `reverse_liability_settlement`. When true, the a6
   checks apply unchanged (run creator may not approve, approver may not finalize,
   recorder may not reverse their own settlement). When false the check is skipped
-  and one operator can run payroll end to end. The default keeps a6 behaviour for any
-  caller that does not name it; an assembly passes its tenant policy explicitly.
+  and one operator can run payroll end to end. The default is `False` (OFF), per
+  Michael's no-compulsory-two-person ruling: a caller that does not name it gets no
+  separation. A caller that wants two-person approval passes `True`; an assembly
+  passes its tenant policy explicitly.
 - No migration and no column: payroll has no database separation CHECK and nothing is
   stamped on the row (the caller supplies the policy at each step). Payroll emits no
   lifecycle event or idempotency payload, so there is nothing to carry the flag.

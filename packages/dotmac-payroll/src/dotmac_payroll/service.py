@@ -690,13 +690,14 @@ def approve_payroll_run(
     run_id: UUID,
     approved_by_id: UUID,
     approved_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> PayrollRun:
     """draft -> approved. The creator may not approve when separation applies.
 
     ``separation_of_duties`` is the tenant policy in force (D-9: optional, never
-    compulsory). The default ``True`` keeps a6 behaviour for a caller that does not
-    name it; an assembly passes its policy explicitly. Nothing is stamped on the
+    compulsory). The default is ``False`` (separation OFF, per Michael's
+    no-compulsory-two-person ruling); a caller that wants two-person approval passes
+    ``True``. An assembly passes its policy explicitly. Nothing is stamped on the
     row: the caller supplies the policy at each step.
     """
     if not isinstance(separation_of_duties, bool):
@@ -723,12 +724,13 @@ def finalize_payroll_run(
     run_id: UUID,
     finalized_by_id: UUID,
     finalized_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> PayrollRun:
     """approved -> finalized. The approver may not finalize when separation applies.
 
-    ``separation_of_duties`` is the tenant policy in force (D-9); default ``True``
-    keeps a6 behaviour, and an assembly passes its policy explicitly.
+    ``separation_of_duties`` is the tenant policy in force (D-9); the default is
+    ``False`` (never compulsory); pass ``True`` to require it. An assembly passes
+    its policy explicitly.
     """
     if not isinstance(separation_of_duties, bool):
         raise TypeError("separation_of_duties must be bool")
@@ -976,7 +978,7 @@ def reverse_liability_settlement(
     reason: str,
     reversed_by_id: UUID,
     reversed_at: datetime,
-    separation_of_duties: bool = True,
+    separation_of_duties: bool = False,
 ) -> PayrollSettlementReversal:
     """Reverse one whole recorded settlement whose bank credit was returned.
 
@@ -985,7 +987,7 @@ def reverse_liability_settlement(
     row is inserted and the liability's settled amount is reduced by exactly
     the settlement amount (status back to ``outstanding``) in the caller's
     transaction. Refuses the settlement's own recorder when
-    ``separation_of_duties`` is true (the default; D-9 makes it an optional tenant
+    ``separation_of_duties`` is true (default ``False``: D-9 makes it an optional tenant
     policy that an assembly passes explicitly), internal recoveries, and a
     liability this settlement does not fully settle. An identical replay (same
     return reference, reason and reverser) returns the existing reversal;
