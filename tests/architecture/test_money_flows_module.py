@@ -529,6 +529,21 @@ def transaction_and_clock_violations(
                 problems.append(f".{node.attr} reconfigures the tz database")
         if isinstance(node, ast.Name) and node.id in _TZ_ESCAPES:
             problems.append(f"{node.id} reconfigures the tz database")
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                # Whatever the alias: ``from zoneinfo import reset_tzpath as r``.
+                if alias.name in _TZ_ESCAPES:
+                    problems.append(
+                        f"imports {alias.name}: reconfigures the tz database"
+                    )
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in _TZ_ESCAPES
+            and id(node) not in docstrings
+        ):
+            # ``getattr(zoneinfo, "reset_tzpath")`` and any other by-name lookup.
+            problems.append(f"{node.value!r} named as a string reaches the tz database")
         if isinstance(node, ast.Attribute | ast.Name):
             dotted = _dotted(node, aliases)
             if dotted in _CLOCKS:
@@ -1079,6 +1094,10 @@ def test_the_literal_scan_does_not_flag_ordinary_words() -> None:
         "from zoneinfo import ZoneInfo\nZoneInfo.clear_cache()",
         "from zoneinfo import ZoneInfo\nZoneInfo.from_file(f)",
         "hook = zoneinfo.reset_tzpath",  # a reference, not a call
+        "from zoneinfo import reset_tzpath as r\nr()",
+        "from zoneinfo import ZoneInfo as Z\nfrom zoneinfo import clear_cache as c",
+        'import zoneinfo\ngetattr(zoneinfo, "reset_tzpath")()',
+        'import zoneinfo\nzoneinfo.__dict__["clear_cache"]',
     ],
 )
 def test_planted_transaction_control_and_clock_reads_are_refused(source: str) -> None:
@@ -1393,3 +1412,47 @@ def test_ordinary_decision_words_are_not_flagged() -> None:
         forbidden_call_violations("decision = 1\nrecord_settle_refusal(db)", "a.py")
         == []
     )
+
+
+# --- F2 reads the tenant policy in exactly one place (GAP-5 review) ----------
+def policy_read_sites(source: str) -> list[str]:
+    """Names of the functions that call ``<anything>.policy.read(...)``."""
+    sites: list[str] = []
+
+    def walk(node: ast.AST, owner: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = (
+                child.name
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+                else owner
+            )
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == "read"
+                and isinstance(child.func.value, ast.Attribute)
+                and child.func.value.attr == "policy"
+            ):
+                sites.append(owner)
+            walk(child, name)
+
+    walk(ast.parse(source), "<module>")
+    return sites
+
+
+def test_the_f2_policy_is_read_only_through_the_validating_helper() -> None:
+    source = (MODULE_ROOT / "funded_charge.py").read_text("utf-8")
+    assert policy_read_sites(source) == ["_read_policy"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(ports, db, scope):\n    return ports.policy.read(db, scope=scope)",
+        "def _read_policy(p):\n    p.policy.read()\n"
+        "def g(ports):\n    return ports.policy.read()",
+        "class C:\n    def m(self):\n        return self.ports.policy.read(1)",
+    ],
+)
+def test_a_planted_unvalidated_policy_read_is_found(source: str) -> None:
+    assert policy_read_sites(source) != ["_read_policy"]
