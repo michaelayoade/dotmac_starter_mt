@@ -101,7 +101,11 @@ def _git(checkout: pathlib.Path, *args: str) -> str:
         _refuse("verify-checkout-unavailable")
     if done.returncode != 0:
         _refuse("verify-checkout-unavailable")
-    return done.stdout.decode("utf-8", "replace")
+    try:
+        return done.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        _refuse("verify-descriptor-unreadable")
+    raise AssertionError  # pragma: no cover
 
 
 def load_descriptor(

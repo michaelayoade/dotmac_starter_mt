@@ -368,10 +368,31 @@ def test_the_acknowledgement_is_a_closed_boolean_of_the_terminal_block() -> None
     refused("proof-invalid", nproof.parse_proof, forged)
 
 
-def test_the_proof_member_is_capped_as_a_whole() -> None:
-    """The calls ride inside the proof as base64: the effective raw cap is lower
-    than the 16 MiB member cap (about 12 MiB), and an oversize proof is refused."""
-    assert nproof.MAX_CALLS_BYTES == 16 * 1024 * 1024
+def test_a_real_proof_over_the_member_cap_is_refused() -> None:
+    """The calls ride inside the proof as base64, so about 12.5 MiB of raw calls
+    already exceeds the 16 MiB member cap: build a real one and see it refused."""
+    from dotmac_deployment_foundation.exposure import (
+        HostObservation,
+        ObservedChain,
+        ObservedRule,
+    )
+    from lane3_exposure_recording import ExposureCallRecord
+
+    huge = HostObservation(
+        chains=(
+            ObservedChain(
+                "ipv4",
+                "DOCKER-USER",
+                "-",
+                (ObservedRule("ipv4", "DOCKER-USER", "x" * 12_800_000),),
+            ),
+        )
+    )
+    calls = serialize_exposure_calls(
+        [ExposureCallRecord(0, "observe", observation=huge)]
+    )
+    assert len(calls) < nproof.MAX_CALLS_BYTES  # a legal exposure-calls member
+    with pytest.raises(nproof.ProofRefused) as caught:
+        support.proof_bytes(exposure_calls=calls)
+    assert caught.value.code == "proof-invalid"
     refused("proof-invalid", nproof.parse_proof, b"x" * (nproof.MAX_CALLS_BYTES + 1))
-    effective = nproof.MAX_CALLS_BYTES * 3 // 4
-    assert effective < nproof.MAX_CALLS_BYTES

@@ -215,3 +215,12 @@ def test_no_launcher_module_calls_the_v1_finalizer() -> None:
                     node.func, "id", None
                 )
                 assert name != "finalize_evidence", path.name
+            # also no reference at all: a bare Name, an Attribute, or an import
+            assert not (isinstance(node, ast.Name) and node.id == "finalize_evidence")
+            assert not (
+                isinstance(node, ast.Attribute) and node.attr == "finalize_evidence"
+            )
+            assert not (
+                isinstance(node, ast.ImportFrom)
+                and any(alias.name == "finalize_evidence" for alias in node.names)
+            ), path.name

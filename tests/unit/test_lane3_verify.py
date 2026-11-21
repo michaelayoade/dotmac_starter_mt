@@ -192,6 +192,18 @@ def test_a_revision_git_cannot_show_is_refused() -> None:
     )
 
 
+def test_git_output_that_is_not_utf8_is_refused_never_replaced(monkeypatch) -> None:
+    import subprocess
+
+    def fake(*_a, **_k):
+        return subprocess.CompletedProcess(
+            [], 0, stdout=b"product = \xff\xfe", stderr=b""
+        )
+
+    monkeypatch.setattr(verify.subprocess, "run", fake)
+    refused("verify-descriptor-unreadable", verify._git, REPO, "show", "x:y")
+
+
 @pytest.mark.parametrize("text", ["", "not = [valid", "schema = 'nope'"])
 def test_an_unreadable_descriptor_is_refused(text: str) -> None:
     refused(
