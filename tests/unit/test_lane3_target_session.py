@@ -50,6 +50,7 @@ START: dict[str, Any] = {
     "evidence_seconds": 60,
     "proceed_seconds": 30,
     "store_time": "2026-11-17T05:00:00+00:00",
+    "role": "positive",
 }
 
 
@@ -102,6 +103,10 @@ def test_a_complete_start_parses() -> None:
         ("proceed_seconds", 601),
         ("expected_machine_id", ""),
         ("expected_host_incarnation", ""),
+        ("role", ""),
+        ("role", "both"),
+        ("role", "Positive"),
+        ("role", 1),
     ],
 )
 def test_an_unusable_start_value_refuses(key: str, value: Any) -> None:
@@ -157,10 +162,60 @@ def test_a_missing_row_is_incomplete() -> None:
         session.parse_external_rows({"rows": _rows()[:-1]})
 
 
-def test_a_seventh_row_is_incomplete() -> None:
+def test_a_seventh_row_that_is_not_row_8_is_refused() -> None:
     rows = [*_rows(), _row("digest_equality")]
+    with pytest.raises(session.controller_half.EvidenceUnreadable):
+        session.parse_external_rows({"rows": rows})
+
+
+def _row8(**overrides: Any) -> dict[str, Any]:
+    import lane3_negative_proof as nproof
+
+    values: dict[str, Any] = {"evidence": [nproof.row_evidence(b"member")]}
+    values.update(overrides)
+    return _row(nproof.ROW_CODE, **values)
+
+
+def test_row_8_is_accepted_as_a_seventh_row_by_shape_only() -> None:
+    parsed = session.parse_external_rows({"rows": [*_rows(), _row8()]})
+    assert len(parsed) == 7
+    assert parsed[-1].code == "provoked_rollback"
+    assert parsed[-1].status is RequirementStatus.EXECUTED_PASSED
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"status": "blocked"},
+        {"status": "executed_failed"},
+        {"evidence": []},
+        {"evidence": ["bundle:provoked_rollback"]},
+        {"evidence": ["lane3-negative-compensation-proof:sha256:" + "z" * 64]},
+    ],
+)
+def test_a_row_8_of_the_wrong_shape_is_refused(override: dict[str, Any]) -> None:
+    rows = [*_rows(), _row8(**override)]
+    with pytest.raises(session.controller_half.EvidenceUnreadable):
+        session.parse_external_rows({"rows": rows})
+
+
+def test_row_8_replacing_a_launcher_row_is_incomplete() -> None:
+    rows = [*_rows()[:-1], _row8()]
     with pytest.raises(session.controller_half.EvidenceIncomplete):
         session.parse_external_rows({"rows": rows})
+
+
+def test_the_negative_role_never_receives_external_rows() -> None:
+    with pytest.raises(session.controller_half.EvidenceUnreadable):
+        session.parse_external_rows({"rows": _rows()}, role="negative")
+
+
+def test_row_8_is_blocked_unless_the_launcher_supplied_it() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    assert source.count('"provoked_rollback"') == 0
+    assert "negative_proof.ROW_CODE" in source
+    blocked = source.index("BLOCKED,", source.index("negative_proof.ROW_CODE not in"))
+    assert blocked > 0
 
 
 def test_rows_must_be_a_list() -> None:
@@ -320,6 +375,74 @@ def _start(**overrides: Any):
     data = copy.deepcopy(START)
     data.update(overrides)
     return session.parse_start(data)
+
+
+# ── S8b: the negative role's post-compensation window ──────────────────────
+
+
+def _compensated_records() -> list[Any]:
+    from lane3_exposure_recording import ExposureCallRecord
+
+    return [
+        ExposureCallRecord(0, "observe"),
+        ExposureCallRecord(1, "restore_chains"),
+        ExposureCallRecord(2, "observe"),
+    ]
+
+
+def test_the_window_opens_after_a_compensation_and_waits_for_done(gate) -> None:
+    import threading
+
+    launcher, live = gate()
+    live.ctx.exposure_calls.extend(_compensated_records())
+    seen: dict[str, Any] = {}
+
+    def launcher_side() -> None:
+        kind, data = launcher.receive("compensation_window_open", timeout=5)
+        seen.update(kind=kind, data=data)
+        launcher.send("compensation_probe_done", {})
+
+    thread = threading.Thread(target=launcher_side)
+    thread.start()
+    live._compensation_window(_start(role="negative"))
+    thread.join(5)
+    assert seen["data"]["deadline_seconds"] == 300
+    assert live.ctx.notes == []
+
+
+def test_the_window_is_not_opened_without_a_compensation(gate) -> None:
+    launcher, live = gate()
+    records = _compensated_records()
+    live.ctx.exposure_calls.extend(records[:2])
+    live._compensation_window(_start(role="negative"))
+    assert live.ctx.notes == ["compensation-window-not-opened"]
+    with pytest.raises(Exception):  # noqa: B017 - nothing was sent
+        launcher.receive("compensation_window_open", timeout=0.2)
+
+
+def test_an_abort_in_the_window_is_no_probe_and_does_not_raise(gate) -> None:
+    launcher, live = gate()
+    live.ctx.exposure_calls.extend(_compensated_records())
+    launcher.send("abort", {"reason": "probe-measurement-refused"})
+    live._compensation_window(_start(role="negative"))
+    assert live.ctx.notes == ["compensation-window-aborted"]
+
+
+def test_a_timeout_in_the_window_is_no_probe_and_does_not_raise(gate) -> None:
+    _, live = gate()
+    live.ctx.exposure_calls.extend(_compensated_records())
+    live._compensation_window(_start(role="negative", window_seconds=1))
+    assert live.ctx.notes == ["compensation-window-failed:channel-timeout"]
+
+
+def test_the_window_is_driven_from_the_executor_failure_only_for_negative() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+    window = source.index("self._compensation_window(start)")
+    assert source.rindex('start.role == "negative"', 0, window) > source.rindex(
+        "except DeploymentFoundationError", 0, window
+    )
+    # the original refusal is re-raised after the window, never swallowed
+    assert source[window:].lstrip().splitlines()[1].strip() == "raise"
 
 
 def test_a_proceed_for_this_plan_releases_the_gate(gate) -> None:

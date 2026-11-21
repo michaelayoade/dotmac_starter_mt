@@ -42,9 +42,11 @@ import lane3_e10_receipt
 import lane3_evidence_finalization as evidence_finalization
 import lane3_launcher_evidence as launcher_evidence
 import lane3_launcher_lease as launcher_lease
+import lane3_launcher_negative as launcher_negative
 import lane3_launcher_probe as launcher_probe
 import lane3_launcher_stage as lane3_stage
 import lane3_lease_store
+import lane3_negative_proof as negative_proof
 from dotmac_deployment_foundation.rehearsal import (
     ExecutionRunBindingV1,
     RehearsalReceiptV2,
@@ -88,6 +90,8 @@ class SessionPlan:
     window_seconds: int
     evidence_seconds: int
     proceed_seconds: int
+    #: S8b: `positive` or `negative`. One X1 run drives both, negative first.
+    role: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -113,6 +117,9 @@ class DriveInputs:
     evidence_output: pathlib.Path
     ready_seconds: float
     terminal_seconds: float
+    #: S8b: `launcher_negative.NegativeClaims` for the negative role,
+    #: `launcher_negative.PositivePair` for the positive role.
+    pair: launcher_negative.NegativeClaims | launcher_negative.PositivePair
     measurers: launcher_probe.Measurers | None = None
 
 
@@ -142,6 +149,7 @@ def build_start(inputs: DriveInputs, store_time: datetime) -> dict[str, Any]:
         "evidence_seconds": plan.evidence_seconds,
         "proceed_seconds": plan.proceed_seconds,
         "store_time": store_time.isoformat(),
+        "role": plan.role,
     }
 
 
@@ -157,6 +165,8 @@ class DriveResult:
     #: The target reported `ready`: it was on a host with a plan in hand.
     ready_seen: bool = False
     plan_digest: str = ""
+    #: The NEGATIVE role's unsigned compensation proof (S8b), held in memory only.
+    negative_proof: bytes | None = dataclasses.field(default=None, repr=False)
 
 
 def _abort(channel: Channel, reason: str) -> None:
@@ -183,6 +193,13 @@ def _terminal(
 
 def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
     result = DriveResult(terminal=None)
+    expected_pair = {
+        "negative": launcher_negative.NegativeClaims,
+        "positive": launcher_negative.PositivePair,
+    }.get(inputs.plan.role)
+    if expected_pair is None or type(inputs.pair) is not expected_pair:
+        result.refusal_code = "role-pair-mismatch"
+        return result
     try:
         # The target's only notion of "now" is the STORE's time, taken here, not
         # this runner's or the target's own clock.
@@ -242,6 +259,9 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
         # The gate: the target takes no grant and no lock until it reads this.
         channel.send("proceed", {"plan_digest": data["plan_digest"]})
 
+        if inputs.plan.role == "negative":
+            return launcher_negative.drive_negative(channel, inputs, result)
+
         kind, data = channel.receive(
             "window_open", "terminal", timeout=inputs.plan.window_seconds
         )
@@ -263,6 +283,20 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
                 channel, inputs.terminal_seconds, result, "probe-measurement-refused"
             )
         rows = measurement.rows
+        # S8b: row 8 is a row the LAUNCHER asserts from the negative drive's proof.
+        # Without a proof the row is absent and the target keeps it BLOCKED.
+        negative = inputs.pair.negative_proof
+        if negative is not None:
+            try:
+                rows = [*rows, negative_proof.compensation_row(negative)]
+            except negative_proof.ProofRefused:
+                _abort(channel, "negative-proof-invalid")
+                return _terminal(
+                    channel,
+                    inputs.terminal_seconds,
+                    result,
+                    "negative-proof-invalid",
+                )
         channel.send("external_results", {"rows": rows})
 
         kind, data = channel.receive(
@@ -274,6 +308,7 @@ def drive(channel: Channel, inputs: DriveInputs) -> DriveResult:
             result.ciphertext = launcher_evidence.finalize(
                 probe_bytes=measurement.document_bytes(),
                 exposure_calls_b64=data["exposure_calls_b64"],
+                negative_compensation=negative,
                 encryption=inputs.encryption,
                 output=inputs.evidence_output,
             )

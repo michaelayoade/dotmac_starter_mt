@@ -761,6 +761,14 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # `test_the_cp6_export_premise_*` (lease_persistence) proves the module has no
     # write route of any kind and never touches the lease store.
     "lane3_cp6_export.py": 2,
+    # The S8b `lane3.negative-compensation-proof.v1` and
+    # `lane3.post-compensation-probe.v1` documents: owned by
+    # `lane3_negative_proof.py` (the launcher BUILDS them from bytes it holds, the
+    # offline verifier PARSES them), through ONE helper (`_canonical`). Both live
+    # only in memory and inside the encrypted evidence bundle; nothing here writes
+    # a Foundation store. `test_the_negative_proof_premise_*` (lease_persistence)
+    # proves the module has no write route and never touches the lease store.
+    "lane3_negative_proof.py": 1,
     # Public offline-verification result and protected signer policy share
     # one canonical JSON codec, owned by lane3_offline_result. Neither writes
     # a Foundation grant or persistent store.

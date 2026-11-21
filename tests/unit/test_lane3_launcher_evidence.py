@@ -27,6 +27,8 @@ from dotmac_deployment_foundation.rehearsal import (  # noqa: E402
 )
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
 
+from tests.unit.lane3_negative_support import proof_bytes  # noqa: E402
+
 CIPHERTEXT = b"age-encryption.org/v1\n-> X25519 example\n\nbody"
 RUN = ExecutionRunBindingV1(repository_id=1, run_id=2, run_attempt=1)
 FINGERPRINT = "SHA256:" + "A" * 43
@@ -49,19 +51,21 @@ def test_finalize_hands_the_launchers_probe_bytes_and_the_calls_to_the_encryptor
         return CIPHERTEXT
 
     monkeypatch.setattr(
-        launcher_evidence.evidence_finalization, "finalize_evidence", fake
+        launcher_evidence.evidence_finalization, "finalize_evidence_v2", fake
     )
     calls = serialize_exposure_calls(())
     out = tmp_path / "bundle.age"
     result = launcher_evidence.finalize(
         probe_bytes=b'{"probe":true}',
         exposure_calls_b64=_b64(calls),
+        negative_compensation=proof_bytes(),
         encryption=object(),  # type: ignore[arg-type]
         output=out,
     )
     assert result == CIPHERTEXT
     assert seen["probe_evidence"] == b'{"probe":true}'
     assert seen["exposure_calls"] == calls
+    assert seen["negative_compensation"] == proof_bytes()
     assert seen["output"] == out
 
 
@@ -73,6 +77,7 @@ def test_finalize_refuses_undecodable_calls(
         launcher_evidence.finalize(
             probe_bytes=b"{}",
             exposure_calls_b64=value,
+            negative_compensation=proof_bytes(),
             encryption=object(),  # type: ignore[arg-type]
             output=tmp_path / "x",
         )
@@ -90,7 +95,7 @@ def test_finalize_refuses_calls_that_are_not_the_canonical_bytes(
         return CIPHERTEXT
 
     monkeypatch.setattr(
-        launcher_evidence.evidence_finalization, "finalize_evidence", fake
+        launcher_evidence.evidence_finalization, "finalize_evidence_v2", fake
     )
     reformatted = json.dumps(json.loads(serialize_exposure_calls(())), indent=2)
     for raw in (b'{"calls":[]}', reformatted.encode(), b"garbage"):
@@ -98,11 +103,33 @@ def test_finalize_refuses_calls_that_are_not_the_canonical_bytes(
             launcher_evidence.finalize(
                 probe_bytes=b"{}",
                 exposure_calls_b64=_b64(raw),
+                negative_compensation=proof_bytes(),
                 encryption=object(),  # type: ignore[arg-type]
                 output=tmp_path / "x",
             )
         assert refusal.value.code == "exposure-calls-not-canonical"
     assert not called
+
+
+@pytest.mark.parametrize("proof", [None, b"", b"{}", b"garbage"])
+def test_finalize_refuses_a_missing_or_malformed_negative_proof(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, proof: object
+) -> None:
+    def fake(**_: Any) -> bytes:  # pragma: no cover - must not run
+        raise AssertionError("encrypted without a proof")
+
+    monkeypatch.setattr(
+        launcher_evidence.evidence_finalization, "finalize_evidence_v2", fake
+    )
+    with pytest.raises(launcher_evidence.EvidenceHandBackRefused) as refusal:
+        launcher_evidence.finalize(
+            probe_bytes=b"{}",
+            exposure_calls_b64=_b64(serialize_exposure_calls(())),
+            negative_compensation=proof,  # type: ignore[arg-type]
+            encryption=object(),  # type: ignore[arg-type]
+            output=tmp_path / "x",
+        )
+    assert refusal.value.code == "negative-compensation-invalid"
 
 
 # ── verify_receipt ──────────────────────────────────────────────────────────

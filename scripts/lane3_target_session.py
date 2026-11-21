@@ -61,6 +61,7 @@ from typing import Any, Final
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import exposure_rehearsal_runner as controller_half
+import lane3_negative_proof as negative_proof
 import lane3_receipt_v2 as receipt_v2
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
@@ -128,6 +129,11 @@ EXTERNAL_CODES: Final = frozenset(
     }
 )
 
+#: The two roles of one X1 run (S8b): the NEGATIVE target is driven first and
+#: provokes the compensation; the POSITIVE target applies cleanly and takes its
+#: row 8 from the launcher.
+ROLES: Final = frozenset({"positive", "negative"})
+
 #: The product lock lives where every other deployer on this host looks for it.
 LOCK_ROOT: Final = pathlib.PurePosixPath("/var/lock")
 
@@ -169,6 +175,7 @@ class Start:
     evidence_seconds: int
     proceed_seconds: int
     store_time: datetime
+    role: str
 
 
 def _token(data: dict[str, Any], key: str) -> str:
@@ -225,6 +232,13 @@ def _instant(data: dict[str, Any], key: str) -> datetime:
     return value
 
 
+def _role(data: dict[str, Any]) -> str:
+    role = _token(data, "role")
+    if role not in ROLES:
+        raise _Unfit("start field role is not positive or negative")
+    return role
+
+
 def parse_start(data: dict[str, Any]) -> Start:
     """The closed `start` frame as typed values, or a `PreconditionUnfit`."""
     run = data["execution_run"]
@@ -261,21 +275,38 @@ def parse_start(data: dict[str, Any]) -> Start:
         evidence_seconds=_bounded_int(data, "evidence_seconds", low=1, high=600),
         proceed_seconds=_bounded_int(data, "proceed_seconds", low=1, high=600),
         store_time=_instant(data, "store_time"),
+        role=_role(data),
     )
 
 
-def parse_external_rows(data: dict[str, Any]) -> list[RequirementResult]:
-    """The launcher's six rows, closed: exactly items 11-16, each once.
+def parse_external_rows(
+    data: dict[str, Any], *, role: str = "positive"
+) -> list[RequirementResult]:
+    """The launcher's rows, closed: items 11-16 each once, and for the POSITIVE
+    role optionally row 8 (`provoked_rollback`) as a seventh.
 
-    The launcher measured these from vantages this host never held, so this half
-    cannot judge them. It only refuses anything that is not the closed shape: a
-    row for an item it owns, a duplicate or a missing one would each let a result
-    be chosen rather than measured.
+    The launcher measured items 11-16 from vantages this host never held, so this
+    half cannot judge them. It only refuses anything that is not the closed shape:
+    a row for an item it owns, a duplicate or a missing one would each let a
+    result be chosen rather than measured. Row 8 is a row the LAUNCHER asserts
+    (S8b): this half checks its SHAPE only and publishes nothing on it, because
+    `require_rehearsal` still needs the authenticated offline result, which E9
+    refuses unless the negative-target proof is re-derived. Absent, row 8 stays
+    BLOCKED and publication fails closed.
     """
+    if role != "positive":
+        raise controller_half.EvidenceUnreadable(
+            "only the positive role receives external rows"
+        )
     rows = data["rows"]
-    if not isinstance(rows, list) or len(rows) != len(EXTERNAL_CODES):
+    allowed = EXTERNAL_CODES | {negative_proof.ROW_CODE}
+    if not isinstance(rows, list) or len(rows) not in (
+        len(EXTERNAL_CODES),
+        len(allowed),
+    ):
         raise controller_half.EvidenceIncomplete(
-            "the external results are not exactly the six launcher-measured items"
+            "the external results are not the six launcher-measured items "
+            "(and optionally row 8)"
         )
     statuses = {status.value: status for status in RequirementStatus}
     parsed: dict[str, RequirementResult] = {}
@@ -286,7 +317,7 @@ def parse_external_rows(data: dict[str, Any]) -> list[RequirementResult]:
         detail, evidence = row["detail"], row["evidence"]
         if (
             not isinstance(code, str)
-            or code not in EXTERNAL_CODES
+            or code not in allowed
             or code in parsed
             or not isinstance(status, str)
             or status not in statuses
@@ -303,11 +334,22 @@ def parse_external_rows(data: dict[str, Any]) -> list[RequirementResult]:
             raise controller_half.EvidenceUnreadable(
                 "an external row is outside the closed vocabulary"
             )
+        if code == negative_proof.ROW_CODE:
+            try:
+                negative_proof.require_row_shape(code, status, detail, evidence)
+            except negative_proof.ProofRefused:
+                raise controller_half.EvidenceUnreadable(
+                    "row 8 is not the closed compensation row shape"
+                ) from None
         parsed[code] = RequirementResult(
             code=code,
             status=statuses[status],
             detail=detail,
             evidence=tuple(evidence),
+        )
+    if not EXTERNAL_CODES <= parsed.keys():
+        raise controller_half.EvidenceIncomplete(
+            "the external results omit a launcher-measured item"
         )
     return list(parsed.values())
 
@@ -567,21 +609,36 @@ class Session:
                 "the authorized plan does not name the leased host/controller"
             )
         held.require_held(product=spec.product)
-        with controller_half.receipt_v2_refusals(refused_as=SpecError):
-            ctx.host_mutated = True
-            execution_outcome = receipt_v2.execute_authorized_plan(
-                execution_plan,
-                grant,
-                spec=spec,
-                deployment_plan=deployment_plan,
-                effects=deployment_effects,
-                exposure_effects=executor_exposure,
-                bindings=bindings,
-                lock=held,
+        try:
+            with controller_half.receipt_v2_refusals(refused_as=SpecError):
+                ctx.host_mutated = True
+                execution_outcome = receipt_v2.execute_authorized_plan(
+                    execution_plan,
+                    grant,
+                    spec=spec,
+                    deployment_plan=deployment_plan,
+                    effects=deployment_effects,
+                    exposure_effects=executor_exposure,
+                    bindings=bindings,
+                    lock=held,
+                )
+        except DeploymentFoundationError:
+            if start.role == "negative":
+                # The Executor refused and (if it got that far) compensated. The
+                # stack is still up and `run_cleanup` has not run: this is the one
+                # moment the launcher can measure the host AFTER compensation.
+                self._compensation_window(start)
+            raise
+        if start.role == "negative":
+            # The provocation provoked nothing: the baseline was not the negative
+            # one. A clean apply proves nothing about compensation.
+            raise controller_half.EvidenceIncomplete(
+                "the negative target applied cleanly; no compensation was exercised"
             )
 
-        # Items 1 and 8 stay BLOCKED for the reasons recorded in the
-        # controller-half runner: the apply and its compensation live in the
+        # Item 1 stays BLOCKED (item 8 too unless the launcher asserts it, S8b)
+        # for the reasons recorded in the controller-half runner: the apply and
+        # its compensation live in the
         # Executor under a grant, and this lane neither orders effects itself
         # nor seeds a shared host to rehearse something that will not run.
         results.record(
@@ -647,16 +704,6 @@ class Session:
             else "the ip6tables DOCKER-USER chain could not be read",
             "ip6tables -L DOCKER-USER -v -n",
         )
-        results.record(
-            "provoked_rollback",
-            BLOCKED,
-            "the compensation moved to `Executor._restore_exposure` and is "
-            "reached only through an authorized `FoundationExecutionPlanV3` "
-            "carrying an exposure reconciliation and a consumed Control V2 "
-            "dispatch. No foreign rule was seeded: a blocked item must not dirty "
-            "a shared host to rehearse something that will not run",
-            "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
-        )
         execution_report = verify_exposure(spec, observed).descriptor_digest
         results.record(
             "digest_equality",
@@ -667,9 +714,64 @@ class Session:
         )
 
         # ── T2: the mid-run pause. Stack up, lock held, grant live. ─────────
-        for row in self._await_external_rows(start):
+        rows = self._await_external_rows(start)
+        for row in rows:
             results.record(row.code, row.status, row.detail, *row.evidence)
+        if negative_proof.ROW_CODE not in {row.code for row in rows}:
+            # Row 8 stays BLOCKED unless the launcher asserted it: nothing was
+            # seeded on this host, and publication fails closed on a blocked row.
+            results.record(
+                negative_proof.ROW_CODE,
+                BLOCKED,
+                "the compensation is proven on the separate negative target; the "
+                "launcher supplied no proof row, so this item is not claimed. No "
+                "foreign rule was seeded on this host",
+                "Executor._reconcile_exposure -> verify_exposure -> _restore_exposure",
+            )
         return execution_outcome
+
+    def _compensation_window(self, start: Start) -> None:
+        """The negative role's bounded post-compensation window (S8b).
+
+        Opened only when the recorded crossings END in a successful
+        `restore_chains` and a successful re-`observe`: the compensation ran and
+        was re-measured. The window carries the serialized exposure calls (the
+        launcher keeps them for the proof) and a deadline. A timeout, an `abort`
+        or a malformed frame is simply NO PROBE: this returns and the caller
+        re-raises the Executor's own refusal, so cleanup and the terminal report
+        run exactly as without a window, and the proof cannot carry a probe.
+        """
+        records = tuple(self.ctx.exposure_calls)
+        if (
+            len(records) < 2
+            or records[-2].method != "restore_chains"
+            or records[-2].exception_type
+            or records[-1].method != "observe"
+            or records[-1].exception_type
+        ):
+            self.ctx.notes.append("compensation-window-not-opened")
+            return
+        try:
+            calls = serialize_exposure_calls(records)
+        except ExposureEvidenceRefused:
+            self.ctx.notes.append("compensation-window-not-opened")
+            return
+        try:
+            self.channel.send(
+                "compensation_window_open",
+                {
+                    "deadline_seconds": start.window_seconds,
+                    "exposure_calls_b64": base64.b64encode(calls).decode("ascii"),
+                },
+            )
+            kind, _ = self.channel.receive(
+                "compensation_probe_done", "abort", timeout=start.window_seconds
+            )
+        except ChannelRefused as exc:
+            self.ctx.notes.append(f"compensation-window-failed:{exc.code}")
+            return
+        if kind == "abort":
+            self.ctx.notes.append("compensation-window-aborted")
 
     def _await_external_rows(self, start: Start) -> list[RequirementResult]:
         """Open the window and wait, bounded, for the launcher's six rows.
@@ -689,7 +791,7 @@ class Session:
             ) from None
         if kind == "abort":
             raise controller_half.ProbeRefused("the launcher aborted the probe window")
-        return parse_external_rows(data)
+        return parse_external_rows(data, role=start.role)
 
     def _finish(
         self,

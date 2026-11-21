@@ -16,12 +16,19 @@ import stat
 import subprocess
 import sys
 import tarfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lane3_evidence_bundle import build_manifest, require_plaintext_bundle
+from lane3_evidence_bundle import (
+    NEGATIVE_COMPENSATION_MEMBER,
+    build_manifest,
+    build_manifest_v2,
+    require_plaintext_bundle,
+    require_plaintext_bundle_v2,
+)
 
 _POLICY = (
     Path(__file__).resolve().parents[1]
@@ -213,53 +220,80 @@ def _json_depth_within_bound(text: str) -> bool:
     return True
 
 
+def _check_json_members(members: dict[str, bytes]) -> None:
+    for raw in members.values():
+        if type(raw) is not bytes or not 0 < len(raw) <= MAX_MEMBER_BYTES:
+            raise ValueError
+        text = raw.decode("utf-8")
+        if not _json_depth_within_bound(text):
+            raise ValueError
+        if type(json.loads(text)) is not dict:
+            raise ValueError
+
+
+def _tar(manifest: bytes, members: dict[str, bytes]) -> bytes:
+    storage = io.BytesIO()
+    with tarfile.open(
+        fileobj=storage, mode="w", format=tarfile.USTAR_FORMAT
+    ) as archive:
+        for name, raw in [("manifest.json", manifest), *members.items()]:
+            info = tarfile.TarInfo(name)
+            info.size, info.mode, info.mtime = len(raw), 0o600, 0
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            archive.addfile(info, io.BytesIO(raw))
+    raw_archive = storage.getvalue()
+    if len(raw_archive) > MAX_ARCHIVE_BYTES:
+        raise ValueError
+    return raw_archive
+
+
 def _archive(probe_evidence: bytes, exposure_calls: bytes) -> bytes:
+    """The v1 archive (two members). Kept for the v1 reader's repack check."""
     members = {
         "probe-evidence.json": probe_evidence,
         "exposure-calls.json": exposure_calls,
     }
     try:
-        for raw in members.values():
-            if type(raw) is not bytes or not 0 < len(raw) <= MAX_MEMBER_BYTES:
-                raise ValueError
-            text = raw.decode("utf-8")
-            if not _json_depth_within_bound(text):
-                raise ValueError
-            if type(json.loads(text)) is not dict:
-                raise ValueError
+        _check_json_members(members)
         manifest = build_manifest(members)
         require_plaintext_bundle(manifest, members)
-        storage = io.BytesIO()
-        with tarfile.open(
-            fileobj=storage, mode="w", format=tarfile.USTAR_FORMAT
-        ) as archive:
-            for name, raw in [("manifest.json", manifest), *members.items()]:
-                info = tarfile.TarInfo(name)
-                info.size, info.mode, info.mtime = len(raw), 0o600, 0
-                info.uid = info.gid = 0
-                info.uname = info.gname = ""
-                archive.addfile(info, io.BytesIO(raw))
-        raw_archive = storage.getvalue()
-        if len(raw_archive) > MAX_ARCHIVE_BYTES:
-            raise ValueError
-        return raw_archive
+        return _tar(manifest, members)
     except (ValueError, TypeError, RecursionError, OverflowError):
         raise FinalizationRefused("encryption-members-invalid") from None
 
 
-def read_plaintext_evidence_archive(payload: bytes) -> tuple[bytes, dict[str, bytes]]:
-    """Read only the bounded canonical archive without extraction or extensions.
+def _archive_v2(
+    probe_evidence: bytes, exposure_calls: bytes, negative_compensation: bytes
+) -> bytes:
+    """The v2 archive: the v1 members then the negative compensation proof."""
+    members = {
+        "probe-evidence.json": probe_evidence,
+        "exposure-calls.json": exposure_calls,
+        NEGATIVE_COMPENSATION_MEMBER: negative_compensation,
+    }
+    try:
+        _check_json_members(members)
+        manifest = build_manifest_v2(members)
+        require_plaintext_bundle_v2(manifest, members)
+        return _tar(manifest, members)
+    except (ValueError, TypeError, RecursionError, OverflowError):
+        raise FinalizationRefused("encryption-members-invalid") from None
 
-    This establishes transport consistency only, never authenticity or proof
-    acceptance. Ciphertext acquisition/authentication and decryption belong to
-    the caller; no policy, key, executable or filesystem is consulted here.
-    """
+
+def _read_archive(
+    payload: bytes,
+    names: tuple[str, ...],
+    *,
+    require: Callable[[bytes, dict[str, bytes]], None],
+    repack: Callable[[dict[str, bytes]], bytes],
+) -> tuple[bytes, dict[str, bytes]]:
     try:
         if type(payload) is not bytes or not 0 < len(payload) <= MAX_ARCHIVE_BYTES:
             raise ValueError
         contents: dict[str, bytes] = {}
         offset = 0
-        for name in ("manifest.json", "probe-evidence.json", "exposure-calls.json"):
+        for name in names:
             # Parse exactly one raw header, never TarFile's PAX/GNU processing.
             header_end = offset + tarfile.BLOCKSIZE
             if header_end > len(payload):
@@ -292,17 +326,56 @@ def read_plaintext_evidence_archive(payload: bytes) -> tuple[bytes, dict[str, by
                 raise ValueError
             contents[name] = payload[header_end:end]
         manifest = contents.pop("manifest.json")
-        require_plaintext_bundle(manifest, contents)
+        require(manifest, contents)
         # Reject every alternate header encoding, padding, trailer or format,
-        # including an extra member hidden after the fixed three-header read.
-        if (
-            _archive(contents["probe-evidence.json"], contents["exposure-calls.json"])
-            != payload
-        ):
+        # including an extra member hidden after the fixed header reads.
+        if repack(contents) != payload:
             raise ValueError
         return manifest, contents
     except (ValueError, TypeError, RecursionError, OverflowError, tarfile.HeaderError):
         raise FinalizationRefused("archive-input-invalid") from None
+
+
+def read_plaintext_evidence_archive(payload: bytes) -> tuple[bytes, dict[str, bytes]]:
+    """Read only the bounded canonical v1 archive without extraction or extensions.
+
+    This establishes transport consistency only, never authenticity or proof
+    acceptance. Ciphertext acquisition/authentication and decryption belong to
+    the caller; no policy, key, executable or filesystem is consulted here.
+    """
+    return _read_archive(
+        payload,
+        ("manifest.json", "probe-evidence.json", "exposure-calls.json"),
+        require=require_plaintext_bundle,
+        repack=lambda contents: _archive(
+            contents["probe-evidence.json"], contents["exposure-calls.json"]
+        ),
+    )
+
+
+def read_plaintext_evidence_archive_v2(
+    payload: bytes,
+) -> tuple[bytes, dict[str, bytes]]:
+    """The v2 reader: four fixed headers in order, repacked for byte equality.
+
+    The caller chooses the version; a v1 archive is refused here (its fourth
+    header is absent) exactly as a v2 archive is refused by the v1 reader.
+    """
+    return _read_archive(
+        payload,
+        (
+            "manifest.json",
+            "probe-evidence.json",
+            "exposure-calls.json",
+            NEGATIVE_COMPENSATION_MEMBER,
+        ),
+        require=require_plaintext_bundle_v2,
+        repack=lambda contents: _archive_v2(
+            contents["probe-evidence.json"],
+            contents["exposure-calls.json"],
+            contents[NEGATIVE_COMPENSATION_MEMBER],
+        ),
+    )
 
 
 def _same_output(directory: int, name: str, descriptor: int) -> bool:
@@ -324,7 +397,38 @@ def finalize_evidence(
     context: EncryptionContext,
     output: Path,
 ) -> bytes:
-    """Encrypt exactly the two late members and return exact newly written bytes.
+    """Encrypt exactly the two v1 members (the legacy controller-half runner).
+
+    Its bundle is v1, which E9 refuses as `offline-join-bundle-version`: it can
+    never be published. The launcher uses `finalize_evidence_v2`.
+    """
+    return _finalize(
+        lambda: _archive(probe_evidence, exposure_calls),
+        context=context,
+        output=output,
+    )
+
+
+def finalize_evidence_v2(
+    *,
+    probe_evidence: bytes,
+    exposure_calls: bytes,
+    negative_compensation: bytes,
+    context: EncryptionContext,
+    output: Path,
+) -> bytes:
+    """Encrypt exactly the three v2 members (the launcher's finalization, S8b)."""
+    return _finalize(
+        lambda: _archive_v2(probe_evidence, exposure_calls, negative_compensation),
+        context=context,
+        output=output,
+    )
+
+
+def _finalize(
+    build: Callable[[], bytes], *, context: EncryptionContext, output: Path
+) -> bytes:
+    """Encrypt the built archive and return exact newly written bytes.
 
     No private input paths, plaintext temporary files, signing, decryption or
     key generation exist here. Existing output names are always refused.
@@ -333,7 +437,7 @@ def finalize_evidence(
         raise FinalizationRefused("encryption-context-invalid")
     if not isinstance(output, Path) or output.name in {"", ".", ".."}:
         raise FinalizationRefused("encryption-output-invalid")
-    plaintext = _archive(probe_evidence, exposure_calls)
+    plaintext = build()
     directory: int | None = None
     descriptor: int | None = None
     success = False

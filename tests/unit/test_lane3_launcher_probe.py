@@ -217,3 +217,72 @@ def test_a_non_finite_measurement_cannot_be_serialized() -> None:
     )
     with pytest.raises(ValueError, match="Out of range"):
         measurement.document_bytes()
+
+
+# ── S8b: the post-compensation probe ────────────────────────────────────────
+
+
+def _post(**kwargs: Any) -> Any:
+    import lane3_negative_proof as nproof
+
+    raw = launcher_probe.measure_post_compensation(
+        INPUTS,
+        {"vantage": {}},
+        dispatch_id="dispatch-n",
+        host_id="host-n",
+        measurers=_measurers(**kwargs),
+    )
+    return nproof.parse_probe(raw)
+
+
+def test_the_post_compensation_probe_is_exactly_the_two_negative_rows() -> None:
+    probe = _post()
+    assert [row.code for row in probe.rows] == [
+        "external_negative_v6",
+        "external_v4",
+    ]
+    assert all(row.status == "executed_passed" for row in probe.rows)
+    assert (probe.dispatch_id, probe.host_id) == ("dispatch-n", "host-n")
+
+
+def test_the_positive_row_is_not_used_after_a_compensation() -> None:
+    probes = {k: v for k, v in PROBE_OK.items() if k != "positive_v6"}
+    assert len(_post(probes=probes).rows) == 2
+
+
+def test_a_reachable_compensated_host_is_a_failing_row_never_relaxed() -> None:
+    probes = copy.deepcopy(PROBE_OK)
+    probes["negative_v6"]["reachable"] = True
+    rows = {row.code: row for row in _post(probes=probes).rows}
+    assert rows["external_negative_v6"].status == "executed_failed"
+    assert rows["external_v4"].status == "executed_passed"
+
+
+@pytest.mark.parametrize("key", ["positive_control_fired", "service_running"])
+@pytest.mark.parametrize("probe", ["negative_v6", "v4_pair"])
+def test_an_unmeasured_control_or_service_never_reads_as_a_pass(
+    probe: str, key: str
+) -> None:
+    probes = copy.deepcopy(PROBE_OK)
+    del probes[probe][key]
+    with pytest.raises(launcher_probe.controller_half.EvidenceIncomplete):
+        _post(probes=probes)
+
+
+@pytest.mark.parametrize("key", ["positive_control_fired", "service_running"])
+def test_the_control_and_the_running_service_are_each_required_to_pass(
+    key: str,
+) -> None:
+    probes = copy.deepcopy(PROBE_OK)
+    probes["v4_pair"][key] = False
+    rows = {row.code: row for row in _post(probes=probes).rows}
+    assert rows["external_v4"].status == "executed_failed"
+
+
+def test_the_window_rows_still_use_the_same_judgement() -> None:
+    import inspect
+
+    assert "_external_row(" in inspect.getsource(launcher_probe.measure_external_rows)
+    assert "_external_row(" in inspect.getsource(
+        launcher_probe.measure_post_compensation
+    )
