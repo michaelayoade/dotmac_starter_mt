@@ -189,15 +189,18 @@ def test_a_malformed_window_aborts(ends, tmp_path) -> None:
 
 
 def test_the_role_and_the_pair_must_agree(ends, tmp_path) -> None:
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
     result = _run(
         ends,
-        _inputs(tmp_path, plan=_plan(role="negative")),  # a PositivePair
+        _inputs(first, plan=_plan(role="negative")),  # a PositivePair
         lambda _chan: None,
     )
     assert result.refusal_code == "role-pair-mismatch"
     result = _run(
         ends,
-        _inputs(tmp_path, pair=CLAIMS),  # positive role, negative claims
+        _inputs(second, pair=CLAIMS),  # positive role, negative claims
         lambda _chan: None,
     )
     assert result.refusal_code == "role-pair-mismatch"

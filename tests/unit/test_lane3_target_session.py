@@ -171,11 +171,9 @@ def test_a_seventh_row_that_is_not_row_8_is_refused() -> None:
 def _row8(**overrides: Any) -> dict[str, Any]:
     import lane3_negative_proof as nproof
 
-    return _row(
-        nproof.ROW_CODE,
-        evidence=[nproof.row_evidence(b"member")],
-        **overrides,
-    )
+    values: dict[str, Any] = {"evidence": [nproof.row_evidence(b"member")]}
+    values.update(overrides)
+    return _row(nproof.ROW_CODE, **values)
 
 
 def test_row_8_is_accepted_as_a_seventh_row_by_shape_only() -> None:

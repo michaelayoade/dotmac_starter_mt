@@ -105,7 +105,7 @@ def test_a_stored_fingerprint_that_is_not_the_keys_is_refused(world: World) -> N
         ("status", "unknown"),
         ("status", "ACTIVE"),
         ("status", None),
-        ("target_id", OTHER_UUID.upper()),
+        ("target_id", "9A8B7C6D-5E4F-4A3B-8C2D-1E0F9A8B7C6D"),
         ("target_id", "not-a-uuid"),
         ("key_id", ""),
         ("key_id", "has space"),

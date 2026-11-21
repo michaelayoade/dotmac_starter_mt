@@ -128,11 +128,11 @@ def test_row_8_must_carry_exactly_the_member_digest(world: World, bound) -> None
     refused(world, "compensation-row-mismatch")
 
 
-def test_a_blocked_row_8_is_refused(world: World) -> None:  # noqa: F811
+def test_a_blocked_row_8_does_not_publish(world: World) -> None:  # noqa: F811
     world.build_receipt(
         world._grant, world._descriptor_digest, row8_status=RequirementStatus.BLOCKED
     )
-    refused(world, "compensation-row-mismatch")
+    refused(world, "receipt-not-published")
 
 
 def test_a_proof_not_the_one_row_8_binds_is_refused(world: World) -> None:  # noqa: F811
