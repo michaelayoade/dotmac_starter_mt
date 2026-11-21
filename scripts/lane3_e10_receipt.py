@@ -37,6 +37,7 @@ __all__ = [
     "E10ReceiptRef",
     "ReceiptRefused",
     "require_enrolment_matches",
+    "require_vm_slot",
     "validate_incarnation_fingerprint",
 ]
 
@@ -172,6 +173,21 @@ class E10ReceiptRef:
             raise ReceiptRefused("receipt-machine-id-mismatch")
         if self.incarnation_key_destroyed_at > store_time:
             raise ReceiptRefused("incarnation-key-not-destroyed-before-launch")
+
+
+def require_vm_slot(receipt: E10ReceiptRef) -> str:
+    """The receipt's `vm_slot`, or a refusal BEFORE launch.
+
+    The release document's `vm_slot` is sourced from the receipt. A NULL or
+    off-grammar value means no lease release can ever be written, so the host
+    would stay held after it was mutated. Refuse while nothing has been touched.
+    """
+    slot = receipt.vm_slot
+    if slot is None:
+        raise ReceiptRefused("receipt-vm-slot-required")
+    if not isinstance(slot, str) or not _VM_SLOT.fullmatch(slot):
+        raise ReceiptRefused("receipt-vm-slot-invalid")
+    return slot
 
 
 MAX_CONTEXT_BYTES: Final = 1024 * 1024
