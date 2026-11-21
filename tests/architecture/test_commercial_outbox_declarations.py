@@ -107,7 +107,11 @@ def test_collections_declares_exactly_the_events_its_service_emits() -> None:
     assert emitted == {
         "collections.action.requested.v1",
         "collections.notice.requested.v1",
+        "collections.subject.access_hold.v1",
     }
+    # The wake-up types are produced by the caller-owned timer, not emitted here.
     assert frozenset(collections_module.outbox_event_types) == emitted | {
-        "collections.case.step_due.v1"
+        "collections.case.step_due.v1",
+        "collections.exposure.due.v1",
+        "collections.case.access_hold_due.v1",
     }
