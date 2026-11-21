@@ -312,7 +312,7 @@ def test_n3_the_positive_anchor_does_not_stand_in_for_the_negative(
 
 
 def test_n4_the_candidate_root_is_checked_for_the_negative_too(world: World) -> None:  # noqa: F811
-    world.neg.cp["candidate_root"]["revoked_at"] = ts(T + timedelta(minutes=1))
+    world.neg.cp["candidate_root"]["revoked_at"] = ts(T + timedelta(seconds=10))
     refused(world, "candidate-root-revoked")
 
 
