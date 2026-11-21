@@ -501,9 +501,9 @@ class World:
     def cp(self) -> dict[str, Any]:
         return self.export["cp_lane3"]
 
-    def verify_values(self, *, refresh_digest: bool = True) -> dict[str, Any]:
+    def verify_values(self, *, rederive_e10_digest: bool = True) -> dict[str, Any]:
         row = self.cp["e10_receipt"]
-        if refresh_digest:
+        if rederive_e10_digest:
             self.cp["e10_receipt_digest"] = cp6.receipt_digest(row)
         values: dict[str, Any] = {
             "receipt_bytes": self.receipt.canonical_bytes(),
@@ -547,8 +547,8 @@ class World:
         values.update(changes)
         return orchestrator.PresentationKeyAnchor(**values)
 
-    def run(self, *, refresh_digest: bool = True, **overrides: Any):
-        values = self.verify_values(refresh_digest=refresh_digest)
+    def run(self, *, rederive_e10_digest: bool = True, **overrides: Any):
+        values = self.verify_values(rederive_e10_digest=rederive_e10_digest)
         if "host_admission_bytes" in overrides and "refresh_digest" not in overrides:
             overrides["refresh_digest"] = hashlib.sha256(
                 overrides["host_admission_bytes"]
@@ -953,7 +953,7 @@ def test_e10_receipt_digest_mismatch_is_refused(world: World) -> None:
 
 def test_exported_receipt_digest_must_match_the_recomputation(world: World) -> None:
     world.cp["e10_receipt"]["vm_alias"] = "vm-b"
-    refused(world, "e10-receipt-export-digest-mismatch", refresh_digest=False)
+    refused(world, "e10-receipt-export-digest-mismatch", rederive_e10_digest=False)
 
 
 def test_e10_receipt_row_edited_after_the_pin_is_refused(world: World) -> None:
