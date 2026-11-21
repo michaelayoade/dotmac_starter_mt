@@ -88,23 +88,23 @@ class PresentationKeyAnchor:
 
 def _require_anchor(anchor: object) -> PresentationKeyAnchor:
     if type(anchor) is not PresentationKeyAnchor:
-        _refuse("anchor-required")
+        _refuse("required")
     assert isinstance(anchor, PresentationKeyAnchor)
     if anchor.source != ANCHOR_SOURCE:
-        _refuse("anchor-source-invalid")
+        _refuse("source-invalid")
     if (
         type(anchor.record_slug) is not str
         or not _SLUG.fullmatch(anchor.record_slug)
         or type(anchor.record_version) is not int
         or anchor.record_version < 1
     ):
-        _refuse("anchor-provenance-invalid")
+        _refuse("provenance-invalid")
     if type(anchor.key_id) is not str or not _KEY_ID.fullmatch(anchor.key_id):
-        _refuse("anchor-key-id-invalid")
+        _refuse("key-id-invalid")
     if type(anchor.key_fingerprint) is not str or not _FINGERPRINT.fullmatch(
         anchor.key_fingerprint
     ):
-        _refuse("anchor-fingerprint-invalid")
+        _refuse("fingerprint-invalid")
     return anchor
 
 

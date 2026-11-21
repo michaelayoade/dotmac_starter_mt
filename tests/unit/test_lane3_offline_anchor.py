@@ -9,6 +9,7 @@ import hashlib
 import json
 import pathlib
 import sys
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -113,7 +114,7 @@ def test_file_sha256_must_equal_the_step_13_refresh_digest(
 
 def test_an_admission_not_the_refreshed_file_is_refused(world: World) -> None:  # noqa: F811
     refresh = hashlib.sha256(_bytes(world)).hexdigest()
-    world.admission["presentation"]["statement"]["presentation_id"] = "presentation-9"
+    world.store_time = world.store_time + timedelta(seconds=1)
     world.resign_admission()
     refused("offline-anchor-refresh-digest-mismatch", world, refresh_digest=refresh)
 
@@ -121,13 +122,13 @@ def test_an_admission_not_the_refreshed_file_is_refused(world: World) -> None:  
 @pytest.mark.parametrize(
     ("changes", "code"),
     [
-        ({"source": "key-init"}, "anchor-source-invalid"),
-        ({"record_slug": ""}, "anchor-provenance-invalid"),
-        ({"record_slug": "Bad Slug"}, "anchor-provenance-invalid"),
-        ({"record_version": 0}, "anchor-provenance-invalid"),
-        ({"record_version": True}, "anchor-provenance-invalid"),
-        ({"key_id": ""}, "anchor-key-id-invalid"),
-        ({"key_fingerprint": "abc"}, "anchor-fingerprint-invalid"),
+        ({"source": "key-init"}, "source-invalid"),
+        ({"record_slug": ""}, "provenance-invalid"),
+        ({"record_slug": "Bad Slug"}, "provenance-invalid"),
+        ({"record_version": 0}, "provenance-invalid"),
+        ({"record_version": True}, "provenance-invalid"),
+        ({"key_id": ""}, "key-id-invalid"),
+        ({"key_fingerprint": "abc"}, "fingerprint-invalid"),
     ],
 )
 def test_the_anchor_and_its_provenance_are_closed(
@@ -135,11 +136,11 @@ def test_the_anchor_and_its_provenance_are_closed(
     changes: dict[str, Any],
     code: str,
 ) -> None:
-    refused(f"offline-{code}", world, anchor=_anchor(world, **changes))
+    refused(f"offline-anchor-{code}", world, anchor=_anchor(world, **changes))
 
 
 def test_an_anchor_object_of_another_type_is_refused(world: World) -> None:  # noqa: F811
-    refused("offline-anchor-anchor-required", world, anchor={"key_id": KEY_ID})
+    refused("offline-anchor-required", world, anchor={"key_id": KEY_ID})
 
 
 @pytest.mark.parametrize("digest", ["", "sha256:" + "0" * 64, "A" * 64, "0" * 63])
