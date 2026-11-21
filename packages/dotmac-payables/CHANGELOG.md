@@ -28,6 +28,20 @@ duties is an optional per-tenant policy, default off).
   default) are enforced exactly as in a6, in the service and in the database.
 - Forbidden and not done: no synthetic distinct actor strings; the audit trail names
   the one real actor.
+- DISCLOSURE (explicit widening under section 8b): with the tenant policy ON, the
+  database backstop is only as strong as the INSERT stamp. The database cannot see the
+  tenant policy, so any `app_user`-level writer (or a buggy assembly path) can insert a
+  DRAFT stamped `separation_enforced = false` and take it through single-handed. The
+  a6 unconditional CHECK prevented that. The assembly (ERP) is responsible for passing
+  the policy explicitly, reading back `separation_enforced` after create and refusing a
+  mismatch; that control is not built here.
+- `separation_of_duties` must be a real `bool`: any other value (None, 0, "") raises
+  `TypeError` before anything is written, so a falsy non-bool can never relax a row.
+- The flag joins an idempotency fingerprint only when it is `False`, so strict
+  (default) callers keep their a6 fingerprint bytes, replays and the reversal event's
+  fingerprint.
+- `pa_0007` downgrade takes `LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE` before it
+  checks for relaxed rows.
 
 ## 0.1.0a6 — unreleased
 

@@ -305,3 +305,10 @@ def test_a7_migration_stamps_the_policy_and_forbids_changing_it() -> None:
     down = source.split("def downgrade")[1]
     assert "WHERE NOT separation_enforced" in down
     assert "RuntimeError" in down
+
+
+def test_a7_downgrade_locks_the_table_before_the_relaxed_row_check() -> None:
+    down = SEVENTH_MIGRATION.read_text(encoding="utf-8").split("def downgrade")[1]
+    assert down.index("SHARE ROW EXCLUSIVE MODE") < down.index(
+        "WHERE NOT separation_enforced"
+    )

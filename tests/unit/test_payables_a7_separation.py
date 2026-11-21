@@ -13,6 +13,7 @@ from datetime import timedelta
 import pytest
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.idempotency import IdempotencyConflict
+from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_payables import models, service
 from dotmac_payables.contracts import (
     Conflict,
@@ -42,12 +43,14 @@ db = _db_fixture  # the shared in-memory payables database fixture
 ONE = "user:operator"
 
 
-def _prepare(db: Session, *, sod: bool, key: str = "a7:create"):
+def _prepare(
+    db: Session, *, sod: bool, key: str = "a7:create", number: str = "SPAY-0001"
+):
     ob = _obligation(db)
     payment = create_supplier_payment(
         db,
         scope=TenantScope(TENANT),
-        command=_command([(ob, "1000")], prepared_by=ONE),
+        command=_command([(ob, "1000")], prepared_by=ONE, number=number),
         idempotency_key=key,
         idempotency_expires_at=None,
         prepared_at=NOW,
@@ -285,3 +288,71 @@ def test_the_stamp_is_not_null_and_defaults_to_enforced() -> None:
     column = models.SupplierPayment.__table__.c.separation_enforced
     assert column.nullable is False
     assert "true" in str(column.server_default.arg).lower()
+
+
+# --- review fixes: a non-bool value must not relax, fingerprint bytes ----------
+
+
+@pytest.mark.parametrize("bad", [None, 0, "", 1, "false"])
+def test_a_non_bool_policy_is_refused_and_nothing_is_written(db: Session, bad) -> None:
+    from sqlalchemy import func, select
+
+    ob = _obligation(db)
+    before = db.scalar(select(func.count()).select_from(models.SupplierPayment))
+    with pytest.raises(TypeError, match="must be bool"):
+        create_supplier_payment(
+            db,
+            scope=TenantScope(TENANT),
+            command=_command([(ob, "1000")], prepared_by=ONE),
+            idempotency_key="a7:bad",
+            idempotency_expires_at=None,
+            prepared_at=NOW,
+            separation_of_duties=bad,
+        )
+    assert db.scalar(select(func.count()).select_from(models.SupplierPayment)) == before
+    payment, _ = _prepare(db, sod=True)
+    with pytest.raises(TypeError, match="must be bool"):
+        _approve(db, payment, by=ONE, sod=bad)
+    assert payment.status == SupplierPaymentStatus.DRAFT
+    _approve(db, payment, by="user:approver", sod=True)
+    with pytest.raises(TypeError, match="must be bool"):
+        _record(db, payment, by=ONE, sod=bad)
+    _record(db, payment, by="user:recorder", sod=True)
+    _ledger_receipt(db, payment)
+    with pytest.raises(TypeError, match="must be bool"):
+        _reverse(db, payment, by=ONE, sod=bad)
+    assert payment.status == SupplierPaymentStatus.RECORDED
+    assert (
+        db.scalar(
+            select(func.count())
+            .select_from(IdempotencyRecord)
+            .where(IdempotencyRecord.key.like("a7:bad%"))
+        )
+        == 0
+    )
+
+
+def test_the_flag_joins_the_fingerprint_only_when_relaxed(db: Session) -> None:
+    from dotmac_kernel.idempotency import fingerprint_of
+    from sqlalchemy import select
+
+    payment, _ = _prepare(db, sod=True, key="a7:fp:strict")
+    _approve(db, payment, by="user:approver", sod=True, key="a7:fp:approve")
+    record = db.scalar(
+        select(IdempotencyRecord).where(IdempotencyRecord.key == "a7:fp:approve")
+    )
+    a6_payload = {
+        "payment_id": str(payment.id),
+        "approval_reference": "approval:a7",
+        "approved_by": "user:approver",
+        "approved_at": (NOW + timedelta(hours=1)).isoformat(),
+    }
+    assert record.fingerprint == fingerprint_of(a6_payload)
+    relaxed, _ = _prepare(db, sod=False, key="a7:fp:relaxed", number="SPAY-0002")
+    _approve(db, relaxed, by=ONE, sod=False, key="a7:fp:approve2")
+    record = db.scalar(
+        select(IdempotencyRecord).where(IdempotencyRecord.key == "a7:fp:approve2")
+    )
+    assert record.fingerprint != fingerprint_of(
+        {**a6_payload, "payment_id": str(relaxed.id), "approved_by": ONE}
+    )

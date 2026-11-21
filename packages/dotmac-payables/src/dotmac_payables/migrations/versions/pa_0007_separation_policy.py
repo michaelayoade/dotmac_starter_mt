@@ -81,6 +81,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    # Block concurrent inserts between the check and the constraint swap.
+    op.execute("LOCK TABLE mod_payables.supplier_payments IN SHARE ROW EXCLUSIVE MODE")
     if bind.scalar(
         sa.text(
             "SELECT EXISTS (SELECT 1 FROM mod_payables.supplier_payments"

@@ -2579,11 +2579,15 @@ def create_supplier_payment(
     (separation enforced), so a caller that does not pass it keeps a5/a6
     behaviour. The caller is expected to pass it explicitly.
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     tenant_id = scope.tenant_id
     payload = command.fingerprint_payload()
     request_fingerprint = fingerprint_of(payload)
+    # The flag joins the fingerprint only when relaxed, so strict (default)
+    # callers keep their a6 fingerprint bytes and replays.
     command_fingerprint = fingerprint_of(
-        {**payload, "separation_of_duties": bool(separation_of_duties)}
+        payload if separation_of_duties else {**payload, "separation_of_duties": False}
     )
     preparer = str(payload["prepared_by"])
     currency = str(payload["currency_code"])
@@ -2772,16 +2776,19 @@ def approve_supplier_payment(
     The separation applies when the row was stamped ``separation_enforced`` at
     preparation or ``separation_of_duties`` is true (the stricter value wins).
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     tenant_id = scope.tenant_id
     approval = _required(approval_reference, "approval reference", 255)
     actor = _required(approved_by, "approved by", 255)
-    payload = {
+    payload: dict[str, object] = {
         "payment_id": str(payment_id),
         "approval_reference": approval,
         "approved_by": actor,
         "approved_at": approved_at.isoformat(),
-        "separation_of_duties": bool(separation_of_duties),
     }
+    if not separation_of_duties:
+        payload["separation_of_duties"] = False
     event_fingerprint = fingerprint_of(payload)
 
     def operation(session: Session) -> Mapping[str, object]:
@@ -2835,16 +2842,19 @@ def record_supplier_payment(
     preparation or ``separation_of_duties`` true; the stricter value wins).
     Nothing here calls a bank or provider.
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     tenant_id = scope.tenant_id
     reference = _required(bank_reference, "bank reference", 255)
     actor = _required(recorded_by, "recorded by", 255)
-    payload = {
+    payload: dict[str, object] = {
         "payment_id": str(payment_id),
         "bank_reference": reference,
         "recorded_by": actor,
         "recorded_at": recorded_at.isoformat(),
-        "separation_of_duties": bool(separation_of_duties),
     }
+    if not separation_of_duties:
+        payload["separation_of_duties"] = False
     event_fingerprint = fingerprint_of(payload)
 
     def operation(session: Session) -> Mapping[str, object]:
@@ -3167,17 +3177,20 @@ def reverse_supplier_payment(
     Only a payment whose original consequence was acknowledged by the ledger
     (an accounting receipt) can be reversed.
     """
+    if not isinstance(separation_of_duties, bool):
+        raise TypeError("separation_of_duties must be bool")
     tenant_id = scope.tenant_id
     why = _required(reason, "reversal reason", 2000)
     actor = _required(reversed_by, "reversed by", 255)
-    payload = {
+    payload: dict[str, object] = {
         "payment_id": str(payment_id),
         "reason": why,
         "reversal_date": reversal_date.isoformat(),
         "reversed_by": actor,
         "reversed_at": reversed_at.isoformat(),
-        "separation_of_duties": bool(separation_of_duties),
     }
+    if not separation_of_duties:
+        payload["separation_of_duties"] = False
     event_fingerprint = fingerprint_of(payload)
 
     def operation(session: Session) -> Mapping[str, object]:
