@@ -2424,6 +2424,16 @@ def _same_actor(left: str | None, right: str | None) -> bool:
     )
 
 
+def _sod_enforced(payment: SupplierPayment, separation_of_duties: bool) -> bool:
+    """The stricter of the row's stamped policy and the caller's value wins.
+
+    Separation of duties is an optional per-tenant policy (D-9). ``prepare``
+    stamps the policy in force on the row; a later step can tighten it (the
+    caller asks for separation) but never loosen it.
+    """
+    return bool(payment.separation_enforced) or separation_of_duties
+
+
 def _payment(
     db: Session, tenant_id: UUID, payment_id: UUID, *, lock: bool = False
 ) -> SupplierPayment:
@@ -2559,11 +2569,22 @@ def create_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     prepared_at: datetime,
+    separation_of_duties: bool = True,
 ) -> SupplierPayment:
-    """Prepare a DRAFT supplier payment against open obligations (no money moves)."""
+    """Prepare a DRAFT supplier payment against open obligations (no money moves).
+
+    ``separation_of_duties`` is the tenant policy in force. It is stamped on the
+    row (``separation_enforced``) and can never be changed afterwards; the later
+    approve/record/reverse steps enforce it per row. The default is ``True``
+    (separation enforced), so a caller that does not pass it keeps a5/a6
+    behaviour. The caller is expected to pass it explicitly.
+    """
     tenant_id = scope.tenant_id
     payload = command.fingerprint_payload()
     request_fingerprint = fingerprint_of(payload)
+    command_fingerprint = fingerprint_of(
+        {**payload, "separation_of_duties": bool(separation_of_duties)}
+    )
     preparer = str(payload["prepared_by"])
     currency = str(payload["currency_code"])
     supplier_ref = str(payload["supplier_ref"])
@@ -2598,6 +2619,11 @@ def create_supplier_payment(
         if existing is not None:
             if existing.request_fingerprint != request_fingerprint:
                 raise Conflict("supplier payment number names a different payment")
+            if existing.separation_enforced != bool(separation_of_duties):
+                raise Conflict(
+                    "supplier payment number was prepared under a different "
+                    "separation-of-duties policy"
+                )
             return {"payment_id": str(existing.id)}
         for obligation_id, amount in sorted(allocations, key=lambda row: str(row[0])):
             _check_allocation_payable(
@@ -2639,6 +2665,7 @@ def create_supplier_payment(
             wht_amount=withheld,
             net_amount=_money(gross - withheld),
             request_fingerprint=request_fingerprint,
+            separation_enforced=bool(separation_of_duties),
             status=SupplierPaymentStatus.DRAFT,
             prepared_by=preparer,
             prepared_at=prepared_at,
@@ -2682,7 +2709,7 @@ def create_supplier_payment(
         scope="payables.create_supplier_payment",
         key=idempotency_key,
         operation=operation,
-        fingerprint=request_fingerprint,
+        fingerprint=command_fingerprint,
         expires_at=idempotency_expires_at,
     )
     return _payment(db, tenant_id, UUID(str(outcome.result["payment_id"])))
@@ -2738,8 +2765,13 @@ def approve_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     approved_at: datetime,
+    separation_of_duties: bool = True,
 ) -> SupplierPayment:
-    """DRAFT -> APPROVED. The approver must differ from the preparer."""
+    """DRAFT -> APPROVED. The approver must differ from the preparer.
+
+    The separation applies when the row was stamped ``separation_enforced`` at
+    preparation or ``separation_of_duties`` is true (the stricter value wins).
+    """
     tenant_id = scope.tenant_id
     approval = _required(approval_reference, "approval reference", 255)
     actor = _required(approved_by, "approved by", 255)
@@ -2748,6 +2780,7 @@ def approve_supplier_payment(
         "approval_reference": approval,
         "approved_by": actor,
         "approved_at": approved_at.isoformat(),
+        "separation_of_duties": bool(separation_of_duties),
     }
     event_fingerprint = fingerprint_of(payload)
 
@@ -2755,7 +2788,9 @@ def approve_supplier_payment(
         payment = _payment(session, tenant_id, payment_id, lock=True)
         if payment.status != SupplierPaymentStatus.DRAFT:
             raise InvalidTransition("only a draft supplier payment can be approved")
-        if _same_actor(actor, payment.prepared_by):
+        if _sod_enforced(payment, separation_of_duties) and _same_actor(
+            actor, payment.prepared_by
+        ):
             raise InvalidTransition(
                 "a supplier payment cannot be approved by its preparer"
             )
@@ -2790,12 +2825,15 @@ def record_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     recorded_at: datetime,
+    separation_of_duties: bool = True,
 ) -> SupplierPayment:
     """APPROVED -> RECORDED, settling every allocation in the caller's transaction.
 
     Recording is an assertion by a human, backed by ``bank_reference``, that the
     money left through an external channel. The recorder must differ from both the
-    preparer and the approver. Nothing here calls a bank or provider.
+    preparer and the approver when separation applies (stamped on the row at
+    preparation or ``separation_of_duties`` true; the stricter value wins).
+    Nothing here calls a bank or provider.
     """
     tenant_id = scope.tenant_id
     reference = _required(bank_reference, "bank reference", 255)
@@ -2805,6 +2843,7 @@ def record_supplier_payment(
         "bank_reference": reference,
         "recorded_by": actor,
         "recorded_at": recorded_at.isoformat(),
+        "separation_of_duties": bool(separation_of_duties),
     }
     event_fingerprint = fingerprint_of(payload)
 
@@ -2812,8 +2851,9 @@ def record_supplier_payment(
         payment = _payment(session, tenant_id, payment_id, lock=True)
         if payment.status != SupplierPaymentStatus.APPROVED:
             raise InvalidTransition("only an approved supplier payment can be recorded")
-        if _same_actor(actor, payment.prepared_by) or _same_actor(
-            actor, payment.approved_by
+        if _sod_enforced(payment, separation_of_duties) and (
+            _same_actor(actor, payment.prepared_by)
+            or _same_actor(actor, payment.approved_by)
         ):
             raise InvalidTransition(
                 "a supplier payment must be recorded by someone other than "
@@ -3113,11 +3153,13 @@ def reverse_supplier_payment(
     idempotency_key: str,
     idempotency_expires_at: datetime | None,
     reversed_at: datetime,
+    separation_of_duties: bool = True,
 ) -> SupplierPayment:
     """RECORDED -> REVERSED (terminal): reopen what the payment settled.
 
     For a payment that did not clear (a bounced transfer, a wrong supplier). The
-    reverser must differ from the recorder and the approver. Every allocation's
+    reverser must differ from the recorder and the approver when separation
+    applies (stamped on the row or ``separation_of_duties`` true). Every allocation's
     amount is returned to its obligation's outstanding balance and a positive
     ``settlement_reversed`` liability event is appended; settlement evidence is
     never edited. The GL reversal is exposed by
@@ -3134,6 +3176,7 @@ def reverse_supplier_payment(
         "reversal_date": reversal_date.isoformat(),
         "reversed_by": actor,
         "reversed_at": reversed_at.isoformat(),
+        "separation_of_duties": bool(separation_of_duties),
     }
     event_fingerprint = fingerprint_of(payload)
 
@@ -3141,8 +3184,9 @@ def reverse_supplier_payment(
         payment = _payment(session, tenant_id, payment_id, lock=True)
         if payment.status != SupplierPaymentStatus.RECORDED:
             raise InvalidTransition("only a recorded supplier payment can be reversed")
-        if _same_actor(actor, payment.recorded_by) or _same_actor(
-            actor, payment.approved_by
+        if _sod_enforced(payment, separation_of_duties) and (
+            _same_actor(actor, payment.recorded_by)
+            or _same_actor(actor, payment.approved_by)
         ):
             raise InvalidTransition(
                 "a supplier payment must be reversed by someone other than "
