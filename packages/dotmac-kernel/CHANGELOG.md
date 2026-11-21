@@ -6,7 +6,28 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased (source marker 0.1.0a109+dev)
+## 0.1.0a110 — Release inventory
+
+This inventories source after the published and tagged `0.1.0a109` (source
+marker `0.1.0a109+dev`). It allocates no version and proves no publication;
+protected release authorization remains required.
+
+### Migrations
+
+Three new kernel migrations ship in this release, in order:
+
+- `0032_communication_dispatches` (file `20261118_0032_communication_dispatches.py`)
+- `0033_receipts_append_only` (file `20261119_0033_receipts_append_only.py`)
+- `0034_receipts_platform_append_only` (file
+  `20261119_0034_receipts_platform_append_only.py`; its Alembic revision id is
+  `0034_receipts_platform_ro`)
+
+### Operating caveat (K-8 relay worker)
+
+Do not run the K-8 relay worker (`DispatchRelayTransport`) on a tenant whose
+outbox carries event types other than `delivery.dispatch.v1` until M2 lands.
+The generic relay transport is only safe for the delivery-dispatch type; the
+other event types are not routed by it.
 
 ### Added
 
