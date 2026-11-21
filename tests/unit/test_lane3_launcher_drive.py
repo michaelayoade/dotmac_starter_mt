@@ -108,6 +108,11 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
         "terminal_seconds": 5.0,
         "measurers": _measurers(),
     }
+    if "execution_context" in overrides and "staged_artifacts" not in overrides:
+        # Unless a test says otherwise, the context under test IS the staged one.
+        overrides["staged_artifacts"] = {
+            "execution-context.json": overrides["execution_context"]
+        }
     values.update(overrides)
     return launcher.DriveInputs(**values)
 

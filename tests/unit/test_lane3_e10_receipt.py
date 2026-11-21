@@ -261,7 +261,8 @@ def test_a_standard_alphabet_key_is_refused_even_without_padding() -> None:
 
 
 def test_vm_slot_may_be_none_but_is_checked_when_given() -> None:
-    assert support.make_receipt().vm_slot is None
+    assert support.make_receipt(vm_slot=None).vm_slot is None
+    assert e10.require_vm_slot(support.make_receipt()) == "contabo/4242"
     assert support.make_receipt(vm_slot="dotmacproxmox/102").vm_slot == (
         "dotmacproxmox/102"
     )
