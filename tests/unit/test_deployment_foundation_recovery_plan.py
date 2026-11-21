@@ -752,6 +752,15 @@ SCRIPT_CANONICALIZING_MODULES: dict[str, int] = {
     # owns the presentation inside it, and CP `host_admission_source` reads it.
     # Written to no Foundation store, only a per-run owner-only directory.
     "lane3_host_admission.py": 1,
+    # The CP-6 export is a document CP (`lane3_record export`) PRODUCES and this
+    # module only PARSES; it is owned by that contract (`# CP-6 PIN:` markers),
+    # never by a Foundation store. Two encodings, both in-memory and never written
+    # anywhere: `canonical_json` (Control's wire form: the dispatch statement the
+    # signature covers and the envelope/ledger digests) and `_canonical` (the
+    # export's own canonical bytes: the noncanonical refusal and `receipt_digest`).
+    # `test_the_cp6_export_premise_*` (lease_persistence) proves the module has no
+    # write route of any kind and never touches the lease store.
+    "lane3_cp6_export.py": 2,
     # Public offline-verification result and protected signer policy share
     # one canonical JSON codec, owned by lane3_offline_result. Neither writes
     # a Foundation grant or persistent store.
