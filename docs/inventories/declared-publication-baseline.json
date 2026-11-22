@@ -137,11 +137,6 @@
       "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a22 carries the DELIVERY crash-safety, terminal-state retention and DELIVERY network-target fixes; published 0.1.0a21 (tag dotmac-integration-v0.1.0a21) remains immutable. This gap is NOT to be repaired by editing the version down. Remove this row in the a22 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a22 from the exact merged revision and records its verification; allocation is not publication.",
       "state": "declared-unpublished"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a110",
-      "reason": "Unpublished source successor to verified 0.1.0a109. It reserves money_flows / mod_mflows / mf / branch money_flows for the money-flows composition package; the reservation installs no module and transfers no data or writer authority. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently verified release record.",
-      "state": "declared-unpublished"
-    },
     "dotmac-money-flows": {
       "declared": "0.1.0a1",
       "reason": "Unpublished tenant-plane money-flows skeleton (manifest and mf_0001 settle_instances lineage; no flow behaviour). It awaits the kernel migration-namespace allocation, the owners' public exports and the protected release lifecycle. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
