@@ -18,7 +18,8 @@ from .client import Reply, TargetClient
 from .commands import Commands
 from .config import AgentConfig, refuse_db_environment
 from .delivery import Delivered, deliver_secret_ids
-from .files import ensure_private_dir, require_private_dir
+from .dispatch import read_identity
+from .files import ensure_private_dir, ensure_traversable_dir, require_private_dir
 from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient
 from .legacy import prepare_legacy, remove_legacy_copy
 from .materials import Materials, parse_materials
@@ -30,8 +31,8 @@ from .observation import (
     read_inflight,
     safe_id,
 )
-from .openbao import OpenBaoClient
-from .openbao_agent import install_agent_config
+from .openbao import OpenBaoSession
+from .openbao_config import check_authored_configs
 from .params import (
     PARAMS_FILE,
     PostRun,
@@ -46,7 +47,9 @@ from .params import (
 from .reconcile import reconcile_observation
 from .refusal import Refusal
 from .runner import Runner, RunResult, RunSpec
+from .systemd_creds import read_credential
 from .transfer import Transfer
+from .transport import Transport
 
 
 @dataclass(frozen=True)
@@ -63,18 +66,22 @@ class Launcher:
         config: AgentConfig,
         client: TargetClient,
         runner: Runner,
-        openbao: OpenBaoClient | None,
+        bao_transport: Transport | None,
         lease: LeaseClient,
         transfer: Transfer,
         read_only: Commands,
+        commands: Commands,
         *,
         environ: Mapping[str, str] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        root_uid: int = 0,
     ) -> None:
         self.config = config
         self.client = client
         self.runner = runner
-        self.openbao = openbao
+        self.bao_transport = bao_transport
+        self.commands = commands
+        self.root_uid = root_uid  # the owner enrolment files must have (0; tests only)
         self.lease = lease
         self.transfer = transfer
         self.read_only = read_only
@@ -84,10 +91,9 @@ class Launcher:
 
     # -- housekeeping ------------------------------------------------------
     def _prepare_dirs(self) -> None:
-        ensure_private_dir(self.config.run_dir)
+        ensure_traversable_dir(self.config.run_dir)
         ensure_private_dir(self.config.deploy_run_dir)
         ensure_private_dir(self.config.inbox_dir)
-        ensure_private_dir(self.config.openbao_agent_config_dir)
 
     def _clean_stale(self) -> None:
         """A file left by a crashed run is removed before anything else (s2.5.5)."""
@@ -136,9 +142,23 @@ class Launcher:
         if reply is None:
             return CycleResult("idle")
         try:
-            materials = parse_materials(reply.document, self.config)
+            materials = parse_materials(
+                reply.document,
+                self.config,
+                identity=read_identity(
+                    self.config.dispatch_identity_path, owner_uid=self.root_uid
+                ),
+                store_now=reply.store_now,
+            )
         except Refusal as refusal:
-            dispatch_id = safe_id(reply.document.get("dispatch_id"))
+            # Unverified: used for refusal evidence only, never as an authority.
+            envelope = reply.document.get("dispatch_envelope")
+            statement = (
+                envelope.get("statement") if isinstance(envelope, dict) else None
+            )
+            dispatch_id = safe_id(
+                statement.get("dispatch_id") if isinstance(statement, dict) else None
+            )
             self._report(self._observation(dispatch_id, "refused", refusal.code, {}))
             return CycleResult("refused", refusal.code, dispatch_id)
         try:
@@ -229,7 +249,7 @@ class Launcher:
                     param_materials={
                         p.material for p in materials.params if p.material
                     },
-                    binding_names={n.name for r in materials.bindings for n in r.names},
+                    binding_names=set(materials.active_binding_names),
                 )
                 details["legacy"] = {
                     "version": materials.legacy.version,
@@ -237,9 +257,15 @@ class Launcher:
                     "names": list(materials.legacy.names),
                 }
 
-            delivered = self._deliver(materials)
+            delivered = self._deliver(materials, details)
             details["delivered_roles"] = [
-                {"role": d.role, "single_use": d.single_use} for d in delivered
+                {
+                    "role": d.role,
+                    "single_use": d.single_use,
+                    "restarted": d.restarted,
+                    "old_accessors_destroyed": d.old_accessors_destroyed,
+                }
+                for d in delivered
             ]
 
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
@@ -251,7 +277,11 @@ class Launcher:
                     dispatch_id=materials.dispatch_id,
                     target_ref=materials.target_ref,
                     product=self.config.product,
+                    plan_digest=materials.plan_digest,
                     params_env=params_file,
+                    agent_config=self.config.config_path,
+                    bindings_env=self.config.bindings_env,
+                    credentials_directory=self.environ.get("CREDENTIALS_DIRECTORY"),
                     legacy_env=legacy_file,
                     lease_id=lease.lease_id,
                 )
@@ -300,14 +330,43 @@ class Launcher:
             return "failed", None
         return "completed", None
 
-    def _deliver(self, materials: Materials) -> tuple[Delivered, ...]:
-        if not materials.bindings:
+    def _deliver(
+        self, materials: Materials, details: dict[str, object]
+    ) -> tuple[Delivered, ...]:
+        if not materials.roles:
             return ()
-        if self.openbao is None:
+        if self.bao_transport is None:
             raise Refusal("secret_delivery_failed")
-        for role in materials.bindings:
-            install_agent_config(self.config, role)
-        return deliver_secret_ids(self.openbao, materials.bindings, self.config.run_dir)
+        # The authored configs are root-installed; the agent checks and reports them.
+        details["openbao_config"] = check_authored_configs(
+            self.config, materials.roles, required_uid=self.root_uid
+        )
+        role_id = _credential_text(
+            self.environ, self.config.delivery_role_id_credential
+        )
+        secret_id = _credential_text(
+            self.environ, self.config.delivery_secret_id_credential
+        )
+        session = OpenBaoSession(self.bao_transport, self.config.bao_namespace)
+        try:
+            session.login(role_id, secret_id)
+            return deliver_secret_ids(
+                session,
+                self.config,
+                materials.roles,
+                self.commands,
+                dispatch_id=materials.dispatch_id,
+            )
+        finally:
+            session.revoke()  # the 5 minute token never outlives the run
+
+
+def _credential_text(environ: Mapping[str, str], name: str) -> str:
+    return (
+        read_credential(environ, name, code="secret_delivery_failed")
+        .decode("utf-8")
+        .strip()
+    )
 
 
 def _detail(refusal: Refusal) -> dict[str, object]:

@@ -18,19 +18,30 @@ Observations are kept in a durable outbox until Control acknowledges them.
 - No registry pull credential, no registry egress: images arrive by governed digest transfer.
 - Secrets arrive only as systemd credentials; values are never logged or observed.
 
-## Contract assumptions to align with CP (WP5b) and Control (WP2)
+## The target API contract is Control's
 
-`wire.py`, `materials.py` and `params.py` hold every name and byte layout the
-design leaves open (header names, signed-message layout, endpoint paths, the
-materials schema, the sort rule that places `APP_IMAGE` among the other lines).
-Each is pinned by a test vector so alignment is a one-file change.
+Deployment Control owns the wire bytes, paths, materials v1, env names and
+vectors (`contract/target_api_v1.json`, ruling R1). This package vendors that file
+byte-identical under `src/dotmac_deploy_agent/contract/` and pins its sha256;
+`tests/unit/test_deploy_agent_conformance.py` fails until it is vendored. Keys and
+signatures are unpadded base64url; the target path is three plain segments.
+
+The agent acts only on a Control-signed, plan-bound dispatch (`dispatch.py`): the
+params digest, images, legacy policy and lease TTL are read from the signed plan
+binding, never from CP-supplied fields.
+
+Secrets: no chown, no capability. `secret_id` is written 0400 as the agent uid and
+read by the per-role OpenBao Agent unit through `LoadCredential`; the authored
+OpenBao configs are root-installed and only checked and reported.
 
 ## Packaging
 
 `deploy/systemd/dotmac-deploy-agent@.service` (instance = product, no
 capabilities, tmpfs RuntimeDirectory, credentials only), `deploy/launcher.sh`
 (root-owned release, pinned digest and Sigstore identity read from root-owned
-files) and `deploy/config.example.toml`. The signed build and the pinned
+files), `deploy/config.example.toml` and the enrolment kit templates under
+`deploy/enrolment/` (per-role `openbao-agent@` unit and drop-in, `tmpfiles.d`,
+and a polkit rule limited to enrolled instance names). The signed build and the pinned
 registry binary and skopeo checksums are the separate WP9 release gate.
 
 Nothing here is enabled, published or enrolled.

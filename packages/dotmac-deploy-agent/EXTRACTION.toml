@@ -32,6 +32,10 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_deploy_agent_legacy.py",
   "dotmac_starter_mt:tests/unit/test_deploy_agent_client.py",
   "dotmac_starter_mt:tests/unit/test_deploy_agent_delivery.py",
+  "dotmac_starter_mt:tests/unit/test_deploy_agent_dispatch.py",
+  "dotmac_starter_mt:tests/unit/test_deploy_agent_lease.py",
+  "dotmac_starter_mt:tests/unit/test_deploy_agent_transfer.py",
+  "dotmac_starter_mt:tests/unit/test_deploy_agent_conformance.py",
   "dotmac_starter_mt:tests/architecture/test_deploy_agent_package.py",
 ]
 contract_consumers = []

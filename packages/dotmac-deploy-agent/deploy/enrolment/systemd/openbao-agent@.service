@@ -1,0 +1,26 @@
+# Instance = <product>-<role>. One per role. Installed by the enrolment kit (P-SEC
+# s3.6); the per-instance drop-in (instance.conf.template) supplies the container
+# uid and the credential path. Without that drop-in the unit cannot start: the
+# placeholder user does not exist, so a missing enrolment fails closed.
+[Unit]
+Description=OpenBao Agent for %i (renders role secrets to tmpfs)
+After=network-online.target wg-quick@wgbao.service
+Wants=network-online.target
+# NO docker.service ordering: it would delay unrelated services when OpenBao is down.
+
+[Service]
+Type=simple
+User=dotmac-bao-unenrolled
+ExecStart=/usr/local/libexec/dotmac/bao agent -config=/etc/dotmac/openbao/%i.hcl
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# No listener, cache or api_proxy stanza exists in the authored config: nothing
+# local can borrow the Agent's token.
+
+[Install]
+WantedBy=multi-user.target

@@ -45,7 +45,7 @@ def fixture(tmp_path: Path) -> Fixture:
     deploy_dir = tmp_path / "app"
     deploy_dir.mkdir()
     policy = LegacyPolicy(
-        "v1", ("LEGACY_ONE", "LEGACY_TWO"), digest(CONTENT), NOW + timedelta(days=30)
+        1, ("LEGACY_ONE", "LEGACY_TWO"), digest(CONTENT), NOW + timedelta(days=30)
     )
     return Fixture(
         allowed,
@@ -92,7 +92,7 @@ def test_legacy_names_equal_policy(fixture: Fixture) -> None:
     other = b"LEGACY_ONE=1\nSOMETHING_ELSE=2\n"
     (fixture.creds / "legacy").write_bytes(other)
     fixture.policy = LegacyPolicy(
-        "v1", fixture.policy.names, digest(other), fixture.policy.expires_at
+        1, fixture.policy.names, digest(other), fixture.policy.expires_at
     )
     with pytest.raises(Refusal) as caught:
         prepare(fixture)
@@ -112,7 +112,7 @@ def test_legacy_refuses_collision_with_param_binding_or_app_image(
     content = b"APP_IMAGE=x\n"
     (fixture.creds / "legacy").write_bytes(content)
     fixture.policy = LegacyPolicy(
-        "v1", ("APP_IMAGE",), digest(content), NOW + timedelta(days=1)
+        1, ("APP_IMAGE",), digest(content), NOW + timedelta(days=1)
     )
     with pytest.raises(Refusal) as caught:
         prepare(fixture)
@@ -121,7 +121,7 @@ def test_legacy_refuses_collision_with_param_binding_or_app_image(
 
 def test_legacy_expired_refused_agent(fixture: Fixture) -> None:
     fixture.policy = LegacyPolicy(
-        "v1", fixture.policy.names, fixture.policy.sha256, NOW - timedelta(seconds=1)
+        1, fixture.policy.names, fixture.policy.sha256, NOW - timedelta(seconds=1)
     )
     with pytest.raises(Refusal) as caught:
         prepare(fixture)
@@ -249,7 +249,7 @@ def test_launcher_legacy_end_to_end(
     rig.runner.effect = effect
     rig.cp.materials = make_materials(
         legacy={
-            "version": "v1",
+            "policy_version": 1,
             "names": list(fixture.policy.names),
             "sha256": fixture.policy.sha256,
             "expires_at": "2027-02-05T12:00:00Z",

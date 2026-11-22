@@ -1,0 +1,6 @@
+# Drop-in: /etc/systemd/system/openbao-agent@@PRODUCT@-@ROLE@.service.d/10-instance.conf
+# @CONTAINER_USER@ is the host system user whose uid equals the container uid.
+[Service]
+User=@CONTAINER_USER@
+LoadCredential=secret_id:/run/dotmac/@PRODUCT@/@ROLE@/secret_id
+ReadWritePaths=/run/dotmac/@PRODUCT@/@ROLE@

@@ -7,7 +7,9 @@ governed deploy op the agent:
 1. checks the inbox, the archive and the pinned binaries;
 2. starts a transient registry bound to 127.0.0.1 only, storage on tmpfs, life
    capped at the lease TTL;
-3. `skopeo copy oci-archive:<file> docker://127.0.0.1:<port>/<path>@<digest>`;
+3. `skopeo copy --preserve-digests [--all] oci-archive:<file>
+   docker://127.0.0.1:<port>/<path>@<digest>`, under the enrolment-pinned
+   `--policy` and with no credentials (`--all` when the digest is an index);
 4. `docker pull` by digest (Docker verifies the content against the digest and
    records a real RepoDigest);
 5. stops the registry, deletes its storage and the archive, and checks the
@@ -19,6 +21,7 @@ produce content matching the digest, so the pull by digest fails closed.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -48,21 +51,36 @@ LOOPBACK: Final = "127.0.0.1"
 _PLANNED: Final = re.compile(r"127\.0\.0\.1:([0-9]{4,5})/([a-z0-9][a-z0-9._/-]*)")
 _REPO_PATH: Final = re.compile(r"[^/]+/(.+)")
 READY_SECONDS: Final = 15.0
+INDEX_MEDIA_TYPES: Final = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
+_ACCEPT: Final = ", ".join(
+    (
+        *sorted(INDEX_MEDIA_TYPES),
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    )
+)
 
 
 @dataclass(frozen=True)
 class TransferResult:
     """Names, digests and booleans only: this goes into the signed observation."""
 
-    name: str
+    service: str
     image_id: str
     repo_digest: str
+    media_type: str
     registry_stopped: bool
     archive_deleted: bool
 
     def as_details(self) -> dict[str, object]:
         return {
-            "name": self.name,
+            "service": self.service,
+            "media_type": self.media_type,
             "image_id": self.image_id,
             "repo_digest": self.repo_digest,
             "registry_stopped": self.registry_stopped,
@@ -111,6 +129,22 @@ def port_open(port: int) -> bool:
         return sock.connect_ex((LOOPBACK, port)) == 0
 
 
+def loopback_manifest_digest(port: int, path: str, digest: str) -> str | None:
+    """`Docker-Content-Digest` the loopback registry reports for `digest`."""
+    connection = http.client.HTTPConnection(LOOPBACK, port, timeout=15)
+    try:
+        connection.request(
+            "HEAD", f"/v2/{path}/manifests/{digest}", headers={"Accept": _ACCEPT}
+        )
+        reply = connection.getresponse()
+        reply.read()
+        return reply.getheader("Docker-Content-Digest") if reply.status == 200 else None
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        connection.close()
+
+
 def pinned(path: Path, expected_sha256: str) -> None:
     try:
         content = read_regular(path, limit=512 * 1024 * 1024)
@@ -128,6 +162,9 @@ class ImageTransfer:
         launcher: RegistryLauncher,
         *,
         probe: Callable[[int], bool] = port_open,
+        manifest_probe: Callable[
+            [int, str, str], str | None
+        ] = loopback_manifest_digest,
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -135,6 +172,7 @@ class ImageTransfer:
         self._commands = commands
         self._launcher = launcher
         self._probe = probe
+        self._manifest_probe = manifest_probe
         self._monotonic = monotonic
         self._sleep = sleep
 
@@ -162,7 +200,10 @@ class ImageTransfer:
         port, planned_path = loopback_port(image.planned_repository)
         # The planned repository is the loopback address with the SAME path, and
         # (by construction of `planned_reference`) the SAME digest as the release.
-        if planned_path != release_path(image.repository) or image.archive is None:
+        if (
+            planned_path != release_path(image.release_repository)
+            or image.planned_digest != image.release_digest
+        ):
             raise Refusal("transfer_repository_mismatch")
         inbox = self._config.inbox_dir
         try:
@@ -182,7 +223,8 @@ class ImageTransfer:
         port, planned_path, archive = self._validate(image)
         pinned(self._config.registry_binary, self._config.registry_binary_sha256)
         pinned(self._config.skopeo_path, self._config.skopeo_sha256)
-        reference = f"{LOOPBACK}:{port}/{planned_path}@{image.manifest_digest}"
+        reference = f"{LOOPBACK}:{port}/{planned_path}@{image.planned_digest}"
+        media_type = self._inspect_archive(image, archive, deadline)
 
         ensure_private_dir(self._config.registry_dir)
         ensure_private_dir(self._config.registry_dir / "data")
@@ -200,17 +242,27 @@ class ImageTransfer:
             self._run_checked(
                 (
                     str(self._config.skopeo_path),
+                    "--policy",
+                    str(self._config.skopeo_policy),
                     "copy",
+                    "--preserve-digests",
+                    *(("--all",) if media_type in INDEX_MEDIA_TYPES else ()),
                     "--dest-tls-verify=false",
+                    "--dest-no-creds",
                     f"oci-archive:{archive}",
                     f"docker://{reference}",
                 ),
                 deadline,
             )
+            if (
+                self._manifest_probe(port, planned_path, image.planned_digest)
+                != image.planned_digest
+            ):
+                raise Refusal("transfer_digest_mismatch")
             self._run_checked(
                 (str(self._config.docker_path), "pull", reference), deadline
             )
-            image_id, repo_digest = self._verify(image, reference, deadline)
+            image_id, repo_digest = self._verify(reference, deadline)
         finally:
             stopped = self._teardown(handle, port)
             shutil.rmtree(self._config.registry_dir, ignore_errors=True)
@@ -218,9 +270,31 @@ class ImageTransfer:
         if not stopped:
             raise Refusal("transfer_registry_left_running")
         return TransferResult(
-            image.name, image_id, repo_digest, registry_stopped=True,
-            archive_deleted=not archive.exists(),
+            image.service, image_id, repo_digest, media_type,
+            registry_stopped=True, archive_deleted=not archive.exists(),
         )  # fmt: skip
+
+    def _inspect_archive(self, image: ImageSpec, archive: Path, deadline: float) -> str:
+        """Prove the archive's manifest IS the release digest before anything starts,
+        and learn its media type (an index needs `--all`)."""
+        raw = self._run_checked(
+            (
+                str(self._config.skopeo_path),
+                "--policy",
+                str(self._config.skopeo_policy),
+                "inspect",
+                "--raw",
+                f"oci-archive:{archive}",
+            ),
+            deadline,
+        )
+        if "sha256:" + sha256_hex(raw) != image.release_digest:
+            raise Refusal("transfer_digest_mismatch")
+        try:
+            media_type = json.loads(raw).get("mediaType")
+        except (ValueError, AttributeError):
+            raise Refusal("transfer_digest_mismatch") from None
+        return media_type if isinstance(media_type, str) else "unknown"
 
     def _await_ready(self, handle: RegistryHandle, port: int, deadline: float) -> None:
         limit = min(READY_SECONDS, self._remaining(deadline))
@@ -239,9 +313,7 @@ class ImageTransfer:
             raise Refusal("transfer_command_failed")
         return result.stdout
 
-    def _verify(
-        self, image: ImageSpec, reference: str, deadline: float
-    ) -> tuple[str, str]:
+    def _verify(self, reference: str, deadline: float) -> tuple[str, str]:
         output = self._run_checked(
             (
                 str(self._config.docker_path),
@@ -263,7 +335,6 @@ class ImageTransfer:
             not isinstance(image_id, str)
             or not isinstance(repo_digests, list)
             or reference not in repo_digests
-            or (image.image_id is not None and image_id != image.image_id)
         ):
             raise Refusal("transfer_digest_mismatch")
         return image_id, reference

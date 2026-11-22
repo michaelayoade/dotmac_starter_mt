@@ -2,6 +2,7 @@
 # Per-host drop-ins (installed by the governed enrolment, never by the agent):
 #   ReadWritePaths=<deploy_dir>          the product's Compose directory
 #   LoadCredential=legacy:/etc/dotmac/legacy/<target>.env   (M11, existing apps only)
+# Enrolment kit (root-installed, per host): deploy/enrolment/.
 [Unit]
 Description=Dotmac deploy agent for %i (launch only)
 After=network-online.target docker.service
@@ -15,15 +16,19 @@ Group=dotmac-deploy
 # and silent drift, not against root.
 SupplementaryGroups=docker
 # tmpfs: params.env, the legacy copy, the image inbox, role files, the registry.
+# 0711: the per-role OpenBao Agent (a different uid) must traverse to its own
+# `secrets/` directory; the agent's own subdirectories stay 0700.
 RuntimeDirectory=dotmac/%i
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0711
 RuntimeDirectoryPreserve=restart
 StateDirectory=dotmac-deploy-agent/%i
 StateDirectoryMode=0700
 UMask=0077
-# Secret-zero and the PoP key arrive as credentials, never as environment.
+# Secret zero (the delivery AppRole) and the PoP key arrive as credentials, never
+# as environment, and there is no static token: the agent logs in per run.
 LoadCredential=pop-key:/etc/dotmac-deploy-agent/%i/pop-key
-LoadCredential=openbao-delivery-token:/etc/dotmac-deploy-agent/%i/openbao-delivery-token
+LoadCredential=delivery-role-id:/etc/dotmac/bao/delivery/role_id
+LoadCredential=delivery-secret-id:/etc/dotmac/bao/delivery/secret_id
 ExecStart=/opt/dotmac-deploy-agent/launcher.sh --config /etc/dotmac-deploy-agent/%i/config.toml
 Restart=on-failure
 RestartSec=30
@@ -31,7 +36,8 @@ KillMode=control-group
 # A run in flight is finished or fenced by Foundation, not cut off by the agent.
 TimeoutStopSec=infinity
 NoNewPrivileges=true
-# No capabilities: a secret_id cannot be chown'd to a container uid by the agent.
+# No capabilities, ever: the agent writes secret_id as its own uid; the per-role
+# OpenBao Agent reads it through LoadCredential (see deploy/enrolment/).
 CapabilityBoundingSet=
 AmbientCapabilities=
 PrivateTmp=true

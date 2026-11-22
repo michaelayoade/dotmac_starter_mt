@@ -1,54 +1,63 @@
 """Test doubles for dotmac-deploy-agent: a CP target-API double, OpenBao, a runner.
 
 The CP double is also the executable statement of the wire contract the agent
-codes against (DESIGN-rev3 s2.6): it VERIFIES the PoP signature, the credential
-and target binding, the clock window and the nonce, and it SIGNS every response.
+codes against (DESIGN-rev3 s2.6, ruling R1): it VERIFIES the PoP signature, the
+credential and target binding, the clock window and the nonce, and it SIGNS every
+response. Materials carry a Control-signed dispatch envelope and its plan
+snapshot, built here with a stand-in Control dispatch key.
 Documentation ranges and placeholders only.
 """
+# ruff: noqa: E501
 
 from __future__ import annotations
 
-import base64
 import json
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
 from dotmac_deploy_agent import wire
+from dotmac_deploy_agent.canon import canonical_json
 from dotmac_deploy_agent.client import TargetClient
 from dotmac_deploy_agent.commands import CommandResult, ReadOnlyCommands
 from dotmac_deploy_agent.config import AgentConfig
+from dotmac_deploy_agent.dispatch import fingerprint_of, plan_digest_of
 from dotmac_deploy_agent.launcher import Launcher
 from dotmac_deploy_agent.lease import LeaseClient
-from dotmac_deploy_agent.openbao import OpenBaoClient
 from dotmac_deploy_agent.params import Param, canonical_render, render_digest
 from dotmac_deploy_agent.refusal import Refusal
 from dotmac_deploy_agent.runner import RunResult, RunSpec
 from dotmac_deploy_agent.transfer import TransferResult
 from dotmac_deploy_agent.transport import Response
+from dotmac_deploy_agent.wire import encode_b64url
 
 TARGET = "erp/staging/host-a"
 NOW = datetime(2027, 1, 6, 12, 0, 0, tzinfo=UTC)
 IMAGE_DIGEST = "sha256:" + "a" * 64
 APP_IMAGE = f"127.0.0.1:5000/org/app@{IMAGE_DIGEST}"
-MANIFEST_DIGEST = IMAGE_DIGEST
 PREVIOUS_IMAGE = "127.0.0.1:5000/org/app@sha256:" + "b" * 64
+DISPATCH_KEY_ID = "control-dispatch-1"
+
+#: A stand-in for Control's dispatch signing key. Shared so `make_materials()`
+#: works without a rig; a test that needs a rogue signer passes its own.
+DISPATCH_KEY = Ed25519PrivateKey.generate()
 
 
-def b64(raw: bytes) -> str:
-    return base64.b64encode(raw).decode("ascii")
-
-
-def public_b64(key: Ed25519PrivateKey) -> str:
-    return b64(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+def public_b64url(key: Ed25519PrivateKey) -> str:
+    return encode_b64url(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
 
 
 @dataclass
@@ -57,40 +66,73 @@ class Keys:
     cp: Ed25519PrivateKey = field(default_factory=Ed25519PrivateKey.generate)
 
     def seed(self) -> bytes:
-        from cryptography.hazmat.primitives.serialization import (
-            NoEncryption,
-            PrivateFormat,
-        )
-
-        return b64(
+        return encode_b64url(
             self.agent.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
         ).encode()
 
 
+def write_identity(path: Path, key: Ed25519PrivateKey = DISPATCH_KEY) -> None:
+    """`PlatformCpPublicVerificationIdentity.v1` for the stand-in dispatch key."""
+    raw = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "PlatformCpPublicVerificationIdentity.v1",
+                "key_id": DISPATCH_KEY_ID,
+                "algorithm": "ed25519",
+                "purpose": "deployment_dispatch",
+                "public_key_b64url": encode_b64url(raw),
+                "public_key_fingerprint": fingerprint_of(raw),
+            }
+        )
+    )
+    path.chmod(0o644)
+
+
 def make_config(tmp_path: Path, keys: Keys, **overrides: object) -> AgentConfig:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     root = tmp_path / "run"
     root.mkdir(exist_ok=True)
     state = tmp_path / "state"
     state.mkdir(exist_ok=True, mode=0o700)
     app = tmp_path / "app"
     app.mkdir(exist_ok=True)
+    identity = tmp_path / "identities" / "dispatch.json"
+    write_identity(identity)
+    bao_dir = tmp_path / "openbao"
+    bao_dir.mkdir(exist_ok=True, mode=0o755)
+    bao_dir.chmod(0o755)
     values: dict[str, object] = {
         "cp_url": "https://cp.example.invalid",
         "target_ref": TARGET,
         "credential_id": "cred-1",
-        "cp_response_public_keys_b64": (public_b64(keys.cp),),
+        "cp_response_public_keys_b64url": (public_b64url(keys.cp),),
         "cp_spki_sha256": ("c" * 64,),
         "state_dir": state,
         "deploy_dir": app,
         "foundation_argv": ("/usr/local/bin/foundation-run",),
         "openbao_url": "http://192.0.2.10:8200",
-        "openbao_agent_config_dir": state / "bao",
+        "openbao_config_dir": bao_dir,
         "registry_binary": Path("/usr/local/bin/registry"),
         "registry_binary_sha256": "d" * 64,
         "skopeo_path": Path("/usr/bin/skopeo"),
         "skopeo_sha256": "e" * 64,
+        "skopeo_policy": Path("/etc/dotmac/skopeo/policy.json"),
         "reconcile_containers": ("erp-app",),
+        "bindings_env": (
+            ("AUTHORIZATION_VERIFICATION_IDENTITY", "/etc/dotmac/identities/auth.json"),
+            ("DISPATCH_VERIFICATION_IDENTITY", str(identity)),
+            ("EXECUTION_CONTEXT_MATERIALS", "/etc/dotmac/bindings/context.json"),
+            ("HOST_ADMISSION_MATERIALS", "/etc/dotmac/bindings/admission.json"),
+            ("RELEASE_EVIDENCE_REPOSITORY", "release-evidence-repo"),
+            (
+                "RELEASE_EVIDENCE_VERIFICATION_IDENTITY",
+                "/etc/dotmac/identities/evidence.json",
+            ),
+        ),
         "runtime_root": root,
+        "config_path": tmp_path / "config.toml",
     }
     values.update(overrides)
     return AgentConfig(**values)  # type: ignore[arg-type]
@@ -119,37 +161,103 @@ def to_params(rows: list[dict[str, object]]) -> list[Param]:
 def base_images() -> list[dict[str, object]]:
     return [
         {
-            "name": "app",
+            "service": "app",
             "source": "transfer",
-            "repository": "registry.example.invalid/org/app",
-            "manifest_digest": MANIFEST_DIGEST,
+            "release_repository": "registry.example.invalid/org/app",
+            "release_digest": IMAGE_DIGEST,
             "planned_repository": "127.0.0.1:5000/org/app",
-            "image_id": "sha256:" + "f" * 64,
-            "archive": "app.oci.tar",
+            "planned_digest": IMAGE_DIGEST,
         }
     ]
 
 
+def make_statement(
+    plan_digest: str, *, dispatch_id: str = "dispatch-1", **overrides: object
+) -> dict[str, object]:
+    raw = DISPATCH_KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    statement: dict[str, object] = {
+        "schema": "dotmac.deployment-dispatch",
+        "version": 1,
+        "purpose": "deployment_dispatch",
+        "dispatch_id": dispatch_id,
+        "authorization_id": "auth-1",
+        "authorization_plan_id": "plan-1",
+        "authorization_control_version": "0.1.0a18",
+        "authorization_key_id": "control-authorization-1",
+        "authorization_public_key_fingerprint": "sha256:" + "1" * 64,
+        "authorization_envelope_digest": "sha256:" + "2" * 64,
+        "execution_sequence": 1,
+        "attempt_no": 1,
+        "rollout_ref": "rollout-1",
+        "target_id": "target-1",
+        "target_ref": TARGET,
+        "product_code": "erp",
+        "environment": "staging",
+        "operation": "deploy",
+        "release_ref": "release-1",
+        "authorized_images": [],
+        "plan_digest": plan_digest,
+        "descriptor_digest": "sha256:" + "3" * 64,
+        "execution_plan_digest": "sha256:" + "4" * 64,
+        "issued_at": "2027-01-06T11:59:00Z",
+        "control_version": "0.1.0a18",
+        "key_id": DISPATCH_KEY_ID,
+        "algorithm": "ed25519",
+        "public_key_fingerprint": fingerprint_of(raw),
+    }
+    statement.update(overrides)
+    return statement
+
+
+def sign_envelope(
+    statement: dict[str, object], key: Ed25519PrivateKey = DISPATCH_KEY
+) -> dict[str, object]:
+    return {
+        "statement": statement,
+        "signature": encode_b64url(key.sign(canonical_json(statement))),
+    }
+
+
 def make_materials(**overrides: object) -> dict[str, object]:
+    """A materials document the way CP serves it: a Control-signed envelope, the
+    plan snapshot it binds, and the few CP-supplied fields (ruling R1)."""
     params = overrides.pop("params", None) or base_params()
     app_image = str(overrides.pop("app_image", APP_IMAGE))
     try:
         digest = render_digest(canonical_render(to_params(params), app_image))  # type: ignore[arg-type]
     except Refusal:
         digest = "sha256:" + "0" * 64  # a refused render has no honest digest
+    binding: dict[str, object] = {
+        "deploy_unit_digest": "sha256:" + "5" * 64,
+        "product_toml_sha256": "sha256:" + "6" * 64,
+        "params_env_digest": overrides.pop("params_env_digest", digest),
+        "images": overrides.pop("images", base_images()),
+        "lease_ttl_seconds": overrides.pop("lease_ttl_seconds", 900),
+        "active_binding_names": overrides.pop("active_binding_names", []),
+        "legacy": overrides.pop("legacy", None),
+        "companion_order": None,
+    }
+    snapshot: dict[str, object] = {
+        "deploy_binding": binding,
+        "release_ref": "release-1",
+    }
+    snapshot.update(overrides.pop("snapshot_extra", {}))  # type: ignore[arg-type]
+    plan_digest = plan_digest_of(snapshot)
+    statement = make_statement(
+        plan_digest,
+        dispatch_id=str(overrides.pop("dispatch_id", "dispatch-1")),
+        **overrides.pop("statement", {}),  # type: ignore[arg-type]
+    )
+    envelope = sign_envelope(statement, overrides.pop("sign_with", DISPATCH_KEY))  # type: ignore[arg-type]
     document: dict[str, object] = {
         "schema": "dotmac.deploy_target_materials/1",
         "pending": True,
-        "dispatch_id": "dispatch-1",
-        "target_ref": TARGET,
+        "dispatch_envelope": envelope,
+        "plan_snapshot": snapshot,
         "params": params,
         "app_image": app_image,
         "previous_app_image": PREVIOUS_IMAGE,
-        "params_env_digest": digest,
-        "bindings": [],
-        "legacy": None,
-        "images": base_images(),
-        "lease_ttl_seconds": 900,
+        "roles": [],
     }
     document.update(overrides)
     return document
@@ -165,15 +273,16 @@ class FakeCp:
         self.observations: list[dict[str, object]] = []
         self.nonces: set[str] = set()
         self.calls: list[tuple[str, str]] = []
+        self.paths: list[str] = []
         self.overrides: dict[str, tuple[int, dict[str, object]]] = {}
+        self.raw_status: dict[str, int] = {}
         self.store_now_override: str | None = None
         self.tamper_signature = False
         self.omit_signature = False
         self.status_5xx = False
-        self.handlers: dict[str, Callable[[dict[str, object]], dict[str, object]]] = {}
         self.standing = "CLEAN"
         self.lease_log: list[tuple[str, dict[str, object]]] = []
-        self.handlers = {
+        self.handlers: dict[str, Callable[[dict[str, object]], dict[str, object]]] = {
             "lease/standing": lambda _p: {"standing": self.standing},
             "lease/acquire": self._acquire,
             "lease/covers": lambda p: self._log("lease/covers", p) | {"covers": True},
@@ -193,6 +302,7 @@ class FakeCp:
         self, method: str, path: str, headers: Mapping[str, str], body: bytes
     ) -> Response:
         nonce = headers[wire.H_NONCE]
+        self.paths.append(path)
         message = wire.request_message(
             method=method,
             path=path,
@@ -205,16 +315,24 @@ class FakeCp:
         public = Ed25519PublicKey.from_public_bytes(
             self.keys.agent.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         )
+        signature = wire.decode_b64url(headers[wire.H_SIGNATURE], length=64)
         try:
-            public.verify(base64.b64decode(headers[wire.H_SIGNATURE]), message)
+            if signature is None:
+                raise InvalidSignature
+            public.verify(signature, message)
         except InvalidSignature:
             return self._reply(method, path, nonce, 401, {"error": "bad_signature"})
         prefix = f"{wire.BASE_PATH}/targets/"
-        target, _, endpoint = path[len(prefix) :].partition("/")
-        if unquote(target) != headers[wire.H_TARGET] or nonce in self.nonces:
+        product, environment, host, endpoint = path[len(prefix) :].split("/", 3)
+        if (
+            f"{product}/{environment}/{host}" != headers[wire.H_TARGET]
+            or nonce in self.nonces
+        ):
             return self._reply(method, path, nonce, 403, {"error": "target_or_replay"})
         self.nonces.add(nonce)
         self.calls.append((method, endpoint))
+        if endpoint in self.raw_status:
+            return Response(self.raw_status[endpoint], {}, b"")
         if self.status_5xx:
             return Response(503, {}, b"upstream")
         if endpoint in self.overrides:
@@ -244,41 +362,77 @@ class FakeCp:
                 method=method, path=path, request_nonce=nonce, status=status, body=body
             )
         )
-        headers = {wire.H_RESPONSE_SIGNATURE.lower(): b64(signature)}
+        headers = {wire.H_RESPONSE_SIGNATURE.lower(): encode_b64url(signature)}
         if self.tamper_signature:
-            headers = {wire.H_RESPONSE_SIGNATURE.lower(): b64(b"x" * 64)}
+            headers = {wire.H_RESPONSE_SIGNATURE.lower(): encode_b64url(b"x" * 64)}
         if self.omit_signature:
             headers = {}
         return Response(status, headers, body)
 
 
 class FakeBaoTransport:
-    """OpenBao responses for the delivery identity. Records paths, never values."""
+    """OpenBao as the delivery identity sees it. Records paths and bodies, never values."""
 
     SECRET = "secret-id-value-for-tests"
+    TOKEN = "delivery-token-1"
 
     def __init__(self) -> None:
         self.paths: list[str] = []
+        self.requests: list[tuple[str, str, dict[str, str], dict[str, object]]] = []
+        self.minted: dict[str, str] = {}
+        self.counter = 0
+        self.fail_lookup = False
+        self.lookup_path: str | None = None
+        self.fail_destroy = False
+        self.revoked = False
 
     def request(
         self, method: str, path: str, headers: Mapping[str, str], body: bytes
     ) -> Response:
         self.paths.append(path)
-        if path.endswith("/role-id"):
-            return Response(
-                200, {}, json.dumps({"data": {"role_id": "role-id-1"}}).encode()
-            )
-        if path.endswith("/secret-id"):
-            assert headers.get("X-Vault-Wrap-TTL")
-            return Response(
-                200, {}, json.dumps({"wrap_info": {"token": "wrap-1"}}).encode()
-            )
+        payload = json.loads(body) if body else {}
+        self.requests.append((method, path, dict(headers), payload))
+        assert headers["X-Vault-Namespace"] == "staging"
+        if path == "/v1/auth/approle-delivery/login":
+            assert set(payload) == {"role_id", "secret_id"}
+            return self._ok({"auth": {"client_token": self.TOKEN}})
+        if path == "/v1/auth/token/revoke-self":
+            assert headers["X-Vault-Token"] == self.TOKEN
+            self.revoked = True
+            return Response(204, {}, b"")
+        if path.endswith("/secret-id") and "/role/" in path:
+            assert headers["X-Vault-Token"] == self.TOKEN
+            assert headers["X-Vault-Wrap-TTL"]
+            assert set(payload) <= {"metadata", "ttl", "num_uses"}
+            self.counter += 1
+            wrap = f"wrap-{self.counter}"
+            self.minted[wrap] = path.removeprefix("/v1/")
+            return self._ok({"wrap_info": {"token": wrap}})
+        if path == "/v1/sys/wrapping/lookup":
+            if self.fail_lookup:
+                return Response(400, {}, b"{}")
+            minted = self.minted.get(str(payload["token"]), "")
+            return self._ok({"data": {"creation_path": self.lookup_path or minted}})
         if path == "/v1/sys/wrapping/unwrap":
-            assert headers["X-Vault-Token"] == "wrap-1"
-            return Response(
-                200, {}, json.dumps({"data": {"secret_id": self.SECRET}}).encode()
+            assert headers["X-Vault-Token"] in self.minted
+            return self._ok(
+                {
+                    "data": {
+                        "secret_id": self.SECRET,
+                        "secret_id_accessor": f"accessor-{headers['X-Vault-Token']}",
+                    }
+                }
             )
+        if path.endswith("/secret-id-accessor/destroy"):
+            assert headers["X-Vault-Token"] == self.TOKEN
+            if self.fail_destroy:
+                return Response(500, {}, b"{}")
+            return Response(204, {}, b"")
         return Response(404, {}, b"{}")
+
+    @staticmethod
+    def _ok(document: dict[str, object]) -> Response:
+        return Response(200, {}, json.dumps(document).encode())
 
 
 class FakeRunner:
@@ -310,14 +464,15 @@ class FakeTransfer:
         self.error: Refusal | None = None
 
     def transfer_all(self, images, *, ttl_seconds):  # type: ignore[no-untyped-def]
-        self.calls.append(tuple(i.name for i in images))
+        self.calls.append(tuple(i.service for i in images))
         if self.error is not None:
             raise self.error
         return tuple(
             TransferResult(
-                i.name,
-                i.image_id or "sha256:" + "0" * 64,
+                i.service,
+                "sha256:" + "0" * 64,
                 i.planned_reference,
+                "application/vnd.oci.image.manifest.v1+json",
                 True,
                 True,
             )
@@ -327,7 +482,8 @@ class FakeTransfer:
 
 
 class FakeCommands:
-    """Scripted external commands. `script` maps a verb tuple to a result."""
+    """Scripted external commands. `script` maps a verb tuple to a result; the
+    verbs may sit anywhere after the executable (global flags come first)."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
@@ -335,8 +491,10 @@ class FakeCommands:
 
     def run(self, argv: tuple[str, ...], *, timeout: float) -> CommandResult:
         self.calls.append(argv)
+        rest = argv[1:]
         for verbs, result in self.script.items():
-            if argv[1 : 1 + len(verbs)] == verbs:
+            width = len(verbs)
+            if any(rest[i : i + width] == verbs for i in range(len(rest) - width + 1)):
                 return result
         return CommandResult(0, b"")
 
@@ -352,6 +510,17 @@ class Rig:
     environ: dict[str, str]
     transfer: FakeTransfer
     commands: FakeCommands
+    systemctl: FakeCommands
+
+
+def prepare_role(rig: Rig, role: str) -> None:
+    """What enrolment does: the role directory (tmpfiles.d) and the authored config."""
+    role_dir = rig.config.run_dir / role
+    role_dir.mkdir(parents=True, exist_ok=True)
+    role_dir.chmod(0o711)
+    authored = rig.config.openbao_config_dir / f"{rig.config.product}-{role}.hcl"
+    authored.write_text(f"# authored config for {role}\n")
+    authored.chmod(0o644)
 
 
 def make_rig(
@@ -367,19 +536,30 @@ def make_rig(
     bao = FakeBaoTransport()
     runner = runner or FakeRunner()
     env = environ if environ is not None else {}
+    if "CREDENTIALS_DIRECTORY" not in env:
+        creds = tmp_path / "credentials"
+        creds.mkdir(exist_ok=True, mode=0o700)
+        (creds / "delivery-role-id").write_text("delivery-role-id-value")
+        (creds / "delivery-secret-id").write_text("delivery-secret-id-value")
+        env["CREDENTIALS_DIRECTORY"] = str(creds)
     signer = wire.PopSigner.from_seed(config.credential_id, keys.seed())
     client = TargetClient(config, signer, cp, clock=lambda: NOW)
     transfer = FakeTransfer()
     commands = FakeCommands()
+    systemctl = FakeCommands()
     launcher = Launcher(
         config,
         client,
         runner,
-        OpenBaoClient(bao, "delivery-token", "staging/erp"),
+        bao,
         LeaseClient(client),
         transfer,
         ReadOnlyCommands(commands),
+        systemctl,
         environ=env,
         clock=lambda: NOW,
+        root_uid=os.geteuid(),
     )
-    return Rig(config, keys, cp, runner, bao, launcher, env, transfer, commands)
+    return Rig(
+        config, keys, cp, runner, bao, launcher, env, transfer, commands, systemctl
+    )

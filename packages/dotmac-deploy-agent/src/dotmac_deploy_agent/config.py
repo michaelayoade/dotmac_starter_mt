@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 import re
 import stat
@@ -14,6 +13,7 @@ from typing import Final
 from urllib.parse import urlparse
 
 from .refusal import Refusal
+from .wire import decode_b64url
 
 DB_ENV_EXACT: Final = frozenset(
     {
@@ -51,31 +51,71 @@ def protected_config_file(path: Path) -> None:
         raise Refusal("config_invalid")
 
 
+BINDINGS_ENV_REQUIRED: Final = (
+    "AUTHORIZATION_VERIFICATION_IDENTITY",
+    "DISPATCH_VERIFICATION_IDENTITY",
+    "EXECUTION_CONTEXT_MATERIALS",
+    "HOST_ADMISSION_MATERIALS",
+    "RELEASE_EVIDENCE_REPOSITORY",
+    "RELEASE_EVIDENCE_VERIFICATION_IDENTITY",
+)
+BINDINGS_ENV_OPTIONAL: Final = ("DISPATCH_CLOCK_SKEW_LIMIT_SECONDS",)
+_PATH_VALUED: Final = re.compile(r".*_(IDENTITY|MATERIALS)$")
+
+
+def _check_bindings_env(pairs: tuple[tuple[str, str], ...]) -> None:
+    """The names the CP bindings already require, taken from the root-owned config."""
+    names = [name for name, _ in pairs]
+    allowed = set(BINDINGS_ENV_REQUIRED) | set(BINDINGS_ENV_OPTIONAL)
+    if len(set(names)) != len(names) or not set(names) <= allowed:
+        raise Refusal("config_invalid")
+    if not set(BINDINGS_ENV_REQUIRED) <= set(names):
+        raise Refusal("config_invalid")
+    for name, value in pairs:
+        if (
+            not value
+            or len(value) > 4096
+            or "\n" in value
+            or "\x00" in value
+            or value != value.strip()
+            or (_PATH_VALUED.fullmatch(name) and not os.path.isabs(value))
+        ):
+            raise Refusal("config_invalid")
+
+
 @dataclass(frozen=True)
 class AgentConfig:
     cp_url: str
     target_ref: str
     credential_id: str
-    cp_response_public_keys_b64: tuple[str, ...]
+    cp_response_public_keys_b64url: tuple[str, ...]
     cp_spki_sha256: tuple[str, ...]
     state_dir: Path
     deploy_dir: Path
     foundation_argv: tuple[str, ...]
     openbao_url: str
-    openbao_agent_config_dir: Path
+    openbao_config_dir: Path
     registry_binary: Path
     registry_binary_sha256: str
     skopeo_path: Path
     skopeo_sha256: str
+    skopeo_policy: Path
     reconcile_containers: tuple[str, ...]
+    bindings_env: tuple[tuple[str, str], ...]
     cp_ca_file: Path | None = None
     runtime_root: Path = Path("/run/dotmac")
     pop_key_credential: str = "pop-key"  # nosec B105 - a credential NAME, not a value
-    delivery_token_credential: str = "openbao-delivery-token"  # nosec B105
+    delivery_role_id_credential: str = "delivery-role-id"
+    delivery_secret_id_credential: str = "delivery-secret-id"  # nosec B105
     legacy_source_path: Path | None = None
     docker_path: Path = Path("/usr/bin/docker")
+    systemctl_path: Path = Path("/usr/bin/systemctl")
+    runtime_secret_id_ttl_seconds: int = 35 * 86400
+    migrate_secret_id_ttl_seconds: int = 900
+    wrap_ttl_seconds: int = 120
     poll_seconds: int = 45
     foundation_timeout_seconds: int = 2700
+    config_path: Path | None = None
     version: str = "0.1.0a1"
 
     @property
@@ -92,6 +132,11 @@ class AgentConfig:
         if match is None:
             raise Refusal("config_invalid")
         return (match[1], match[2], match[3])
+
+    @property
+    def bao_namespace(self) -> str:
+        """The PARENT namespace `<env>`: login and mint both happen here (R4)."""
+        return self.environment
 
     @property
     def run_dir(self) -> Path:
@@ -112,6 +157,11 @@ class AgentConfig:
     def deploy_run_dir(self) -> Path:
         """`/run/dotmac/<product>/deploy`: params.env and the legacy copy live here."""
         return self.run_dir / "deploy"
+
+    @property
+    def dispatch_identity_path(self) -> Path:
+        """The enrolment-pinned dispatch identity (the same file the bindings get)."""
+        return Path(dict(self.bindings_env)["DISPATCH_VERIFICATION_IDENTITY"])
 
     def __post_init__(self) -> None:
         _ = self.target_parts
@@ -141,18 +191,16 @@ class AgentConfig:
             raise Refusal("config_invalid")
         if not _ID.fullmatch(self.credential_id):
             raise Refusal("config_invalid")
+        # The CP response key is a DISTINCT key from Control's dispatch key (U13).
         if (
-            not self.cp_response_public_keys_b64
-            or len(self.cp_response_public_keys_b64) > 2
+            not self.cp_response_public_keys_b64url
+            or len(self.cp_response_public_keys_b64url) > 2
+            or any(
+                decode_b64url(key, length=32) is None
+                for key in self.cp_response_public_keys_b64url
+            )
         ):
             raise Refusal("config_invalid")
-        for key in self.cp_response_public_keys_b64:
-            try:
-                raw = base64.b64decode(key, validate=True)
-            except ValueError:
-                raise Refusal("config_invalid") from None
-            if len(raw) != 32:
-                raise Refusal("config_invalid")
         # The SPKI pin is mandatory: the CP is pinned at enrolment (DESIGN-rev3 s3.1).
         if not self.cp_spki_sha256 or not all(
             _HEX64.fullmatch(pin) for pin in self.cp_spki_sha256
@@ -161,16 +209,20 @@ class AgentConfig:
         paths = [
             self.state_dir,
             self.deploy_dir,
-            self.openbao_agent_config_dir,
+            self.openbao_config_dir,
             self.runtime_root,
             self.registry_binary,
             self.skopeo_path,
+            self.skopeo_policy,
             self.docker_path,
+            self.systemctl_path,
         ]
         if self.cp_ca_file is not None:
             paths.append(self.cp_ca_file)
         if self.legacy_source_path is not None:
             paths.append(self.legacy_source_path)
+        if self.config_path is not None:
+            paths.append(self.config_path)
         if not all(path.is_absolute() for path in paths):
             raise Refusal("config_invalid")
         if (
@@ -188,9 +240,16 @@ class AgentConfig:
             _ID.fullmatch(name) for name in self.reconcile_containers
         ):
             raise Refusal("config_invalid")
+        _check_bindings_env(self.bindings_env)
         if not 30 <= self.poll_seconds <= 60:
             raise Refusal("config_invalid")
         if not 1 <= self.foundation_timeout_seconds <= 7200:
+            raise Refusal("config_invalid")
+        if not 60 <= self.wrap_ttl_seconds <= 300:  # the policy's wrapping bounds
+            raise Refusal("config_invalid")
+        if not 60 <= self.migrate_secret_id_ttl_seconds <= 3600:
+            raise Refusal("config_invalid")
+        if not 3600 <= self.runtime_secret_id_ttl_seconds <= 90 * 86400:
             raise Refusal("config_invalid")
 
     @classmethod
@@ -203,18 +262,23 @@ class AgentConfig:
                 values = tomllib.load(stream)
         except (OSError, tomllib.TOMLDecodeError):
             raise Refusal("config_invalid") from None
-        return cls.from_mapping(values)
+        return cls.from_mapping(values, config_path=path)
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, object]) -> AgentConfig:
+    def from_mapping(
+        cls, values: Mapping[str, object], *, config_path: Path | None = None
+    ) -> AgentConfig:
         known = {
-            "cp_url", "target_ref", "credential_id", "cp_response_public_keys_b64",
+            "cp_url", "target_ref", "credential_id", "cp_response_public_keys_b64url",
             "cp_spki_sha256", "state_dir", "deploy_dir", "foundation_argv",
-            "openbao_url", "openbao_agent_config_dir", "cp_ca_file", "runtime_root",
-            "pop_key_credential", "delivery_token_credential", "legacy_source_path",
-            "poll_seconds", "foundation_timeout_seconds", "registry_binary",
-            "registry_binary_sha256", "skopeo_path", "skopeo_sha256",
-            "reconcile_containers", "docker_path",
+            "openbao_url", "openbao_config_dir", "cp_ca_file", "runtime_root",
+            "pop_key_credential", "delivery_role_id_credential",
+            "delivery_secret_id_credential", "legacy_source_path", "poll_seconds",
+            "foundation_timeout_seconds", "registry_binary", "registry_binary_sha256",
+            "skopeo_path", "skopeo_sha256", "skopeo_policy", "reconcile_containers",
+            "docker_path", "systemctl_path", "bindings_env",
+            "runtime_secret_id_ttl_seconds", "migrate_secret_id_ttl_seconds",
+            "wrap_ttl_seconds",
         }  # fmt: skip
         if not set(values) <= known:
             raise Refusal("config_invalid")
@@ -236,37 +300,56 @@ class AgentConfig:
         def optional_path(name: str) -> Path | None:
             return Path(text(name)) if name in values else None
 
+        table = values.get("bindings_env")
+        if not isinstance(table, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in table.items()
+        ):
+            raise Refusal("config_invalid")
+        pairs = tuple(sorted((str(k), str(v)) for k, v in table.items()))
+
         extra: dict[str, object] = {}
-        for name in ("pop_key_credential", "delivery_token_credential"):
+        for name in (
+            "pop_key_credential",
+            "delivery_role_id_credential",
+            "delivery_secret_id_credential",
+        ):
             if name in values:
                 extra[name] = text(name)
-        for name in ("poll_seconds", "foundation_timeout_seconds"):
+        for name in ("docker_path", "systemctl_path", "runtime_root"):
+            if name in values:
+                extra[name] = Path(text(name))
+        for name in (
+            "poll_seconds",
+            "foundation_timeout_seconds",
+            "runtime_secret_id_ttl_seconds",
+            "migrate_secret_id_ttl_seconds",
+            "wrap_ttl_seconds",
+        ):
             if name in values:
                 number = values[name]
                 if type(number) is not int:
                     raise Refusal("config_invalid")
                 extra[name] = number
-        if "docker_path" in values:
-            extra["docker_path"] = Path(text("docker_path"))
-        if "runtime_root" in values:
-            extra["runtime_root"] = Path(text("runtime_root"))
         return cls(
             cp_url=text("cp_url"),
             target_ref=text("target_ref"),
             credential_id=text("credential_id"),
-            cp_response_public_keys_b64=texts("cp_response_public_keys_b64"),
+            cp_response_public_keys_b64url=texts("cp_response_public_keys_b64url"),
             cp_spki_sha256=texts("cp_spki_sha256"),
             state_dir=Path(text("state_dir")),
             deploy_dir=Path(text("deploy_dir")),
             foundation_argv=texts("foundation_argv"),
             openbao_url=text("openbao_url"),
-            openbao_agent_config_dir=Path(text("openbao_agent_config_dir")),
+            openbao_config_dir=Path(text("openbao_config_dir")),
             cp_ca_file=optional_path("cp_ca_file"),
             legacy_source_path=optional_path("legacy_source_path"),
             registry_binary=Path(text("registry_binary")),
             registry_binary_sha256=text("registry_binary_sha256"),
             skopeo_path=Path(text("skopeo_path")),
             skopeo_sha256=text("skopeo_sha256"),
+            skopeo_policy=Path(text("skopeo_policy")),
             reconcile_containers=texts("reconcile_containers"),
+            bindings_env=pairs,
+            config_path=config_path,
             **extra,  # type: ignore[arg-type]
         )

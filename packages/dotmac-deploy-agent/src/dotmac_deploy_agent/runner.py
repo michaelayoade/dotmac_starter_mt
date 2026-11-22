@@ -24,7 +24,11 @@ class RunSpec:
     dispatch_id: str
     target_ref: str
     product: str
+    plan_digest: str
     params_env: Path
+    agent_config: Path | None
+    bindings_env: tuple[tuple[str, str], ...] = ()
+    credentials_directory: str | None = None
     legacy_env: Path | None = None
     lease_id: str | None = None
 
@@ -40,14 +44,24 @@ class Runner(Protocol):
 
 
 def runner_environment(spec: RunSpec) -> dict[str, str]:
+    """An allow-list. The bindings' own names come from the root-owned agent
+    config (`bindings_env`); the agent adds `DOTMAC_DEPLOY_*` and
+    `CREDENTIALS_DIRECTORY`, from which the bindings read only `pop-key` to sign
+    `consume`. No DSN, no token, nothing inherited (ruling R3)."""
     env = {
         "PATH": ENV_PATH,
         "LANG": "C.UTF-8",
+        **dict(spec.bindings_env),
         "DOTMAC_DEPLOY_DISPATCH_ID": spec.dispatch_id,
         "DOTMAC_DEPLOY_TARGET_REF": spec.target_ref,
         "DOTMAC_DEPLOY_PRODUCT": spec.product,
         "DOTMAC_DEPLOY_PARAMS_ENV": str(spec.params_env),
+        "DOTMAC_DEPLOY_PLAN_DIGEST": spec.plan_digest,
     }
+    if spec.agent_config is not None:
+        env["DOTMAC_DEPLOY_AGENT_CONFIG"] = str(spec.agent_config)
+    if spec.credentials_directory is not None:
+        env["CREDENTIALS_DIRECTORY"] = spec.credentials_directory
     if spec.legacy_env is not None:
         env["DOTMAC_DEPLOY_LEGACY_ENV"] = str(spec.legacy_env)
     if spec.lease_id is not None:

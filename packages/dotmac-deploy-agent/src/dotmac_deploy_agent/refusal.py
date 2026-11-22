@@ -18,6 +18,10 @@ CODES: Final = frozenset(
         # materials and parameters
         "materials_invalid",
         "materials_target_mismatch",
+        "dispatch_identity_invalid",
+        "dispatch_envelope_invalid",
+        "dispatch_signature_invalid",
+        "dispatch_plan_mismatch",
         "params_value_invalid",
         "params_secret_shaped",
         "params_digest_mismatch",
@@ -36,7 +40,8 @@ CODES: Final = frozenset(
         "legacy_malformed",
         # secret_id delivery and OpenBao Agent config
         "secret_delivery_failed",
-        "secret_chown_failed",
+        "secret_wrap_unexpected_path",
+        "secret_wrap_already_unwrapped",
         "openbao_config_invalid",
         # CP API
         "response_signature_invalid",

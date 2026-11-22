@@ -16,7 +16,7 @@ SOURCE = ROOT / "packages" / "dotmac-deploy-agent" / "src" / "dotmac_deploy_agen
 ALLOWED_IMPORT_ROOTS = frozenset(
     {
         "__future__", "argparse", "base64", "collections", "dataclasses", "datetime",
-        "enum", "fcntl", "hashlib", "http", "json", "logging", "os", "pathlib",
+        "enum", "errno", "fcntl", "hashlib", "http", "json", "logging", "os", "pathlib",
         "re", "secrets", "shutil", "signal", "socket", "ssl", "stat", "subprocess",
         "sys",
         "time", "tomllib", "typing", "urllib", "cryptography", "dotmac_deploy_agent",
@@ -128,12 +128,69 @@ def test_the_unit_is_non_root_capability_free_and_carries_no_environment() -> No
     assert "Environment" not in directives and "EnvironmentFile" not in directives
     # Secret-zero and the PoP key are credentials, not environment.
     assert all(
-        v.startswith(("pop-key:", "openbao-delivery-token:"))
+        v.startswith(("pop-key:", "delivery-role-id:", "delivery-secret-id:"))
         for v in directives["LoadCredential"]
     )
+    assert not any("token" in v for v in directives["LoadCredential"])
 
 
 def test_the_unit_guard_bites() -> None:
     planted = "User=root\nAmbientCapabilities=CAP_CHOWN\nEnvironment=X=1\n"
     directives = unit_directives(planted)
     assert directives["AmbientCapabilities"] != [""] and "Environment" in directives
+
+
+KIT = ROOT / "packages/dotmac-deploy-agent/deploy/enrolment"
+
+
+def test_the_agent_never_chowns_and_carries_no_uid_from_a_dispatch() -> None:
+    for path in SOURCE.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        called = {
+            node.func.attr
+            if isinstance(node.func, ast.Attribute)
+            else getattr(node.func, "id", "")
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+        }
+        assert not called & {"chown", "lchown", "fchown", "setuid", "setgid"}, path.name
+        assert "container_uid" not in path.read_text(), path.name
+
+
+def test_the_hcl_renderer_and_role_id_fetch_are_gone() -> None:
+    assert not (SOURCE / "openbao_agent.py").exists()
+    for path in SOURCE.glob("*.py"):
+        assert not any(
+            "/role-id" in s for s in string_literals(path.read_text())
+        ), path.name
+
+
+def test_the_polkit_rule_names_enrolled_units_only() -> None:
+    text = (KIT / "polkit/50-dotmac-deploy-agent.rules.template").read_text()
+    code = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("//")
+    )
+    assert "@ENROLLED_UNITS@" in code
+    assert 'action.lookup("verb") == "restart"' in code
+    assert 'subject.user == "dotmac-deploy"' in code
+    assert (
+        "*" not in code and "startsWith" not in code and "indexOf(action.lookup" in code
+    )
+
+
+def test_the_openbao_agent_unit_and_tmpfiles_follow_p_sec() -> None:
+    unit = unit_directives((KIT / "systemd/openbao-agent@.service").read_text())
+    assert unit["User"] == ["dotmac-bao-unenrolled"]  # a missing drop-in fails closed
+    assert unit["CapabilityBoundingSet"] == [""] and unit["NoNewPrivileges"] == ["yes"]
+    instance = (KIT / "systemd/instance.conf.template").read_text()
+    assert "LoadCredential=secret_id:/run/dotmac/@PRODUCT@/@ROLE@/secret_id" in instance
+    assert "User=@CONTAINER_USER@" in instance
+    tmpfiles = (KIT / "tmpfiles.d/dotmac-role.conf.template").read_text()
+    assert "/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in tmpfiles
+    assert "@ROLE@ 0711 dotmac-deploy dotmac-deploy" in tmpfiles
+
+
+def test_the_enrolment_guards_bite() -> None:
+    assert "*" in 'enrolled.indexOf("openbao-agent@*.service")'
+    planted = unit_directives("User=root\nAmbientCapabilities=CAP_CHOWN\n")
+    assert planted["User"] != ["dotmac-bao-unenrolled"]

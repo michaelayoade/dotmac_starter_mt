@@ -20,7 +20,6 @@ from .config import AgentConfig, refuse_db_environment
 from .files import ensure_private_dir
 from .launcher import Launcher
 from .lease import LeaseClient
-from .openbao import OpenBaoClient
 from .refusal import Refusal
 from .runner import SubprocessRunner
 from .systemd_creds import read_credential
@@ -44,28 +43,17 @@ def build_launcher(config: AgentConfig) -> Launcher:
             config.cp_url, spki_pins=config.cp_spki_sha256, ca_file=config.cp_ca_file
         ),
     )
-    token = (
-        read_credential(
-            environ, config.delivery_token_credential, code="secret_delivery_failed"
-        )
-        .decode("utf-8")
-        .strip()
-    )
-    openbao = OpenBaoClient(
-        OpenBaoTransport(config.openbao_url),
-        token,
-        f"{config.environment}/{config.product}",
-    )
     runner = SubprocessRunner(config.foundation_argv, config.foundation_timeout_seconds)
     commands = SubprocessCommands()
     return Launcher(
         config,
         client,
         runner,
-        openbao,
+        OpenBaoTransport(config.openbao_url),
         LeaseClient(client),
         ImageTransfer(config, commands, SubprocessRegistryLauncher()),
         ReadOnlyCommands(commands),
+        commands,
         environ=environ,
     )
 

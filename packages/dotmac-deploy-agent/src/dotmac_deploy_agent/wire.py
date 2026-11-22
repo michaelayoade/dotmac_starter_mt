@@ -4,9 +4,10 @@ Every request carries an Ed25519 signature from the TargetCredential PoP key ove
 `(method, path, sha256(body), credential_id, target_ref, issued_at, nonce)`.
 Every response is signed under the purpose `cp-target-response.v1`.
 
-The design fixes the signed tuple and the response purpose, not the byte layout
-or header names. Both live ONLY in this module so that aligning with the CP
-implementation (WP5b) is a one-file change, pinned by the vectors in the tests.
+The byte layout, header names, path shape and encodings are owned by Deployment
+Control (`contract/target_api_v1.json`, ruling R1); this module is the agent's
+copy, pinned by the vendored vectors (`tests/unit/test_deploy_agent_conformance.py`).
+Keys and signatures are canonical UNPADDED base64url.
 """
 
 from __future__ import annotations
@@ -99,6 +100,28 @@ def new_nonce() -> str:
     return secrets.token_hex(16)
 
 
+def encode_b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_b64url(value: object, *, length: int) -> bytes | None:
+    """Canonical unpadded base64url of exactly `length` bytes, else None."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or "=" in value
+        or value != value.strip()
+    ):
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except ValueError:
+        return None
+    if len(raw) != length or encode_b64url(raw) != value:
+        return None
+    return raw
+
+
 @dataclass(frozen=True)
 class PopSigner:
     """The target PoP private key, held in memory only. Never printed, never stored."""
@@ -108,32 +131,34 @@ class PopSigner:
 
     @classmethod
     def from_seed(cls, credential_id: str, raw: bytes) -> PopSigner:
-        """`raw` is the credential file: base64 of the 32-byte Ed25519 seed."""
+        """`raw` is the credential file: unpadded base64url of the 32-byte seed."""
         try:
-            seed = base64.b64decode(raw.strip(), validate=True)
-            key = Ed25519PrivateKey.from_private_bytes(seed)
-        except ValueError:
+            text = raw.decode("ascii").strip()
+        except UnicodeDecodeError:
             raise Refusal("config_invalid") from None
-        return cls(credential_id, key)
+        seed = decode_b64url(text, length=32)
+        if seed is None:
+            raise Refusal("config_invalid")
+        return cls(credential_id, Ed25519PrivateKey.from_private_bytes(seed))
 
     def sign(self, message: bytes) -> str:
-        return base64.b64encode(self._key.sign(message)).decode("ascii")
+        return encode_b64url(self._key.sign(message))
 
     def __repr__(self) -> str:
         return f"PopSigner(credential_id={self.credential_id!r})"
 
 
 def verify_response(
-    public_keys_b64: tuple[str, ...], message: bytes, signature_b64: str | None
+    public_keys_b64url: tuple[str, ...], message: bytes, signature_b64: str | None
 ) -> None:
-    if signature_b64 is None:
+    signature = decode_b64url(signature_b64, length=64)
+    if signature is None:
         raise Refusal("response_signature_invalid")
-    try:
-        signature = base64.b64decode(signature_b64, validate=True)
-    except ValueError:
-        raise Refusal("response_signature_invalid") from None
-    for encoded in public_keys_b64:
-        key = Ed25519PublicKey.from_public_bytes(base64.b64decode(encoded))
+    for encoded in public_keys_b64url:
+        raw = decode_b64url(encoded, length=32)
+        if raw is None:
+            raise Refusal("config_invalid")
+        key = Ed25519PublicKey.from_public_bytes(raw)
         try:
             key.verify(signature, message)
         except InvalidSignature:

@@ -101,7 +101,7 @@ def test_release_failure_is_reported_and_never_hides_the_outcome(
     assert rig.cp.observations[0]["details"]["lease_released"] is False  # type: ignore[index]
 
 
-@pytest.mark.parametrize("ttl", [30, 3601, 0, True, "900"])
+@pytest.mark.parametrize("ttl", [3601, 0, -5, True, "900"])
 def test_lease_ttl_outside_the_cap_is_refused(tmp_path: Path, ttl: object) -> None:
     rig = make_rig(tmp_path)
     rig.cp.materials = make_materials(lease_ttl_seconds=ttl)

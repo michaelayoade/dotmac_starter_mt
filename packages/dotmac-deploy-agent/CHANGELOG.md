@@ -6,4 +6,7 @@
   observation return, canonical params.env render and post-run classification,
   D1 secret_id delivery, OpenBao Agent config install, M11 legacy copy, refusal
   matrix. Lane B: transfer, lease client, reconcile observation, packaging.
+- Conforms to the agent contract ruling: unpadded base64url wire and three-segment
+  paths, Control-signed dispatch plus plan snapshot, AppRole delivery with a
+  wrapping-token lookup, no chown, no HCL renderer, skopeo `--preserve-digests`.
 - Not published and not enrolled in any release lane.

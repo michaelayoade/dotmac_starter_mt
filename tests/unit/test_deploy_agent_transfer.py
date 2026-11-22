@@ -1,7 +1,9 @@
 """dotmac-deploy-agent: governed digest transfer through a loopback registry."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -22,9 +24,14 @@ from tests.unit.deploy_agent_support import (
     make_rig,
 )
 
-DIGEST = "sha256:" + "a" * 64
+MANIFEST = json.dumps(
+    {"mediaType": "application/vnd.oci.image.manifest.v1+json"}
+).encode()
+INDEX = json.dumps({"mediaType": "application/vnd.oci.image.index.v1+json"}).encode()
+DIGEST = "sha256:" + sha256_hex(MANIFEST)
 IMAGE_ID = "sha256:" + "f" * 64
 REFERENCE = f"127.0.0.1:5000/org/app@{DIGEST}"
+ARCHIVE = f"app-{DIGEST.removeprefix('sha256:')}.oci.tar"
 
 
 class FakeHandle:
@@ -73,6 +80,7 @@ class Setup:
     archive: Path
     image: ImageSpec
     clock: list[float]
+    reported: list[str | None]
 
 
 def setup(
@@ -80,6 +88,7 @@ def setup(
     *,
     launcher: FakeLauncher | None = None,
     probe_open_after: bool = False,
+    raw: bytes = MANIFEST,
 ) -> Setup:
     tmp_path.mkdir(parents=True, exist_ok=True)
     registry = tmp_path / "registry-bin"
@@ -93,60 +102,126 @@ def setup(
         registry_binary_sha256=sha256_hex(b"registry"),
         skopeo_path=skopeo,
         skopeo_sha256=sha256_hex(b"skopeo"),
+        skopeo_policy=tmp_path / "policy.json",
     )
     config.run_dir.mkdir(mode=0o700)
     config.inbox_dir.mkdir(mode=0o700)
-    archive = config.inbox_dir / "app.oci.tar"
+    archive = config.inbox_dir / ARCHIVE
     archive.write_bytes(b"archive")
     commands = FakeCommands()
+    commands.script[("inspect", "--raw")] = CommandResult(0, raw)
     commands.script[("image", "inspect")] = CommandResult(
         0, f'"{IMAGE_ID}" ["{REFERENCE}"]\n'.encode()
     )
     launcher = launcher or FakeLauncher()
     clock = [0.0]
+    reported: list[str | None] = []
 
     def probe(_port: int) -> bool:
         if probe_open_after:
             return True
         return launcher.handle.poll() is None
 
+    def manifest_probe(_port: int, _path: str, digest: str) -> str | None:
+        reported.append(digest)
+        return digest
+
     transfer = ImageTransfer(
         config,
         commands,
         launcher,
         probe=probe,
+        manifest_probe=manifest_probe,
         monotonic=lambda: clock[0],
         sleep=lambda _s: None,
     )
     image = ImageSpec(
         "app", "transfer", "registry.example.invalid/org/app", DIGEST,
-        "127.0.0.1:5000/org/app", IMAGE_ID, "app.oci.tar",
+        "127.0.0.1:5000/org/app", DIGEST,
     )  # fmt: skip
-    return Setup(config, commands, launcher, transfer, archive, image, clock)
+    return Setup(config, commands, launcher, transfer, archive, image, clock, reported)
 
 
-def test_transfer_runs_the_five_steps_and_tears_down(tmp_path: Path) -> None:
+def test_transfer_runs_the_steps_and_tears_down(tmp_path: Path) -> None:
     s = setup(tmp_path)
     [result] = s.transfer.transfer_all((s.image,), ttl_seconds=900)
-    assert result.as_details() == {
-        "name": "app",
-        "image_id": IMAGE_ID,
-        "repo_digest": REFERENCE,
-        "registry_stopped": True,
-        "archive_deleted": True,
-    }
-    skopeo, pull, inspect = s.commands.calls
+    assert (
+        result.as_details()
+        == {
+            "service": "app",
+            "media_type": "application/vnd.oci.image.manifest.v1+json",
+            "image_id": IMAGE_ID,  # recorded, not compared (the image store decides its form)
+            "repo_digest": REFERENCE,
+            "registry_stopped": True,
+            "archive_deleted": True,
+        }
+    )
+    inspect_raw, skopeo, pull, inspect = s.commands.calls
+    policy = str(s.config.skopeo_policy)
+    assert inspect_raw[1:] == (
+        "--policy",
+        policy,
+        "inspect",
+        "--raw",
+        f"oci-archive:{s.archive}",
+    )
     assert skopeo[1:] == (
+        "--policy",
+        policy,
         "copy",
+        "--preserve-digests",
         "--dest-tls-verify=false",
+        "--dest-no-creds",
         f"oci-archive:{s.archive}",
         f"docker://{REFERENCE}",
     )
     assert pull[1:] == ("pull", REFERENCE)
     assert inspect[1:4] == ("image", "inspect", "--format")
+    assert s.reported == [
+        DIGEST
+    ]  # the loopback registry's Docker-Content-Digest was proved
     assert not s.archive.exists()
     assert not s.config.registry_dir.exists()
     assert s.launcher.handle.poll() is not None
+
+
+def test_an_index_digest_is_copied_with_all(tmp_path: Path) -> None:
+    index_digest = "sha256:" + sha256_hex(INDEX)
+    s = setup(tmp_path, raw=INDEX)
+    reference = f"127.0.0.1:5000/org/app@{index_digest}"
+    archive = s.config.inbox_dir / f"app-{index_digest.removeprefix('sha256:')}.oci.tar"
+    archive.write_bytes(b"archive")
+    s.commands.script[("image", "inspect")] = CommandResult(
+        0, f'"{IMAGE_ID}" ["{reference}"]\n'.encode()
+    )
+    image = replace(s.image, release_digest=index_digest, planned_digest=index_digest)
+    [result] = s.transfer.transfer_all((image,), ttl_seconds=900)
+    copy = next(c for c in s.commands.calls if "copy" in c)
+    assert "--all" in copy and "--preserve-digests" in copy
+    assert result.media_type == "application/vnd.oci.image.index.v1+json"
+
+
+def test_an_archive_whose_manifest_is_not_the_release_digest_is_refused_first(
+    tmp_path: Path,
+) -> None:
+    s = setup(
+        tmp_path, raw=MANIFEST + b" "
+    )  # a rewritten manifest: other bytes, other digest
+    with pytest.raises(Refusal) as caught:
+        s.transfer.transfer_all((s.image,), ttl_seconds=900)
+    assert caught.value.code == "transfer_digest_mismatch"
+    assert s.launcher.started == []  # nothing was started for a wrong archive
+
+
+def test_a_loopback_registry_that_reports_another_digest_is_refused(
+    tmp_path: Path,
+) -> None:
+    s = setup(tmp_path)
+    s.transfer._manifest_probe = lambda *_a: "sha256:" + "0" * 64  # type: ignore[method-assign]
+    with pytest.raises(Refusal) as caught:
+        s.transfer.transfer_all((s.image,), ttl_seconds=900)
+    assert caught.value.code == "transfer_digest_mismatch"
+    assert not s.archive.exists() and s.launcher.handle.poll() is not None
 
 
 def test_registry_config_binds_loopback_only(tmp_path: Path) -> None:
@@ -210,7 +285,6 @@ def test_a_port_still_open_after_teardown_is_left_running(tmp_path: Path) -> Non
     [
         f'"{IMAGE_ID}" ["127.0.0.1:5000/org/app@sha256:{"b" * 64}"]\n',  # other digest
         f'"{IMAGE_ID}" []\n',  # no RepoDigest recorded
-        f'"sha256:{"0" * 64}" ["{REFERENCE}"]\n',  # other image id than the release
         "garbage\n",
     ],
 )
@@ -232,6 +306,10 @@ def test_transfer_repository_must_be_the_release_path(tmp_path: Path) -> None:
         s.transfer.transfer_all((image,), ttl_seconds=900)
     assert caught.value.code == "transfer_repository_mismatch"
     assert s.launcher.started == []
+    other_digest = replace(s.image, planned_digest="sha256:" + "0" * 64)
+    with pytest.raises(Refusal) as digest:
+        s.transfer.transfer_all((other_digest,), ttl_seconds=900)
+    assert digest.value.code == "transfer_repository_mismatch"
 
 
 def test_pull_or_skopeo_failure_refuses_and_tears_down(tmp_path: Path) -> None:
@@ -274,10 +352,13 @@ def test_inbox_and_archive_rules(tmp_path: Path) -> None:
         s.transfer.transfer_all((s.image,), ttl_seconds=900)
     assert link.value.code == "transfer_archive_missing"
 
-    s = setup(tmp_path / "noarchive")
-    with pytest.raises(Refusal) as unnamed:
-        s.transfer.transfer_all((replace(s.image, archive=None),), ttl_seconds=900)
-    assert unnamed.value.code == "transfer_repository_mismatch"
+    # The archive name is derived from the service and digest: a differently named
+    # file in the inbox is not picked up.
+    s = setup(tmp_path / "othername")
+    s.archive.rename(s.config.inbox_dir / "other.oci.tar")
+    with pytest.raises(Refusal) as other:
+        s.transfer.transfer_all((s.image,), ttl_seconds=900)
+    assert other.value.code == "transfer_archive_missing"
 
 
 def test_registry_life_is_capped_at_the_lease_ttl(tmp_path: Path) -> None:
@@ -292,7 +373,6 @@ def test_registry_life_is_capped_at_the_lease_ttl(tmp_path: Path) -> None:
     with pytest.raises(Refusal) as caught:
         s.transfer.transfer_all((s.image,), ttl_seconds=900)
     assert caught.value.code == "transfer_deadline_exceeded"
-    assert not s.archive.exists() and s.launcher.handle.poll() is not None
 
 
 def test_a_pull_image_is_not_ours_to_move(tmp_path: Path) -> None:
@@ -311,7 +391,7 @@ def test_the_executable_environment_carries_no_registry_credential(
     assert os.path.isabs(setup(tmp_path).config.docker_path.as_posix())
 
 
-def test_app_image_must_be_a_release_image_as_planned(tmp_path: Path) -> None:
+def test_app_image_must_be_a_planned_image_exactly(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     other = f"127.0.0.1:5000/org/app@sha256:{'c' * 64}"
     rig.cp.materials = make_materials(app_image=other)

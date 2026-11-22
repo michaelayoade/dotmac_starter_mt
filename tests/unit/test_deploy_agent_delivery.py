@@ -1,170 +1,280 @@
-"""dotmac-deploy-agent: D1 delivery, OpenBao Agent config, runner environment."""
+"""dotmac-deploy-agent: D1 delivery (ruling R2/R4), authored configs, runner environment."""
+# ruff: noqa: E501
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
 
 import pytest
-from dotmac_deploy_agent.materials import BindingName, RoleBindings
-from dotmac_deploy_agent.openbao_agent import render_agent_config
+from dotmac_deploy_agent.commands import CommandResult
+from dotmac_deploy_agent.openbao import mint_path
 from dotmac_deploy_agent.runner import RunSpec, runner_environment
 
 from tests.unit.deploy_agent_support import (
     FakeBaoTransport,
-    Keys,
-    make_config,
+    Rig,
     make_materials,
     make_rig,
+    prepare_role,
 )
 
-BINDINGS = [
-    {
-        "role": "app",
-        "container_uid": None,
-        "single_use": False,
-        "names": [
-            {"name": "DB_URL", "secret_ref": "bao://staging/erp/kv/app/DB_URL"},
-            {"name": "API_KEY", "secret_ref": "bao://staging/erp/kv/app/API_KEY"},
-        ],
-    },
-    {
-        "role": "migrate",
-        "container_uid": None,
-        "single_use": True,
-        "names": [
-            {
-                "name": "OWNER_URL",
-                "secret_ref": "bao://staging/erp/kv/migrate/OWNER_URL",
-            }
-        ],
-    },
+ROLES = [
+    {"role": "web", "single_use": False},
+    {"role": "migrate", "single_use": True},
 ]
 
 
-def test_secret_ids_delivered_0400_and_never_leak(
+def deliver_rig(tmp_path: Path, roles: list[dict[str, object]] = ROLES) -> Rig:
+    rig = make_rig(tmp_path)
+    for role in roles:
+        prepare_role(rig, str(role["role"]))
+    rig.cp.materials = make_materials(roles=roles)
+    return rig
+
+
+def test_secret_ids_are_written_0400_as_the_agent_uid_and_never_leak(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(bindings=BINDINGS)
+    rig = deliver_rig(tmp_path)
     result = rig.launcher.run_once()
     assert result.outcome == "completed", result
-    for role in ("app", "migrate"):
-        secret_id = rig.config.run_dir / role / "secret_id"
-        assert secret_id.read_text() == FakeBaoTransport.SECRET
-        assert secret_id.stat().st_mode & 0o777 == 0o400
-        assert (rig.config.run_dir / role / "role_id").stat().st_mode & 0o777 == 0o400
+    for role in ("web", "migrate"):
+        path = rig.config.run_dir / role / "secret_id"
+        assert path.read_text() == FakeBaoTransport.SECRET
+        assert path.stat().st_mode & 0o777 == 0o400
+        assert path.stat().st_uid == os.geteuid()  # no chown, ever
     assert FakeBaoTransport.SECRET not in repr(rig.cp.observations)
     assert FakeBaoTransport.SECRET not in caplog.text
+    assert FakeBaoTransport.TOKEN not in repr(rig.cp.observations)
     assert rig.cp.observations[0]["details"]["delivered_roles"] == [  # type: ignore[index]
-        {"role": "app", "single_use": False},
-        {"role": "migrate", "single_use": True},
+        {
+            "role": "web",
+            "single_use": False,
+            "restarted": True,
+            "old_accessors_destroyed": 0,
+        },
+        {
+            "role": "migrate",
+            "single_use": True,
+            "restarted": True,
+            "old_accessors_destroyed": 0,
+        },
     ]
-    assert rig.bao.paths.count("/v1/sys/wrapping/unwrap") == 2
 
 
-def test_chown_not_permitted_fails_closed(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    foreign = os.geteuid() + 1 if os.geteuid() else 12345
-    bindings = [dict(BINDINGS[0], container_uid=foreign)]
-    rig.cp.materials = make_materials(bindings=bindings)
+def test_no_role_id_is_fetched_and_no_role_file_is_written(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path)
+    rig.launcher.run_once()
+    assert not any(p.endswith("/role-id") for p in rig.bao.paths)
+    assert not (rig.config.run_dir / "web" / "role_id").exists()
+    assert not (rig.config.run_dir / "web" / "secrets").exists()  # tmpfiles.d, not us
+
+
+def test_approle_login_mint_in_parent_namespace_lookup_before_unwrap_then_revoke(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.launcher.run_once()
+    assert rig.bao.paths == [
+        "/v1/auth/approle-delivery/login",
+        "/v1/erp/auth/approle-apps/role/erp-staging-web/secret-id",
+        "/v1/sys/wrapping/lookup",
+        "/v1/sys/wrapping/unwrap",
+        "/v1/auth/token/revoke-self",
+    ]
+    assert mint_path("erp", "staging", "web") == rig.bao.paths[1].removeprefix("/v1/")
+    assert rig.bao.revoked  # the 5 minute token does not outlive the run
+    for _, _, headers, _ in rig.bao.requests:
+        assert headers["X-Vault-Namespace"] == "staging"  # parent namespace
+
+
+def test_mint_body_is_limited_to_metadata_ttl_and_num_uses(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path)
+    rig.launcher.run_once()
+    mints = [r for r in rig.bao.requests if r[1].endswith("/secret-id")]
+    runtime, single = mints[0][3], mints[1][3]
+    assert set(runtime) == {"metadata", "ttl"} and runtime["ttl"] == f"{35 * 86400}s"
+    assert set(single) == {"metadata", "ttl", "num_uses"}
+    assert single["num_uses"] == 1 and single["ttl"] == "900s"
+    assert json.loads(str(single["metadata"])) == {"dispatch_id": "dispatch-1"}
+
+
+def test_wrapping_token_from_an_unexpected_creation_path_is_refused_before_unwrap(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.bao.lookup_path = "erp/auth/approle-apps/role/erp-staging-other/secret-id"
     result = rig.launcher.run_once()
-    if os.geteuid() == 0:  # pragma: no cover - the agent is never root
-        pytest.skip("chown succeeds as root")
-    assert (result.outcome, result.reason) == ("refused", "secret_chown_failed")
+    assert (result.outcome, result.reason) == ("refused", "secret_wrap_unexpected_path")
+    assert "/v1/sys/wrapping/unwrap" not in rig.bao.paths
+    assert not (rig.config.run_dir / "web" / "secret_id").exists()
+    assert rig.bao.revoked and rig.runner.specs == []
+
+
+def test_an_already_unwrapped_token_is_a_distinct_alarm(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.bao.fail_lookup = True
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == (
+        "refused",
+        "secret_wrap_already_unwrapped",
+    )
+    assert "/v1/sys/wrapping/unwrap" not in rig.bao.paths
     assert rig.runner.specs == []
-    assert not (rig.config.run_dir / "app" / "secret_id").exists()
 
 
-def test_bindings_without_a_delivery_client_refuse(tmp_path: Path) -> None:
+def test_unit_is_restarted_and_a_failed_restart_removes_the_unconsumed_id(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.launcher.run_once()
+    restart = [c for c in rig.systemctl.calls if "restart" in c]
+    assert restart == [
+        (
+            str(rig.config.systemctl_path),
+            "--no-ask-password",
+            "restart",
+            "openbao-agent@erp-web.service",
+        )
+    ]
+    rig2 = deliver_rig(tmp_path / "second", ROLES[:1])
+    rig2.systemctl.script[("restart",)] = CommandResult(1, b"")
+    result = rig2.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "secret_delivery_failed")
+    assert not (rig2.config.run_dir / "web" / "secret_id").exists()
+
+
+def test_previous_accessor_is_destroyed_after_the_new_login_is_confirmed(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.launcher.run_once()  # first delivery: nothing to destroy
+    assert not any(p.endswith("/destroy") for p in rig.bao.paths)
+    rig.launcher.run_once()  # second: the first accessor goes
+    destroys = [
+        r for r in rig.bao.requests if r[1].endswith("/secret-id-accessor/destroy")
+    ]
+    assert [d[1] for d in destroys] == [
+        "/v1/erp/auth/approle-apps/role/erp-staging-web/secret-id-accessor/destroy"
+    ]
+    assert destroys[0][3] == {"secret_id_accessor": "accessor-wrap-1"}
+    kept = json.loads((rig.config.state_dir / "accessors" / "web.json").read_text())
+    assert kept == ["accessor-wrap-2"]
+
+
+def test_an_accessor_that_cannot_be_destroyed_is_kept_not_forgotten(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.launcher.run_once()
+    rig.bao.fail_destroy = True
+    rig.launcher.run_once()
+    kept = json.loads((rig.config.state_dir / "accessors" / "web.json").read_text())
+    assert kept == ["accessor-wrap-1", "accessor-wrap-2"]
+
+
+def test_single_use_roles_have_no_accessor_bookkeeping(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path, ROLES[1:])
+    rig.launcher.run_once()
+    assert not (rig.config.state_dir / "accessors" / "migrate.json").exists()
+
+
+def test_a_role_directory_that_enrolment_did_not_create_is_refused(
+    tmp_path: Path,
+) -> None:
     rig = make_rig(tmp_path)
-    rig.launcher.openbao = None
-    rig.cp.materials = make_materials(bindings=BINDINGS)
+    (rig.config.openbao_config_dir / "erp-web.hcl").write_text("# authored\n")
+    (rig.config.openbao_config_dir / "erp-web.hcl").chmod(0o644)
+    rig.cp.materials = make_materials(roles=ROLES[:1])
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "runtime_dir_unsafe")
+    assert not (rig.config.run_dir / "web").exists()  # the agent never creates it
+
+
+def test_authored_configs_are_checked_and_their_digest_reported(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    result = rig.launcher.run_once()
+    assert result.outcome == "completed"
+    digest = rig.cp.observations[0]["details"]["openbao_config"]["web"]  # type: ignore[index]
+    assert digest.startswith("sha256:") and len(digest) == 71
+    # Never written: the file is still exactly what the kit installed.
+    authored = rig.config.openbao_config_dir / "erp-web.hcl"
+    assert authored.read_text() == "# authored config for web\n"
+
+
+@pytest.mark.parametrize("case", ["missing", "writable", "symlink"])
+def test_unsafe_authored_config_is_refused(tmp_path: Path, case: str) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    authored = rig.config.openbao_config_dir / "erp-web.hcl"
+    if case == "missing":
+        authored.unlink()
+    elif case == "writable":
+        authored.chmod(0o664)
+    else:
+        authored.unlink()
+        authored.symlink_to(tmp_path / "elsewhere")
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "openbao_config_invalid")
+    assert rig.bao.paths == []  # no login before the authored bytes check out
+
+
+def test_the_agent_has_no_renderer_for_openbao_config() -> None:
+    import importlib.util
+
+    assert importlib.util.find_spec("dotmac_deploy_agent.openbao_agent") is None
+
+
+def test_bindings_without_a_delivery_transport_refuse(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.launcher.bao_transport = None
     assert rig.launcher.run_once().reason == "secret_delivery_failed"
     assert rig.runner.specs == []
 
 
-def test_openbao_agent_config_is_golden_and_holds_no_value(tmp_path: Path) -> None:
-    config = make_config(tmp_path, Keys())
-    role = RoleBindings(
-        "app",
-        None,
-        False,
-        (
-            BindingName("DB_URL", "staging", "erp", "app"),
-            BindingName("API_KEY", "staging", "erp", "app"),
-        ),
-    )
-    text = render_agent_config(config, role)
-    base = str(config.run_dir / "app")
-    assert (
-        text
-        == (
-            "# Managed by dotmac-deploy-agent. Holds no secret value.\n"
-            "vault {\n"
-            '  address = "http://192.0.2.10:8200"\n'
-            "}\n"
-            "auto_auth {\n"
-            '  method "approle" {\n'
-            '    namespace = "staging/erp"\n'
-            '    mount_path = "auth/approle"\n'
-            "    config = {\n"
-            f'      role_id_file_path = "{base}/role_id"\n'
-            f'      secret_id_file_path = "{base}/secret_id"\n'
-            "      remove_secret_id_file_after_reading = false\n"
-            "    }\n"
-            "  }\n"
-            "}\n"
-            "template_config {\n"
-            "  exit_on_retry_failure = true\n"
-            "}\n"
-            "template {\n"
-            '  contents = "{{ with secret \\"kv/data/erp/app\\" }}{{ .Data.data.API_KEY }}{{ end }}"\n'  # noqa: E501
-            f'  destination = "{base}/secrets/API_KEY"\n'
-            '  perms = "0400"\n'
-            "  error_on_missing_key = true\n"
-            "}\n"
-            "template {\n"
-            '  contents = "{{ with secret \\"kv/data/erp/app\\" }}{{ .Data.data.DB_URL }}{{ end }}"\n'  # noqa: E501
-            f'  destination = "{base}/secrets/DB_URL"\n'
-            '  perms = "0400"\n'
-            "  error_on_missing_key = true\n"
-            "}\n"
-        )
-    )
-    single = RoleBindings("migrate", None, True, ())
-    assert "remove_secret_id_file_after_reading = true" in render_agent_config(
-        config, single
-    )
-
-
-def test_launcher_installs_agent_config_0600_once(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(bindings=BINDINGS)
-    rig.launcher.run_once()
-    path = rig.config.openbao_agent_config_dir / "erp-app.hcl"
-    assert path.stat().st_mode & 0o777 == 0o600
-    first = path.stat().st_mtime_ns
-    rig.launcher.run_once()
-    assert path.stat().st_mtime_ns == first  # unchanged bytes are not rewritten
-
-
-def test_runner_environment_is_an_allow_list(
+def test_runner_environment_is_the_bindings_names_plus_the_deploy_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", "x")
     monkeypatch.setenv("OPENBAO_TOKEN", "x")
+    rig = make_rig(tmp_path)
     spec = RunSpec(
         "d1",
         "erp/staging/host-a",
         "erp",
+        "sha256:" + "9" * 64,
         tmp_path / "params.env",
+        rig.config.config_path,
+        rig.config.bindings_env,
+        "/run/credentials/unit",
         tmp_path / "legacy.env",
+        "lease-1",
     )
     env = runner_environment(spec)
     assert set(env) == {
-        "PATH", "LANG", "DOTMAC_DEPLOY_DISPATCH_ID", "DOTMAC_DEPLOY_TARGET_REF",
-        "DOTMAC_DEPLOY_PRODUCT", "DOTMAC_DEPLOY_PARAMS_ENV", "DOTMAC_DEPLOY_LEGACY_ENV",
+        "PATH", "LANG",
+        "AUTHORIZATION_VERIFICATION_IDENTITY", "DISPATCH_VERIFICATION_IDENTITY",
+        "EXECUTION_CONTEXT_MATERIALS", "HOST_ADMISSION_MATERIALS",
+        "RELEASE_EVIDENCE_REPOSITORY", "RELEASE_EVIDENCE_VERIFICATION_IDENTITY",
+        "DOTMAC_DEPLOY_DISPATCH_ID", "DOTMAC_DEPLOY_TARGET_REF", "DOTMAC_DEPLOY_PRODUCT",
+        "DOTMAC_DEPLOY_PARAMS_ENV", "DOTMAC_DEPLOY_LEGACY_ENV", "DOTMAC_DEPLOY_LEASE_ID",
+        "DOTMAC_DEPLOY_PLAN_DIGEST", "DOTMAC_DEPLOY_AGENT_CONFIG", "CREDENTIALS_DIRECTORY",
     }  # fmt: skip
+    assert env["DOTMAC_DEPLOY_PLAN_DIGEST"] == "sha256:" + "9" * 64
+    assert not any(
+        name.startswith("PG") or name.endswith("DATABASE_URL") for name in env
+    )
+
+
+def test_the_launcher_hands_the_runner_the_signed_plan_digest(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials()
+    rig.launcher.run_once()
+    [spec] = rig.runner.specs
+    assert spec.plan_digest.startswith("sha256:")
+    assert spec.agent_config == rig.config.config_path
+    assert dict(spec.bindings_env) == dict(rig.config.bindings_env)
+    assert spec.credentials_directory == rig.environ["CREDENTIALS_DIRECTORY"]

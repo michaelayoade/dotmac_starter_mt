@@ -51,7 +51,7 @@ class LeaseClient:
         return value
 
     def acquire(self, *, dispatch_id: str, ttl_seconds: int) -> Lease:
-        if not 60 <= ttl_seconds <= MAX_TTL:
+        if not 1 <= ttl_seconds <= MAX_TTL:
             raise Refusal("lease_ttl_invalid")
         reply = self._post(
             "acquire", {"dispatch_run": dispatch_id, "ttl_seconds": ttl_seconds}

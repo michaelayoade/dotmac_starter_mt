@@ -15,7 +15,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, cast
-from urllib.parse import quote
 
 from . import wire
 from .canon import canonical_json
@@ -52,10 +51,8 @@ class TargetClient:
         self._nonce = nonce
 
     def _path(self, endpoint: str) -> str:
-        return (
-            f"{wire.BASE_PATH}/targets/{quote(self._config.target_ref, safe='')}"
-            f"/{endpoint}"
-        )
+        """Three segments of the target_ref grammar; never percent-encoded (R1)."""
+        return f"{wire.BASE_PATH}/targets/{self._config.target_ref}/{endpoint}"
 
     def call(
         self, method: str, endpoint: str, payload: dict[str, object] | None
@@ -83,11 +80,12 @@ class TargetClient:
             "Accept": "application/json",
         }
         response = self._transport.request(method, path, headers, body)
-        if response.status >= 500:
-            # An unsigned proxy error is indistinguishable from an outage.
+        if response.status >= 500 or response.status in (413, 429):
+            # Unsigned proxy errors and rate limits are retryable, not a signature
+            # refusal: an outage and a throttle are indistinguishable from outside.
             raise Refusal("cp_unreachable")
         wire.verify_response(
-            self._config.cp_response_public_keys_b64,
+            self._config.cp_response_public_keys_b64url,
             wire.response_message(
                 method=method,
                 path=path,
