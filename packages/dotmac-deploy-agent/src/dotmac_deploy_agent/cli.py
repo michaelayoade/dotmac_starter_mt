@@ -17,13 +17,13 @@ from pathlib import Path
 from .client import TargetClient
 from .commands import ReadOnlyCommands, SubprocessCommands, SubprocessRegistryLauncher
 from .config import AgentConfig, refuse_db_environment
-from .credentials import read_credential
 from .files import ensure_private_dir
 from .launcher import Launcher
 from .lease import LeaseClient
 from .openbao import OpenBaoClient
 from .refusal import Refusal
 from .runner import SubprocessRunner
+from .systemd_creds import read_credential
 from .transfer import ImageTransfer
 from .transport import HttpsTransport, OpenBaoTransport
 from .wire import PopSigner

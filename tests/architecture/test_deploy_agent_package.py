@@ -17,7 +17,7 @@ ALLOWED_IMPORT_ROOTS = frozenset(
     {
         "__future__", "argparse", "base64", "collections", "dataclasses", "datetime",
         "enum", "fcntl", "hashlib", "http", "json", "logging", "os", "pathlib",
-        "re", "secrets", "shutil", "signal", "ssl", "stat", "subprocess", "sys",
+        "re", "secrets", "shutil", "signal", "socket", "ssl", "stat", "subprocess", "sys",
         "time", "tomllib", "typing", "urllib", "cryptography", "dotmac_deploy_agent",
     }
 )  # fmt: skip

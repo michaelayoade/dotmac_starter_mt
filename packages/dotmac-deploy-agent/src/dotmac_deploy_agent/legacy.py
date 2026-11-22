@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Final
 
 from .canon import digest
-from .credentials import read_credential
 from .files import remove_file, require_private_dir, write_private
 from .materials import LegacyPolicy
 from .params import APP_IMAGE
 from .refusal import Refusal
+from .systemd_creds import read_credential
 
 LEGACY_DIR: Final = Path("/etc/dotmac/legacy")
 CREDENTIAL_NAME: Final = "legacy"

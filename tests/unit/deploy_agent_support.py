@@ -133,6 +133,10 @@ def base_images() -> list[dict[str, object]]:
 def make_materials(**overrides: object) -> dict[str, object]:
     params = overrides.pop("params", None) or base_params()
     app_image = str(overrides.pop("app_image", APP_IMAGE))
+    try:
+        digest = render_digest(canonical_render(to_params(params), app_image))  # type: ignore[arg-type]
+    except Refusal:
+        digest = "sha256:" + "0" * 64  # a refused render has no honest digest
     document: dict[str, object] = {
         "schema": "dotmac.deploy_target_materials/1",
         "pending": True,
@@ -141,9 +145,7 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "params": params,
         "app_image": app_image,
         "previous_app_image": PREVIOUS_IMAGE,
-        "params_env_digest": render_digest(
-            canonical_render(to_params(params), app_image)  # type: ignore[arg-type]
-        ),
+        "params_env_digest": digest,
         "bindings": [],
         "legacy": None,
         "images": base_images(),

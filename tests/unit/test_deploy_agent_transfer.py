@@ -81,6 +81,7 @@ def setup(
     launcher: FakeLauncher | None = None,
     probe_open_after: bool = False,
 ) -> Setup:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     registry = tmp_path / "registry-bin"
     registry.write_bytes(b"registry")
     skopeo = tmp_path / "skopeo-bin"
