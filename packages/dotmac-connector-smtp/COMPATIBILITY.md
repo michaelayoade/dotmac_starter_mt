@@ -85,8 +85,16 @@ follow-up. Raise the lease before raising these.
   message with attachments is `TERMINAL` (`attachment_refused`) until one is.
 - Bounce coverage is synchronous only; asynchronous DSNs are not captured.
 
-## Governance ADR 0011
+## Governance ADR 0011: net-zero transfer (Michael, approved 2026-11-22)
 
-`.dotmac/standards-profile.json` `external_connector_surface.baselines.outbound_transport`
-stays at 1 in this change and `dotmac-delivery-smtp` is untouched. See the pull
-request for the engineering-standards checker's verdict on this package.
+The surface MOVES, it is not added. `dotmac-delivery-smtp` (never released) is
+deleted in the same change that introduces this package, with its tests and the
+fingerprint-pinned conserved exclusion for
+`test_data_reply_uses_the_long_timeout`; `.dotmac/standards-profile.json`
+`external_connector_surface.baselines.outbound_transport` goes 1 to 0. The
+connector, being a locked source distribution with a connector entry point, is
+outside the engineering-standards count. The comms-writer ratchet (ADR-0006 5f)
+carries one `allowed` entry for this package's two `direct_smtp` findings,
+replacing delivery-smtp's. The recorded 2026-11-18 transfer (0 to 1) therefore
+returns to 0; Academy's own count is lowered with cutover evidence in its work
+package A4/B15.

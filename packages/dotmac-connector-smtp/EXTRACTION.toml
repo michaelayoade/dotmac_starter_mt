@@ -14,9 +14,6 @@ source_revisions = [
 ]
 source_paths = [
   "dotmac_academy_app:app/services/email.py",
-  "dotmac_starter_mt:packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py",
-  "dotmac_starter_mt:packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/classify.py",
-  "dotmac_starter_mt:packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/config.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:packages/dotmac-connector-smtp/tests/test_classification.py",
@@ -31,7 +28,7 @@ inventory_evidence = [
 ]
 first_cutover = "The Academy companion Integrator (Integrator topology ruling D10): after a separately authorized release and an exact pin in dotmac_integrator, and after the Integrator outbound pump exists, the operator binds the SMTP destination as a network target, enters the password once as runtime material, and Academy flips mail kinds one at a time while its legacy sender stays live. This dossier authorizes none of that."
 shadow_and_drift = "Not applicable: adoption is proven by the package's SMTP-sink tests, a recorded-row MIME backtest and a real-record preview (connection check, no DATA), not by side-by-side sending."
-local_copy_retirement = "Academy deletes its smtplib sender (dotmac_academy_app:app/services/email.py) at the per-kind cutover. In Starter, dotmac-delivery-smtp is a never-released duplicate of the moved logic; its deletion, and the outbound_transport baseline 1 to 0, need the fresh approval recorded in the pull request that introduced this package."
+local_copy_retirement = "Starter: dotmac-delivery-smtp (the never-released source of the moved provider, classify and config modules, at dotmac_starter_mt revision 4746829764e6b15ba9f733fb217246b43bf365f2) is deleted in the same change that introduces this package, together with its tests and the conserved test exclusion; the outbound_transport baseline goes from 1 to 0 (net-zero Governance ADR 0011 transfer, approved by Michael). Academy deletes its smtplib sender (dotmac_academy_app:app/services/email.py) at the per-kind cutover."
 next_action = "Review, then a separately authorized release of 0.1.0a1 once the Integrator delivers engine-owned network targets to DELIVERY handlers (see CHANGELOG) and the pump exists."
 
 [[product_writers]]

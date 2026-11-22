@@ -5,6 +5,7 @@
 Not published; no release run, no peeled tag. Held back in
 `.github/release-connectors.json` (`release_enabled: false`).
 
+- `dotmac-delivery-smtp` is deleted in the same change (net-zero ADR 0011 transfer).
 - Initial SMTP delivery connector (work package B4 of the Academy companion
   plan). The transport, MIME builder, classification table and configuration
   validator MOVED from the never-released `dotmac-delivery-smtp`
