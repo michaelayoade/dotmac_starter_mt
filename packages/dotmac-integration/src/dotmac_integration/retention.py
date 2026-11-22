@@ -1142,7 +1142,13 @@ def classify_delivery(
         return "already_redacted"
     if delivery.payload_json is None:
         return "no_payload"
-    if _as_utc(delivery.created_at) >= policy.cutoff(now):
+    # The clock runs from the moment the attempt BECAME terminal, not from when
+    # it was enqueued: a row that waited or ran long before failing keeps its
+    # full repair window. NULL (a row written by a runtime that predates the
+    # column) is never guessed at; it is refused until it is stamped.
+    if delivery.terminal_at is None:
+        return "terminal_time_unknown"
+    if _as_utc(delivery.terminal_at) >= policy.cutoff(now):
         return "not_expired"
     return None
 
@@ -1187,7 +1193,8 @@ def redact_delivery(
         .where(
             DeliveryAttempt.id == delivery.id,
             DeliveryAttempt.state.in_(_TERMINAL_DELIVERY_STATES),
-            DeliveryAttempt.created_at < policy.cutoff(moment),
+            DeliveryAttempt.terminal_at.is_not(None),
+            DeliveryAttempt.terminal_at < policy.cutoff(moment),
             DeliveryAttempt.payload_json.is_not(None),
             ~_active_delivery_hold_exists(),
         )
@@ -1244,8 +1251,18 @@ class DeliveryRetentionSweep:
 
 
 def _expired_delivery_content(cutoff: datetime) -> list[Any]:
+    """Aged, unredacted content (terminal by `terminal_at`, live by `created_at`)."""
     return [
-        DeliveryAttempt.created_at < cutoff,
+        sa.or_(
+            sa.and_(
+                DeliveryAttempt.state.in_(_TERMINAL_DELIVERY_STATES),
+                DeliveryAttempt.terminal_at < cutoff,
+            ),
+            sa.and_(
+                DeliveryAttempt.state.not_in(_TERMINAL_DELIVERY_STATES),
+                DeliveryAttempt.created_at < cutoff,
+            ),
+        ),
         DeliveryAttempt.payload_json.is_not(None),
         DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None),
     ]
@@ -1273,6 +1290,23 @@ def _delivery_refusal_counts(db: Any, cutoff: datetime) -> dict[str, int]:
             DeliveryAttempt.state.not_in((*_TERMINAL_DELIVERY_STATES, "in_flight")),
         ),
     }
+    unstamped = int(
+        db.execute(
+            sa.select(sa.func.count())
+            .select_from(DeliveryAttempt)
+            .where(
+                DeliveryAttempt.state.in_(_TERMINAL_DELIVERY_STATES),
+                DeliveryAttempt.terminal_at.is_(None),
+                DeliveryAttempt.created_at < cutoff,
+                DeliveryAttempt.payload_json.is_not(None),
+                DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None),
+                ~held,
+            )
+        ).scalar_one()
+        or 0
+    )
+    if unstamped:
+        counts["terminal_time_unknown"] = unstamped
     return {reason: count for reason, count in counts.items() if count}
 
 
@@ -1295,7 +1329,7 @@ def purge_expired_delivery_payloads(
                 DeliveryAttempt.state.in_(_TERMINAL_DELIVERY_STATES),
                 ~_active_delivery_hold_exists(),
             )
-            .order_by(DeliveryAttempt.created_at, DeliveryAttempt.id)
+            .order_by(DeliveryAttempt.terminal_at, DeliveryAttempt.id)
             .limit(policy.batch_size)
         )
         .scalars()

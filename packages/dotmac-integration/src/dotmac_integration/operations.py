@@ -495,20 +495,16 @@ def replay_delivery(
     is requeued only when the operator passes
     ``acknowledge_possible_duplicate=True``, which the audit record preserves.
     """
-    # Lock first, so a concurrent retention purge cannot redact between the
-    # checks below and the write (the claim's own predicate is the backstop).
-    from sqlalchemy import select
+    # Lock the FULL row first, then decide everything from the locked values. A
+    # concurrent claim (state -> in_flight) or retention purge (payload ->
+    # tombstone) cannot slip between the checks below and the write: replaying a
+    # live in_flight row would overwrite a lease and send the message twice.
+    # Pending edits are flushed first so the refresh does not discard them.
+    from dotmac_integration.retention import is_delivery_redacted
 
-    from dotmac_integration.retention import REDACTION_MARKER, is_delivery_redacted
-
-    locked_payload = db.execute(
-        select(DeliveryAttempt.payload_json)
-        .where(DeliveryAttempt.id == delivery.id)
-        .with_for_update()
-    ).scalar_one_or_none()
-    if is_delivery_redacted(delivery) or (
-        isinstance(locked_payload, dict) and REDACTION_MARKER in locked_payload
-    ):
+    db.flush()
+    db.refresh(delivery, with_for_update=True)
+    if is_delivery_redacted(delivery):
         raise NotRepairable(
             "delivery payload was redacted by retention; a tombstone is not a "
             "payload and must not be sent"
@@ -533,6 +529,7 @@ def replay_delivery(
     previous_state, previous_attempts = delivery.state, delivery.attempt_count
 
     delivery.state = "pending"
+    delivery.terminal_at = None  # live work again; the retention clock restarts
     # Reset, unlike the source. Leaving the count at the cap makes the replay a
     # no-op that looks like an action: the very next outcome dead-letters it.
     delivery.attempt_count = 0

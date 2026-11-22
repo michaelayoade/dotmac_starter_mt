@@ -357,7 +357,7 @@ Requeueing it is an explicit operator act,
 change for every DELIVERY connector (notably `dotmac-connector-whatsapp`, which
 has no idempotency handling): a crash after the provider call needs an operator
 decision instead of resending. No SPI or schema change; PROVISION and QUERY
-semantics are untouched. Outbound payload retention now covers `delivered`,
+semantics are untouched. The outbound retention clock is the new nullable `terminal_at` column (`ig_0019`, additive; old code ignores it). Outbound payload retention now covers `delivered`,
 `dead_letter` and `reconciliation_required` rows. And a DELIVERY handler now
 receives `_network_targets` in config exactly as PROVISION does, so
 `require_network_target` is usable there (still deny-all when none are bound).

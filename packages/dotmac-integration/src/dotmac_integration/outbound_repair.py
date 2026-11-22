@@ -1056,6 +1056,7 @@ def reconcile_with_evidence(
     if evidence.verdict is ProviderVerdict.LANDED:
         values = {
             "state": "delivered",
+            "terminal_at": moment,
             "delivered_at": moment,
             "next_attempt_at": None,
             "leased_until": None,
@@ -1086,6 +1087,7 @@ def reconcile_with_evidence(
             raise _refuse(delivery, "binding_missing")
         values = {
             "state": "pending",
+            "terminal_at": None,
             # Reset, for `operations.replay_delivery`'s reason: leaving the
             # count at the cap makes the requeue a no-op that looks like an
             # action, because the very next outcome dead-letters it again.

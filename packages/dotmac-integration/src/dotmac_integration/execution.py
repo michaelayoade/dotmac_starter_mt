@@ -651,6 +651,7 @@ def ambiguate_expired_delivery_leases(
             .where(DeliveryAttempt.id == row_id, *expired)
             .values(
                 state="reconciliation_required",
+                terminal_at=now,
                 leased_until=None,
                 next_attempt_at=None,
                 error_code=LEASE_EXPIRED_ERROR_CODE,
@@ -780,6 +781,8 @@ def record_delivery_outcome(
     delivery.provider_reference = outcome.provider_reference
     delivery.provider_status_code = outcome.provider_status_code
 
+    if delivery.state in ("delivered", "dead_letter", "reconciliation_required"):
+        delivery.terminal_at = moment
     if delivery.state == "delivered":
         delivery.delivered_at = moment
         delivery.next_attempt_at = None

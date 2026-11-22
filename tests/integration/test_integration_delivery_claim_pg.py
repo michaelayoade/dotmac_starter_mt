@@ -145,7 +145,10 @@ def _make_delivery(
         delivery.leased_until = leased_until
         delivery.attempt_count = attempt_count
         if age_days:
-            delivery.created_at = datetime.now(UTC) - timedelta(days=age_days)
+            aged = datetime.now(UTC) - timedelta(days=age_days)
+            delivery.created_at = aged
+            if state in ("delivered", "dead_letter", "reconciliation_required"):
+                delivery.terminal_at = aged
         session.commit()
         return delivery.id
 
@@ -269,3 +272,87 @@ def test_replay_versus_purge_never_leaves_a_pending_tombstone(
                 session.commit()
                 assert claim_delivery(session, fresh, policy=LEASE) is False
                 session.rollback()
+
+
+def test_purge_versus_a_late_terminal_transition_never_redacts_live_work(
+    schema_factory: sessionmaker[Session],
+) -> None:
+    """A row enqueued long ago, still in flight, settles to dead_letter while the
+    purge runs. The clock is `terminal_at`, so the fresh failure keeps its
+    payload whichever side wins."""
+    from dotmac_integration import Outcome, OutcomeStatus
+    from dotmac_integration.execution import record_delivery_outcome
+
+    for _ in range(ROUNDS):
+        delivery_id = _make_delivery(
+            schema_factory,
+            state="in_flight",
+            leased_until=datetime.now(UTC) + timedelta(seconds=600),
+            age_days=60,
+            attempt_count=1,
+        )
+
+        def settler(delivery_id: uuid.UUID = delivery_id) -> str:
+            with schema_factory() as session:
+                row = session.get(DeliveryAttempt, delivery_id)
+                record_delivery_outcome(
+                    row, Outcome(status=OutcomeStatus.TERMINAL), policy=LEASE
+                )
+                session.commit()
+                return row.state
+
+        def purger() -> int:
+            with schema_factory() as session:
+                sweep = purge_expired_delivery_payloads(session, policy=POLICY)
+                session.commit()
+                return sweep.redacted
+
+        _race(settler, purger)
+        row = _row(schema_factory, delivery_id)
+        assert row.state == "dead_letter"
+        assert row.terminal_at is not None
+        assert REDACTION_MARKER not in (
+            row.payload_json or {}
+        ), "a fresh failure was redacted on its enqueue age"
+
+
+def test_replay_versus_claim_never_overwrites_a_live_claim(
+    schema_factory: sessionmaker[Session],
+) -> None:
+    """Replaying a retryable row races a dispatcher claiming it. Whichever wins,
+    a row that is `in_flight` with a live lease must never be reset to `pending`
+    (that would let a second worker send the same message)."""
+    for _ in range(ROUNDS):
+        delivery_id = _make_delivery(schema_factory, state="retryable")
+
+        def claimer(delivery_id: uuid.UUID = delivery_id) -> bool:
+            with schema_factory() as session:
+                row = session.get(DeliveryAttempt, delivery_id)
+                won = claim_delivery(session, row, policy=LEASE)
+                session.commit()
+                return won
+
+        def replayer(delivery_id: uuid.UUID = delivery_id) -> str:
+            with schema_factory() as session:
+                row = session.get(DeliveryAttempt, delivery_id)
+                try:
+                    replay_delivery(session, row, reason="operator")
+                except Exception as exc:  # NotRepairable when the claim won
+                    session.rollback()
+                    return type(exc).__name__
+                session.commit()
+                return "replayed"
+
+        claimed, replayed = _race(claimer, replayer)
+        row = _row(schema_factory, delivery_id)
+        if claimed:
+            # The claim won the lock first: replay must have refused, and the
+            # live claim must be intact.
+            assert replayed == "NotRepairable"
+            assert row.state == "in_flight"
+            assert row.leased_until is not None
+            assert row.attempt_count == 1
+        else:
+            # Replay won; the claim then saw a fresh pending row or lost the
+            # race. Never an in_flight row with a reset attempt budget.
+            assert not (row.state == "in_flight" and row.attempt_count == 0)

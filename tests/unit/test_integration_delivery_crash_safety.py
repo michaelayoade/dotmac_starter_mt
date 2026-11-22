@@ -495,3 +495,148 @@ def test_not_landed_reconcile_refuses_if_the_purge_won_the_race(
     )
     db.refresh(delivery)
     assert delivery.state == "reconciliation_required"
+
+
+# ── Every terminal path stamps terminal_at ─────────────────────────────────
+
+
+def _settle_with(db: Session, plugin_outcome, *, attempts_cap: int = 1):
+    from dotmac_integration import Outcome, settle  # noqa: F401
+
+    plugin = fake_plugin(outcome=plugin_outcome)
+    registry = fake_registry(plugins=[plugin])
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    policy = ExecutionPolicy(lease_seconds=600, max_attempts=attempts_cap)
+    prepared = prepare(db, delivery, registry=registry, policy=policy)
+    outcome = invoke(prepared, registry=registry, resolve_secrets=lambda r: {})
+    settle(db, delivery, outcome, prepared=prepared, policy=policy)
+    db.refresh(delivery)
+    return delivery
+
+
+@pytest.mark.parametrize(
+    ("status", "state"),
+    [
+        (OutcomeStatus.SUCCEEDED, "delivered"),
+        (OutcomeStatus.TERMINAL, "dead_letter"),
+        (OutcomeStatus.RECONCILIATION_REQUIRED, "reconciliation_required"),
+        (OutcomeStatus.RETRYABLE, "dead_letter"),  # exhausted at max_attempts=1
+    ],
+)
+def test_settle_stamps_terminal_at_on_every_terminal_state(
+    db: Session, status: OutcomeStatus, state: str
+) -> None:
+    from dotmac_integration import Outcome
+
+    delivery = _settle_with(db, Outcome(status=status))
+    assert delivery.state == state
+    assert delivery.terminal_at is not None
+
+
+def test_settle_leaves_a_retryable_row_unstamped(db: Session) -> None:
+    from dotmac_integration import Outcome
+
+    delivery = _settle_with(db, Outcome(status=OutcomeStatus.RETRYABLE), attempts_cap=5)
+    assert delivery.state == "retryable"
+    assert delivery.terminal_at is None
+
+
+@pytest.mark.parametrize(
+    ("status", "state"),
+    [
+        (OutcomeStatus.SUCCEEDED, "delivered"),
+        (OutcomeStatus.TERMINAL, "dead_letter"),
+        (OutcomeStatus.RECONCILIATION_REQUIRED, "reconciliation_required"),
+    ],
+)
+def test_record_delivery_outcome_stamps_terminal_at(
+    db: Session, status: OutcomeStatus, state: str
+) -> None:
+    from dotmac_integration import Outcome
+    from dotmac_integration.execution import record_delivery_outcome
+
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    moment = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+    record_delivery_outcome(delivery, Outcome(status=status), now=moment)
+    assert delivery.state == state
+    assert delivery.terminal_at == moment
+
+
+def test_lease_ambiguation_stamps_terminal_at_on_both_paths(db: Session) -> None:
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    swept = _queued(db, installation, binding, key="a")
+    claimed = _queued(db, installation, binding, key="b")
+    assert claim_delivery(db, swept, policy=LEASE)
+    assert claim_delivery(db, claimed, policy=LEASE)
+    later = datetime.now(UTC) + timedelta(seconds=600)
+
+    assert claim_delivery(db, claimed, now=later) is False  # claim path
+    release_expired_leases(db, now=later)  # sweep path
+
+    for row in (swept, claimed):
+        db.refresh(row)
+        assert row.state == "reconciliation_required"
+        assert row.terminal_at is not None
+
+
+def test_a_landed_reconcile_stamps_and_a_requeue_clears_terminal_at(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dotmac_integration.outbound_repair as repair
+
+    monkeypatch.setattr(repair, "record_operation", lambda *a, **k: None)
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    landed = _queued(db, installation, binding, key="landed")
+    landed.state = "reconciliation_required"
+    landed.attempt_count = 1
+    db.commit()
+    subject = prepare_reconciliation(db, delivery_id=landed.id)
+    reconcile_with_evidence(
+        db,
+        subject,
+        ProviderEvidence(verdict=ProviderVerdict.LANDED),
+        reason="provider has it",
+    )
+    db.refresh(landed)
+    assert landed.state == "delivered"
+    assert landed.terminal_at is not None
+
+    rearmed = _queued(db, installation, binding, key="rearm")
+    rearmed.state = "dead_letter"
+    rearmed.terminal_at = datetime.now(UTC)
+    db.commit()
+    replay_delivery(db, rearmed, reason="operator")
+    assert rearmed.state == "pending"
+    assert rearmed.terminal_at is None
+
+
+def test_replay_refuses_a_live_in_flight_row_even_from_a_stale_copy(
+    db: Session,
+) -> None:
+    """The replay's lock re-reads the STATE: this session still believes the row
+    is retryable, but another worker has claimed it."""
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    delivery.state = "retryable"
+    db.commit()
+    stale = db.get(DeliveryAttempt, delivery.id)
+    assert stale is not None and stale.state == "retryable"
+    other = Session(db.info["engine"])
+    try:
+        row = other.get(DeliveryAttempt, delivery.id)
+        assert claim_delivery(other, row, policy=ExecutionPolicy(lease_seconds=600))
+        other.commit()
+    finally:
+        other.close()
+
+    with pytest.raises(NotRepairable, match="in_flight"):
+        replay_delivery(db, stale, reason="double click")
+    db.refresh(delivery)
+    assert delivery.state == "in_flight"
+    assert delivery.attempt_count == 1

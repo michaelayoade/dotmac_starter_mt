@@ -1980,7 +1980,8 @@
           "dotmac_integration/migrations/versions/ig_0017_provisioning.py",
           "dotmac_integration/provisioning.py",
           "dotmac_integration/provision_contract.py",
-          "dotmac_integration/migrations/versions/ig_0018_dispatch_snapshot.py"
+          "dotmac_integration/migrations/versions/ig_0018_dispatch_snapshot.py",
+          "dotmac_integration/migrations/versions/ig_0019_delivery_terminal_at.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -88,6 +88,7 @@ def delivery(db: Session) -> DeliveryAttempt:
     queued.state = "delivered"
     queued.created_at = OLD
     queued.delivered_at = OLD
+    queued.terminal_at = OLD
     queued.provider_reference = "wamid.outbound-1"
     queued.provider_status_code = 200
     queued.result_json = {"accepted_reference": "product-result-1"}
@@ -252,3 +253,58 @@ def test_a_held_dead_letter_is_not_redacted(
         db, delivery, policy=POLICY, reason="dispute", placed_by="legal-user"
     )
     assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 0
+
+
+# ── The retention clock is terminal_at, not created_at ─────────────────────
+
+
+def test_a_row_that_ran_long_before_failing_is_not_purged_early(
+    db: Session, delivery: DeliveryAttempt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dotmac_integration.retention as retention_module
+
+    monkeypatch.setattr(retention_module, "record_operation", lambda *a, **k: None)
+    delivery.state = "dead_letter"
+    delivery.created_at = OLD  # enqueued 60 days ago ...
+    delivery.terminal_at = NOW - timedelta(days=1)  # ... failed yesterday
+    db.flush()
+
+    assert (
+        classify_delivery(delivery, policy=POLICY, now=NOW, held=False) == "not_expired"
+    )
+    assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 0
+    assert not is_delivery_redacted(delivery)
+
+
+def test_the_purge_boundary_is_computed_from_terminal_at(
+    db: Session, delivery: DeliveryAttempt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dotmac_integration.retention as retention_module
+
+    monkeypatch.setattr(retention_module, "record_operation", lambda *a, **k: None)
+    cutoff = POLICY.cutoff(NOW)
+    delivery.terminal_at = cutoff + timedelta(seconds=1)
+    db.flush()
+    assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 0
+
+    delivery.terminal_at = cutoff - timedelta(seconds=1)
+    db.flush()
+    assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 1
+
+
+def test_a_terminal_row_without_terminal_at_is_refused_not_guessed(
+    db: Session, delivery: DeliveryAttempt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dotmac_integration.retention as retention_module
+
+    monkeypatch.setattr(retention_module, "record_operation", lambda *a, **k: None)
+    delivery.terminal_at = None  # written by a runtime that predates ig_0019
+    db.flush()
+
+    assert (
+        classify_delivery(delivery, policy=POLICY, now=NOW, held=False)
+        == "terminal_time_unknown"
+    )
+    sweep = purge_expired_delivery_payloads(db, policy=POLICY, now=NOW)
+    assert sweep.redacted == 0
+    assert sweep.refused_by_reason == {"terminal_time_unknown": 1}

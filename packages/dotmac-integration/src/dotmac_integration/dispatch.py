@@ -487,6 +487,8 @@ def settle(
             outcome.result if outcome.status is OutcomeStatus.SUCCEEDED else None
         ),
     }
+    if next_state_value in ("delivered", "dead_letter", "reconciliation_required"):
+        values["terminal_at"] = moment
     if next_state_value == "delivered":
         values.update(
             delivered_at=moment,

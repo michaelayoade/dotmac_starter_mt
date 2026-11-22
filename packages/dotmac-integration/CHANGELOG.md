@@ -2,7 +2,7 @@
 
 ## 0.1.0a22 — unpublished allocation
 
-Three DELIVERY fixes; no migration and no SPI change. Allocated as the successor of
+Three DELIVERY fixes plus a retention clock; one additive migration (`ig_0019_delivery_terminal_at`), no SPI change. Allocated as the successor of
 published a21 (tag `dotmac-integration-v0.1.0a21`); publication remains a separate gate.
 
 - **BEHAVIOUR CHANGE: no resend after a crash.** An `in_flight` DELIVERY row
@@ -35,6 +35,24 @@ published a21 (tag `dotmac-integration-v0.1.0a21`); publication remains a separa
   state, error and provider evidence are kept. `pending`, `retryable` and
   `in_flight` are live work and are never redacted. A redacted dead letter can
   no longer be replayed (a tombstone is not a payload).
+- **Retention runs from terminal time (`ig_0019_delivery_terminal_at`).** Adds the
+  nullable `delivery_attempts.terminal_at` (additive; no default, constraint or
+  index), set in the same UPDATE as every transition into `delivered`,
+  `dead_letter` or `reconciliation_required` (settle, `record_delivery_outcome`,
+  lease ambiguation by sweep and by claim, a LANDED reconcile) and cleared when a
+  row is re-armed (operator replay, NOT_LANDED reconcile). Payload retention now
+  measures age from `terminal_at`, so a row that waited or ran long before
+  failing keeps its full repair window. A terminal row with NULL `terminal_at`
+  (written by a runtime that predates the column) is refused as
+  `terminal_time_unknown`, never guessed. **Backfill chosen:** `delivered` rows
+  take `delivered_at` (fallback `created_at`); `dead_letter` and
+  `reconciliation_required` rows have no recorded terminal time (the table has no
+  `updated_at`), so they take the migration time, starting their repair window
+  at upgrade; the sweep never redacted those states before this release, so
+  nothing is shortened. Live rows stay NULL. Downgrade drops the column.
+  Decisions D-1 (every crashed DELIVERY waits for an operator) and D-3
+  (every `reconciliation_required` replay needs `acknowledge_possible_duplicate`)
+  were ruled 2026-11-22.
 - **DELIVERY handlers receive bound network targets.** `dispatch.prepare` now
   injects the revision's `network_targets_json` under `_network_targets`,
   overwriting any same-named config entry, exactly as the PROVISION path does;
