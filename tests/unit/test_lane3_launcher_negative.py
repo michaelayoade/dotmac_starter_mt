@@ -13,6 +13,8 @@ import base64
 import threading
 from typing import Any
 
+import pytest
+
 from tests.unit import lane3_negative_support as nsupport
 from tests.unit.lane3_negative_support import nproof, serialize_exposure_calls
 from tests.unit.test_lane3_launcher_drive import (
@@ -354,10 +356,50 @@ def test_the_negative_drive_passes_s5s_staged_and_receipt_prechecks(
         chan.send("terminal", REFUSED)
 
     inputs = _negative_inputs(tmp_path)
-    assert inputs.staged is not None and inputs.pair is CLAIMS
+    assert inputs.pair is CLAIMS
     result = _run(ends, inputs, script)
     assert result.refusal_code == ""
     assert result.negative_proof is not None
+
+
+def _other_receipt() -> Any:
+    from tests.unit import lane3_e10_support as e10_support
+    from tests.unit import test_lane3_launcher_stage as stage_tests
+    from tests.unit.test_lane3_launcher_lease import MACHINE
+
+    return e10_support.make_receipt(
+        ssh_host_key_fingerprint=stage_tests.FINGERPRINT,
+        vm_alias=stage_tests.ALIAS,
+        machine_id=MACHINE,
+        receipt_ref="e10-receipt-0099",
+    )
+
+
+@pytest.mark.parametrize(
+    ("which", "code"),
+    [
+        ("receipt", "receipt-not-the-leases"),
+        ("staged", "execution-context-not-the-staged-file"),
+    ],
+)
+def test_the_negative_role_never_sends_start_past_a_failed_s5_precheck(
+    ends, tmp_path, which: str, code: str
+) -> None:
+    from tests.unit.test_lane3_launcher_drive import _context, _no_start, _staged_run
+
+    overrides: dict[str, Any] = {
+        "plan": _plan(role="negative"),
+        "pair": CLAIMS,
+    }
+    if which == "receipt":
+        overrides["e10"] = _other_receipt()
+    else:
+        overrides["staged"] = _staged_run(_context(x=1))
+    result, seen = _no_start(ends, tmp_path, **overrides)
+    assert seen["no_start"] is True
+    assert result.refusal_code == code
+    assert result.ready_seen is False
+    assert result.negative_proof is None
 
 
 def test_a_store_drop_before_proceed_leaves_the_negative_with_no_proof(
@@ -366,7 +408,6 @@ def test_a_store_drop_before_proceed_leaves_the_negative_with_no_proof(
     """S5: a dropped store aborts the target before `proceed`; the negative then
     has no probe window, no proof and, with the lease left to expire, no release
     (E9 refuses `release-missing`)."""
-    store = launcher.lane3_lease_store  # noqa: F841 - interface present
     from tests.unit.lane3_store_support import FakeStore
 
     fake = FakeStore()
@@ -375,8 +416,10 @@ def test_a_store_drop_before_proceed_leaves_the_negative_with_no_proof(
 
     def script(chan: Any) -> None:
         chan.receive("start", timeout=5)
-        chan.send("ready", _ready_for_negative())
+        # The launcher is blocked awaiting `ready`: severing here is before its
+        # `covers` check, with no race.
         fake.sever("before_write")
+        chan.send("ready", _ready_for_negative())
         seen["kind"] = chan.receive("proceed", "abort", timeout=5)[0]
         chan.send(
             "terminal",
