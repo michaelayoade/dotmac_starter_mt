@@ -938,6 +938,23 @@ type = "directory"
 url = "packages/dotmac-connector-remita"
 
 [[package]]
+name = "dotmac-connector-smtp"
+version = "0.1.0a1"
+description = "Dotmac Integrator delivery connector for SMTP submission: STARTTLS with hostname verification, operator-bound network target, classified outcomes"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a20"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-smtp"
+
+[[package]]
 name = "dotmac-connector-sub-accounting"
 version = "0.1.0a1"
 description = "Sub invoice-accounting-sync feed, POLL-only observation connector"
@@ -4599,4 +4616,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "e3ea42c3c7d5007953929adc1fab51ac5603be6618cfba554b8389121efcef53"
+content-hash = "a76f7f459909fba737a7b221c7264459b446fa31d5549e71ba0d6b6e6b1b3e3b"

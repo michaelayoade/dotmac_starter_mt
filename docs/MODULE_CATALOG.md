@@ -68,6 +68,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-connector-nira`](../packages/dotmac-connector-nira/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-nira/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_domains`, `dotmac_integrator` |
 | [`dotmac-connector-paystack`](../packages/dotmac-connector-paystack/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-paystack/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a3` | — | — | `dotmac_erp`, `dotmac_integrator`, `dotmac_sub` |
 | [`dotmac-connector-remita`](../packages/dotmac-connector-remita/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-remita/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_erp`, `dotmac_integrator` |
+| [`dotmac-connector-smtp`](../packages/dotmac-connector-smtp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-smtp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_academy_app`, `dotmac_integrator` |
 | [`dotmac-connector-sub-accounting`](../packages/dotmac-connector-sub-accounting/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-sub-accounting/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator` |
 | [`dotmac-connector-traccar`](../packages/dotmac-connector-traccar/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-traccar/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a4` | — | — | `dotmac_integrator` |
@@ -346,6 +347,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-remita/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`.
+
+### [`dotmac-connector-smtp`](../packages/dotmac-connector-smtp/README.md)
+
+- **Owner:** SMTP submission transport for the Dotmac Integrator: required STARTTLS with certificate and hostname verification (TLS 1.2 minimum), MIME construction from one rendered message, Message-ID derivation from the dispatch id, classification of SMTP replies into engine outcomes, and refusal of any endpoint outside the installation's operator-bound network targets before any I/O
+- **Contract:** Implement dotmac-integration SPI >=1.7,<2.0 for connector key smtp. Serve email.send.v1 in DELIVERY: given one rendered message, operator-bound destination configuration (host, pinned address, port, username, from address) and a materialised smtp_password secret, submit it and return one Outcome. The endpoint is checked with require_network_target before any I/O and the connection goes to that pinned address; STARTTLS is always required and the certificate hostname verified. Every failure after the DATA payload left, including an explicit non-250 final reply, is RECONCILIATION_REQUIRED and never retried; pre-DATA bounces and rejections are TERMINAL; connection, TLS, 4xx and soft 5.2/5.4 before DATA are RETRYABLE. Own no table, queue, retry, consent, rendering, attachment storage or secret path, and import no kernel type.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-smtp/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_academy_app`, `dotmac_integrator`.
 
 ### [`dotmac-connector-sub-accounting`](../packages/dotmac-connector-sub-accounting/README.md)
 
