@@ -253,6 +253,7 @@ class _Chain:
         self.policy = _publish_policy(scratch, scope)
         self.ref = f"document:{document_id}"
         self.sequence = 0
+        self.delivered: set[int] = set()  # the outbox delivers each event once
 
     def _command(self, observation) -> AssessCollectionExposureV1:
         self.sequence += 1
@@ -357,6 +358,9 @@ class _Chain:
         with session(self.scratch, self.scope) as db:
             for event in self.events_in(db):
                 payload = event.payload
+                if payload["source_version"] in self.delivered:
+                    continue
+                self.delivered.add(payload["source_version"])
                 record_access_input_v2(
                     db,
                     scope=self.scope,
