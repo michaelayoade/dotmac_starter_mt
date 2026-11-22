@@ -832,23 +832,45 @@ EMAIL_SEND_CAPABILITY_ID = "email.send.v1"
 #: the dispatch id as a string and attachments by reference only (never bytes).
 #: A DELIVERY capability publishes a command schema and no result schema: the
 #: effect is the outcome.
+#:
+#: The digest of this schema depends on the kernel constants it embeds
+#: (`MAX_PART_BYTES`, `ALLOWED_HEADERS`, the attachment limits and content
+#: types). Changing ANY of them changes the published contract: that is
+#: `email.send.v2`, never an edit of v1 (the digest pin in
+#: `tests/unit/test_email_send_contract.py` is the guard).
 EMAIL_SEND_COMMAND_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["dispatch_id", "address"],
-    "anyOf": [{"required": ["text"]}, {"required": ["html"]}],
+    "description": (
+        "At least one of text/html must be a string. text, html and each header "
+        "value are limited in UTF-8 BYTES (MAX_PART_BYTES), which JSON Schema "
+        "cannot count: maxLength bounds characters only, and the producer and "
+        "the connector enforce the byte limit."
+    ),
+    "anyOf": [
+        {"required": ["text"], "properties": {"text": {"type": "string"}}},
+        {"required": ["html"], "properties": {"html": {"type": "string"}}},
+    ],
     "properties": {
         "dispatch_id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            # Python's `$` also matches before a final newline.
+            "not": {"type": "string", "pattern": "[\\r\\n]"},
         },
         "address": {
             "type": "string",
             "pattern": (
                 '^[^\\s<>"@,;:()\\[\\]\\\\]{1,64}@' '[^\\s<>"@,;:()\\[\\]\\\\]{1,255}$'
             ),
+            "not": {"type": "string", "pattern": "[\\r\\n]"},
         },
-        "subject": {"type": ["string", "null"], "maxLength": 998},
+        "subject": {
+            "type": ["string", "null"],
+            "maxLength": 998,
+            "not": {"type": "string", "pattern": "[\\r\\n]"},
+        },
         "text": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
         "html": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
         "headers": {

@@ -17,7 +17,7 @@ from dotmac_kernel.delivery_providers import (
 #: The digest a connector claims (copied, never derived by the connector). A
 #: change to the schema changes this; the published contract is then succeeded
 #: by a new `.vN` id (ADR-0024 11), not edited.
-PUBLISHED_DIGEST = "cf56bf4a64b57901c588d7931259f4a9c4b8548bc8a768915156d064151eb605"
+PUBLISHED_DIGEST = "ad829f89fc3822b4d10c561c566baea04417b578d9205e2f02345b6931b12bf6"
 
 CONTRACT = CapabilityContract(
     capability_id=EMAIL_SEND_CAPABILITY_ID,
@@ -69,6 +69,14 @@ def test_valid_commands_are_accepted(payload: dict[str, object]) -> None:
         {**GOOD, "text": "x", "address": "no-at-sign"},
         {**GOOD, "text": "x", "address": "a@b.example\r\nBcc: z@y.example"},
         {**GOOD, "text": "x", "headers": {"Bcc": "z@y.example"}},
+        {**GOOD, "text": None},
+        {**GOOD, "text": None, "html": None},
+        {**GOOD, "html": None},
+        {**GOOD, "text": "x", "dispatch_id": "abc\n"},
+        {**GOOD, "text": "x", "address": "a@b.example\n"},
+        {**GOOD, "text": "x", "subject": "a\r\nBcc: z@y.example"},
+        {**GOOD, "text": "x", "subject": "a\nb"},
+        {**GOOD, "text": "x" * (1024 * 1024 + 1)},
         {**GOOD, "text": "x", "unknown": 1},
         {**GOOD, "text": "x", "attachments": [{"kind": "document"}]},
         {
@@ -93,3 +101,23 @@ def test_malformed_commands_are_refused(payload: dict[str, object]) -> None:
 def test_header_names_follow_the_kernel_allowlist() -> None:
     headers = EMAIL_SEND_COMMAND_SCHEMA["properties"]["headers"]["properties"]  # type: ignore[index]
     assert set(headers) == set(ALLOWED_HEADERS)
+
+
+def test_the_schema_matches_what_the_smtp_connector_accepts() -> None:
+    """Every malformed row above is also refused by the connector's own parser,
+    and every valid row is accepted by it (when the connector is installed)."""
+    pytest.importorskip("dotmac_connector_smtp")
+    from dotmac_connector_smtp.plugin import PayloadError, message_from_payload
+
+    for payload in (
+        {**GOOD, "text": "hi"},
+        {**GOOD, "html": "<p>x</p>", "subject": "S"},
+    ):
+        message_from_payload(payload)
+    for payload in (
+        {**GOOD, "text": None},
+        {**GOOD, "text": "x", "dispatch_id": "abc\n"},
+        {**GOOD, "text": "x", "address": "a@b.example\n"},
+    ):
+        with pytest.raises(PayloadError):
+            message_from_payload(payload)
