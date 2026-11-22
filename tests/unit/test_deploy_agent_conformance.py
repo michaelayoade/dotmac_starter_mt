@@ -44,10 +44,17 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v1.json"
-#: The sha256 Control a18 records in its CHANGELOG for `contract/target_api_v1.json`
-#: (dotmac_deployment_control PR #76 at ab738548, 53737 bytes).
-TARGET_API_V1_SHA256 = (
-    "354e587a8f6902ae14653ee6ff0282544fcfd5c77d19d74cc2b99500bc3ac0b7"
+#: The sha256 Control a18 records in its CHANGELOG for `contract/target_api_v1.json`.
+#: None until Control's FINAL file lands: the first draft (354e587a, #76 ab738548)
+#: was withdrawn by the architect review, so nothing is vendored or pinned yet.
+TARGET_API_V1_SHA256: str | None = None
+
+MISSING = (
+    "the vendored contract is not in place: copy Control a18's FINAL "
+    "contract/target_api_v1.json byte-identical to " + str(VENDORED) + ", pin "
+    "TARGET_API_V1_SHA256 from the a18 CHANGELOG, and replay Control's "
+    "`check_request` in test_request_vectors (shared path/header/credential/"
+    "target equality) once it is released"
 )
 
 REFUSAL_FOR_RENDER = {
@@ -64,22 +71,20 @@ REFUSAL_FOR_VALUE = {
 
 
 def load() -> dict[str, object]:
-    if not VENDORED.is_file():
-        pytest.fail(
-            "the vendored contract is missing: copy Control's "
-            "contract/target_api_v1.json byte-identical to " + str(VENDORED)
-        )
-    return json.loads(VENDORED.read_bytes())
+    if not VENDORED.is_file() or TARGET_API_V1_SHA256 is None:
+        pytest.fail(MISSING)
+    raw = VENDORED.read_bytes()
+    assert (
+        hashlib.sha256(raw).hexdigest() == TARGET_API_V1_SHA256
+    ), "the vendored contract differs from the pinned Control release"
+    return json.loads(raw)
 
 
 def join(parts: list[str]) -> str:
     return "".join(parts)
 
 
-def test_the_vendored_contract_is_byte_identical_to_the_pinned_release() -> None:
-    raw = VENDORED.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == TARGET_API_V1_SHA256
-    assert len(raw) == 53737
+def test_the_vendored_contract_is_present_and_pinned() -> None:
     assert load()["contract"] == "dotmac.target_api/1"
 
 
