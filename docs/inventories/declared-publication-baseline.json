@@ -134,7 +134,7 @@
     },
     "dotmac-money-flows": {
       "declared": "0.1.0a1",
-      "reason": "Unpublished tenant-plane money-flows skeleton (manifest and mf_0001 settle_instances lineage; no flow behaviour). It awaits the kernel migration-namespace allocation, the owners' public exports and the protected release lifecycle. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
+      "reason": "RELEASE-ALLOWLISTED, NOT YET RELEASED. Tenant-plane money-flows composition (manifest, mf_0001 settle_instances and mf_0002 funded_charge_instances lineage in mod_mflows). The kernel migration-namespace allocation is published in dotmac-kernel 0.1.0a110 (recorded in #1136) and the package pins >=0.1.0a110; it composes Billing, Payments and Service Access Policy through their top-level exports at the released versions it pins. It is now in the release-module allowlist, but no version has ever been published or tagged and this row authorizes no tag or adoption. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a1 publication via release-module.yml from protected main, never by editing the declared version down.",
       "state": "never-published"
     },
     "dotmac-payables": {
