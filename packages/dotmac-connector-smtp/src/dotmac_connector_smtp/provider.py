@@ -246,6 +246,10 @@ class _Watchdog:
         self.fired = False
         self._thread = threading.Thread(target=self._run, daemon=True)
 
+    @property
+    def expired(self) -> bool:
+        return self.fired
+
     def start(self) -> None:
         self._thread.start()
 
@@ -265,7 +269,10 @@ class _Watchdog:
                 candidates.append(self.smtp.sock)
             for sock in candidates:
                 with suppress(Exception):
-                    sock.shutdown(socket.SHUT_RDWR)
+                    # The RAW socket's shutdown, never `SSLSocket.shutdown`: the
+                    # TLS object's own method is not what stops the bytes, and
+                    # nothing may be written to the wire in plaintext.
+                    socket.socket.shutdown(sock, socket.SHUT_RDWR)
             if self._done.wait(0.5):
                 return
 
@@ -507,6 +514,9 @@ class SmtpTransport:
             if code != 250:
                 return self._reply_failure(STAGE_SESSION, code, text)
             if cfg.username:
+                if self._expired(smtp):
+                    # Never present credentials once the deadline has passed.
+                    return _failed(CODE_CONNECTION_ERROR, "timeout")
                 try:
                     smtp.login(cfg.username, password or "")
                 except smtplib.SMTPAuthenticationError as exc:
@@ -531,6 +541,10 @@ class SmtpTransport:
             return _failed(CODE_TLS_ERROR)
         except (OSError, smtplib.SMTPException) as exc:
             return self._connection_failure(exc)
+        if self._expired(smtp):
+            # Checked immediately before DATA: after the deadline the payload
+            # must not leave at all (a retry then cannot double-send).
+            return _failed(CODE_CONNECTION_ERROR, "timeout")
         # The payload is about to leave: from here a lost reply is UNKNOWN.
         try:
             if smtp.sock is not None:
@@ -564,6 +578,11 @@ class SmtpTransport:
             response_body=_reply_text(text) or None,
             payload_sent=True,
         )
+
+    @staticmethod
+    def _expired(smtp: smtplib.SMTP) -> bool:
+        watchdog = getattr(smtp, "_watchdog", None)
+        return bool(watchdog is not None and watchdog.expired)
 
     @staticmethod
     def _reply_failure(

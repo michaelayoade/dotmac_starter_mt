@@ -516,3 +516,56 @@ def test_the_transport_refuses_a_plaintext_config_whatever_the_caller_built(
     with pytest.raises(SmtpConfigError):
         send(sink, trusting, config=cfg(sink, starttls=False, production=False))
     assert sink.connections == 0
+
+
+# ------------------------------------------------ F-1: raw shutdown, checks
+def test_the_watchdog_shuts_down_the_raw_socket_never_the_tls_object(
+    sink, trusting, monkeypatch
+) -> None:
+    tls_calls: list[object] = []
+    raw_calls: list[object] = []
+    original_raw = socket.socket.shutdown
+    monkeypatch.setattr(
+        ssl.SSLSocket, "shutdown", lambda self, how: tls_calls.append(how)
+    )
+    monkeypatch.setattr(
+        socket.socket,
+        "shutdown",
+        lambda self, how: raw_calls.append(how) or original_raw(self, how),
+    )
+    sink.trickle_data_reply = True  # TLS is up when the deadline fires
+    result, _ = _timed(sink, trusting)
+    assert result is None
+    assert raw_calls and not tls_calls
+
+
+def _expire_after(monkeypatch, name: str) -> None:
+    """Mark the deadline as passed right after the named session step."""
+    from dotmac_connector_smtp import provider
+
+    original = getattr(provider._PinnedSMTP, name)
+
+    def wrapper(self, *a, **k):
+        out = original(self, *a, **k)
+        self._watchdog.fired = True
+        return out
+
+    monkeypatch.setattr(provider._PinnedSMTP, name, wrapper)
+
+
+def test_credentials_are_never_sent_once_the_deadline_has_passed(
+    sink, trusting, monkeypatch
+) -> None:
+    _expire_after(monkeypatch, "ehlo")
+    result = send(sink, trusting, config=cfg(sink, username="mailer"), password=GOOD_PW)
+    assert (result.status, result.payload_sent) == ("failed", False)
+    assert "AUTH" not in sink.commands and not sink.auth_seen
+
+
+def test_the_payload_never_leaves_once_the_deadline_has_passed(
+    sink, trusting, monkeypatch
+) -> None:
+    _expire_after(monkeypatch, "rcpt")
+    result = send(sink, trusting)
+    assert (result.status, result.payload_sent) == ("failed", False)
+    assert "DATA" not in sink.commands and sink.messages == []

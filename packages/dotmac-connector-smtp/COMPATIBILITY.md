@@ -31,9 +31,9 @@
 
 ## Engine dependency (open): raise the floor before release
 
-The `dotmac-integration` floor must rise to the release that contains the
-DELIVERY `_network_targets` fix (a separate draft PR) before this connector is
-released; a20 is not enough for a working send.
+The `dotmac-integration` floor must rise to **a22** (the release that contains
+the DELIVERY `_network_targets` fix) before this connector is released; a20 is
+not enough for a working send.
 
 ## Engine dependency detail
 
@@ -75,7 +75,7 @@ QUIT). Nominal budget: 11 x `timeout` + 3 x `data_timeout`; the defaults give
 11 x 15 + 3 x 40 = 285. These are per-operation budgets, not a wall-clock limit
 (a server trickling bytes resets each one).
 
-**Hard cap:** `SEND_DEADLINE_SECONDS` = 240 caps the whole send by watchdog; the pump asserts its lease exceeds it. **Lease coupling:** whatever leases one attempt must hold the lease for longer
+**Hard cap:** `SEND_DEADLINE_SECONDS` = 240 caps the whole send by watchdog (real worst case about 255 s: a TLS handshake in progress is not interruptible); the pump must check its lease against the connector deadline. **Lease coupling:** whatever leases one attempt must hold the lease for longer
 than this budget, or a second worker may reclaim it and double-send. The kernel
 relay's `stale_lease_seconds` is 300 (285 < 300); the Integrator outbound pump
 (work package B5) must use a longer lease. A caller passing explicit timeouts

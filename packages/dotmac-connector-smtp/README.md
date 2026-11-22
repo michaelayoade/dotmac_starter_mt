@@ -28,22 +28,34 @@ SMTP submission connector for the independently deployed Dotmac Integrator
 
 Michael approved this model (2026-11-22). `host` is the TLS server name the
 certificate is verified against; `address` is the IP literal the connection is
-actually made to, so no name is ever resolved at send time. The **operator**
-binds the installation's network target as a **/32** (or /128) for exactly that
-address, tcp 587 (the schema pins `port` to 587 and the manifest ceiling is tcp
-587 only). The manage scope cannot bind targets and cannot change `address`:
-the Integrator manage caller already refuses destination keys (`host`,
-`address`, `port`, `username`), and any change to them must come with a fresh
-secret, so held credentials are never presented to a new destination.
+actually made to, so no name is ever resolved at send time. The intent is that
+the **operator** binds the installation's network target as a **/32** (or /128)
+for exactly that address, tcp 587 (the schema pins `port` to 587 and the manifest
+ceiling is tcp 587 only).
+
+**What is enforced today, honestly:** the connector checks the address against
+the bound targets before any I/O, and the manifest ceiling is tcp 587. It does
+**not** enforce a /32: any bound CIDR covering the address and port is accepted,
+so the /32 is an operator convention until a gate checks it. And the manage
+scope **can** change `address` today. The Integrator (#35) will refuse the
+`address` key (alongside `host`, `port` and `username`) under manage scope, and
+require a fresh secret for any destination change; that code fix lives in #35,
+not in this package.
 
 ## Timing and the lease
 
 `SEND_DEADLINE_SECONDS` (240) is a hard wall-clock cap on one whole send: a
-watchdog shuts the socket at the deadline, so a server trickling bytes cannot
-outlast it (before DATA: retryable; after DATA: ambiguous). **The Integrator
-pump must assert at boot that its attempt lease is greater than
-`SEND_DEADLINE_SECONDS`** (not the 285 s nominal per-operation sum, and not its
-own data budget).
+watchdog shuts the raw socket down at the deadline (never the TLS object's own
+`shutdown`, so nothing is written in plaintext), and the session checks the
+deadline immediately before AUTH and before DATA. A server trickling bytes
+cannot outlast it (before DATA: retryable; after DATA: ambiguous). **Real worst
+case: about 255 s**, because a TLS handshake already in progress is not
+interruptible (240 s plus up to one 15 s operation). **The Integrator pump must
+check its attempt lease against the connector's deadline** (assert at boot that
+the lease is greater than `SEND_DEADLINE_SECONDS`, and keep real margin over the
+255 s worst case), not against the 285 s nominal per-operation sum or its own
+data budget. The connector's `dotmac-integration` floor for release is **a22**
+(the release carrying the DELIVERY `_network_targets` fix).
 
 Owns no database, queue, retry, consent, rendering or attachment storage.
 Tests are hermetic: a scripted SMTP sink on loopback with throwaway
