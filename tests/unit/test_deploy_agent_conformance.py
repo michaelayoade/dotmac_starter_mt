@@ -44,17 +44,16 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v1.json"
-#: The sha256 Control a18 records in its CHANGELOG for `contract/target_api_v1.json`.
-#: None until Control's FINAL file lands: the first draft (354e587a, #76 ab738548)
-#: was withdrawn by the architect review, so nothing is vendored or pinned yet.
-TARGET_API_V1_SHA256: str | None = None
+#: The sha256 Control a18 records in its CHANGELOG for `contract/target_api_v1.json`
+#: (dotmac_deployment_control PR #76 at 4819d705, 122686 bytes). A new Control sha
+#: replaces this value and the vendored bytes together.
+TARGET_API_V1_SHA256: str | None = (
+    "ff0a25b8284f7c22c9e5d930274ae4001ef3510529f75c74144544baa4158970"
+)
 
 MISSING = (
-    "the vendored contract is not in place: copy Control a18's FINAL "
-    "contract/target_api_v1.json byte-identical to " + str(VENDORED) + ", pin "
-    "TARGET_API_V1_SHA256 from the a18 CHANGELOG, and replay Control's "
-    "`check_request` in test_request_vectors (shared path/header/credential/"
-    "target equality) once it is released"
+    "the vendored contract is not in place: copy Control a18's "
+    "contract/target_api_v1.json byte-identical to " + str(VENDORED)
 )
 
 REFUSAL_FOR_RENDER = {
