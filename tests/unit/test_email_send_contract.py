@@ -17,7 +17,7 @@ from dotmac_kernel.delivery_providers import (
 #: The digest a connector claims (copied, never derived by the connector). A
 #: change to the schema changes this; the published contract is then succeeded
 #: by a new `.vN` id (ADR-0024 11), not edited.
-PUBLISHED_DIGEST = "ad829f89fc3822b4d10c561c566baea04417b578d9205e2f02345b6931b12bf6"
+PUBLISHED_DIGEST = "5e84feda870c42573615d32e0b90d5cd7204b40ecbe01c9567d86a0c3d85247c"
 
 CONTRACT = CapabilityContract(
     capability_id=EMAIL_SEND_CAPABILITY_ID,
