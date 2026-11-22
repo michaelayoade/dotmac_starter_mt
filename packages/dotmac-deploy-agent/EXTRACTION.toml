@@ -43,3 +43,32 @@ first_cutover = "Seabone (staging) is the first enrolled host after the Control 
 shadow_and_drift = "No side-by-side run. The wire contract is proved against a CP double that verifies the PoP signature, binding, clock window and nonce and signs every response; Control's params digest vectors and the Foundation pin-rewrite golden test pin the render rule from the other side."
 local_copy_retirement = "The Sub agent shell and the frozen CP deploy_agent retire when this launcher has completed the staging drills; the Sub copy is not deleted by this package."
 next_action = "Review lane A (launcher, params, secret_id delivery, M11) and lane B (lease client, governed transfer, reconcile observation, packaging); security review (WP6); signed build and release (WP9) only on the owner's go."
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "e571f9e90b68e37ae2567ece21481f10eafb5685"
+evidence_paths = [
+  "deploy/agent/agent.py",
+  "deploy/agent/state.py",
+  "deploy/agent/hostio.py",
+  "deploy/agent/launcher.sh",
+]
+
+# Frozen, single-product and staging-only: it retires when this launcher has
+# completed the staging drills.
+[[product_writers]]
+product = "dotmac_vendor_control_plane"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "286f6f2b4544a10bd157cc84534df98968dc38dc"
+evidence_paths = ["src/vendor_cp/deploy_agent/service.py"]
+
+# Searched for a deploy agent outside docs/: none; ERP deploys through scripts.
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "74fa788ae562905e4c8a1fcd46616585e4bf7694"
+evidence_paths = ["scripts/deploy.sh", "scripts/deploy_production.py"]
