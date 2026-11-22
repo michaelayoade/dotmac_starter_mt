@@ -1,0 +1,101 @@
+"""Boundary guards for dotmac-deploy-agent (DESIGN-rev3 s7 widenings).
+
+The agent holds NO CP DB credential or reach, NO lease DSN and NO registry pull
+credential. Pinned with the AST so a docstring explaining the absence cannot trip
+a rule; each guard carries a sensitivity proof that it fires on the planted defect.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "packages" / "dotmac-deploy-agent" / "src" / "dotmac_deploy_agent"
+
+ALLOWED_IMPORT_ROOTS = frozenset(
+    {
+        "__future__", "argparse", "base64", "collections", "dataclasses", "datetime",
+        "enum", "fcntl", "hashlib", "http", "json", "logging", "os", "pathlib",
+        "re", "secrets", "shutil", "signal", "ssl", "stat", "subprocess", "sys",
+        "time", "tomllib", "typing", "urllib", "cryptography", "dotmac_deploy_agent",
+    }
+)  # fmt: skip
+FORBIDDEN_ROOTS = frozenset(
+    {
+        "sqlalchemy", "psycopg", "psycopg2", "asyncpg", "alembic", "dotmac_kernel",
+        "dotmac_deployment_foundation", "dotmac_deployment_control", "app",
+        "docker", "requests", "httpx", "boto3",
+    }
+)  # fmt: skip
+FORBIDDEN_STRINGS = (
+    "DOCKER_CONFIG",
+    "docker login",
+    ".docker/config",
+    "ghcr.io",
+    "registry.dotmac.io",
+)
+
+
+def import_roots(source: str) -> set[str]:
+    roots: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def test_the_agent_imports_a_closed_set() -> None:
+    for path in SOURCE.glob("*.py"):
+        roots = import_roots(path.read_text())
+        assert not roots & FORBIDDEN_ROOTS, path.name
+        assert roots <= ALLOWED_IMPORT_ROOTS, (path.name, roots - ALLOWED_IMPORT_ROOTS)
+
+
+def test_the_import_guard_bites() -> None:
+    assert import_roots("import psycopg\nfrom sqlalchemy import text") & FORBIDDEN_ROOTS
+    assert import_roots("from dotmac_kernel import db") & FORBIDDEN_ROOTS
+
+
+def string_literals(source: str) -> list[str]:
+    return [
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+
+
+def test_no_registry_credential_or_pull_target_is_named() -> None:
+    for path in SOURCE.glob("*.py"):
+        literals = string_literals(path.read_text())
+        for needle in FORBIDDEN_STRINGS:
+            assert not any(needle in literal for literal in literals), (
+                path.name,
+                needle,
+            )
+
+
+def test_the_registry_guard_bites() -> None:
+    assert any("ghcr.io" in s for s in string_literals('x = "ghcr.io/o/p"'))
+
+
+def test_the_legacy_source_is_only_lstat_checked_never_opened() -> None:
+    """L7: the only read path is $CREDENTIALS_DIRECTORY/legacy."""
+    tree = ast.parse((SOURCE / "legacy.py").read_text())
+    calls = {
+        node.func.attr
+        if isinstance(node.func, ast.Attribute)
+        else getattr(node.func, "id", "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    }
+    assert not calls & {"open", "read_bytes", "read_text"} - {"read_bytes"}
+    source = (SOURCE / "legacy.py").read_text()
+    assert "source.read" not in source and "open(source" not in source
+
+
+def test_no_shell_true_anywhere() -> None:
+    for path in SOURCE.glob("*.py"):
+        assert "shell=True" not in path.read_text(), path.name

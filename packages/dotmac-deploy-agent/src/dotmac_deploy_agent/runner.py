@@ -1,0 +1,88 @@
+"""Invoke Foundation (the sole runner). The agent launches; it never runs the sequence.
+
+The environment handed to the runner is an explicit allow-list: nothing is
+inherited, so no DB credential or secret-zero can leak into Foundation. The
+variable names below are the agent-to-bindings contract (WP5a reads them).
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess  # nosec B404 - argv list, shell=False, absolute executable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final, Protocol
+
+from .refusal import Refusal
+
+ENV_PATH: Final = "/usr/local/bin:/usr/bin:/bin"
+
+
+@dataclass(frozen=True)
+class RunSpec:
+    dispatch_id: str
+    target_ref: str
+    product: str
+    params_env: Path
+    legacy_env: Path | None = None
+    lease_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RunResult:
+    exit_code: int | None
+    timed_out: bool
+
+
+class Runner(Protocol):
+    def run(self, spec: RunSpec) -> RunResult: ...
+
+
+def runner_environment(spec: RunSpec) -> dict[str, str]:
+    env = {
+        "PATH": ENV_PATH,
+        "LANG": "C.UTF-8",
+        "DOTMAC_DEPLOY_DISPATCH_ID": spec.dispatch_id,
+        "DOTMAC_DEPLOY_TARGET_REF": spec.target_ref,
+        "DOTMAC_DEPLOY_PRODUCT": spec.product,
+        "DOTMAC_DEPLOY_PARAMS_ENV": str(spec.params_env),
+    }
+    if spec.legacy_env is not None:
+        env["DOTMAC_DEPLOY_LEGACY_ENV"] = str(spec.legacy_env)
+    if spec.lease_id is not None:
+        env["DOTMAC_DEPLOY_LEASE_ID"] = spec.lease_id
+    return env
+
+
+class SubprocessRunner:
+    def __init__(self, argv: tuple[str, ...], timeout_seconds: int) -> None:
+        if not argv or not os.path.isabs(argv[0]):
+            raise Refusal("config_invalid")
+        self._argv = argv
+        self._timeout = timeout_seconds
+
+    def run(self, spec: RunSpec) -> RunResult:
+        try:
+            process = subprocess.Popen(  # nosec B603  # noqa: S603
+                list(self._argv),
+                env=runner_environment(spec),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+                start_new_session=True,
+                close_fds=True,
+            )
+        except OSError:
+            raise Refusal("runner_start_failed") from None
+        try:
+            return RunResult(process.wait(timeout=self._timeout), False)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            return RunResult(None, True)
