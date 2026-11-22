@@ -177,6 +177,12 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # prerequisite contract that predates its a84 allocation. Its ledger row
     # is therefore the effective floor.
     "dotmac-web-analytics": "0.1.0a86",
+    # Money flows owns mod_mflows / mf, reserved in kernel source by #1055 and
+    # first PUBLISHED in a110 (a109 carries no reservation), which also ships
+    # the 0032 dispatch migration and the 0033/0034 append-only receipts it
+    # composes over. Every other kernel surface it imports (money, cache,
+    # messaging, idempotency, migrations.verify, prerequisites) predates a110.
+    "dotmac-money-flows": "0.1.0a110",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

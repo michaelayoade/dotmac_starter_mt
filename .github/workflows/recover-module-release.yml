@@ -71,6 +71,7 @@ on:
           - dotmac-ipam
           - dotmac-licensing
           - dotmac-media-observations
+          - dotmac-money-flows
           - dotmac-network-access
           - dotmac-network-assurance
           - dotmac-network-control
