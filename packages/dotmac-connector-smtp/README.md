@@ -36,11 +36,10 @@ ceiling is tcp 587 only).
 **What is enforced today, honestly:** the connector checks the address against
 the bound targets before any I/O, and the manifest ceiling is tcp 587. It does
 **not** enforce a /32: any bound CIDR covering the address and port is accepted,
-so the /32 is an operator convention until a gate checks it. And the manage
-scope **can** change `address` today. The Integrator (#35) will refuse the
-`address` key (alongside `host`, `port` and `username`) under manage scope, and
-require a fresh secret for any destination change; that code fix lives in #35,
-not in this package.
+so the /32 is an operator convention until a gate checks it. The `address` key is
+refused under the manage scope by Integrator main 03c18b4f (#35), so the manage
+caller cannot repoint the destination; that guard lives in the Integrator, not in
+this package.
 
 ## Timing and the lease
 
@@ -51,11 +50,13 @@ deadline immediately before AUTH and before DATA. A server trickling bytes
 cannot outlast it (before DATA: retryable; after DATA: ambiguous). **Real worst
 case: about 255 s**, because a TLS handshake already in progress is not
 interruptible (240 s plus up to one 15 s operation). **The Integrator pump must
-check its attempt lease against the connector's deadline** (assert at boot that
-the lease is greater than `SEND_DEADLINE_SECONDS`, and keep real margin over the
-255 s worst case), not against the 285 s nominal per-operation sum or its own
-data budget. The connector's `dotmac-integration` floor for release is **a22**
-(the release carrying the DELIVERY `_network_targets` fix).
+check its attempt lease against the connector's deadline** (an Integrator
+follow-up: assert at boot that the lease is greater than `SEND_DEADLINE_SECONDS`,
+with real margin over the 255 s worst case), not against the 285 s nominal
+per-operation sum or its own data budget. The connector's `dotmac-integration`
+floor rises to **a22** (the release carrying the DELIVERY `_network_targets`
+fix) when a22 is tagged; the package and release policy stay at `>=a20` until
+then.
 
 Owns no database, queue, retry, consent, rendering or attachment storage.
 Tests are hermetic: a scripted SMTP sink on loopback with throwaway
