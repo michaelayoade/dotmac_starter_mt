@@ -44,6 +44,7 @@ from tests import test_billing_isolation as b
 from tests.money_flows_fixtures import (
     BASE,
     FakeChargeSource,
+    add_months_local,
     assembly_settled,
     assembly_start,
     deposit,
@@ -101,7 +102,7 @@ def test_a_charge_the_balance_covers_is_discharged_at_its_due_date(scratch):
     document, obligation, exposure = _invoice(scratch, scope)
     assert document.due_at == BASE and document.grand_total == TOTAL
     assert obligation.period_start == BASE
-    assert obligation.period_end == BASE + timedelta(days=30)
+    assert obligation.period_end == add_months_local(BASE, 1)
     assert exposure.collectible_receivable == b._money("0")
     assert unrestricted(scratch, scope, account) == Decimal("200.00") - TOTAL
     assert _draws(scratch, scope) == 1
@@ -164,7 +165,7 @@ def test_a_later_deposit_starts_the_paid_period_at_the_cash_instant(scratch):
     document, obligation, _ = _invoice(scratch, scope)
     assert document.due_at == LATE
     assert obligation.period_start == LATE
-    assert obligation.period_end == LATE + timedelta(days=30)
+    assert obligation.period_end == add_months_local(LATE, 1)
     assert source.issues == [(key, LATE)]
     (row,) = _rows(scratch, scope)
     assert row.state == "discharged"
