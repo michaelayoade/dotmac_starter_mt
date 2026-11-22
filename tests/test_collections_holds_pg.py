@@ -776,3 +776,101 @@ def test_republish_allocates_a_fresh_version_from_the_plane_sequence(
             before.version,
             first.version,
         ]
+
+
+def test_last_lift_racing_a_case_opening_arms_the_ladder_or_refuses(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    subject = "subscriber:concurrency"
+    timer = FakeCollectionsTimer()
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_policy(session, scope)
+        CollectionHoldService.place(
+            session, _place_command(scope, subject, "dispute:r")
+        )
+        session.commit()
+
+    key = _lock_key("collections", scope_segment(scope), "subject", subject)
+    holder = create_engine(app_url)
+    observer = create_engine(_superuser_url())
+    database = create_engine(admin_url).url.database
+    barrier = threading.Barrier(3)
+
+    def waiting() -> int:
+        with observer.connect() as connection:
+            return int(
+                connection.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = :d "
+                        "AND wait_event_type = 'Lock' AND wait_event = 'advisory'"
+                    ),
+                    {"d": database},
+                )
+                or 0
+            )
+
+    def lift():
+        with _tenant_session(app_url, tenant_id) as session:
+            barrier.wait(timeout=20)
+            try:
+                result = CollectionHoldService.lift(
+                    session, _lift_command(scope, subject, "dispute:r"), timer
+                )
+                session.commit()
+                return result
+            except CollectionsConflict as refusal:
+                session.rollback()
+                return refusal
+
+    def open_case():
+        with _tenant_session(app_url, tenant_id) as session:
+            barrier.wait(timeout=20)
+            result = _assess_open(session, scope, policy, timer, NOW)
+            session.commit()
+            return result
+
+    blocked = 0
+    try:
+        with holder.connect() as connection:
+            transaction = connection.begin()
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                {"k": key},
+            )
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(lift), pool.submit(open_case)]
+                try:
+                    barrier.wait(timeout=20)
+                    deadline = time.monotonic() + 20
+                    while blocked < 2 and time.monotonic() < deadline:
+                        time.sleep(0.2)
+                        blocked = waiting()
+                finally:
+                    transaction.commit()
+                lifted, opened = (f.result(timeout=30) for f in futures)
+    finally:
+        holder.dispose()
+        observer.dispose()
+    assert blocked >= 2, "both commands must wait on the subject lock"
+    assert isinstance(opened, CaseAssessed)
+    step = TimerIdentityV1(
+        scope, "collections.case", "collection_case", str(opened.case_id), "next_step"
+    )
+    with _tenant_session(app_url, tenant_id) as session:
+        if isinstance(lifted, CollectionsConflict):
+            # The case came first and saw the hold: lift refused, and its redelivery
+            # (now that the case is visible) re-arms the ladder.
+            assert lifted.code == "subject_cases_changed"
+            assert timer.current(session, step) is None
+            again = CollectionHoldService.lift(
+                session, _lift_command(scope, subject, "dispute:r"), timer
+            )
+            session.commit()
+            assert isinstance(again, HoldLifted)
+        else:
+            assert isinstance(lifted, HoldLifted)
+        # Either way the new case ends with its reminder steps armed.
+        assert timer.current(session, step) is not None

@@ -1751,6 +1751,11 @@ class CollectionCaseService:
                     )
                 elif source_advanced:
                     # A live collection hold suppresses the ladder; lift re-arms it.
+                    # Decide under the subject lock (case lock already held), so a
+                    # concurrent last lift either finishes first or sees this case.
+                    _serialize_identity(
+                        session, command.scope, "subject", row.subject_ref
+                    )
                     if not _live_hold_refs(session, command.scope, row.subject_ref):
                         _schedule_next_policy_step(
                             session,
@@ -1845,6 +1850,9 @@ class CollectionCaseService:
             session.flush()
             if timer is not None:
                 if to_state == "active":
+                    _serialize_identity(
+                        session, command.scope, "subject", row.subject_ref
+                    )
                     if not _live_hold_refs(session, command.scope, row.subject_ref):
                         _schedule_next_policy_step(
                             session,

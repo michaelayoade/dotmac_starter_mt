@@ -338,3 +338,10 @@ def test_the_reader_is_tenant_plane_only_and_requires_a_reason(monkeypatch) -> N
         billing.read(scope=PlatformScope())
     with pytest.raises(ValueError, match="reason_code"):
         billing.read(reason=" ")
+
+
+def test_a_naive_terms_floor_is_refused_before_any_billing_read(monkeypatch) -> None:
+    billing = _Billing(monkeypatch, _v1())
+    with pytest.raises(ValueError, match="terms_floor_at must be timezone-aware"):
+        billing.read(floor=datetime(2026, 11, 1))
+    assert billing.terms_at == []

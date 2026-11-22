@@ -104,6 +104,10 @@ class BillingReceivablesReader:
         del as_of  # Collections applies the instant; Billing's fact is as sealed.
         if not self.reason_code.strip():
             raise ValueError("reason_code is required")
+        floor = self.terms_floor_at
+        if floor is not None and (floor.tzinfo is None or floor.utcoffset() is None):
+            # A deploy-time input error, refused before any Billing read, not data.
+            raise ValueError("terms_floor_at must be timezone-aware")
         if not isinstance(scope, TenantScope):
             raise TypeError("money flows requires a TenantScope")
         if source_owner != SOURCE_OWNER:
