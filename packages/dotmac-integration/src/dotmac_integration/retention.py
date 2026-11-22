@@ -1108,6 +1108,15 @@ def is_delivery_redacted(delivery: DeliveryAttempt) -> bool:
     return isinstance(payload, dict) and isinstance(payload.get(REDACTION_MARKER), dict)
 
 
+#: States after which an attempt is final unless an operator acts. `in_flight`,
+#: `pending` and `retryable` are live work and are never redacted.
+_TERMINAL_DELIVERY_STATES: tuple[str, ...] = (
+    "delivered",
+    "dead_letter",
+    "reconciliation_required",
+)
+
+
 def classify_delivery(
     delivery: DeliveryAttempt,
     *,
@@ -1121,11 +1130,13 @@ def classify_delivery(
         return "legal_hold"
     if delivery.state == "in_flight":
         return "leased"
-    if delivery.state == "reconciliation_required":
-        return "reconciliation_required"
-    # Dead-letter and retryable deliveries remain replayable through the
-    # operations API, so their payload is unresolved content, not old evidence.
-    if delivery.state != "delivered":
+    # Every TERMINAL state ages out: delivered, dead_letter and
+    # reconciliation_required. Retention is a bounded promise about content, so
+    # a failed or ambiguous attempt's payload cannot live forever. The digest,
+    # key count, state, error and provider evidence survive; a redacted row is
+    # refused by every replay/repair path (a tombstone is not a payload).
+    # Only live work (pending, retryable) is unresolved content.
+    if delivery.state not in _TERMINAL_DELIVERY_STATES:
         return "unresolved"
     if is_delivery_redacted(delivery):
         return "already_redacted"
@@ -1158,7 +1169,7 @@ def redact_delivery(
     policy: RetentionPolicy,
     now: datetime | None = None,
 ) -> DeliveryAttempt:
-    """Redact one delivered payload with a hold-aware conditional update."""
+    """Redact one terminal delivery's payload with a hold-aware conditional update."""
 
     moment = now or datetime.now(UTC)
     held = active_delivery_hold_for(db, delivery.id) is not None
@@ -1175,7 +1186,7 @@ def redact_delivery(
         sa.update(DeliveryAttempt)
         .where(
             DeliveryAttempt.id == delivery.id,
-            DeliveryAttempt.state == "delivered",
+            DeliveryAttempt.state.in_(_TERMINAL_DELIVERY_STATES),
             DeliveryAttempt.created_at < policy.cutoff(moment),
             DeliveryAttempt.payload_json.is_not(None),
             ~_active_delivery_hold_exists(),
@@ -1257,14 +1268,9 @@ def _delivery_refusal_counts(db: Any, cutoff: datetime) -> dict[str, int]:
     counts = {
         "legal_hold": _count(held),
         "leased": _count(~held, DeliveryAttempt.state == "in_flight"),
-        "reconciliation_required": _count(
-            ~held, DeliveryAttempt.state == "reconciliation_required"
-        ),
         "unresolved": _count(
             ~held,
-            DeliveryAttempt.state.not_in(
-                ("delivered", "in_flight", "reconciliation_required")
-            ),
+            DeliveryAttempt.state.not_in((*_TERMINAL_DELIVERY_STATES, "in_flight")),
         ),
     }
     return {reason: count for reason, count in counts.items() if count}
@@ -1277,7 +1283,7 @@ def purge_expired_delivery_payloads(
     now: datetime | None = None,
     actor_admin_id: UUID | None = None,
 ) -> DeliveryRetentionSweep:
-    """Redact one oldest-first batch of delivered outbox payloads."""
+    """Redact one oldest-first batch of terminal outbox payloads."""
 
     moment = now or datetime.now(UTC)
     cutoff = policy.cutoff(moment)
@@ -1286,7 +1292,7 @@ def purge_expired_delivery_payloads(
             sa.select(DeliveryAttempt)
             .where(
                 *_expired_delivery_content(cutoff),
-                DeliveryAttempt.state == "delivered",
+                DeliveryAttempt.state.in_(_TERMINAL_DELIVERY_STATES),
                 ~_active_delivery_hold_exists(),
             )
             .order_by(DeliveryAttempt.created_at, DeliveryAttempt.id)

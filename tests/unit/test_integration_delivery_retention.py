@@ -146,12 +146,13 @@ def test_redacted_delivery_still_deduplicates_product_replay(
         ("pending", "unresolved"),
         ("in_flight", "leased"),
         ("retryable", "unresolved"),
-        ("dead_letter", "unresolved"),
-        ("reconciliation_required", "reconciliation_required"),
+        ("delivered", None),
+        ("dead_letter", None),
+        ("reconciliation_required", None),
     ],
 )
-def test_only_delivered_content_can_be_redacted(
-    delivery: DeliveryAttempt, state: str, reason: str
+def test_only_terminal_content_can_be_redacted(
+    delivery: DeliveryAttempt, state: str, reason: str | None
 ) -> None:
     delivery.state = state
     assert classify_delivery(delivery, policy=POLICY, now=NOW, held=False) == reason
@@ -193,3 +194,61 @@ def test_sweep_is_bounded_and_idempotent(
     assert first.redacted == 1
     assert first.redacted_ids == (delivery.id,)
     assert second.redacted == 0
+
+
+@pytest.mark.parametrize(
+    "state", ["delivered", "dead_letter", "reconciliation_required"]
+)
+def test_every_terminal_state_is_redacted_keeping_evidence(
+    db: Session,
+    delivery: DeliveryAttempt,
+    state: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dotmac_integration.retention as retention_module
+
+    monkeypatch.setattr(retention_module, "record_operation", lambda *a, **k: None)
+    delivery.state = state
+    delivery.error_code = "provider_rejected" if state != "delivered" else None
+    db.flush()
+    digest, key, reference = (
+        delivery.payload_digest,
+        delivery.idempotency_key,
+        delivery.provider_reference,
+    )
+
+    sweep = purge_expired_delivery_payloads(db, policy=POLICY, now=NOW)
+
+    assert sweep.redacted_ids == (delivery.id,)
+    db.refresh(delivery)
+    assert is_delivery_redacted(delivery)
+    assert delivery.state == state
+    assert delivery.payload_digest == digest
+    assert delivery.idempotency_key == key
+    assert delivery.provider_reference == reference
+    assert delivery.result_json is None
+    assert "+2348012345678" not in str(delivery.payload_json)
+    assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 0
+
+
+@pytest.mark.parametrize("state", ["pending", "retryable", "in_flight"])
+def test_live_work_is_never_redacted(
+    db: Session, delivery: DeliveryAttempt, state: str
+) -> None:
+    delivery.state = state
+    db.flush()
+    assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 0
+    assert not is_delivery_redacted(delivery)
+
+
+def test_a_held_dead_letter_is_not_redacted(
+    db: Session, delivery: DeliveryAttempt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dotmac_integration.retention as retention_module
+
+    monkeypatch.setattr(retention_module, "record_operation", lambda *a, **k: None)
+    delivery.state = "dead_letter"
+    place_delivery_legal_hold(
+        db, delivery, policy=POLICY, reason="dispute", placed_by="legal-user"
+    )
+    assert purge_expired_delivery_payloads(db, policy=POLICY, now=NOW).redacted == 0

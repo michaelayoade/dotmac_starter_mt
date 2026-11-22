@@ -167,7 +167,7 @@ write, not this package's to assume.
 | See what is stuck | `operations.health_report(db)` |
 | See how the queue is behaving | `operations.dispatch_metrics(db)` |
 | Requeue a dead letter | `operations.replay_delivery(db, delivery, reason=…)` |
-| Recover a dead worker's rows | `operations.release_expired_leases(db)` |
+| Settle a dead worker's rows (to `reconciliation_required`, never retried) | `operations.release_expired_leases(db)` |
 
 Three properties worth knowing before using any of them:
 

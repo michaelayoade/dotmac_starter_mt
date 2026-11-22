@@ -9,6 +9,36 @@ source allocation supplies no production accepting authority, credential
 assignment producer, transport negotiation, consumer enrollment or cutover.
 Publication and installed consumer qualification remain separate gates.
 
+Also in this unpublished source (three DELIVERY fixes, no migration):
+
+- **BEHAVIOUR CHANGE: no resend after a crash.** An `in_flight` DELIVERY row
+  whose lease expired is now moved to `reconciliation_required`
+  (`error_code="lease_expired_outcome_unknown"`) by both
+  `operations.release_expired_leases` and `execution.claim_delivery`, instead of
+  `retryable` / re-claimed. It is never retried automatically; an operator may
+  reconcile it against provider evidence or requeue it with
+  `operations.replay_delivery(..., acknowledge_possible_duplicate=True)`
+  (recorded in the audit trail). `claim_delivery` now claims only `pending` /
+  `retryable` rows, under `SELECT ... FOR UPDATE SKIP LOCKED` with the state
+  re-verified by the conditional UPDATE. `replay_delivery` also refuses a
+  retention-redacted row. PROVISION's own lease engine is unchanged.
+  Connectors without idempotency handling (for example
+  `dotmac-connector-whatsapp`) are the beneficiaries: a worker crash after the
+  provider call no longer sends the message twice, but such rows now need an
+  operator decision instead of retrying by themselves.
+- **Retention covers every terminal state.**
+  `retention.purge_expired_delivery_payloads` / `redact_delivery` now redact
+  `delivered`, `dead_letter` and `reconciliation_required` payloads (and
+  `result_json`) after the payload retention period; digest, idempotency key,
+  state, error and provider evidence are kept. `pending`, `retryable` and
+  `in_flight` are live work and are never redacted. A redacted dead letter can
+  no longer be replayed (a tombstone is not a payload).
+- **DELIVERY handlers receive bound network targets.** `dispatch.prepare` now
+  injects the revision's `network_targets_json` under `_network_targets`,
+  overwriting any same-named config entry, exactly as the PROVISION path does;
+  a malformed stored value raises `DispatchUnavailable` before the claim.
+  `spi.require_network_target` therefore works for DELIVERY connectors.
+
 ## 0.1.0a20 — released 2026-10-28: durable PROVISION runtime and SPI 1.7 fleet targets
 
 Released from protected main `7a9bfbef6a24070bea97b4490d7e6074de714552` after the

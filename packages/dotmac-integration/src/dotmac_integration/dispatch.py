@@ -70,10 +70,14 @@ from dotmac_integration.retry import (
     throttle_cooldown_seconds,
 )
 from dotmac_integration.spi import (
+    NETWORK_TARGETS_CONFIG_KEY,
     ConnectorMode,
     DeliveryPlugin,
     DispatchRequest,
+    NetworkTargetError,
     accepts_manifest_digest,
+    network_targets_from_json,
+    network_targets_to_json,
     require_capability_mode,
 )
 
@@ -254,6 +258,23 @@ def prepare(
         else None
     )
 
+    config = dict((revision.config_json if revision else {}) or {})
+    # Engine-owned, overwritten unconditionally, exactly as the PROVISION path
+    # does: the connector is handed the targets this revision bound (validated
+    # by `network_targets_from_json`), never a same-named config entry. A
+    # malformed stored value raises here, before the claim, leaving the row
+    # unclaimed. A NULL (pre-1.7) revision yields the deny-all empty list.
+    try:
+        bound_targets = network_targets_from_json(
+            revision.network_targets_json if revision else None
+        )
+    except NetworkTargetError as exc:
+        raise DispatchUnavailable(
+            f"installation {installation.name!r} has malformed bound network "
+            f"targets: {exc}"
+        ) from exc
+    config[NETWORK_TARGETS_CONFIG_KEY] = network_targets_to_json(bound_targets)
+
     # LAST: nothing below can refuse, so nothing can strand a claimed row.
     if not claim_delivery(db, delivery, policy=policy, now=now):
         return None
@@ -266,7 +287,7 @@ def prepare(
         capability_id=binding.capability_id,
         event_type=delivery.event_type,
         payload=dict(delivery.payload_json or {}),
-        config=dict((revision.config_json if revision else {}) or {}),
+        config=config,
         secret_refs=dict((revision.secret_refs if revision else {}) or {}),
         idempotency_key=delivery.idempotency_key,
         config_revision_id=revision.id if revision else None,

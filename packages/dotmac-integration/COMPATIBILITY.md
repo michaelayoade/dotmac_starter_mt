@@ -346,6 +346,22 @@ existing installation pins are untouched. A connector targeting SPI >=1.7
 must declare its ceiling explicitly, including the explicit "no fleet
 traffic" of an empty declaration.
 
+### DELIVERY crash safety, retention and targets (unpublished a21 source)
+
+A DELIVERY connector call is not idempotent by contract, so the engine never
+treats an expired lease as "did not run": `release_expired_leases` and
+`claim_delivery` move an expired `in_flight` row to `reconciliation_required`
+(`error_code="lease_expired_outcome_unknown"`), which no dispatcher retries.
+Requeueing it is an explicit operator act,
+`replay_delivery(..., acknowledge_possible_duplicate=True)`. This is a behaviour
+change for every DELIVERY connector (notably `dotmac-connector-whatsapp`, which
+has no idempotency handling): a crash after the provider call needs an operator
+decision instead of resending. No SPI or schema change; PROVISION and QUERY
+semantics are untouched. Outbound payload retention now covers `delivered`,
+`dead_letter` and `reconciliation_required` rows. And a DELIVERY handler now
+receives `_network_targets` in config exactly as PROVISION does, so
+`require_network_target` is usable there (still deny-all when none are bound).
+
 ## Product-port descriptor v3 carries the domain contract
 
 `0.1.0a17` closes the assembly gap exposed by a16's fail-closed payload gate.

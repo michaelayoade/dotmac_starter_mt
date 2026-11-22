@@ -307,9 +307,10 @@ _REFUSAL_DETAIL: Mapping[str, str] = MappingProxyType(
         "already_queued": "this command is already queued and will be attempted",
         "in_flight": (
             "a worker holds the lease for this command. If that worker died, "
-            "`operations.release_expired_leases` is what returns it to the queue "
-            "— it owns lease recovery, and unlike a repair it does not reset the "
-            "attempt budget, because the attempt genuinely happened"
+            "`operations.release_expired_leases` moves it to "
+            "`reconciliation_required` once the lease expires, because the "
+            "provider may already have acted; it is never returned to the "
+            "queue automatically"
         ),
         "ambiguous_outcome": (
             "this attempt's outcome is INDETERMINATE: it may have half-landed at "
