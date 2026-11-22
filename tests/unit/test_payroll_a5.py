@@ -186,7 +186,13 @@ def test_reversed_at_must_be_aware_and_not_before_recorded_at(db: Session) -> No
 def test_reverser_equal_to_recorder_is_refused(db: Session) -> None:
     tenant, net, settlement = _settled_net_pay(db)
     with pytest.raises(PayrollRuleViolation, match="different person"):
-        _reverse(db, tenant, settlement, reversed_by_id=RECORDER)
+        _reverse(
+            db,
+            tenant,
+            settlement,
+            reversed_by_id=RECORDER,
+            separation_of_duties=True,
+        )
     assert net.status == "settled"
     assert db.scalars(select(PayrollSettlementReversal)).all() == []
 

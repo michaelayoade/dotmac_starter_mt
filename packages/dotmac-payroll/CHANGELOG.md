@@ -1,5 +1,30 @@
 # Changelog — dotmac-payroll
 
+## 0.1.0a7 — declared successor
+
+D-9 (Michael, 2026-11-17/18: two-person approval is never compulsory; separation of
+duties is an optional per-tenant policy, default off).
+
+- `separation_of_duties: bool = False` (keyword-only) on `approve_payroll_run`,
+  `finalize_payroll_run` and `reverse_liability_settlement`. When true, the a6
+  checks apply unchanged (run creator may not approve, approver may not finalize,
+  recorder may not reverse their own settlement). When false the check is skipped
+  and one operator can run payroll end to end. The default is `False` (OFF), per
+  Michael's no-compulsory-two-person ruling: a caller that does not name it gets no
+  separation. A caller that wants two-person approval passes `True`; an assembly
+  passes its tenant policy explicitly.
+- No migration and no column: payroll has no database separation CHECK and nothing is
+  stamped on the row (the caller supplies the policy at each step). Payroll emits no
+  lifecycle event or idempotency payload, so there is nothing to carry the flag.
+- `separation_of_duties` must be a real `bool`: None, 0, "" and other values raise
+  `TypeError` before any state is read or written, so a falsy non-bool never relaxes
+  a check.
+- The per-row database relaxation of `ck_supplier_payments_sod` is in payables 0.1.0a7
+  (#1129); payroll has no database separation check and nothing is stamped.
+- WIDENING, stated plainly: the owner's separation-of-duties checks in the three
+  commands above are relaxed when the caller passes `separation_of_duties=False`.
+  Synthetic distinct actor identifiers are not a substitute and must not be used.
+
 ## 0.1.0a6 — declared successor
 
 - `adjust_liability`: an audited, signed adjustment of one liability (a write-down

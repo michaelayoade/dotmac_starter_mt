@@ -10,7 +10,7 @@ from dotmac_payroll.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="payroll",
-    version="0.1.0a6",
+    version="0.1.0a7",
     core=False,
     short_code="payroll",
     migration_prefix="py",

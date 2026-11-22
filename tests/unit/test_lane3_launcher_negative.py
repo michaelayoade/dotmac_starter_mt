@@ -337,3 +337,59 @@ def test_the_acknowledgement_note_is_one_string_in_both_modules() -> None:
     import lane3_target_session as session
 
     assert launcher_negative.WINDOW_DONE_NOTE == session.WINDOW_DONE_NOTE
+
+
+# ── S5 interface: the negative target through S5's pre-checks and store drops ──
+
+
+def test_the_negative_drive_passes_s5s_staged_and_receipt_prechecks(
+    ends, tmp_path
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def script(chan: Any) -> None:
+        assert front(chan, seen)
+        _window(chan)
+        chan.receive("compensation_probe_done", "abort", timeout=5)
+        chan.send("terminal", REFUSED)
+
+    inputs = _negative_inputs(tmp_path)
+    assert inputs.staged is not None and inputs.pair is CLAIMS
+    result = _run(ends, inputs, script)
+    assert result.refusal_code == ""
+    assert result.negative_proof is not None
+
+
+def test_a_store_drop_before_proceed_leaves_the_negative_with_no_proof(
+    ends, tmp_path
+) -> None:
+    """S5: a dropped store aborts the target before `proceed`; the negative then
+    has no probe window, no proof and, with the lease left to expire, no release
+    (E9 refuses `release-missing`)."""
+    store = launcher.lane3_lease_store  # noqa: F841 - interface present
+    from tests.unit.lane3_store_support import FakeStore
+
+    fake = FakeStore()
+    inputs = _negative_inputs(tmp_path, store=fake)
+    seen: dict[str, Any] = {}
+
+    def script(chan: Any) -> None:
+        chan.receive("start", timeout=5)
+        chan.send("ready", _ready_for_negative())
+        fake.sever("before_write")
+        seen["kind"] = chan.receive("proceed", "abort", timeout=5)[0]
+        chan.send(
+            "terminal",
+            terminal_data(receipt_digest="", lease_in_hand=False, host_mutated=False),
+        )
+
+    result = _run(ends, inputs, script)
+    assert seen["kind"] == "abort"
+    assert result.store_failure == "store-unreachable"
+    assert result.negative_proof is None
+
+
+def _ready_for_negative() -> dict[str, str]:
+    from tests.unit.test_lane3_launcher_drive import _ready
+
+    return _ready()
