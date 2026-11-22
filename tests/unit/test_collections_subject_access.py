@@ -907,8 +907,14 @@ def test_the_exposure_wake_is_accepted_and_retired_once_actionable(
         )
 
 
-def _ladder(db: Session) -> UUID:
-    """Notices at due + 7 days and due + 30 days, counted from the due date."""
+def _ladder(
+    db: Session,
+    steps: tuple[tuple[str, int, int, str, bool], ...] = (
+        ("notice_7", 1, 7, "exposure_at", False),
+        ("notice_30", 2, 30, "exposure_at", False),
+    ),
+) -> UUID:
+    """Notices as (code, ordinal, days, anchor, receipt); default due+7 and due+30."""
 
     from dotmac_collections.policies import (
         PolicyPublicationV1,
@@ -940,18 +946,18 @@ def _ladder(db: Session) -> UUID:
             grace=None,
             steps=tuple(
                 PolicyStepDraftV1(
-                    code=f"notice_{days}",
+                    code=code,
                     ordinal=ordinal,
                     offset=timedelta(days=days),
-                    offset_anchor="exposure_at",
+                    offset_anchor=anchor,  # type: ignore[arg-type]
                     request_kind="notice",
                     action_code=None,
                     purpose_code="overdue_notice",
                     effect_scope=None,
-                    receipt_required=False,
+                    receipt_required=receipt,
                     retry_offsets=(),
                 )
-                for ordinal, days in ((1, 7), (2, 30))
+                for code, ordinal, days, anchor, receipt in steps
             ),
         ),
         publication=PolicyPublicationV1(
@@ -1045,3 +1051,57 @@ def test_a_resumed_case_skips_the_reminders_that_fell_due_while_paused(
     step = _handle(timer, db, "next_step", str(opened.case_id))
     assert step is not None and step.due_at == due + timedelta(days=30)
     assert _skips(db) == ["notice_7"]
+
+
+_CHAIN = (
+    ("notice_1", 1, 7, "exposure_at", False),
+    ("notice_2", 2, 23, "request_at", False),
+)
+
+
+def test_a_skipped_notice_still_anchors_the_notice_counted_from_its_request(
+    db: Session,
+) -> None:
+    policy = _ladder(db, _CHAIN)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    obs = _observation(due_at=due, hold_from=None)
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=10))
+    assert isinstance(opened, CaseAssessed)
+    step = _handle(timer, db, "next_step", str(opened.case_id))
+    # notice 1 (due+7) skipped; notice 2 counts from that instant: due+7+23.
+    assert step is not None and step.due_at == due + timedelta(days=30)
+    assert _skips(db) == ["notice_1"]
+    assert db.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_a_chained_ladder_opened_at_due_plus_40_skips_both(db: Session) -> None:
+    policy = _ladder(db, _CHAIN)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    obs = _observation(due_at=due, hold_from=None)
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=40))
+    assert isinstance(opened, CaseAssessed)
+    assert [i for i in timer.identities if i.purpose == "next_step"] == []
+    assert _skips(db) == ["notice_1", "notice_2"]
+    assert db.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_a_notice_counted_from_a_receipt_stops_the_pass_without_raising(
+    db: Session,
+) -> None:
+    policy = _ladder(
+        db,
+        (
+            ("notice_1", 1, 7, "exposure_at", True),
+            ("notice_2", 2, 23, "accepted_notice_receipt_at", False),
+        ),
+    )
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    obs = _observation(due_at=due, hold_from=None)
+    # notice 1 is skipped; notice 2 needs a receipt a skip cannot supply: no raise.
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=10))
+    assert isinstance(opened, CaseAssessed)
+    assert _skips(db) == ["notice_1"]
+    assert [i for i in timer.identities if i.purpose == "next_step"] == []

@@ -2523,6 +2523,7 @@ class _StepProgress:
     request_pending: bool
     request_at: datetime | None
     accepted_notice_receipt_at: datetime | None
+    skipped: bool = False
 
 
 def _latest_step_request(
@@ -2570,6 +2571,7 @@ def _request_receipt(
 def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgress:
     request_at: datetime | None = None
     accepted_notice_receipt_at: datetime | None = None
+    skipped = False
     for step in _policy_steps(db, scope, case_row.policy_version_id):
         request = _latest_step_request(
             db,
@@ -2578,9 +2580,16 @@ def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgre
             step=step,
         )
         if request is None:
-            if _step_skipped(db, scope, case_row.id, step.step_code):
-                continue  # passed over, never sent
-            return _StepProgress(step, False, request_at, accepted_notice_receipt_at)
+            skipped_at = _step_skipped_at(db, scope, case_row.id, step.step_code)
+            if skipped_at is not None:
+                # Passed over, never sent; its scheduled instant still anchors the
+                # step counted from its request.
+                request_at = skipped_at
+                skipped = True
+                continue
+            return _StepProgress(
+                step, False, request_at, accepted_notice_receipt_at, skipped
+            )
         if not step.receipt_required:
             request_at = _stored_utc(request.requested_at)
             continue
@@ -2594,31 +2603,47 @@ def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgre
             "ActionApplied" if step.request_kind == "action" else "NoticeAccepted"
         )
         if receipt is None or receipt.receipt_kind != accepted_kind:
-            return _StepProgress(step, True, request_at, accepted_notice_receipt_at)
+            return _StepProgress(
+                step, True, request_at, accepted_notice_receipt_at, skipped
+            )
         request_at = _stored_utc(request.requested_at)
         if step.request_kind == "notice":
             accepted_notice_receipt_at = _stored_utc(receipt.observed_at)
-    return _StepProgress(None, False, request_at, accepted_notice_receipt_at)
+    return _StepProgress(None, False, request_at, accepted_notice_receipt_at, skipped)
 
 
-def _step_skipped(db: Session, scope: Scope, case_id: UUID, step_code: str) -> bool:
+def _step_skipped_at(
+    db: Session, scope: Scope, case_id: UUID, step_code: str
+) -> datetime | None:
+    """The scheduled instant of a skipped step (stored as its attempt instant)."""
+
     model = _models(scope).step_attempt
-    return (
-        db.scalar(
-            _where_scope(
-                select(model.id)
-                .where(
-                    model.case_id == case_id,
-                    model.policy_step_code == step_code,
-                    model.request_kind == "skipped",
-                )
-                .limit(1),
-                scope,
-                model,
+    value = db.scalar(
+        _where_scope(
+            select(model.attempted_at)
+            .where(
+                model.case_id == case_id,
+                model.policy_step_code == step_code,
+                model.request_kind == "skipped",
             )
+            .limit(1),
+            scope,
+            model,
         )
-        is not None
     )
+    return None if value is None else _stored_utc(value)
+
+
+def _step_anchor(case_row: _CaseRow, progress: _StepProgress) -> datetime | None:
+    step = progress.step
+    if step is None:
+        return None
+    if step.offset_anchor == "exposure_at":
+        # Reminders count from the due date, not from when the case happened to open.
+        return _stored_utc(case_row.due_at or case_row.opened_at)
+    if step.offset_anchor == "request_at":
+        return progress.request_at
+    return progress.accepted_notice_receipt_at
 
 
 def _skip_past_due_steps(
@@ -2626,24 +2651,25 @@ def _skip_past_due_steps(
 ) -> None:
     """On open or resume, pass over reminders already due before ``now``.
 
-    Only notice steps counted from the due date can be judged without the earlier
-    steps' outcomes; the first step that is not yet due (or is not of that kind) ends
-    the pass. Each is recorded as a ``skipped`` step attempt, never sent, so replay and
-    audit see it.
+    Walks the ladder: a notice step whose instant is already before ``now`` is
+    recorded as a ``skipped`` attempt (never sent) whose attempt instant is the moment
+    it was scheduled, and that instant anchors a successor counted from its request,
+    so the walk continues. It stops, without error, at the first step that is not
+    due yet, is not a notice, or has no anchor (counted from a receipt, which a skip
+    cannot supply).
     """
 
-    anchor = _stored_utc(case_row.due_at or case_row.opened_at)
-    for step in _policy_steps(db, scope, case_row.policy_version_id):
-        if _latest_step_request(
-            db, scope=scope, case_id=case_row.id, step=step
-        ) is not None or _step_skipped(db, scope, case_row.id, step.step_code):
-            continue
+    # Each pass records one skip, so at most one pass per policy step.
+    for _ in _policy_steps(db, scope, case_row.policy_version_id):
+        progress = _step_progress(db, scope, case_row)
+        step = progress.step
+        if step is None or progress.request_pending or step.request_kind != "notice":
+            return
+        anchor = _step_anchor(case_row, progress)
+        if anchor is None:
+            return
         due = anchor + timedelta(seconds=step.offset_seconds)
-        if (
-            step.request_kind != "notice"
-            or step.offset_anchor != "exposure_at"
-            or due >= now.astimezone(UTC)
-        ):
+        if due >= now.astimezone(UTC):
             return
         key = (
             f"collections:{scope_segment(scope)}:{case_row.id}:{step.step_code}:skipped"
@@ -2661,7 +2687,7 @@ def _skip_past_due_steps(
             fingerprint=fingerprint_of(
                 {"reason": "past_due_on_open", "step_due_at": due.isoformat()}
             ),
-            attempted_at=now,
+            attempted_at=due,
         )
         db.flush()
 
@@ -2672,14 +2698,7 @@ def _step_due_at(case_row: _CaseRow, progress: _StepProgress) -> datetime:
         raise CollectionsServiceError(
             "policy_ladder_complete", "The collection policy ladder is complete."
         )
-    anchor: datetime | None
-    if step.offset_anchor == "exposure_at":
-        # Reminders count from the due date, not from when the case happened to open.
-        anchor = _stored_utc(case_row.due_at or case_row.opened_at)
-    elif step.offset_anchor == "request_at":
-        anchor = progress.request_at
-    else:
-        anchor = progress.accepted_notice_receipt_at
+    anchor = _step_anchor(case_row, progress)
     if anchor is None:
         raise CollectionsConflict(
             "policy_anchor_unavailable",
@@ -2701,6 +2720,10 @@ def _schedule_next_policy_step(
         _skip_past_due_steps(db, scope=scope, case_row=case_row, now=recorded_at)
     progress = _step_progress(db, scope, case_row)
     if progress.step is None or progress.request_pending:
+        return
+    if progress.skipped and _step_anchor(case_row, progress) is None:
+        # The successor counts from evidence a skipped step cannot supply: the
+        # ladder stops here rather than raising and redelivering for ever.
         return
     _schedule_case_timer(
         db,

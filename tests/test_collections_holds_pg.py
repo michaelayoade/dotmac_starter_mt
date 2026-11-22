@@ -876,8 +876,13 @@ def test_last_lift_racing_a_case_opening_arms_the_ladder_or_refuses(
         assert timer.current(session, step) is not None
 
 
-def _publish_ladder(session, scope) -> uuid.UUID:
-    """Notices at due + 7 days and due + 30 days (counted from the due date)."""
+def _publish_ladder(session, scope, steps=None) -> uuid.UUID:
+    """Notices as (code, ordinal, days, anchor); default due+7 and due+30."""
+
+    steps = steps or (
+        ("notice_7", 1, 7, "exposure_at"),
+        ("notice_30", 2, 30, "exposure_at"),
+    )
 
     from dotmac_collections.policies import (
         PolicyPublicationV1,
@@ -910,10 +915,10 @@ def _publish_ladder(session, scope) -> uuid.UUID:
             grace=None,
             steps=tuple(
                 PolicyStepDraftV1(
-                    code=f"notice_{days}",
+                    code=code,
                     ordinal=ordinal,
                     offset=timedelta(days=days),
-                    offset_anchor="exposure_at",
+                    offset_anchor=anchor,
                     request_kind="notice",
                     action_code=None,
                     purpose_code="overdue_notice",
@@ -921,7 +926,7 @@ def _publish_ladder(session, scope) -> uuid.UUID:
                     receipt_required=False,
                     retry_offsets=(),
                 )
-                for ordinal, days in ((1, 7), (2, 30))
+                for code, ordinal, days, anchor in steps
             ),
         ),
         publication=PolicyPublicationV1(
@@ -992,4 +997,60 @@ def test_a_case_opened_at_due_plus_10_arms_only_the_30_day_notice(
         handle = timer.current(session, step)
         assert handle is not None and handle.due_at == DUE + timedelta(days=30)
         assert _skipped_steps(session) == ["notice_7"]
+        assert session.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+_CHAIN = (
+    ("notice_1", 1, 7, "exposure_at"),
+    ("notice_2", 2, 23, "request_at"),
+)
+
+
+def test_a_skipped_notice_anchors_the_notice_counted_from_its_request(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_ladder(session, scope, _CHAIN)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, DUE + timedelta(days=10))
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        step = TimerIdentityV1(
+            scope,
+            "collections.case",
+            "collection_case",
+            str(opened.case_id),
+            "next_step",
+        )
+        handle = timer.current(session, step)
+        # notice 1 (due+7) skipped; notice 2 counts from it: due+7+23.
+        assert handle is not None and handle.due_at == DUE + timedelta(days=30)
+        assert _skipped_steps(session) == ["notice_1"]
+        assert session.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_a_chained_ladder_opened_at_due_plus_40_skips_both(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_ladder(session, scope, _CHAIN)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, DUE + timedelta(days=40))
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        step = TimerIdentityV1(
+            scope,
+            "collections.case",
+            "collection_case",
+            str(opened.case_id),
+            "next_step",
+        )
+        assert timer.current(session, step) is None
+        assert _skipped_steps(session) == ["notice_1", "notice_2"]
         assert session.scalars(select(CollectionNoticeRequest)).all() == []

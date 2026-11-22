@@ -62,7 +62,12 @@ unchanged.
   already before that moment is passed over and recorded as a `skipped` step attempt
   (cl_0002 widens the attempt-kind check to `notice`, `action`, `skipped`), and the
   ladder carries on from the first step not yet due. The first step that is an action,
-  or counts from a request or receipt, ends the pass. Replay and audit read the skips.
+  is not yet due, or has no anchor ends the pass without error. A skip stores the instant the step was
+  scheduled as its attempt instant, and that instant anchors a successor counted from
+  its request (the walk continues, so a case opened at due+10 skips notice 1 and arms
+  notice 2 at its scheduled time); a successor counted from a receipt, which a skip
+  cannot supply, halts the ladder instead of raising `policy_anchor_unavailable`.
+  Replay and audit read the skips.
 - `republish_subject_state` (`RepublishSubjectStateV1`): re-emits the subject's current
   state under the next sequence version, for a product that must apply the state on
   service activation or transfer and would otherwise see a stale version.
