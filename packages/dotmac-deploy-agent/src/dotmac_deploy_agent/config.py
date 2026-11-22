@@ -134,11 +134,6 @@ class AgentConfig:
         return (match[1], match[2], match[3])
 
     @property
-    def bao_namespace(self) -> str:
-        """The PARENT namespace `<env>`: login and mint both happen here (R4)."""
-        return self.environment
-
-    @property
     def run_dir(self) -> Path:
         """`/run/dotmac/<product>`: the systemd RuntimeDirectory."""
         return self.runtime_root / self.product

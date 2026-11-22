@@ -42,8 +42,9 @@ class Delivered:
     old_accessors_destroyed: int
 
 
-def unit_name(config: AgentConfig, role: str) -> str:
-    return f"openbao-agent@{config.product}-{role}.service"
+def unit_name(secrets_namespace: str, role: str) -> str:
+    """`openbao-agent@<secrets_namespace>-<role>.service`: the P-SEC instance name."""
+    return f"openbao-agent@{secrets_namespace}-{role}.service"
 
 
 def _require_role_dir(path: Path) -> None:
@@ -89,6 +90,8 @@ def deliver_secret_ids(
     roles: tuple[RoleSpec, ...],
     commands: Commands,
     *,
+    secrets_namespace: str,
+    secrets_environment: str,
     dispatch_id: str,
 ) -> tuple[Delivered, ...]:
     ensure_private_dir(config.state_dir / "accessors")
@@ -97,8 +100,8 @@ def deliver_secret_ids(
         role_dir = config.run_dir / spec.role
         _require_role_dir(role_dir)
         wrapping = session.mint_wrapped(
-            product=config.product,
-            environment=config.environment,
+            secrets_namespace=secrets_namespace,
+            secrets_environment=secrets_environment,
             role=spec.role,
             single_use=spec.single_use,
             ttl_seconds=(
@@ -110,14 +113,14 @@ def deliver_secret_ids(
             dispatch_id=dispatch_id,
         )
         session.require_creation_path(
-            wrapping, mint_path(config.product, config.environment, spec.role)
+            wrapping, mint_path(secrets_namespace, secrets_environment, spec.role)
         )
         secret_id, accessor = session.unwrap(wrapping)
         target = role_dir / SECRET_ID_FILE
         write_private(target, secret_id.encode("utf-8"), 0o400)
         del secret_id
 
-        unit = unit_name(config, spec.role)
+        unit = unit_name(secrets_namespace, spec.role)
         restarted = _systemctl(config, commands, "restart", unit)
         if not restarted:
             remove_file(target)  # a delivered id nobody consumed is not left behind
@@ -126,7 +129,12 @@ def deliver_secret_ids(
         destroyed = 0
         if not spec.single_use and accessor is not None:
             destroyed = _rotate_accessor(
-                session, config, spec.role, accessor, confirmed=confirmed
+                session,
+                config,
+                (secrets_namespace, secrets_environment),
+                spec.role,
+                accessor,
+                confirmed=confirmed,
             )
         delivered.append(Delivered(spec.role, spec.single_use, restarted, destroyed))
     return tuple(delivered)
@@ -135,6 +143,7 @@ def deliver_secret_ids(
 def _rotate_accessor(
     session: OpenBaoSession,
     config: AgentConfig,
+    naming: tuple[str, str],
     role: str,
     new_accessor: str,
     *,
@@ -152,8 +161,8 @@ def _rotate_accessor(
             continue
         try:
             session.destroy_accessor(
-                product=config.product,
-                environment=config.environment,
+                secrets_namespace=naming[0],
+                secrets_environment=naming[1],
                 role=role,
                 accessor=old,
             )

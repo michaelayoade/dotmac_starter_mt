@@ -21,17 +21,21 @@ from .refusal import Refusal
 LIMIT = 256 * 1024
 
 
-def config_path(config: AgentConfig, role: str) -> Path:
-    return config.openbao_config_dir / f"{config.product}-{role}.hcl"
+def config_path(config: AgentConfig, secrets_namespace: str, role: str) -> Path:
+    return config.openbao_config_dir / f"{secrets_namespace}-{role}.hcl"
 
 
 def check_authored_configs(
-    config: AgentConfig, roles: tuple[RoleSpec, ...], *, required_uid: int = 0
+    config: AgentConfig,
+    secrets_namespace: str,
+    roles: tuple[RoleSpec, ...],
+    *,
+    required_uid: int = 0,
 ) -> dict[str, str]:
     """`{role: sha256:<hex>}` for every role, or refuse."""
     digests: dict[str, str] = {}
     for spec in roles:
-        path = config_path(config, spec.role)
+        path = config_path(config, secrets_namespace, spec.role)
         try:
             info = path.lstat()
             parent = path.parent.lstat()

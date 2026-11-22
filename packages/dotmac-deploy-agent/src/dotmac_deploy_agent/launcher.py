@@ -359,8 +359,13 @@ class Launcher:
         if self.bao_transport is None:
             raise Refusal("secret_delivery_failed")
         # The authored configs are root-installed; the agent checks and reports them.
+        if not materials.secrets_namespace or not materials.secrets_environment:
+            raise Refusal("materials_invalid", "bad_secrets_name")
         details["openbao_config"] = check_authored_configs(
-            self.config, materials.roles, required_uid=self.root_uid
+            self.config,
+            materials.secrets_namespace,
+            materials.roles,
+            required_uid=self.root_uid,
         )
         role_id = _credential_text(
             self.environ, self.config.delivery_role_id_credential
@@ -368,7 +373,7 @@ class Launcher:
         secret_id = _credential_text(
             self.environ, self.config.delivery_secret_id_credential
         )
-        session = OpenBaoSession(self.bao_transport, self.config.bao_namespace)
+        session = OpenBaoSession(self.bao_transport, materials.secrets_environment)
         try:
             session.login(role_id, secret_id)
             return deliver_secret_ids(
@@ -376,6 +381,8 @@ class Launcher:
                 self.config,
                 materials.roles,
                 self.commands,
+                secrets_namespace=materials.secrets_namespace,
+                secrets_environment=materials.secrets_environment,
                 dispatch_id=materials.dispatch_id,
             )
         finally:

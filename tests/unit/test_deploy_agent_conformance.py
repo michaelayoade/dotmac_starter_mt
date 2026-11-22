@@ -37,6 +37,7 @@ from dotmac_deploy_agent.materials import (
     expected_app_image,
     plan_roles,
 )
+from dotmac_deploy_agent.openbao import approle_name, openbao_namespace
 from dotmac_deploy_agent.params import Param, canonical_render
 from dotmac_deploy_agent.refusal import Refusal
 from dotmac_deploy_agent.runner import RunSpec, runner_environment
@@ -50,10 +51,10 @@ SOURCE = (
 )
 VENDORED = SOURCE / "contract/target_api_v1.json"
 #: The sha256 Control a18 records in its CHANGELOG for `contract/target_api_v1.json`
-#: (dotmac_deployment_control PR #76 at 4819d705, 122686 bytes). A new Control sha
+#: (dotmac_deployment_control PR #76 at 24b24416, 142605 bytes). A new Control sha
 #: replaces this value and the vendored bytes together.
 TARGET_API_V1_SHA256: str | None = (
-    "ff0a25b8284f7c22c9e5d930274ae4001ef3510529f75c74144544baa4158970"
+    "2e02f2ca295ee531d819d8c09aa7887ed4801c6272e60dd8b2c151d21929a907"
 )
 
 MISSING = (
@@ -334,17 +335,22 @@ def test_materials_vectors() -> None:
         assert image.archive == vector["name"]
 
 
+def _check(i):  # type: ignore[no-untyped-def]
+    headers = i.get("headers_pairs") or i["headers"]
+    return check_request(
+        method=i["method"], raw_path=i["raw_path"], query_string=i["query_string"],
+        headers=headers, body=i["body_utf8"].encode(), store_now=i["store_now"],
+        credential_target_ref=i["credential_target_ref"],
+        looked_up_credential_id=i["looked_up_credential_id"],
+    )  # fmt: skip
+
+
 def test_request_check_vectors_through_the_cp_double() -> None:
     """The CP double the agent is proved against refuses exactly what Control's
     `check_request` refuses, and yields the same coordinates."""
     group = load()["request_check"]  # type: ignore[index]
     for vector in group["ok"]:
-        i = vector["inputs"]
-        coords = check_request(
-            method=i["method"], raw_path=i["raw_path"], query_string=i["query_string"],
-            headers=i["headers"], body=i["body_utf8"].encode(), store_now=i["store_now"],
-            credential_target_ref=i["credential_target_ref"],
-        )  # fmt: skip
+        coords = _check(vector["inputs"])
         want = vector["coordinates"]
         assert coords.credential_id == want["credential_id"]
         assert coords.dispatch_id == want["dispatch_id"]
@@ -353,33 +359,87 @@ def test_request_check_vectors_through_the_cp_double() -> None:
         assert coords.target_ref == want["target_ref"]
         assert coords.signed_message.decode() == want["signed_message_utf8"]
     for vector in group["refused"]:
-        i = vector["inputs"]
         with pytest.raises(RequestRefused) as caught:
-            check_request(
-                method=i["method"], raw_path=i["raw_path"], query_string=i["query_string"],
-                headers=i["headers"], body=i["body_utf8"].encode(), store_now=i["store_now"],
-                credential_target_ref=i["credential_target_ref"],
-            )  # fmt: skip
+            _check(vector["inputs"])
         assert caught.value.code == vector["code"], vector["name"]
 
 
-def test_target_binding_vectors(tmp_path: Path) -> None:
+def test_response_check_vectors_through_the_agents_client_half() -> None:
+    """The agent's response check matches Control's `check_response`."""
+    document = load()
+    group = document["response_check"]  # type: ignore[index]
+    key = document["keys"]["response"]["public_b64u"]  # type: ignore[index]
+    for vector in group["ok"]:
+        checked = wire.check_response(
+            method=vector["method"], path=vector["path"],
+            request_nonce=vector["request_nonce"], status=vector["status"],
+            body=vector["body_utf8"].encode(), headers=vector["headers"],
+        )  # fmt: skip
+        assert checked.message.decode() == vector["message_utf8"]
+        assert wire.encode_b64url(checked.signature) == vector["signature_b64u"]
+        wire.verify_signature((key,), checked.message, checked.signature)
+    for vector in group["refused"]:
+        i = vector["inputs"]
+        with pytest.raises(Refusal) as caught:
+            checked = wire.check_response(
+                method=i["method"], path=i["path"], request_nonce=i["request_nonce"],
+                status=i["status"], body=i["body_utf8"].encode(),
+                headers=i.get("headers_pairs") or i["headers"],
+            )  # fmt: skip
+            # A well-formed but wrong signature is refused at verification.
+            wire.verify_signature((key,), checked.message, checked.signature)
+        assert caught.value.code == vector["code"], vector["name"]
+
+
+def test_target_binding_vectors_and_openbao_naming(tmp_path: Path) -> None:
     group = load()["target_binding"]  # type: ignore[index]
-    for index, vector in enumerate(group["ok"]):
+    for vector in group["ok"]:
         host = wire.check_target_binding(
             vector["target_ref"], vector["product_code"], vector["environment"]
         )
         assert host == vector["host"]
-        config = make_config(
-            tmp_path / f"b{index}", Keys(), target_ref=vector["target_ref"]
+        namespace = openbao_namespace(
+            vector["secrets_namespace"], vector["secrets_environment"]
         )
-        assert config.bao_namespace == vector["openbao_namespace"]
+        assert namespace == vector["openbao_namespace"]
+        assert (
+            approle_name(
+                vector["secrets_namespace"], vector["secrets_environment"], "app"
+            )
+            == vector["approle_app"]
+        )
     for vector in group["refused"]:
         with pytest.raises(Refusal) as caught:
             wire.check_target_binding(
                 vector["target_ref"], vector["product_code"], vector["environment"]
             )
+            openbao_namespace(
+                vector["secrets_namespace"], vector["secrets_environment"]
+            )
         assert caught.value.detail == vector["code"], vector
+    # The registration defaults are Control's: the agent holds none and derives
+    # nothing from the target ref (the plan carries the names).
+    assert group["environment_defaults"]["pilot"] is None
+
+
+def test_secret_ref_vectors_the_agent_takes_only_the_approle_name() -> None:
+    group = load()["secret_ref_vectors"]  # type: ignore[index]
+    for vector in group["ok"]:
+        assert (
+            approle_name(
+                vector["secrets_namespace"],
+                vector["secrets_environment"],
+                vector["role"],
+            )
+            == vector["approle"]
+        )
+    for vector in group["refused"]:
+        with pytest.raises(Refusal):
+            approle_name(
+                vector["secrets_namespace"],
+                vector["secrets_environment"],
+                vector["role"],
+            )
 
 
 def test_denied_public_key_vectors(tmp_path: Path) -> None:

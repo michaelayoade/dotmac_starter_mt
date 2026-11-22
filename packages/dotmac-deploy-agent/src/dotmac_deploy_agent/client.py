@@ -83,26 +83,21 @@ class TargetClient:
             "Accept": "application/json",
         }
         response = self._transport.request(method, path, headers, body)
-        if (
-            wire.classify_unsigned_response(response.status) == "cp_unreachable"
-            and wire.H_RESPONSE_SIGNATURE.lower() not in response.headers
-        ):
-            # Unsigned proxy errors and rate limits are retryable, not a signature
-            # refusal: an outage and a throttle are indistinguishable from outside.
-            raise Refusal("cp_unreachable")
+        checked = wire.check_response(
+            method=method,
+            path=path,
+            request_nonce=nonce,
+            status=response.status,
+            body=response.body,
+            headers=response.headers,
+        )
+        wire.verify_signature(
+            self._config.cp_response_public_keys_b64url,
+            checked.message,
+            checked.signature,
+        )
         if response.status >= 500:
             raise Refusal("cp_unreachable")
-        wire.verify_response(
-            self._config.cp_response_public_keys_b64url,
-            wire.response_message(
-                method=method,
-                path=path,
-                request_nonce=nonce,
-                status=response.status,
-                body=response.body,
-            ),
-            response.headers.get(wire.H_RESPONSE_SIGNATURE.lower()),
-        )
         document: dict[str, object] = {}
         if response.body:
             parsed = wire.parse_json_body(response.body)

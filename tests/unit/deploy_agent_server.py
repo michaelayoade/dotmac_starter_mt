@@ -10,7 +10,7 @@ refuses exactly what the real server refuses.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from dotmac_deploy_agent import wire
@@ -32,6 +32,28 @@ _VERBS = {
     "consume": "POST",
     "committed/<dispatch_id>": "GET",
 }
+
+
+HeaderInput = Mapping[str, str] | Sequence[tuple[str, str]]
+
+
+def single_header(headers: HeaderInput, name: str) -> str:
+    """The ONE value of a header; absent, empty or repeated (any case) is refused."""
+    items = headers.items() if isinstance(headers, Mapping) else headers
+    values = [v for k, v in items if str(k).lower() == name.lower()]
+    if not values or not isinstance(values[0], str) or not values[0]:
+        raise RequestRefused("missing_header")
+    if len(values) > 1:
+        raise RequestRefused("duplicate_header")
+    return values[0]
+
+
+def request_credential_id(headers: HeaderInput) -> str:
+    """The id to look the credential up by: refuses an absent or repeated header."""
+    value = single_header(headers, wire.H_CREDENTIAL)
+    if not _DISPATCH_ID.fullmatch(value):
+        raise RequestRefused("bad_credential_id")
+    return value
 
 
 class RequestRefused(ValueError):
@@ -83,10 +105,11 @@ def check_request(
     method: str,
     raw_path: str,
     query_string: str,
-    headers: Mapping[str, str],
+    headers: HeaderInput,
     body: bytes,
     store_now: str,
     credential_target_ref: str,
+    looked_up_credential_id: str,
 ) -> Coordinates:
     """Every coordinate check, before any signature (Control's order)."""
     target_ref, route, dispatch_id = parse_target_path(raw_path)
@@ -94,13 +117,7 @@ def check_request(
         raise RequestRefused("wrong_verb")
     if query_string:
         raise RequestRefused("query_string")
-    lowered = {str(k).lower(): v for k, v in headers.items()}
-    found: dict[str, str] = {}
-    for name in _HEADERS:
-        value = lowered.get(name.lower())
-        if not isinstance(value, str) or not value:
-            raise RequestRefused("missing_header")
-        found[name] = value
+    found = {name: single_header(headers, name) for name in _HEADERS}
     if found[wire.H_TARGET] != target_ref:
         raise RequestRefused("target_mismatch_header_path")
     if credential_target_ref != target_ref:
@@ -108,6 +125,8 @@ def check_request(
     credential_id = found[wire.H_CREDENTIAL]
     if not _DISPATCH_ID.fullmatch(credential_id):
         raise RequestRefused("bad_credential_id")
+    if credential_id != looked_up_credential_id:
+        raise RequestRefused("credential_lookup_mismatch")
     try:
         nonce = wire.check_nonce(found[wire.H_NONCE])
     except Refusal:

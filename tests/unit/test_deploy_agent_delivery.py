@@ -342,3 +342,49 @@ def _snapshot(rig: Rig, into: list[tuple[Path, int]]) -> list[tuple[Path, int]]:
         into.append((path, path.lstat().st_mode))
     into.append((rig.config.run_dir, rig.config.run_dir.lstat().st_mode))
     return into
+
+
+def test_openbao_naming_comes_from_the_signed_plan_not_the_target_ref(
+    tmp_path: Path,
+) -> None:
+    """Target ref `erp/staging/host-a`; the plan says secrets namespace
+    `erp-integrator` and namespace-env `prod`: names follow the plan."""
+    rig = make_rig(tmp_path)
+    rig.bao.namespace = "prod"
+    prepare_role(rig, "web", secrets_namespace="erp-integrator")
+    rig.cp.materials = make_materials(
+        roles=WEB, secrets_namespace="erp-integrator", secrets_environment="prod"
+    )
+    result = rig.launcher.run_once()
+    assert result.outcome == "completed", result
+    assert rig.bao.paths[1] == (
+        "/v1/erp-integrator/auth/approle-apps/role/erp-integrator-prod-web/secret-id"
+    )
+    assert next(c for c in rig.systemctl.calls if "restart" in c)[-1] == (
+        "openbao-agent@erp-integrator-web.service"
+    )
+    assert rig.cp.observations[0]["details"]["openbao_config"]["web"].startswith(  # type: ignore[index]
+        "sha256:"
+    )
+    for _, _, headers, _ in rig.bao.requests:
+        assert headers["X-Vault-Namespace"] == "prod"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"secrets_namespace": None},
+        {"secrets_environment": None},
+        {"secrets_namespace": "Erp"},
+        {"secrets_environment": "Prod"},
+        {"secrets_namespace": "erp/x"},
+    ],
+)
+def test_a_plan_with_roles_must_name_a_valid_secrets_namespace_and_env(
+    tmp_path: Path, change: dict[str, object]
+) -> None:
+    rig = deliver_rig(tmp_path, WEB)
+    rig.cp.materials = make_materials(roles=WEB, **change)
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "materials_invalid")
+    assert rig.bao.paths == []

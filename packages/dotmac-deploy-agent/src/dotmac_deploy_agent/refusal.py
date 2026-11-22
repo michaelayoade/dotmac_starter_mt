@@ -45,6 +45,7 @@ CODES: Final = frozenset(
         "openbao_config_invalid",
         # CP API
         "response_signature_invalid",
+        "response_binding_invalid",
         "response_malformed",
         "clock_skew",
         "cp_refused",

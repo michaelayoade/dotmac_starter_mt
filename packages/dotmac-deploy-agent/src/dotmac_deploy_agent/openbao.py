@@ -5,7 +5,8 @@ systemd credentials. Per run the agent logs in at `<env>/auth/approle-delivery`,
 holds the 5-minute token in memory only, and revokes it at the end.
 
 For each role it mints a RESPONSE-WRAPPED `secret_id` in the PARENT namespace
-`<env>` at `<product>/auth/approle-apps/role/<product>-<env>-<role>/secret-id`,
+`<ns_env>` at `<secrets_namespace>/auth/approle-apps/role/<name>/secret-id`
+with `<name>` = `<secrets_namespace>-<ns_env>-<role>`,
 looks the wrapping token up and requires that `creation_path` BEFORE unwrapping
 (the WireGuard leg is plain HTTP, so a swapped token would otherwise be
 accepted), then unwraps it. The request body is limited to `metadata`, `ttl` and,
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Final, cast
 
 from .refusal import Refusal
@@ -29,20 +31,44 @@ APPROLE_DELIVERY: Final = "auth/approle-delivery"
 APPROLE_APPS: Final = "auth/approle-apps"
 
 
-def role_name(product: str, environment: str, role: str) -> str:
-    return f"{product}-{environment}-{role}"
+_SEGMENT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 
 
-def mint_path(product: str, environment: str, role: str) -> str:
-    full = role_name(product, environment, role)
-    return f"{product}/{APPROLE_APPS}/role/{full}/secret-id"
+def check_secrets_value(value: object, what: str) -> str:
+    """A secrets namespace, namespace-env or role is a lowercase path segment."""
+    if not isinstance(value, str) or not _SEGMENT.fullmatch(value):
+        raise Refusal("materials_invalid", "bad_secrets_name")
+    return value
 
 
-def accessor_destroy_path(product: str, environment: str, role: str) -> str:
-    return (
-        f"{product}/{APPROLE_APPS}/role/{role_name(product, environment, role)}"
-        "/secret-id-accessor/destroy"
-    )
+def openbao_namespace(secrets_namespace: str, secrets_environment: str) -> str:
+    """The OpenBao namespace `<env>/<product>`, e.g. `prod/erp` (Control's rule)."""
+    env = check_secrets_value(secrets_environment, "the namespace env")
+    product = check_secrets_value(secrets_namespace, "the secrets namespace")
+    return f"{env}/{product}"
+
+
+def approle_name(secrets_namespace: str, secrets_environment: str, role: str) -> str:
+    """`<secrets_namespace>-<ns_env>-<role>`, e.g. `erp-prod-app`."""
+    check_secrets_value(role, "a role")
+    openbao_namespace(secrets_namespace, secrets_environment)
+    return f"{secrets_namespace}-{secrets_environment}-{role}"
+
+
+# Naming comes from the SIGNED PLAN (the descriptor's `secrets_namespace` and the
+# target's namespace-env), never from the target ref: Control's ref names the
+# product and environment, the OpenBao layout is `<env>/<product>`.
+def mint_path(secrets_namespace: str, secrets_environment: str, role: str) -> str:
+    """Relative to the PARENT namespace `<ns_env>` (the delivery identity's)."""
+    name = approle_name(secrets_namespace, secrets_environment, role)
+    return f"{secrets_namespace}/{APPROLE_APPS}/role/{name}/secret-id"
+
+
+def accessor_destroy_path(
+    secrets_namespace: str, secrets_environment: str, role: str
+) -> str:
+    name = approle_name(secrets_namespace, secrets_environment, role)
+    return f"{secrets_namespace}/{APPROLE_APPS}/role/{name}/secret-id-accessor/destroy"
 
 
 class OpenBaoSession:
@@ -126,8 +152,8 @@ class OpenBaoSession:
     def mint_wrapped(
         self,
         *,
-        product: str,
-        environment: str,
+        secrets_namespace: str,
+        secrets_environment: str,
         role: str,
         single_use: bool,
         ttl_seconds: int,
@@ -143,7 +169,7 @@ class OpenBaoSession:
             body["num_uses"] = 1
         document = self._call(
             "POST",
-            mint_path(product, environment, role),
+            mint_path(secrets_namespace, secrets_environment, role),
             body=body,
             token=self._require_token(),
             wrap_ttl=wrap_ttl_seconds,
@@ -182,11 +208,16 @@ class OpenBaoSession:
         return secret_id, accessor if isinstance(accessor, str) and accessor else None
 
     def destroy_accessor(
-        self, *, product: str, environment: str, role: str, accessor: str
+        self,
+        *,
+        secrets_namespace: str,
+        secrets_environment: str,
+        role: str,
+        accessor: str,
     ) -> None:
         self._call(
             "POST",
-            accessor_destroy_path(product, environment, role),
+            accessor_destroy_path(secrets_namespace, secrets_environment, role),
             body={"secret_id_accessor": accessor},
             token=self._require_token(),
         )

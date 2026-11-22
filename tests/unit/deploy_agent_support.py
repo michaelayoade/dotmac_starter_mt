@@ -44,7 +44,11 @@ from dotmac_deploy_agent.transfer import TransferResult
 from dotmac_deploy_agent.transport import Response
 from dotmac_deploy_agent.wire import encode_b64url
 
-from tests.unit.deploy_agent_server import RequestRefused, check_request
+from tests.unit.deploy_agent_server import (
+    RequestRefused,
+    check_request,
+    request_credential_id,
+)
 
 TARGET = "erp/staging/host-a"
 NOW = datetime(2027, 1, 6, 12, 0, 0, tzinfo=UTC)
@@ -239,6 +243,8 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "legacy": overrides.pop("legacy", None),
         "companion_order": None,
         "primary_service": overrides.pop("primary_service", "app"),
+        "secrets_namespace": overrides.pop("secrets_namespace", "erp"),
+        "secrets_environment": overrides.pop("secrets_environment", "staging"),
         "roles": overrides.pop("roles", []),
     }
     target = str(overrides.pop("target_ref", TARGET))
@@ -289,6 +295,7 @@ class FakeCp:
         self.clock = clock
         self.materials: dict[str, object] | None = None
         self.credential_target_ref = TARGET
+        self.credential_id = "cred-1"
         self.observations: list[dict[str, object]] = []
         self.nonces: set[str] = set()
         self.calls: list[tuple[str, str]] = []
@@ -323,6 +330,11 @@ class FakeCp:
         nonce = headers[wire.H_NONCE]
         self.paths.append(path)
         try:
+            credential = request_credential_id(headers)
+            if credential != self.credential_id:
+                return self._reply(
+                    method, path, nonce, 401, {"error": "unknown_credential"}
+                )
             coords = check_request(
                 method=method,
                 raw_path=path,
@@ -331,6 +343,7 @@ class FakeCp:
                 body=body,
                 store_now=wire.utc_stamp(self.clock()),
                 credential_target_ref=self.credential_target_ref,
+                looked_up_credential_id=credential,
             )
         except RequestRefused as refused:
             return self._reply(method, path, nonce, 400, {"error": refused.code})
@@ -403,6 +416,7 @@ class FakeBaoTransport:
         self.requests: list[tuple[str, str, dict[str, str], dict[str, object]]] = []
         self.minted: dict[str, str] = {}
         self.counter = 0
+        self.namespace = "staging"
         self.fail_lookup = False
         self.lookup_path: str | None = None
         self.fail_destroy = False
@@ -414,7 +428,7 @@ class FakeBaoTransport:
         self.paths.append(path)
         payload = json.loads(body) if body else {}
         self.requests.append((method, path, dict(headers), payload))
-        assert headers["X-Vault-Namespace"] == "staging"
+        assert headers["X-Vault-Namespace"] == self.namespace
         if path == "/v1/auth/approle-delivery/login":
             assert set(payload) == {"role_id", "secret_id"}
             return self._ok({"auth": {"client_token": self.TOKEN}})
@@ -535,12 +549,12 @@ class Rig:
     systemctl: FakeCommands
 
 
-def prepare_role(rig: Rig, role: str) -> None:
+def prepare_role(rig: Rig, role: str, secrets_namespace: str = "erp") -> None:
     """What enrolment does: the role directory (tmpfiles.d) and the authored config."""
     role_dir = rig.config.run_dir / role
     role_dir.mkdir(parents=True, exist_ok=True)
     role_dir.chmod(0o711)
-    authored = rig.config.openbao_config_dir / f"{rig.config.product}-{role}.hcl"
+    authored = rig.config.openbao_config_dir / f"{secrets_namespace}-{role}.hcl"
     authored.write_text(f"# authored config for {role}\n")
     authored.chmod(0o644)
 

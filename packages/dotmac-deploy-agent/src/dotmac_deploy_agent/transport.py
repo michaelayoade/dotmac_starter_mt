@@ -67,7 +67,13 @@ def _read(
         connection.close()
     if len(data) > MAX_RESPONSE:
         raise Refusal("response_malformed")
-    return Response(reply.status, {k.lower(): v for k, v in reply.getheaders()}, data)
+    headers: dict[str, str] = {}
+    for name, value in reply.getheaders():
+        key = name.lower()
+        # A repeated header is joined, which no signature or id can equal: it is
+        # refused, never silently first-or-last (Control's `single_header`).
+        headers[key] = f"{headers[key]}, {value}" if key in headers else value
+    return Response(reply.status, headers, data)
 
 
 class HttpsTransport:

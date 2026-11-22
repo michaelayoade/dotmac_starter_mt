@@ -16,6 +16,7 @@ import base64
 import json
 import re
 import secrets
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -310,20 +311,125 @@ class PopSigner:
         return f"PopSigner(credential_id={self.credential_id!r})"
 
 
-def verify_response(
-    public_keys_b64url: tuple[str, ...], message: bytes, signature_b64: str | None
-) -> None:
-    signature = decode_b64url(signature_b64, length=64)
-    if signature is None:
+_FORBIDDEN_PATH_CHARS: Final = frozenset("%?#\\ \t\r\n\x00")
+_ALL_ROUTES: Final = {
+    **ROUTES,
+    "resolve": "POST",
+    "consume": "POST",
+    "committed/<dispatch_id>": "GET",
+}
+_DISPATCH_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+SIGNATURE_BYTES: Final = 64
+HeaderInput = Mapping[str, str] | Sequence[tuple[str, str]]
+
+
+def parse_target_path(path: str) -> tuple[str, str]:
+    """`(target_ref, route)` of a well-formed target-API path, else refuse. Mirrors
+    Control's `parse_target_path` (no encoding, no query, no empty segment)."""
+    prefix = f"{BASE_PATH}/targets/"
+    if (
+        not isinstance(path, str)
+        or not path.startswith(prefix)
+        or _FORBIDDEN_PATH_CHARS & set(path)
+        or path.endswith("/")
+        or "//" in path
+    ):
+        raise Refusal("response_binding_invalid")
+    rest = path[len(prefix) :].split("/")
+    if len(rest) < 4 or not all(_SEGMENT.fullmatch(p) for p in rest[:3]):
+        raise Refusal("response_binding_invalid")
+    route = "/".join(rest[3:])
+    if route.startswith("committed/") and route.count("/") == 1:
+        if not _DISPATCH_ID.fullmatch(route.split("/", 1)[1]):
+            raise Refusal("response_binding_invalid")
+        return "/".join(rest[:3]), "committed/<dispatch_id>"
+    if route not in _ALL_ROUTES or route == "committed/<dispatch_id>":
+        raise Refusal("response_binding_invalid")
+    return "/".join(rest[:3]), route
+
+
+def single_header(headers: HeaderInput, name: str) -> str:
+    """The ONE value of a header: absent, empty or repeated (any case) is refused.
+    A framework lookup returns the first of a repeated header and a dict keeps the
+    last; refusing repetition removes the difference."""
+    items = headers.items() if isinstance(headers, Mapping) else headers
+    values = [v for k, v in items if str(k).lower() == name.lower()]
+    if not values or not isinstance(values[0], str) or not values[0]:
+        raise Refusal("response_signature_invalid", "missing_header")
+    if len(values) > 1:
+        raise Refusal("response_signature_invalid", "duplicate_header")
+    return values[0]
+
+
+@dataclass(frozen=True)
+class ResponseCheck:
+    """What a client verifies: `signature` over `message` under the pinned key."""
+
+    message: bytes
+    signature: bytes
+
+
+def check_response(
+    *,
+    method: str,
+    path: str,
+    request_nonce: str,
+    status: int,
+    body: bytes,
+    headers: HeaderInput,
+) -> ResponseCheck:
+    """The CLIENT half, matching Control's `check_response`: everything about a
+    response before its signature check. A well-formed path and request nonce, and
+    exactly one canonical 64-byte `X-Dotmac-Response-Signature`. An UNSIGNED 413,
+    429 or 5xx is a retryable fault (`cp_unreachable`); any other unsigned or
+    malformed response is `response_signature_invalid`."""
+    try:
+        parse_target_path(path)
+        check_nonce(request_nonce)
+    except Refusal:
+        raise Refusal("response_binding_invalid") from None
+    unsigned = classify_unsigned_response(status)
+    try:
+        text = single_header(headers, H_RESPONSE_SIGNATURE)
+    except Refusal:
+        raise Refusal(unsigned) from None
+    signature = b64url_decode(text) or b""
+    if len(signature) != SIGNATURE_BYTES:
         raise Refusal("response_signature_invalid")
+    return ResponseCheck(
+        response_message(
+            method=method,
+            path=path,
+            request_nonce=request_nonce,
+            status=status,
+            body=body,
+        ),
+        signature,
+    )
+
+
+def verify_signature(
+    public_keys_b64url: tuple[str, ...], message: bytes, signature: bytes
+) -> None:
+    """Under ANY pinned CP response key; never a denied one. Failure is
+    `response_signature_invalid`."""
     for encoded in public_keys_b64url:
         raw = decode_b64url(encoded, length=32)
-        if raw is None:
+        if raw is None or is_denied_public_key(encoded):
             raise Refusal("config_invalid")
-        key = Ed25519PublicKey.from_public_bytes(raw)
         try:
-            key.verify(signature, message)
+            Ed25519PublicKey.from_public_bytes(raw).verify(signature, message)
         except InvalidSignature:
             continue
         return
     raise Refusal("response_signature_invalid")
+
+
+def verify_response(
+    public_keys_b64url: tuple[str, ...], message: bytes, signature_b64: str | None
+) -> None:
+    """Verify a response signature given as text (conformance helper)."""
+    signature = decode_b64url(signature_b64, length=SIGNATURE_BYTES)
+    if signature is None:
+        raise Refusal("response_signature_invalid")
+    verify_signature(public_keys_b64url, message, signature)

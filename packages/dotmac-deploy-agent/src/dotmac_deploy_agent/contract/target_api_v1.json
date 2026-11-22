@@ -2397,6 +2397,83 @@
     }
   ],
   "request_check": {
+    "credential_id": {
+      "ok": [
+        {
+          "credential_id": "cred-0001",
+          "headers": {
+            "X-Dotmac-Credential-Id": "cred-0001",
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          }
+        },
+        {
+          "credential_id": "cred-0001",
+          "headers": {
+            "x-dotmac-credential-id": "cred-0001",
+            "x-dotmac-issued-at": "2026-11-22T10:00:00Z",
+            "x-dotmac-nonce": "000000000000000000000000a5a5a5a6",
+            "x-dotmac-signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "x-dotmac-target-ref": "dotmac-erp-v2/production/host-a"
+          }
+        }
+      ],
+      "refused": [
+        {
+          "code": "missing_header",
+          "headers": {
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          },
+          "name": "absent"
+        },
+        {
+          "code": "duplicate_header",
+          "headers_pairs": [
+            [
+              "X-Dotmac-Credential-Id",
+              "cred-0001"
+            ],
+            [
+              "X-Dotmac-Target-Ref",
+              "dotmac-erp-v2/production/host-a"
+            ],
+            [
+              "X-Dotmac-Issued-At",
+              "2026-11-22T10:00:00Z"
+            ],
+            [
+              "X-Dotmac-Nonce",
+              "000000000000000000000000a5a5a5a6"
+            ],
+            [
+              "X-Dotmac-Signature",
+              "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg"
+            ],
+            [
+              "x-dotmac-credential-id",
+              "cred-9999"
+            ]
+          ],
+          "name": "repeated (any case)"
+        },
+        {
+          "code": "missing_header",
+          "headers": {
+            "X-Dotmac-Credential-Id": "",
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          },
+          "name": "empty"
+        }
+      ]
+    },
     "ok": [
       {
         "coordinates": {
@@ -2417,6 +2494,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2442,6 +2520,7 @@
             "X-Dotmac-Signature": "fsWgnqHVh1duvqI03xcavSFCF1p1DCsT_KNa2mqADPj-gojoBZg0lCFRD_EN85anbWLWh4kaVX4HMEYH_MYzBg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "POST",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/observations",
@@ -2467,6 +2546,7 @@
             "X-Dotmac-Signature": "pCJMszn6TFk7G0Jlw6Yartd7LamoDYx7kkfie7S1JywZ65gnlB6rn4a_lRKMNSIttUvoIp_Mk1kY1eUjaYvPDw",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/committed/dispatch-0001",
@@ -2487,6 +2567,7 @@
             "x-dotmac-signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "x-dotmac-target-ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2507,6 +2588,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-b"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2526,6 +2608,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2545,6 +2628,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "POST",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2564,6 +2648,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "x=1",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2583,6 +2668,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/nonsense",
@@ -2601,6 +2687,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2619,6 +2706,7 @@
             "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2637,6 +2725,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2655,6 +2744,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2673,6 +2763,7 @@
             "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2692,6 +2783,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2711,6 +2803,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2730,6 +2823,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2749,6 +2843,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2768,6 +2863,7 @@
             "X-Dotmac-Signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
@@ -2787,12 +2883,171 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bh",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
           "store_now": "2026-11-22T10:00:00Z"
         },
         "name": "a non-canonical signature spelling"
+      },
+      {
+        "code": "credential_lookup_mismatch",
+        "inputs": {
+          "body_utf8": "",
+          "credential_target_ref": "dotmac-erp-v2/production/host-a",
+          "headers": {
+            "X-Dotmac-Credential-Id": "cred-0001",
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          },
+          "looked_up_credential_id": "cred-9999",
+          "method": "GET",
+          "query_string": "",
+          "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "store_now": "2026-11-22T10:00:00Z"
+        },
+        "name": "the credential looked up is not the one the request names"
+      },
+      {
+        "code": "duplicate_header",
+        "inputs": {
+          "body_utf8": "",
+          "credential_target_ref": "dotmac-erp-v2/production/host-a",
+          "headers": {
+            "X-Dotmac-Credential-Id": "cred-0001",
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          },
+          "headers_pairs": [
+            [
+              "X-Dotmac-Credential-Id",
+              "cred-0001"
+            ],
+            [
+              "X-Dotmac-Target-Ref",
+              "dotmac-erp-v2/production/host-a"
+            ],
+            [
+              "X-Dotmac-Issued-At",
+              "2026-11-22T10:00:00Z"
+            ],
+            [
+              "X-Dotmac-Nonce",
+              "000000000000000000000000a5a5a5a6"
+            ],
+            [
+              "X-Dotmac-Signature",
+              "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg"
+            ],
+            [
+              "x-dotmac-credential-id",
+              "cred-9999"
+            ]
+          ],
+          "looked_up_credential_id": "cred-0001",
+          "method": "GET",
+          "query_string": "",
+          "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "store_now": "2026-11-22T10:00:00Z"
+        },
+        "name": "a repeated X-Dotmac-Credential-Id header"
+      },
+      {
+        "code": "duplicate_header",
+        "inputs": {
+          "body_utf8": "",
+          "credential_target_ref": "dotmac-erp-v2/production/host-a",
+          "headers": {
+            "X-Dotmac-Credential-Id": "cred-0001",
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          },
+          "headers_pairs": [
+            [
+              "X-Dotmac-Credential-Id",
+              "cred-0001"
+            ],
+            [
+              "X-Dotmac-Target-Ref",
+              "dotmac-erp-v2/production/host-a"
+            ],
+            [
+              "X-Dotmac-Issued-At",
+              "2026-11-22T10:00:00Z"
+            ],
+            [
+              "X-Dotmac-Nonce",
+              "000000000000000000000000a5a5a5a6"
+            ],
+            [
+              "X-Dotmac-Signature",
+              "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg"
+            ],
+            [
+              "x-dotmac-target-ref",
+              "dotmac-erp-v2/production/host-b"
+            ]
+          ],
+          "looked_up_credential_id": "cred-0001",
+          "method": "GET",
+          "query_string": "",
+          "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "store_now": "2026-11-22T10:00:00Z"
+        },
+        "name": "a repeated X-Dotmac-Target-Ref header"
+      },
+      {
+        "code": "duplicate_header",
+        "inputs": {
+          "body_utf8": "",
+          "credential_target_ref": "dotmac-erp-v2/production/host-a",
+          "headers": {
+            "X-Dotmac-Credential-Id": "cred-0001",
+            "X-Dotmac-Issued-At": "2026-11-22T10:00:00Z",
+            "X-Dotmac-Nonce": "000000000000000000000000a5a5a5a6",
+            "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
+            "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
+          },
+          "headers_pairs": [
+            [
+              "X-Dotmac-Credential-Id",
+              "cred-0001"
+            ],
+            [
+              "X-Dotmac-Target-Ref",
+              "dotmac-erp-v2/production/host-a"
+            ],
+            [
+              "X-Dotmac-Issued-At",
+              "2026-11-22T10:00:00Z"
+            ],
+            [
+              "X-Dotmac-Nonce",
+              "000000000000000000000000a5a5a5a6"
+            ],
+            [
+              "X-Dotmac-Signature",
+              "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg"
+            ],
+            [
+              "x-dotmac-nonce",
+              "000000000000000000000000a5a5a608"
+            ]
+          ],
+          "looked_up_credential_id": "cred-0001",
+          "method": "GET",
+          "query_string": "",
+          "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "store_now": "2026-11-22T10:00:00Z"
+        },
+        "name": "a repeated X-Dotmac-Nonce header"
       },
       {
         "code": "bad_path",
@@ -2806,6 +3061,7 @@
             "X-Dotmac-Signature": "-tOXfmngYl7Oi2OGP9kPrEL9kji0FqVSw4hU_IRZhezhjrc5NVw6u-oUb09qji_EAUdKOaMOCqGukUafsQJ3Bg",
             "X-Dotmac-Target-Ref": "dotmac-erp-v2/production/host-a"
           },
+          "looked_up_credential_id": "cred-0001",
           "method": "GET",
           "query_string": "",
           "raw_path": "/platform/deploy/target/v1/targets/dotmac-erp-v2%2Fproduction%2Fhost-a/materials",
@@ -2889,6 +3145,202 @@
       "target_ref": "dotmac-erp-v2/production/host-a"
     }
   ],
+  "response_check": {
+    "ok": [
+      {
+        "body_utf8": "{\"ok\":true}",
+        "headers": {
+          "X-Dotmac-Response-Signature": "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ"
+        },
+        "message_utf8": "cp-target-response.v1\nGET\n/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials\n000000000000000000000000a5a5a5b0\n200\n4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93",
+        "method": "GET",
+        "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+        "request_nonce": "000000000000000000000000a5a5a5b0",
+        "signature_b64u": "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ",
+        "status": 200
+      },
+      {
+        "body_utf8": "{\"error\":\"x\"}",
+        "headers": {
+          "X-Dotmac-Response-Signature": "WSstURzIoIO-FMwatVBU1IBszbgCPpGnv7NMpmzlkrApdas9MDVrgr5Z_HKPJAda0qgjQhMddN31yzV_CaqBBg"
+        },
+        "message_utf8": "cp-target-response.v1\nPOST\n/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/consume\n000000000000000000000000a5a5a5b1\n409\n469535a7a760aaa23c38f15a48eea08848693bd2fcda382aba664e319f672300",
+        "method": "POST",
+        "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/consume",
+        "request_nonce": "000000000000000000000000a5a5a5b1",
+        "signature_b64u": "WSstURzIoIO-FMwatVBU1IBszbgCPpGnv7NMpmzlkrApdas9MDVrgr5Z_HKPJAda0qgjQhMddN31yzV_CaqBBg",
+        "status": 409
+      },
+      {
+        "body_utf8": "",
+        "headers": {
+          "X-Dotmac-Response-Signature": "EV-AGVZDl_Is6CrgRSX7KJEncCeQ1V8yOTTs44T3C_cH-U1dA9BSCzPvhPBisnBtjNrfIam6FXgVdrdsNe6pBg"
+        },
+        "message_utf8": "cp-target-response.v1\nPOST\n/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/resolve\n000000000000000000000000a5a5a5b2\n200\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "method": "POST",
+        "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/resolve",
+        "request_nonce": "000000000000000000000000a5a5a5b2",
+        "signature_b64u": "EV-AGVZDl_Is6CrgRSX7KJEncCeQ1V8yOTTs44T3C_cH-U1dA9BSCzPvhPBisnBtjNrfIam6FXgVdrdsNe6pBg",
+        "status": 200
+      }
+    ],
+    "refused": [
+      {
+        "code": "response_signature_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {},
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 200
+        },
+        "name": "unsigned 200"
+      },
+      {
+        "code": "cp_unreachable",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {},
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 413
+        },
+        "name": "unsigned 413 is a transport fault"
+      },
+      {
+        "code": "cp_unreachable",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {},
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 429
+        },
+        "name": "unsigned 429 is a transport fault"
+      },
+      {
+        "code": "cp_unreachable",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {},
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 502
+        },
+        "name": "unsigned 502 is a transport fault"
+      },
+      {
+        "code": "response_signature_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {},
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 403
+        },
+        "name": "unsigned 403 is not a transport fault"
+      },
+      {
+        "code": "response_signature_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {
+            "X-Dotmac-Response-Signature": "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ"
+          },
+          "headers_pairs": [
+            [
+              "X-Dotmac-Response-Signature",
+              "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ"
+            ],
+            [
+              "x-dotmac-response-signature",
+              "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ"
+            ]
+          ],
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 200
+        },
+        "name": "a repeated response signature"
+      },
+      {
+        "code": "response_signature_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {
+            "X-Dotmac-Response-Signature": "not base64!"
+          },
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 200
+        },
+        "name": "a malformed signature"
+      },
+      {
+        "code": "response_signature_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {
+            "X-Dotmac-Response-Signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 200
+        },
+        "name": "a 63-byte signature"
+      },
+      {
+        "code": "response_signature_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {
+            "X-Dotmac-Response-Signature": "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BR"
+          },
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 200
+        },
+        "name": "a non-canonical signature spelling"
+      },
+      {
+        "code": "response_binding_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {
+            "X-Dotmac-Response-Signature": "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ"
+          },
+          "method": "GET",
+          "path": "/elsewhere",
+          "request_nonce": "000000000000000000000000a5a5a5b0",
+          "status": 200
+        },
+        "name": "a path that is not a target path"
+      },
+      {
+        "code": "response_binding_invalid",
+        "inputs": {
+          "body_utf8": "{\"ok\":true}",
+          "headers": {
+            "X-Dotmac-Response-Signature": "gT-PXrpe5HhhUF9YxAbICNJhoJBsAhfzu_Hl1li78uUBa7TtnJWtnMZI0hGnKznH6aafdWkGTs6cjf8G3vL4BQ"
+          },
+          "method": "GET",
+          "path": "/platform/deploy/target/v1/targets/dotmac-erp-v2/production/host-a/materials",
+          "request_nonce": "short",
+          "status": 200
+        },
+        "name": "a malformed request nonce"
+      }
+    ]
+  },
   "response_vectors": [
     {
       "body_utf8": "{\"ok\":true}",
@@ -3064,55 +3516,57 @@
   "secret_ref_vectors": {
     "ok": [
       {
-        "environment": "production",
+        "approle": "erp-prod-app",
         "name": "DB_PASSWORD",
-        "product": "dotmac-erp-v2",
         "role": "app",
-        "secret_ref": "bao://production/dotmac-erp-v2/kv/app/db_password"
+        "secret_ref": "bao://prod/erp/kv/app/db_password",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp"
       },
       {
-        "environment": "staging",
+        "approle": "erp-integrator-staging-migrate",
         "name": "MIGRATION_DATABASE_URL",
-        "product": "dotmac-integrator-companion",
         "role": "migrate",
-        "secret_ref": "bao://staging/dotmac-integrator-companion/kv/migrate/migration_database_url"
+        "secret_ref": "bao://staging/erp-integrator/kv/migrate/migration_database_url",
+        "secrets_environment": "staging",
+        "secrets_namespace": "erp-integrator"
       }
     ],
     "refused": [
       {
-        "environment": "Production",
         "name": "DB_PASSWORD",
-        "product": "dotmac-erp-v2",
         "refused": true,
-        "role": "app"
+        "role": "app",
+        "secrets_environment": "Prod",
+        "secrets_namespace": "erp"
       },
       {
-        "environment": "production",
         "name": "DB_PASSWORD",
-        "product": "dotmac erp",
         "refused": true,
-        "role": "app"
+        "role": "app",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp app"
       },
       {
-        "environment": "production",
         "name": "DB_PASSWORD",
-        "product": "dotmac-erp-v2",
         "refused": true,
-        "role": "App"
+        "role": "App",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp"
       },
       {
-        "environment": "production",
         "name": "db_password",
-        "product": "dotmac-erp-v2",
         "refused": true,
-        "role": "app"
+        "role": "app",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp"
       },
       {
-        "environment": "production",
         "name": "DB_PASSWORD",
-        "product": "dotmac-erp-v2",
         "refused": true,
-        "role": "app/x"
+        "role": "app/x",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp"
       }
     ]
   },
@@ -3127,21 +3581,33 @@
     }
   ],
   "target_binding": {
+    "environment_defaults": {
+      "pilot": null,
+      "prod": "prod",
+      "production": "prod",
+      "staging": "staging"
+    },
     "ok": [
       {
+        "approle_app": "erp-prod-app",
         "environment": "production",
         "host": "host-a",
-        "openbao_namespace": "production",
+        "openbao_namespace": "prod/erp",
         "product_code": "dotmac-erp-v2",
-        "secret_ref_prefix": "bao://production/dotmac-erp-v2/kv/",
+        "secret_ref_prefix": "bao://prod/erp/kv/",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp",
         "target_ref": "dotmac-erp-v2/production/host-a"
       },
       {
+        "approle_app": "erp-integrator-staging-app",
         "environment": "staging",
         "host": "host-1",
-        "openbao_namespace": "staging",
+        "openbao_namespace": "staging/erp-integrator",
         "product_code": "dotmac-integrator-companion",
-        "secret_ref_prefix": "bao://staging/dotmac-integrator-companion/kv/",
+        "secret_ref_prefix": "bao://staging/erp-integrator/kv/",
+        "secrets_environment": "staging",
+        "secrets_namespace": "erp-integrator",
         "target_ref": "dotmac-integrator-companion/staging/host-1"
       }
     ],
@@ -3150,34 +3616,76 @@
         "code": "target_ref_mismatch",
         "environment": "production",
         "product_code": "dotmac-erp-v2",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp",
         "target_ref": "erp/prod/host-a"
       },
       {
         "code": "target_ref_mismatch",
         "environment": "production",
         "product_code": "dotmac-erp-v2",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp",
         "target_ref": "dotmac-erp-v2/staging/host-a"
       },
       {
         "code": "target_ref_mismatch",
         "environment": "production",
         "product_code": "dotmac-sub",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp",
         "target_ref": "dotmac-erp-v2/production/host-a"
       },
       {
         "code": "contract_violation",
         "environment": "production",
         "product_code": "dotmac-erp-v2",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp",
         "target_ref": "dotmac-erp-v2/production"
       },
       {
         "code": "contract_violation",
         "environment": "production",
         "product_code": "dotmac-erp-v2",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp",
         "target_ref": "dotmac-erp-v2/production/Host-A"
+      },
+      {
+        "code": "bad_secrets_name",
+        "environment": "production",
+        "product_code": "dotmac-erp-v2",
+        "secrets_environment": "prod",
+        "secrets_namespace": "Erp",
+        "target_ref": "dotmac-erp-v2/production/host-a"
+      },
+      {
+        "code": "bad_secrets_name",
+        "environment": "production",
+        "product_code": "dotmac-erp-v2",
+        "secrets_environment": "prod",
+        "secrets_namespace": "erp/x",
+        "target_ref": "dotmac-erp-v2/production/host-a"
+      },
+      {
+        "code": "bad_secrets_name",
+        "environment": "production",
+        "product_code": "dotmac-erp-v2",
+        "secrets_environment": "Prod",
+        "secrets_namespace": "erp",
+        "target_ref": "dotmac-erp-v2/production/host-a"
+      },
+      {
+        "code": "bad_secrets_name",
+        "environment": "production",
+        "product_code": "dotmac-erp-v2",
+        "secrets_environment": "",
+        "secrets_namespace": "erp",
+        "target_ref": "dotmac-erp-v2/production/host-a"
       }
     ],
-    "rule": "a descriptor-backed target's ref is <product_code>/<environment>/<host>; the environment segment IS the OpenBao namespace name"
+    "rule": "the target ref is <product_code>/<environment>/<host> (Control's identities, signed and routed on). OpenBao names follow the approved <env>/<product> layout: the namespace is <secrets_environment>/<secrets_namespace> (prod/erp), the AppRole is <secrets_namespace>-<secrets_environment>-<role> (erp-prod-app), and the secret_ref is bao://<secrets_environment>/<secrets_namespace>/kv/<role>/<lower(name)>. secrets_namespace is a descriptor field; secrets_environment is fixed on the target at registration and never sent in a dispatch."
   },
   "value_vectors": [
     {

@@ -104,6 +104,11 @@ class Materials:
     images: tuple[ImageSpec, ...]
     lease_ttl_seconds: int
     active_binding_names: tuple[str, ...]
+    #: From the SIGNED plan binding (never the target ref): the descriptor's
+    #: `secrets_namespace` and the namespace-env fixed on the target. Required
+    #: whenever the plan binds roles.
+    secrets_namespace: str | None = None
+    secrets_environment: str | None = None
 
 
 def _list(value: object) -> list[object]:
@@ -344,6 +349,13 @@ def parse_materials(
     ttl = binding.get("lease_ttl_seconds")
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
+    roles = plan_roles(snapshot)
+    secrets_namespace = binding.get("secrets_namespace")
+    secrets_environment = binding.get("secrets_environment")
+    if roles or secrets_namespace is not None or secrets_environment is not None:
+        for value in (secrets_namespace, secrets_environment):
+            if not isinstance(value, str) or not _SEGMENT.fullmatch(value):
+                raise Refusal("materials_invalid", "bad_secrets_name")
     return Materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,
@@ -352,11 +364,13 @@ def parse_materials(
         app_image=cast("str", document["app_image"]),
         primary_service=cast("str", binding["primary_service"]),
         params_env_digest=_digest(binding.get("params_env_digest")),
-        roles=plan_roles(snapshot),
+        roles=roles,
         legacy=_parse_legacy(binding.get("legacy")),
         images=_parse_images(binding.get("images")),
         lease_ttl_seconds=ttl,
         active_binding_names=tuple(
             _text(n, _NAME) for n in _list(binding.get("active_binding_names", []))
         ),
+        secrets_namespace=secrets_namespace,  # type: ignore[arg-type]
+        secrets_environment=secrets_environment,  # type: ignore[arg-type]
     )
