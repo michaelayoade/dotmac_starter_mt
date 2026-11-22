@@ -21,6 +21,7 @@ from dotmac_deploy_agent.refusal import Refusal
 from tests.unit.deploy_agent_support import (
     APP_IMAGE,
     PREVIOUS_IMAGE,
+    base_images,
     base_params,
     make_materials,
     make_rig,
@@ -281,3 +282,63 @@ def test_observation_is_kept_in_outbox_until_cp_acknowledges(tmp_path: Path) -> 
     rig.launcher.run_once()
     assert rig.launcher.outbox.pending() == []
     assert os.listdir(rig.config.state_dir / "outbox") == []
+
+
+def _new_image_materials():  # type: ignore[no-untyped-def]
+    digest = "sha256:" + "c" * 64
+    image = dict(base_images()[0], release_digest=digest, planned_digest=digest)
+    app_image = f"127.0.0.1:5000/org/app@{digest}"
+    return app_image, make_materials(app_image=app_image, images=[image])
+
+
+def test_the_agents_own_last_pin_is_the_only_second_rendering(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials()
+    assert rig.launcher.run_once().outcome == "completed"
+    assert (rig.config.state_dir / "last_app_image").read_text() == APP_IMAGE
+    new_image, materials = _new_image_materials()
+    rig.cp.materials = materials
+
+    def foundation_restores_the_previous_pin(spec) -> None:  # type: ignore[no-untyped-def]
+        spec.params_env.chmod(0o600)
+        spec.params_env.write_bytes(
+            with_app_image(spec.params_env.read_bytes(), APP_IMAGE)
+        )
+
+    rig.runner.effect = foundation_restores_the_previous_pin
+    rig.launcher.run_once()
+    details = rig.cp.observations[-1]["details"]
+    assert details["params_env_post_run"] == "planned_previous_pin"  # type: ignore[index]
+    # It is not remembered as applied: only a file at the planned pin is.
+    assert (rig.config.state_dir / "last_app_image").read_text() == APP_IMAGE
+    assert new_image != APP_IMAGE
+
+
+def test_a_pin_the_agent_never_applied_is_an_integrity_violation(
+    tmp_path: Path,
+) -> None:
+    rig = make_rig(tmp_path)
+    _, materials = _new_image_materials()
+    rig.cp.materials = materials
+
+    def restore_unknown_pin(spec) -> None:  # type: ignore[no-untyped-def]
+        spec.params_env.chmod(0o600)
+        spec.params_env.write_bytes(
+            with_app_image(spec.params_env.read_bytes(), PREVIOUS_IMAGE)
+        )
+
+    rig.runner.effect = restore_unknown_pin
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == (
+        "integrity_violation",
+        "integrity_violation",
+    )
+
+
+def test_a_cp_supplied_previous_pin_is_refused(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    document = make_materials()
+    document["previous_app_image"] = PREVIOUS_IMAGE
+    rig.cp.materials = document
+    assert rig.launcher.run_once().reason == "materials_invalid"
+    assert rig.runner.specs == []

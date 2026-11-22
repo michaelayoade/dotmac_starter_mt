@@ -28,8 +28,11 @@ from .refusal import Refusal
 APP_IMAGE: Final = "APP_IMAGE"
 PARAMS_FILE: Final = "params.env"
 _MATERIAL: Final = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
+# Control's `SECRET_NAMED_MATERIAL` (vector `secret_name_vectors`): a material whose
+# NAME says secret may only point at a FILE (type path), never carry a value.
 _SECRETISH_NAME: Final = re.compile(
-    r"PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|CREDENTIAL"
+    r"PASS|PWD|SECRET|TOKEN|CREDENTIAL|DSN|SALT|COOKIE|PRIVATE_KEY|API_KEY"
+    r"|(?:^|_)KEY(?:$|_)"
 )
 # Control's `looks_secret_shaped`, ported rule for rule (contract/target_api_v1.json
 # `value_vectors`): the agent refuses nothing Control accepts and accepts nothing

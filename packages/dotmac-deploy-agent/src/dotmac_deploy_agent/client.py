@@ -9,7 +9,6 @@ request's nonce, and carries a CP time within 60 s of the host clock.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,6 +18,7 @@ from typing import Final, cast
 from . import wire
 from .canon import canonical_json
 from .config import AgentConfig
+from .materials import check_shape
 from .refusal import Refusal
 from .transport import Transport
 
@@ -105,10 +105,7 @@ class TargetClient:
         )
         document: dict[str, object] = {}
         if response.body:
-            try:
-                parsed = json.loads(response.body)
-            except ValueError:
-                raise Refusal("response_malformed") from None
+            parsed = wire.parse_json_body(response.body)
             if not isinstance(parsed, dict):
                 raise Refusal("response_malformed")
             document = cast("dict[str, object]", parsed)
@@ -128,7 +125,10 @@ class TargetClient:
     def materials(self) -> Reply | None:
         """The pending signed dispatch materials, or None when nothing is pending."""
         reply = self.call("GET", "materials", None)
-        if reply.document.get("pending") is False:
+        check_shape(reply.document)  # an idle document is exactly the four always-keys
+        if reply.document["target_ref"] != self._config.target_ref:
+            raise Refusal("materials_target_mismatch")
+        if reply.document["pending"] is False:
             return None
         return reply
 

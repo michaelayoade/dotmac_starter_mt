@@ -59,11 +59,12 @@ def test_a_plan_snapshot_that_is_not_the_signed_plan_is_refused(tmp_path: Path) 
     snapshot = copy.deepcopy(document["plan_snapshot"])
     snapshot["deploy_binding"]["lease_ttl_seconds"] = 3600  # type: ignore[index]
     document["plan_snapshot"] = snapshot
-    assert refused(tmp_path, document) == "dispatch_plan_mismatch"
+    # The shape check cross-checks the signed plan digest against the snapshot.
+    assert refused(tmp_path, document) == "materials_invalid"
     # Swapping in a different, internally valid plan fares no better.
     other = make_materials(lease_ttl_seconds=120)
     document["plan_snapshot"] = other["plan_snapshot"]
-    assert refused(tmp_path, document) == "dispatch_plan_mismatch"
+    assert refused(tmp_path, document) == "materials_invalid"
 
 
 def test_the_params_digest_images_legacy_and_ttl_come_only_from_the_signed_plan(
@@ -106,6 +107,7 @@ def test_a_malformed_or_unsigned_envelope_is_refused(tmp_path: Path, mutation) -
     assert refused(tmp_path, document) in {
         "dispatch_envelope_invalid",
         "dispatch_signature_invalid",
+        "materials_invalid",
     }
 
 
@@ -130,14 +132,24 @@ def test_wrong_purpose_key_id_or_fingerprint_is_refused(tmp_path: Path) -> None:
 def test_a_dispatch_for_another_host_product_or_environment_is_refused(
     tmp_path: Path,
 ) -> None:
+    for target in ("erp/staging/other", "sub/staging/host-a", "erp/prod/host-a"):
+        assert (
+            refused(tmp_path, make_materials(target_ref=target))
+            == "materials_target_mismatch"
+        )
+
+
+def test_a_statement_that_disagrees_with_the_document_is_refused(
+    tmp_path: Path,
+) -> None:
     for change in (
         {"target_ref": "erp/staging/other"},
         {"product_code": "sub"},
         {"environment": "prod"},
+        {"dispatch_id": "dispatch-2"},
     ):
         assert (
-            refused(tmp_path, make_materials(statement=change))
-            == "materials_target_mismatch"
+            refused(tmp_path, make_materials(statement=change)) == "materials_invalid"
         )
 
 

@@ -44,11 +44,13 @@ from dotmac_deploy_agent.transfer import TransferResult
 from dotmac_deploy_agent.transport import Response
 from dotmac_deploy_agent.wire import encode_b64url
 
+from tests.unit.deploy_agent_server import RequestRefused, check_request
+
 TARGET = "erp/staging/host-a"
 NOW = datetime(2027, 1, 6, 12, 0, 0, tzinfo=UTC)
 IMAGE_DIGEST = "sha256:" + "a" * 64
 APP_IMAGE = f"127.0.0.1:5000/org/app@{IMAGE_DIGEST}"
-PREVIOUS_IMAGE = "127.0.0.1:5000/org/app@sha256:" + "b" * 64
+PREVIOUS_IMAGE = "127.0.0.1:5000/org/app@sha256:" + "b" * 64  # a previously applied pin
 DISPATCH_KEY_ID = "control-dispatch-1"
 
 #: A stand-in for Control's dispatch signing key. Shared so `make_materials()`
@@ -236,34 +238,44 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "active_binding_names": overrides.pop("active_binding_names", []),
         "legacy": overrides.pop("legacy", None),
         "companion_order": None,
+        "primary_service": overrides.pop("primary_service", "app"),
         "roles": overrides.pop("roles", []),
     }
+    target = str(overrides.pop("target_ref", TARGET))
+    product, environment, _host = target.split("/")
     snapshot: dict[str, object] = {
         "deploy_binding": binding,
         "release_ref": "release-1",
-        "product_code": "erp",
-        "environment": "staging",
-        "target_ref": TARGET,
+        "product_code": product,
+        "environment": environment,
+        "target_ref": target,
         "plan_purpose": "foundation_execution",
     }
     snapshot.update(overrides.pop("snapshot_extra", {}))  # type: ignore[arg-type]
     plan_digest = plan_digest_of(snapshot)
+    document_dispatch_id = str(overrides.pop("dispatch_id", "dispatch-1"))
+    statement_fields: dict[str, object] = {
+        "dispatch_id": document_dispatch_id,
+        "target_ref": target,
+        "product_code": product,
+        "environment": environment,
+        **overrides.pop("statement", {}),  # type: ignore[arg-type]
+    }
     statement = make_statement(
         plan_digest,
-        dispatch_id=str(overrides.pop("dispatch_id", "dispatch-1")),
-        **overrides.pop("statement", {}),  # type: ignore[arg-type]
+        dispatch_id=str(statement_fields.pop("dispatch_id")),
+        **statement_fields,
     )
     envelope = sign_envelope(statement, overrides.pop("sign_with", DISPATCH_KEY))  # type: ignore[arg-type]
     document: dict[str, object] = {
         "schema": "dotmac.deploy_target_materials/1",
         "pending": True,
-        "dispatch_id": statement["dispatch_id"],
-        "target_ref": TARGET,
+        "dispatch_id": document_dispatch_id,
+        "target_ref": target,
         "dispatch_envelope": envelope,
         "plan_snapshot": snapshot,
         "params": params,
         "app_image": app_image,
-        "previous_app_image": PREVIOUS_IMAGE,
     }
     document.update(overrides)
     return document
@@ -276,6 +288,7 @@ class FakeCp:
         self.keys = keys
         self.clock = clock
         self.materials: dict[str, object] | None = None
+        self.credential_target_ref = TARGET
         self.observations: list[dict[str, object]] = []
         self.nonces: set[str] = set()
         self.calls: list[tuple[str, str]] = []
@@ -309,33 +322,32 @@ class FakeCp:
     ) -> Response:
         nonce = headers[wire.H_NONCE]
         self.paths.append(path)
-        message = wire.request_message(
-            method=method,
-            path=path,
-            body=body,
-            credential_id=headers[wire.H_CREDENTIAL],
-            target_ref=headers[wire.H_TARGET],
-            issued_at=headers[wire.H_ISSUED_AT],
-            nonce=nonce,
-        )
+        try:
+            coords = check_request(
+                method=method,
+                raw_path=path,
+                query_string="",
+                headers=headers,
+                body=body,
+                store_now=wire.utc_stamp(self.clock()),
+                credential_target_ref=self.credential_target_ref,
+            )
+        except RequestRefused as refused:
+            return self._reply(method, path, nonce, 400, {"error": refused.code})
         public = Ed25519PublicKey.from_public_bytes(
             self.keys.agent.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         )
-        signature = wire.decode_b64url(headers[wire.H_SIGNATURE], length=64)
         try:
-            if signature is None:
-                raise InvalidSignature
-            public.verify(signature, message)
+            public.verify(
+                wire.decode_b64url(coords.signature_b64u, length=64) or b"",
+                coords.signed_message,
+            )
         except InvalidSignature:
             return self._reply(method, path, nonce, 401, {"error": "bad_signature"})
-        prefix = f"{wire.BASE_PATH}/targets/"
-        product, environment, host, endpoint = path[len(prefix) :].split("/", 3)
-        if (
-            f"{product}/{environment}/{host}" != headers[wire.H_TARGET]
-            or nonce in self.nonces
-        ):
-            return self._reply(method, path, nonce, 403, {"error": "target_or_replay"})
-        self.nonces.add(nonce)
+        if coords.nonce_ledger_key in self.nonces:
+            return self._reply(method, path, nonce, 403, {"error": "nonce_replay"})
+        self.nonces.add(coords.nonce_ledger_key)
+        endpoint = coords.route
         self.calls.append((method, endpoint))
         if endpoint in self.raw_status:
             return Response(self.raw_status[endpoint], {}, b"")
@@ -346,7 +358,11 @@ class FakeCp:
             return self._reply(method, path, nonce, status, doc)
         payload = json.loads(body) if body else {}
         if endpoint == "materials":
-            doc = self.materials or {"pending": False}
+            doc = self.materials or {
+                "schema": "dotmac.deploy_target_materials/1",
+                "pending": False,
+                "target_ref": TARGET,
+            }
             return self._reply(method, path, nonce, 200, dict(doc))
         if endpoint == "observations":
             self.observations.append(payload)

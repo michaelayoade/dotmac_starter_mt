@@ -36,6 +36,7 @@ def build_launcher(config: AgentConfig) -> Launcher:
         config.credential_id,
         read_credential(environ, config.pop_key_credential, code="config_invalid"),
     )
+    signer.check_admissible()
     client = TargetClient(
         config,
         signer,

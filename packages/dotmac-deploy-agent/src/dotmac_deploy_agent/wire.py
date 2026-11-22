@@ -13,6 +13,7 @@ Keys and signatures are canonical UNPADDED base64url.
 from __future__ import annotations
 
 import base64
+import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -188,27 +189,83 @@ def b64url_decode(value: object) -> bytes | None:
     ):
         return None
     try:
-        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
     except ValueError:
         return None
+    # Non-zero trailing bits decode to the same bytes (`AB` == `AA`): one
+    # signature would have several spellings. Require the round trip (Control).
+    return raw if encode_b64url(raw) == value else None
 
 
 def decode_b64url(value: object, *, length: int) -> bytes | None:
     """Canonical unpadded base64url of exactly `length` bytes, else None."""
-    if (
-        not isinstance(value, str)
-        or not value
-        or "=" in value
-        or value != value.strip()
-    ):
-        return None
+    raw = b64url_decode(value)
+    return raw if raw is not None and len(raw) == length else None
+
+
+#: Public keys of the two Ed25519 seeds Control's vector file PUBLISHES. They
+#: authenticate nobody: the agent refuses them as a pinned CP response key or a
+#: PoP key (Control's `DENIED_PUBLIC_KEYS_B64U`; vector `denied_public_keys`).
+DENIED_PUBLIC_KEYS_B64URL: Final = frozenset(
+    {
+        "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+        "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+    }
+)
+_DENIED_RAW: Final = frozenset(
+    decode_b64url(key, length=32) for key in DENIED_PUBLIC_KEYS_B64URL
+)
+
+
+def is_denied_public_key(text: str) -> bool:
+    """True for a published test key, in unpadded base64url or standard base64."""
+    if not isinstance(text, str):
+        return False
+    raw = b64url_decode(text)
+    if raw is None:
+        try:
+            raw = base64.b64decode(text, validate=True)
+        except ValueError:
+            try:
+                raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+            except ValueError:
+                return False
+    return raw in _DENIED_RAW
+
+
+def parse_json_body(body: bytes) -> object:
+    """Parse a CP body as Control does: UTF-8, no duplicate keys, no NaN/Infinity.
+    A parser that keeps the last duplicate and one that keeps the first would read
+    different documents from the same signed bytes."""
+
+    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
+        seen: dict[str, object] = {}
+        for key, value in items:
+            if key in seen:
+                raise Refusal("response_malformed", "duplicate_key")
+            seen[key] = value
+        return seen
+
+    def constant(_name: str) -> object:
+        raise Refusal("response_malformed", "bad_json")
+
     try:
-        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-    except ValueError:
-        return None
-    if len(raw) != length or encode_b64url(raw) != value:
-        return None
-    return raw
+        return json.loads(
+            body.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant
+        )
+    except (UnicodeDecodeError, ValueError):
+        raise Refusal("response_malformed", "bad_json") from None
+
+
+def check_target_binding(target_ref: str, product_code: str, environment: str) -> str:
+    """`<product_code>/<environment>/<host>`: the environment segment IS the
+    OpenBao namespace. Returns the host alias."""
+    parts = target_ref.split("/") if isinstance(target_ref, str) else []
+    if len(parts) != 3 or not all(_SEGMENT.fullmatch(p) for p in parts):
+        raise Refusal("materials_invalid", "contract_violation")
+    if (parts[0], parts[1]) != (product_code, environment):
+        raise Refusal("materials_target_mismatch", "target_ref_mismatch")
+    return parts[2]
 
 
 @dataclass(frozen=True)
@@ -232,6 +289,22 @@ class PopSigner:
 
     def sign(self, message: bytes) -> str:
         return encode_b64url(self._key.sign(message))
+
+    @property
+    def public_key_b64url(self) -> str:
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            PublicFormat,
+        )
+
+        return encode_b64url(
+            self._key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        )
+
+    def check_admissible(self) -> None:
+        """Refuse a PoP key whose seed is published (it would authenticate nobody)."""
+        if is_denied_public_key(self.public_key_b64url):
+            raise Refusal("config_invalid", "denied_public_key")
 
     def __repr__(self) -> str:
         return f"PopSigner(credential_id={self.credential_id!r})"

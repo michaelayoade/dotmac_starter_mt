@@ -28,15 +28,20 @@ from dotmac_deploy_agent.config import BINDINGS_ENV_OPTIONAL, BINDINGS_ENV_REQUI
 from dotmac_deploy_agent.dispatch import plan_digest_of
 from dotmac_deploy_agent.materials import (
     FORBIDDEN_KEYS,
+    MATERIALS_ALWAYS,
     MATERIALS_KEYS,
+    MATERIALS_PENDING,
+    STATEMENT_KEYS,
     ImageSpec,
     check_shape,
     expected_app_image,
+    plan_roles,
 )
 from dotmac_deploy_agent.params import Param, canonical_render
 from dotmac_deploy_agent.refusal import Refusal
 from dotmac_deploy_agent.runner import RunSpec, runner_environment
 
+from tests.unit.deploy_agent_server import RequestRefused, check_request
 from tests.unit.deploy_agent_support import Keys, make_config
 
 SOURCE = (
@@ -268,7 +273,13 @@ def test_render_vectors() -> None:
 
 
 def test_secret_name_vectors() -> None:
-    sample = {"string": "x", "path": "/run/x", "int": "1"}
+    sample = {
+        "string": "x",
+        "path": "/run/x",
+        "int": "1",
+        "hostname": "erp.example.test",
+        "bool": "true",
+    }
     image = "127.0.0.1:5000/team/app@sha256:" + "1" * 64
     for vector in load()["secret_name_vectors"]:  # type: ignore[union-attr]
         params = [
@@ -299,21 +310,121 @@ def test_value_vectors_the_agent_refuses_nothing_control_accepts_and_accepts_not
 def test_materials_vectors() -> None:
     group = load()["materials"]  # type: ignore[index]
     assert group["schema"] == "dotmac.deploy_target_materials/1"
-    assert set(group["keys"]) == set(MATERIALS_KEYS)
+    assert set(group["always_keys"]) == set(MATERIALS_ALWAYS)
+    assert set(group["pending_keys"]) == set(MATERIALS_PENDING)
+    assert set(group["keys"] if "keys" in group else MATERIALS_KEYS) == set(
+        MATERIALS_KEYS
+    )
     assert set(group["removed_keys"]) == set(FORBIDDEN_KEYS)
+    assert set(group["statement_keys"]) == set(STATEMENT_KEYS)
     check_shape(group["ok"])
+    check_shape(group["idle"])  # nothing pending: exactly the always keys
     for vector in group["refused"]:
         with pytest.raises(Refusal):
             check_shape(vector["document"])
     snapshot = group["ok"]["plan_snapshot"]
     assert plan_digest_of(snapshot) == group["plan_digest"]
     assert expected_app_image(snapshot) == group["expected_app_image"]
+    assert [[r.role, r.single_use] for r in plan_roles(snapshot)] == group["plan_roles"]
     for vector in group["archive_names"]:
         image = ImageSpec(
             vector["service"], "transfer", "registry.example.test/team/app",
             vector["digest"], "127.0.0.1:5000/team/app", vector["digest"],
         )  # fmt: skip
         assert image.archive == vector["name"]
+
+
+def test_request_check_vectors_through_the_cp_double() -> None:
+    """The CP double the agent is proved against refuses exactly what Control's
+    `check_request` refuses, and yields the same coordinates."""
+    group = load()["request_check"]  # type: ignore[index]
+    for vector in group["ok"]:
+        i = vector["inputs"]
+        coords = check_request(
+            method=i["method"], raw_path=i["raw_path"], query_string=i["query_string"],
+            headers=i["headers"], body=i["body_utf8"].encode(), store_now=i["store_now"],
+            credential_target_ref=i["credential_target_ref"],
+        )  # fmt: skip
+        want = vector["coordinates"]
+        assert coords.credential_id == want["credential_id"]
+        assert coords.dispatch_id == want["dispatch_id"]
+        assert coords.nonce_ledger_key == want["nonce_ledger_key"]
+        assert coords.route == want["route"]
+        assert coords.target_ref == want["target_ref"]
+        assert coords.signed_message.decode() == want["signed_message_utf8"]
+    for vector in group["refused"]:
+        i = vector["inputs"]
+        with pytest.raises(RequestRefused) as caught:
+            check_request(
+                method=i["method"], raw_path=i["raw_path"], query_string=i["query_string"],
+                headers=i["headers"], body=i["body_utf8"].encode(), store_now=i["store_now"],
+                credential_target_ref=i["credential_target_ref"],
+            )  # fmt: skip
+        assert caught.value.code == vector["code"], vector["name"]
+
+
+def test_target_binding_vectors(tmp_path: Path) -> None:
+    group = load()["target_binding"]  # type: ignore[index]
+    for index, vector in enumerate(group["ok"]):
+        host = wire.check_target_binding(
+            vector["target_ref"], vector["product_code"], vector["environment"]
+        )
+        assert host == vector["host"]
+        config = make_config(
+            tmp_path / f"b{index}", Keys(), target_ref=vector["target_ref"]
+        )
+        assert config.bao_namespace == vector["openbao_namespace"]
+    for vector in group["refused"]:
+        with pytest.raises(Refusal) as caught:
+            wire.check_target_binding(
+                vector["target_ref"], vector["product_code"], vector["environment"]
+            )
+        assert caught.value.detail == vector["code"], vector
+
+
+def test_denied_public_key_vectors(tmp_path: Path) -> None:
+    import base64
+
+    group = load()["denied_public_keys"]  # type: ignore[index]
+    seeds = load()["keys"]  # type: ignore[index]
+    for entry in group["keys"]:
+        key = entry["public_b64u"]
+        assert key == seeds[entry["seed_of"]]["public_b64u"]
+        assert wire.is_denied_public_key(key)
+        standard = base64.b64encode(wire.b64url_decode(key) or b"").decode()
+        assert wire.is_denied_public_key(standard)  # the other spelling too
+        with pytest.raises(Refusal):  # never a pinned CP response key
+            make_config(
+                tmp_path / key[:6], Keys(), cp_response_public_keys_b64url=(key,)
+            )
+    assert not wire.is_denied_public_key(group["accepted_example"])
+    # A PoP key whose seed the vector file publishes authenticates nobody.
+    published = wire.PopSigner.from_seed(
+        "cred-1", seeds["request"]["seed_b64u"].encode()
+    )
+    with pytest.raises(Refusal):
+        published.check_admissible()
+    wire.PopSigner.from_seed("cred-1", Keys().seed()).check_admissible()
+
+
+def test_json_body_vectors() -> None:
+    group = load()["json_bodies"]  # type: ignore[index]
+    for vector in group["ok"]:
+        assert wire.parse_json_body(vector["body_utf8"].encode()) == vector["parsed"]
+    for vector in group["refused"]:
+        with pytest.raises(Refusal) as caught:
+            wire.parse_json_body(bytes.fromhex(vector["body_hex"]))
+        assert caught.value.detail == vector["code"], vector
+
+
+def test_nonce_ledger_and_retry_vectors_are_the_servers_the_agent_only_uses_the_routes() -> (
+    None
+):
+    document = load()
+    assert set(wire.ROUTES) <= set(document["retry_idempotency"])  # type: ignore[arg-type]
+    ledger = document["nonce_ledger"]  # type: ignore[index]
+    assert ledger["key_fields"] == ["credential_id", "nonce"]
+    assert ledger["retention"] == "permanent"
 
 
 def test_the_agent_holds_no_secret_ref() -> None:

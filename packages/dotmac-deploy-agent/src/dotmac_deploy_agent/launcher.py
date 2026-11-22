@@ -19,7 +19,12 @@ from .commands import Commands
 from .config import AgentConfig, refuse_db_environment
 from .delivery import Delivered, deliver_secret_ids
 from .dispatch import read_identity
-from .files import ensure_private_dir, ensure_traversable_dir, require_private_dir
+from .files import (
+    ensure_private_dir,
+    ensure_traversable_dir,
+    require_private_dir,
+    write_private,
+)
 from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient
 from .legacy import prepare_legacy, remove_legacy_copy
 from .materials import Materials, parse_materials
@@ -112,6 +117,21 @@ class Launcher:
     def _report(self, observation: dict[str, object]) -> None:
         self.outbox.seal(observation)
         self.flush_outbox()
+
+    def _last_app_image(self) -> str | None:
+        """The pin this agent itself last applied: the only second rendering the
+        post-run check accepts (Foundation restores it after a failed switch).
+        Never CP-supplied: an unsigned previous pin would widen the check."""
+        try:
+            text = (self.config.state_dir / "last_app_image").read_text()
+        except OSError:
+            return None
+        return text.strip() or None
+
+    def _remember_app_image(self, app_image: str) -> None:
+        write_private(
+            self.config.state_dir / "last_app_image", app_image.encode(), 0o600
+        )
 
     def _recover_interrupted(self) -> None:
         dispatch_id = read_inflight(self.config.state_dir)
@@ -292,10 +312,12 @@ class Launcher:
             post = classify_post_run(
                 params_path(deploy_run_dir),
                 planned_render=planned,
-                previous_app_image=materials.previous_app_image,
+                previous_app_image=self._last_app_image(),
             )
             details["params_env_post_run"] = post.value
             outcome, reason = self._classify(result, post)
+            if outcome == "completed" and post is PostRun.PLANNED:
+                self._remember_app_image(materials.app_image)
         except Refusal as refusal:
             outcome = "failed" if ran else "refused"
             reason = refusal.code

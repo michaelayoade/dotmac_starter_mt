@@ -1,12 +1,14 @@
 """Typed parse of the dispatch materials the agent acts on (ruling R1).
 
-`dotmac.deploy_target_materials/1` carries a Control-signed `dispatch_envelope`
-and the `plan_snapshot` it binds. The agent reads the params digest, the images,
-the legacy policy and the lease TTL ONLY from `plan_snapshot.deploy_binding`,
-after `dispatch.verify_dispatch` has proved the envelope and the snapshot digest.
-CP-supplied fields are limited to what the plan cannot hold: the param VALUES
-(checked only by digest), the planned `APP_IMAGE`, the previous pin, and the
-role list. Unknown top-level keys are refused.
+`dotmac.deploy_target_materials/1` is exactly {schema, pending, store_now,
+target_ref}, plus {dispatch_id, params, app_image, dispatch_envelope,
+plan_snapshot} when `pending` is true. The params digest, images, primary
+service, roles, legacy policy and lease TTL are read ONLY from
+`plan_snapshot.deploy_binding`, after `dispatch.verify_dispatch` has proved the
+envelope and the snapshot digest. CP-supplied fields are limited to what the plan
+cannot hold: the param VALUES (checked only by digest) and the planned
+`APP_IMAGE` (which must be the primary service's planned reference). Every
+unsigned field is cross-checked against the signed statement and the snapshot.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Final, cast
 
 from .canon import DIGEST
 from .config import AgentConfig
-from .dispatch import PinnedIdentity, verify_dispatch
+from .dispatch import PinnedIdentity, plan_digest_of, verify_dispatch
 from .params import Param
 from .refusal import Refusal
 from .wire import parse_stamp
@@ -29,19 +31,25 @@ _NAME: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}")
 _SEGMENT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 _ROLE: Final = _SEGMENT
 _SERVICE: Final = _SEGMENT
+_DISPATCH_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 _REPOSITORY: Final = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,254}")
-MATERIALS_KEYS: Final = frozenset(
+MATERIALS_ALWAYS: Final = frozenset({"schema", "pending", "store_now", "target_ref"})
+MATERIALS_PENDING: Final = frozenset(
+    {"dispatch_id", "params", "app_image", "dispatch_envelope", "plan_snapshot"}
+)
+MATERIALS_KEYS: Final = MATERIALS_ALWAYS | MATERIALS_PENDING
+#: Removed: everything the plan binds is READ from the signed snapshot, so a
+#: CP-supplied copy could only disagree. `previous_app_image` was unsigned and
+#: widened post-run classification; the agent keeps its own last applied pin.
+FORBIDDEN_KEYS: Final = frozenset(
     {
-        "schema", "pending", "store_now", "dispatch_id", "target_ref", "params",
-        "app_image", "previous_app_image", "dispatch_envelope", "plan_snapshot",
+        "params_env_digest", "images", "legacy", "lease_ttl_seconds", "bindings",
+        "roles", "previous_app_image",
     }
 )  # fmt: skip
-#: Removed from the first draft: they are READ from the signed plan instead, so a
-#: CP-supplied copy could only ever disagree with what Control signed.
-FORBIDDEN_KEYS: Final = frozenset(
-    {"params_env_digest", "images", "legacy", "lease_ttl_seconds", "bindings", "roles"}
+STATEMENT_KEYS: Final = frozenset(
+    {"dispatch_id", "target_ref", "product_code", "environment", "plan_digest"}
 )
-ROLE_KEYS: Final = frozenset({"role", "single_use"})
 MAX_LEASE_TTL: Final = 3600
 
 
@@ -89,7 +97,7 @@ class Materials:
     target_ref: str
     params: tuple[Param, ...]
     app_image: str
-    previous_app_image: str | None
+    primary_service: str
     params_env_digest: str
     roles: tuple[RoleSpec, ...]
     legacy: LegacyPolicy | None
@@ -120,13 +128,124 @@ def _digest(value: object) -> str:
     return _text(value, DIGEST)
 
 
+def primary_image(plan_snapshot: Mapping[str, object]) -> dict[str, object]:
+    """The image the plan binding NAMES as primary. No fallback to "the only
+    image": a snapshot that names nothing, or an unknown service, is refused."""
+    binding = plan_snapshot.get("deploy_binding")
+    if not isinstance(binding, dict):
+        raise Refusal("materials_invalid")
+    service = binding.get("primary_service")
+    raw = binding.get("images")
+    chosen = [
+        image
+        for image in (raw if isinstance(raw, list) else [])
+        if isinstance(image, dict)
+        and isinstance(service, str)
+        and service
+        and image.get("service") == service
+    ]
+    if len(chosen) != 1:
+        raise Refusal("materials_invalid")
+    return chosen[0]
+
+
+def plan_roles(plan_snapshot: Mapping[str, object]) -> tuple[RoleSpec, ...]:
+    """`(role, single_use)` from the SIGNED plan only; unique and sorted."""
+    binding = plan_snapshot.get("deploy_binding")
+    rows = binding.get("roles") if isinstance(binding, dict) else None
+    if not isinstance(rows, list):
+        raise Refusal("materials_invalid")
+    roles: list[RoleSpec] = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"role", "single_use"}
+            or not isinstance(row["role"], str)
+            or not _ROLE.fullmatch(row["role"])
+            or type(row["single_use"]) is not bool
+        ):
+            raise Refusal("materials_invalid")
+        roles.append(RoleSpec(row["role"], row["single_use"]))
+    names = [r.role for r in roles]
+    if names != sorted(set(names)):
+        raise Refusal("materials_invalid")
+    return tuple(roles)
+
+
+def expected_app_image(plan_snapshot: Mapping[str, object]) -> str:
+    image = primary_image(plan_snapshot)
+    return f"{image.get('planned_repository')}@{image.get('planned_digest')}"
+
+
+def check_shape(document: Mapping[str, object]) -> None:
+    """Control's `check_materials_shape`: structure and cross-checks of every
+    unsigned field against the statement and the snapshot, with no signature."""
+    if not isinstance(document, Mapping):
+        raise Refusal("materials_invalid")
+    if set(document) & FORBIDDEN_KEYS or not set(document) <= MATERIALS_KEYS:
+        raise Refusal("materials_invalid")
+    if document.get("schema") != SCHEMA:
+        raise Refusal("materials_invalid")
+    if not MATERIALS_ALWAYS <= set(document):
+        raise Refusal("materials_invalid")
+    target_ref = document["target_ref"]
+    if not isinstance(target_ref, str):
+        raise Refusal("materials_invalid")
+    parts = target_ref.split("/")
+    if len(parts) != 3 or not all(_SEGMENT.fullmatch(p) for p in parts):
+        raise Refusal("materials_invalid")
+    parse_stamp(cast("str", document["store_now"]))
+    pending = document["pending"]
+    if type(pending) is not bool:
+        raise Refusal("materials_invalid")
+    present = set(document) & MATERIALS_PENDING
+    if not pending:
+        if present:
+            raise Refusal("materials_invalid")
+        return
+    if present != MATERIALS_PENDING:
+        raise Refusal("materials_invalid")
+    envelope, snapshot = document["dispatch_envelope"], document["plan_snapshot"]
+    if not isinstance(envelope, dict) or not isinstance(snapshot, dict):
+        raise Refusal("materials_invalid")
+    statement = envelope.get("statement")
+    if not isinstance(statement, dict) or not STATEMENT_KEYS <= set(statement):
+        raise Refusal("materials_invalid")
+    dispatch_id = document["dispatch_id"]
+    if not isinstance(dispatch_id, str) or not _DISPATCH_ID.fullmatch(dispatch_id):
+        raise Refusal("materials_invalid")
+    for key, expected in (
+        ("dispatch_id", dispatch_id),
+        ("target_ref", target_ref),
+        ("product_code", parts[0]),
+        ("environment", parts[1]),
+        ("plan_digest", plan_digest_of(snapshot)),
+    ):
+        if statement.get(key) != expected:
+            raise Refusal("materials_invalid")
+    for key, expected in (
+        ("target_ref", target_ref),
+        ("product_code", parts[0]),
+        ("environment", parts[1]),
+    ):
+        if snapshot.get(key) != expected:
+            raise Refusal("materials_invalid")
+    params = document["params"]
+    if not isinstance(params, list) or any(
+        not isinstance(row, dict) or set(row) != {"name", "material", "type", "value"}
+        for row in params
+    ):
+        raise Refusal("materials_invalid")
+    plan_roles(snapshot)
+    if document["app_image"] != expected_app_image(snapshot):
+        raise Refusal("transfer_repository_mismatch")
+
+
 def _parse_params(raw: object) -> tuple[Param, ...]:
     params: list[Param] = []
     seen: set[str] = set()
     for item in _list(raw):
         row = _mapping(item)
-        if set(row) != {"name", "material", "type", "value"}:
-            raise Refusal("materials_invalid")
         name = _text(row["name"], _NAME)
         material, value, kind = row["material"], row["value"], row["type"]
         if (
@@ -158,8 +277,7 @@ def _parse_images(raw: object) -> tuple[ImageSpec, ...]:
         if (
             service in services
             or row["source"] not in ("transfer", "pull")
-            or planned_digest
-            != release_digest  # Control guarantees it; the agent re-checks
+            or planned_digest != release_digest  # Control guarantees it; re-checked
         ):
             raise Refusal("materials_invalid")
         services.add(service)
@@ -197,57 +315,6 @@ def _parse_legacy(raw: object) -> LegacyPolicy | None:
     return LegacyPolicy(version, names, _digest(row["sha256"]), parse_stamp(expires))
 
 
-def _parse_roles(raw: object) -> tuple[RoleSpec, ...]:
-    roles: list[RoleSpec] = []
-    seen: set[str] = set()
-    for item in _list(raw):
-        row = _mapping(item)
-        if set(row) != {"role", "single_use"}:
-            raise Refusal("materials_invalid")
-        role = _text(row["role"], _ROLE)
-        if role in seen or type(row["single_use"]) is not bool:
-            raise Refusal("materials_invalid")
-        seen.add(role)
-        roles.append(RoleSpec(role, row["single_use"]))
-    return tuple(roles)
-
-
-def primary_image(plan_snapshot: Mapping[str, object]) -> dict[str, object]:
-    """The primary service's image: the one named for the product, or the only one."""
-    binding = plan_snapshot.get("deploy_binding")
-    raw = binding.get("images") if isinstance(binding, dict) else None
-    images = [i for i in raw if isinstance(i, dict)] if isinstance(raw, list) else []
-    product = plan_snapshot.get("product_code")
-    chosen = [i for i in images if i.get("service") == product] or (
-        images if len(images) == 1 else []
-    )
-    if len(chosen) != 1:
-        raise Refusal("materials_invalid")
-    return chosen[0]
-
-
-def expected_app_image(plan_snapshot: Mapping[str, object]) -> str:
-    image = primary_image(plan_snapshot)
-    return f"{image.get('planned_repository')}@{image.get('planned_digest')}"
-
-
-def check_shape(document: Mapping[str, object]) -> None:
-    """The structural contract of the document (Control's `check_materials_shape`),
-    before and independent of any signature."""
-    if not isinstance(document, Mapping):
-        raise Refusal("materials_invalid")
-    if set(document) & FORBIDDEN_KEYS or not set(document) <= MATERIALS_KEYS:
-        raise Refusal("materials_invalid")
-    if document.get("schema") != SCHEMA:
-        raise Refusal("materials_invalid")
-    for key in ("dispatch_envelope", "plan_snapshot"):
-        if not isinstance(document.get(key), Mapping):
-            raise Refusal("materials_invalid")
-    snapshot = cast("Mapping[str, object]", document["plan_snapshot"])
-    if document.get("app_image") != expected_app_image(snapshot):
-        raise Refusal("transfer_repository_mismatch")
-
-
 def parse_materials(
     document: Mapping[str, object],
     config: AgentConfig,
@@ -255,40 +322,37 @@ def parse_materials(
     identity: PinnedIdentity,
     store_now: datetime,
 ) -> Materials:
+    """A PENDING document only (an idle one never reaches here)."""
     check_shape(document)
+    if document.get("pending") is not True:
+        raise Refusal("materials_invalid")
+    if document["target_ref"] != config.target_ref:
+        raise Refusal("materials_target_mismatch")
     # 1. Nothing below is believed until Control's signature and the plan digest hold.
     verified = verify_dispatch(
-        document.get("dispatch_envelope"),
-        document.get("plan_snapshot"),
+        document["dispatch_envelope"],
+        document["plan_snapshot"],
         config=config,
         identity=identity,
         store_now=store_now,
     )
-    # The CP-supplied copies, where present, may only agree with what was signed.
-    if document.get("dispatch_id", verified.dispatch_id) != verified.dispatch_id:
+    if document["dispatch_id"] != verified.dispatch_id:
         raise Refusal("materials_invalid")
-    if document.get("target_ref", config.target_ref) != config.target_ref:
-        raise Refusal("materials_target_mismatch")
-    # 2. The plan binding is the only source for digest, images, legacy and TTL.
-    binding = _mapping(_mapping(document["plan_snapshot"]).get("deploy_binding"))
+    # 2. The plan binding is the only source for everything the plan binds.
+    snapshot = _mapping(document["plan_snapshot"])
+    binding = _mapping(snapshot.get("deploy_binding"))
     ttl = binding.get("lease_ttl_seconds")
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
-    app_image, previous = document.get("app_image"), document.get("previous_app_image")
-    if not isinstance(app_image, str) or not (
-        previous is None or isinstance(previous, str)
-    ):
-        raise Refusal("materials_invalid")
     return Materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,
         target_ref=config.target_ref,
-        params=_parse_params(document.get("params")),
-        app_image=app_image,
-        previous_app_image=previous,
+        params=_parse_params(document["params"]),
+        app_image=cast("str", document["app_image"]),
+        primary_service=cast("str", binding["primary_service"]),
         params_env_digest=_digest(binding.get("params_env_digest")),
-        # Roles come ONLY from the signed plan: mint for nothing else.
-        roles=_parse_roles(binding.get("roles", [])),
+        roles=plan_roles(snapshot),
         legacy=_parse_legacy(binding.get("legacy")),
         images=_parse_images(binding.get("images")),
         lease_ttl_seconds=ttl,

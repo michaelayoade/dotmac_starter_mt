@@ -21,10 +21,9 @@ from tests.unit.deploy_agent_support import (
     prepare_role,
 )
 
-ROLES = [
-    {"role": "web", "single_use": False},
-    {"role": "migrate", "single_use": True},
-]
+WEB = [{"role": "web", "single_use": False}]
+MIGRATE = [{"role": "migrate", "single_use": True}]
+ROLES = MIGRATE + WEB  # a signed plan lists roles sorted
 
 
 def deliver_rig(tmp_path: Path, roles: list[dict[str, object]] = ROLES) -> Rig:
@@ -52,14 +51,14 @@ def test_secret_ids_are_written_0400_as_the_agent_uid_and_never_leak(
     assert FakeBaoTransport.TOKEN not in repr(rig.cp.observations)
     assert rig.cp.observations[0]["details"]["delivered_roles"] == [  # type: ignore[index]
         {
-            "role": "web",
-            "single_use": False,
+            "role": "migrate",
+            "single_use": True,
             "restarted": True,
             "old_accessors_destroyed": 0,
         },
         {
-            "role": "migrate",
-            "single_use": True,
+            "role": "web",
+            "single_use": False,
             "restarted": True,
             "old_accessors_destroyed": 0,
         },
@@ -77,7 +76,7 @@ def test_no_role_id_is_fetched_and_no_role_file_is_written(tmp_path: Path) -> No
 def test_approle_login_mint_in_parent_namespace_lookup_before_unwrap_then_revoke(
     tmp_path: Path,
 ) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.launcher.run_once()
     assert rig.bao.paths == [
         "/v1/auth/approle-delivery/login",
@@ -96,7 +95,7 @@ def test_mint_body_is_limited_to_metadata_ttl_and_num_uses(tmp_path: Path) -> No
     rig = deliver_rig(tmp_path)
     rig.launcher.run_once()
     mints = [r for r in rig.bao.requests if r[1].endswith("/secret-id")]
-    runtime, single = mints[0][3], mints[1][3]
+    single, runtime = mints[0][3], mints[1][3]  # roles are sorted: migrate, web
     assert set(runtime) == {"metadata", "ttl"} and runtime["ttl"] == f"{35 * 86400}s"
     assert set(single) == {"metadata", "ttl", "num_uses"}
     assert single["num_uses"] == 1 and single["ttl"] == "900s"
@@ -106,7 +105,7 @@ def test_mint_body_is_limited_to_metadata_ttl_and_num_uses(tmp_path: Path) -> No
 def test_wrapping_token_from_an_unexpected_creation_path_is_refused_before_unwrap(
     tmp_path: Path,
 ) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.bao.lookup_path = "erp/auth/approle-apps/role/erp-staging-other/secret-id"
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "secret_wrap_unexpected_path")
@@ -116,7 +115,7 @@ def test_wrapping_token_from_an_unexpected_creation_path_is_refused_before_unwra
 
 
 def test_an_already_unwrapped_token_is_a_distinct_alarm(tmp_path: Path) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.bao.fail_lookup = True
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == (
@@ -130,7 +129,7 @@ def test_an_already_unwrapped_token_is_a_distinct_alarm(tmp_path: Path) -> None:
 def test_unit_is_restarted_and_a_failed_restart_removes_the_unconsumed_id(
     tmp_path: Path,
 ) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.launcher.run_once()
     restart = [c for c in rig.systemctl.calls if "restart" in c]
     assert restart == [
@@ -141,7 +140,7 @@ def test_unit_is_restarted_and_a_failed_restart_removes_the_unconsumed_id(
             "openbao-agent@erp-web.service",
         )
     ]
-    rig2 = deliver_rig(tmp_path / "second", ROLES[:1])
+    rig2 = deliver_rig(tmp_path / "second", WEB)
     rig2.systemctl.script[("restart",)] = CommandResult(1, b"")
     result = rig2.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "secret_delivery_failed")
@@ -151,7 +150,7 @@ def test_unit_is_restarted_and_a_failed_restart_removes_the_unconsumed_id(
 def test_previous_accessor_is_destroyed_after_the_new_login_is_confirmed(
     tmp_path: Path,
 ) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.launcher.run_once()  # first delivery: nothing to destroy
     assert not any(p.endswith("/destroy") for p in rig.bao.paths)
     rig.launcher.run_once()  # second: the first accessor goes
@@ -169,7 +168,7 @@ def test_previous_accessor_is_destroyed_after_the_new_login_is_confirmed(
 def test_an_accessor_that_cannot_be_destroyed_is_kept_not_forgotten(
     tmp_path: Path,
 ) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.launcher.run_once()
     rig.bao.fail_destroy = True
     rig.launcher.run_once()
@@ -178,7 +177,7 @@ def test_an_accessor_that_cannot_be_destroyed_is_kept_not_forgotten(
 
 
 def test_single_use_roles_have_no_accessor_bookkeeping(tmp_path: Path) -> None:
-    rig = deliver_rig(tmp_path, ROLES[1:])
+    rig = deliver_rig(tmp_path, MIGRATE)
     rig.launcher.run_once()
     assert not (rig.config.state_dir / "accessors" / "migrate.json").exists()
 
@@ -189,14 +188,14 @@ def test_a_role_directory_that_enrolment_did_not_create_is_refused(
     rig = make_rig(tmp_path)
     (rig.config.openbao_config_dir / "erp-web.hcl").write_text("# authored\n")
     (rig.config.openbao_config_dir / "erp-web.hcl").chmod(0o644)
-    rig.cp.materials = make_materials(roles=ROLES[:1])
+    rig.cp.materials = make_materials(roles=WEB)
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "runtime_dir_unsafe")
     assert not (rig.config.run_dir / "web").exists()  # the agent never creates it
 
 
 def test_authored_configs_are_checked_and_their_digest_reported(tmp_path: Path) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     result = rig.launcher.run_once()
     assert result.outcome == "completed"
     digest = rig.cp.observations[0]["details"]["openbao_config"]["web"]  # type: ignore[index]
@@ -208,7 +207,7 @@ def test_authored_configs_are_checked_and_their_digest_reported(tmp_path: Path) 
 
 @pytest.mark.parametrize("case", ["missing", "writable", "symlink"])
 def test_unsafe_authored_config_is_refused(tmp_path: Path, case: str) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     authored = rig.config.openbao_config_dir / "erp-web.hcl"
     if case == "missing":
         authored.unlink()
@@ -229,7 +228,7 @@ def test_the_agent_has_no_renderer_for_openbao_config() -> None:
 
 
 def test_bindings_without_a_delivery_transport_refuse(tmp_path: Path) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.launcher.bao_transport = None
     assert rig.launcher.run_once().reason == "secret_delivery_failed"
     assert rig.runner.specs == []
@@ -281,8 +280,8 @@ def test_the_launcher_hands_the_runner_the_signed_plan_digest(tmp_path: Path) ->
 
 
 def test_roles_come_only_from_the_signed_plan(tmp_path: Path) -> None:
-    rig = deliver_rig(tmp_path, ROLES[:1])
-    document = make_materials(roles=ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
+    document = make_materials(roles=WEB)
     document["roles"] = [{"role": "evil", "single_use": False}]  # CP-supplied, unsigned
     rig.cp.materials = document
     result = rig.launcher.run_once()
@@ -298,11 +297,11 @@ def test_the_creation_path_form_seen_is_logged(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig = deliver_rig(tmp_path, WEB)
     rig.launcher.run_once()
     assert "creation_path form=bare" in caplog.text
     caplog.clear()
-    rig2 = deliver_rig(tmp_path / "ns", ROLES[:1])
+    rig2 = deliver_rig(tmp_path / "ns", WEB)
     rig2.bao.lookup_path = (
         "staging/erp/auth/approle-apps/role/erp-staging-web/secret-id"
     )

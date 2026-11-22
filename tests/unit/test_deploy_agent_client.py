@@ -170,7 +170,7 @@ def test_request_signed_with_a_different_key_is_refused_by_cp(tmp_path: Path) ->
 
 def test_materials_for_another_target_are_refused_and_reported(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(statement={"target_ref": "erp/staging/other"})
+    rig.cp.materials = make_materials(target_ref="erp/staging/other")
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "materials_target_mismatch")
     assert rig.runner.specs == []

@@ -10,7 +10,7 @@
   paths, Control-signed dispatch plus plan snapshot, AppRole delivery with a
   wrapping-token lookup, no chown, no HCL renderer, skopeo `--preserve-digests`.
 - Vendors Control's `contract/target_api_v1.json` byte-identical (sha256
-  `354e587a8f6902ae14653ee6ff0282544fcfd5c77d19d74cc2b99500bc3ac0b7`, Control a18
-  #76 at ab738548) and replays every vector through the agent's own functions;
+  `ff0a25b8284f7c22c9e5d930274ae4001ef3510529f75c74144544baa4158970`, Control a18
+  #76 at 4819d705) and replays every vector through the agent's own functions;
   secret-shape rules are Control's, ported rule for rule.
 - Not published and not enrolled in any release lane.

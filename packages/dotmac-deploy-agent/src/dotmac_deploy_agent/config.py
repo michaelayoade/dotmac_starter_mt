@@ -13,7 +13,7 @@ from typing import Final
 from urllib.parse import urlparse
 
 from .refusal import Refusal
-from .wire import decode_b64url
+from .wire import decode_b64url, is_denied_public_key
 
 DB_ENV_EXACT: Final = frozenset(
     {
@@ -201,6 +201,10 @@ class AgentConfig:
             )
         ):
             raise Refusal("config_invalid")
+        # Control's vector file publishes two private seeds: their public keys
+        # authenticate nobody and may never be pinned as the CP response key.
+        if any(is_denied_public_key(k) for k in self.cp_response_public_keys_b64url):
+            raise Refusal("config_invalid", "denied_public_key")
         # The SPKI pin is mandatory: the CP is pinned at enrolment (DESIGN-rev3 s3.1).
         if not self.cp_spki_sha256 or not all(
             _HEX64.fullmatch(pin) for pin in self.cp_spki_sha256
