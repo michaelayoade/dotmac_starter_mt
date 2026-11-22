@@ -24,9 +24,9 @@ DB_ENV_EXACT: Final = frozenset(
     }
 )
 _ID: Final = re.compile(r"[a-z0-9][a-z0-9_.-]{0,62}")
-_TARGET: Final = re.compile(
-    r"([a-z0-9][a-z0-9_-]{0,62})/([a-z0-9][a-z0-9_-]{0,62})/([a-z0-9][a-z0-9_-]{0,62})"
-)
+# Control's target-ref grammar: three lowercase segments (target_api_v1 `paths`).
+_SEG = r"([a-z0-9][a-z0-9._-]{0,63})"
+_TARGET: Final = re.compile(f"{_SEG}/{_SEG}/{_SEG}")
 _HEX64: Final = re.compile(r"[0-9a-f]{64}")
 
 

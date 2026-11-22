@@ -16,7 +16,8 @@ SOURCE = ROOT / "packages" / "dotmac-deploy-agent" / "src" / "dotmac_deploy_agen
 ALLOWED_IMPORT_ROOTS = frozenset(
     {
         "__future__", "argparse", "base64", "collections", "dataclasses", "datetime",
-        "enum", "errno", "fcntl", "hashlib", "http", "json", "logging", "os", "pathlib",
+        "enum", "errno", "fcntl", "hashlib", "http", "json", "logging", "math", "os",
+        "pathlib",
         "re", "secrets", "shutil", "signal", "socket", "ssl", "stat", "subprocess",
         "sys",
         "time", "tomllib", "typing", "urllib", "cryptography", "dotmac_deploy_agent",

@@ -13,6 +13,7 @@ Keys and signatures are canonical UNPADDED base64url.
 from __future__ import annotations
 
 import base64
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -39,6 +40,66 @@ H_SIGNATURE: Final = "X-Dotmac-Signature"
 H_RESPONSE_SIGNATURE: Final = "X-Dotmac-Response-Signature"
 MAX_SKEW_SECONDS: Final = 60
 
+#: The agent's routes and their fixed verbs (Control's `ENDPOINTS`, caller=agent).
+#: `resolve`, `consume` and `committed/<id>` belong to the bindings, never here.
+ROUTES: Final = {
+    "materials": "GET",
+    "observations": "POST",
+    "lease/acquire": "POST",
+    "lease/covers": "POST",
+    "lease/release": "POST",
+    "lease/standing": "GET",
+}
+_SEGMENT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+_NONCE: Final = re.compile(r"[0-9a-f]{32}")
+_STAMP: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+_B64URL: Final = re.compile(r"[A-Za-z0-9_-]*")
+
+
+def check_route(method: str, route: str) -> None:
+    if ROUTES.get(route) != method:
+        raise Refusal("materials_invalid")
+
+
+def target_path(target_ref: str, route: str) -> str:
+    """The route as signed: three plain segments, no encoding, no query string."""
+    parts = target_ref.split("/")
+    if len(parts) != 3 or not all(_SEGMENT.fullmatch(part) for part in parts):
+        raise Refusal("config_invalid")
+    if route not in ROUTES:
+        raise Refusal("materials_invalid")
+    return f"{BASE_PATH}/targets/{target_ref}/{route}"
+
+
+def check_nonce(value: str) -> str:
+    if not isinstance(value, str) or not _NONCE.fullmatch(value):
+        raise Refusal("materials_invalid")
+    return value
+
+
+def request_headers(
+    *,
+    credential_id: str,
+    target_ref: str,
+    issued_at: str,
+    nonce: str,
+    signature_b64url: str,
+) -> dict[str, str]:
+    return {
+        H_CREDENTIAL: credential_id,
+        H_TARGET: target_ref,
+        H_ISSUED_AT: issued_at,
+        H_NONCE: check_nonce(nonce),
+        H_SIGNATURE: signature_b64url,
+    }
+
+
+def classify_unsigned_response(status: int) -> str:
+    """An UNSIGNED 413, 429 or 5xx is a retryable fault, not a forgery."""
+    if status in (413, 429) or 500 <= status <= 599:
+        return "cp_unreachable"
+    return "response_signature_invalid"
+
 
 def _line(value: str) -> str:
     if "\n" in value or "\r" in value or "\x00" in value:
@@ -56,6 +117,8 @@ def request_message(
     issued_at: str,
     nonce: str,
 ) -> bytes:
+    parse_stamp(issued_at)
+    check_nonce(nonce)
     parts = [
         REQUEST_PURPOSE,
         method.upper(),
@@ -73,6 +136,7 @@ def response_message(
     *, method: str, path: str, request_nonce: str, status: int, body: bytes
 ) -> bytes:
     """Bound to the request nonce: a captured response answers nothing else."""
+    check_nonce(request_nonce)
     parts = [
         RESPONSE_PURPOSE,
         method.upper(),
@@ -89,11 +153,21 @@ def utc_stamp(moment: datetime) -> str:
 
 
 def parse_stamp(value: str) -> datetime:
+    """`YYYY-MM-DDTHH:MM:SSZ` and nothing else."""
+    if not isinstance(value, str) or not _STAMP.fullmatch(value):
+        raise Refusal("response_malformed")
     try:
         parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
         raise Refusal("response_malformed") from None
     return parsed.replace(tzinfo=UTC)
+
+
+def check_skew(issued_at: str, store_now: str) -> None:
+    """Refuse anything more than 60 s from the signed `store_now`."""
+    delta = abs((parse_stamp(issued_at) - parse_stamp(store_now)).total_seconds())
+    if delta > MAX_SKEW_SECONDS:
+        raise Refusal("clock_skew")
 
 
 def new_nonce() -> str:
@@ -102,6 +176,21 @@ def new_nonce() -> str:
 
 def encode_b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def b64url_decode(value: object) -> bytes | None:
+    """Strict, as Control's `b64u_decode`: no padding, no standard alphabet, no
+    whitespace. None when refused."""
+    if (
+        not isinstance(value, str)
+        or not _B64URL.fullmatch(value)
+        or len(value) % 4 == 1
+    ):
+        return None
+    try:
+        return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except ValueError:
+        return None
 
 
 def decode_b64url(value: object, *, length: int) -> bytes | None:

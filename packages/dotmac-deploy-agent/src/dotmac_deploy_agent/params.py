@@ -11,6 +11,7 @@ image reference>`, ALL sorted bytewise by name.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import stat
@@ -30,24 +31,24 @@ _MATERIAL: Final = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 _SECRETISH_NAME: Final = re.compile(
     r"PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|CREDENTIAL"
 )
-_SECRET_PATTERNS: Final = tuple(
-    re.compile(pattern)
-    for pattern in (
-        r"-----BEGIN ",
-        r"^(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}",
-        r"^github_pat_",
-        r"^glpat-",
-        r"^(AKIA|ASIA)[A-Z0-9]{12,}",
-        r"^(hvs|hvb|hvr)\.",
-        r"^s\.[A-Za-z0-9]{20,}$",
-        r"^xox[abprs]-",
-        r"^sk-[A-Za-z0-9]{20,}",
-        r"^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$",
-        r"://[^/\s:@]+:[^/\s@]+@",
-    )
+# Control's `looks_secret_shaped`, ported rule for rule (contract/target_api_v1.json
+# `value_vectors`): the agent refuses nothing Control accepts and accepts nothing
+# Control refuses. Any change is a vector change in Control first.
+_SECRET_SHAPES: Final = (
+    re.compile(r"-----BEGIN [A-Z ]*-----"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\."),
+    re.compile(r"\bhv[sbr]\.[A-Za-z0-9_-]{8,}"),
+    re.compile(r"\bs\.[A-Za-z0-9]{24}\b"),
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bsk-[A-Za-z0-9]{20,}"),
+    re.compile(r"://[^/\s:@]*:[^/\s@]+@"),
 )
-_LONG_TOKEN: Final = re.compile(r"[A-Za-z0-9+_-]{40,}={0,2}")
-_HEX: Final = re.compile(r"[0-9a-f]+")
+_HIGH_ENTROPY_RUN: Final = re.compile(r"[A-Za-z0-9+_=-]{32,}")
+#: Types Control returns before its secret-shape check (never string-like).
+_NOT_STRINGLIKE: Final = frozenset({"bool", "int", "duration_seconds", "image_digest"})
 OVERRIDE_NAMES: Final = (
     "docker-compose.override.yml",
     "docker-compose.override.yaml",
@@ -64,19 +65,28 @@ class Param:
     value: str
 
 
+def _entropy(text: str) -> float:
+    counts: dict[str, int] = {}
+    for char in text:
+        counts[char] = counts.get(char, 0) + 1
+    return -sum((n / len(text)) * math.log2(n / len(text)) for n in counts.values())
+
+
 def secret_shaped(value: str) -> bool:
-    if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
+    if any(shape.search(value) for shape in _SECRET_SHAPES):
         return True
-    return bool(
-        _LONG_TOKEN.fullmatch(value)
-        and not _HEX.fullmatch(value)
-        and any(c.isdigit() for c in value)
-        and any(c.isalpha() for c in value)
-    )
+    for run in _HIGH_ENTROPY_RUN.findall(value):
+        if (
+            any(c.isdigit() for c in run)
+            and any(c.isalpha() for c in run)
+            and _entropy(run) >= 4.0
+        ):
+            return True
+    return False
 
 
-def check_value(value: str) -> None:
-    """Refuse what Foundation's env parser would alter, or that looks secret."""
+def check_alterable(value: str) -> None:
+    """Refuse what Foundation's env parser would alter, and an empty value."""
     if (
         not value
         or "\n" in value
@@ -86,7 +96,11 @@ def check_value(value: str) -> None:
         or (len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"")
     ):
         raise Refusal("params_value_invalid")
-    if secret_shaped(value):
+
+
+def check_value(value: str, kind: str = "string") -> None:
+    check_alterable(value)
+    if kind not in _NOT_STRINGLIKE and secret_shaped(value):
         raise Refusal("params_secret_shaped")
 
 
@@ -104,9 +118,9 @@ def canonical_render(params: Sequence[Param], app_image: str) -> bytes:
         # A secret-named material may only point at a FILE, never carry a value.
         if _SECRETISH_NAME.search(param.material) and param.type != "path":
             raise Refusal("params_secret_shaped")
-        check_value(param.value)
+        check_value(param.value, param.type)
         lines[param.material] = param.value
-    check_value(app_image)
+    check_alterable(app_image)  # the planned image is Control's; never secret-checked
     lines[APP_IMAGE] = app_image
     return "".join(f"{name}={lines[name]}\n" for name in sorted(lines)).encode("utf-8")
 

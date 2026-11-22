@@ -52,11 +52,12 @@ class TargetClient:
 
     def _path(self, endpoint: str) -> str:
         """Three segments of the target_ref grammar; never percent-encoded (R1)."""
-        return f"{wire.BASE_PATH}/targets/{self._config.target_ref}/{endpoint}"
+        return wire.target_path(self._config.target_ref, endpoint)
 
     def call(
         self, method: str, endpoint: str, payload: dict[str, object] | None
     ) -> Reply:
+        wire.check_route(method, endpoint)
         path = self._path(endpoint)
         body = canonical_json(payload) if payload is not None else b""
         issued_at = wire.utc_stamp(self._clock())
@@ -71,18 +72,25 @@ class TargetClient:
             nonce=nonce,
         )
         headers = {
-            wire.H_CREDENTIAL: self._signer.credential_id,
-            wire.H_TARGET: self._config.target_ref,
-            wire.H_ISSUED_AT: issued_at,
-            wire.H_NONCE: nonce,
-            wire.H_SIGNATURE: self._signer.sign(message),
+            **wire.request_headers(
+                credential_id=self._signer.credential_id,
+                target_ref=self._config.target_ref,
+                issued_at=issued_at,
+                nonce=nonce,
+                signature_b64url=self._signer.sign(message),
+            ),
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
         response = self._transport.request(method, path, headers, body)
-        if response.status >= 500 or response.status in (413, 429):
+        if (
+            wire.classify_unsigned_response(response.status) == "cp_unreachable"
+            and wire.H_RESPONSE_SIGNATURE.lower() not in response.headers
+        ):
             # Unsigned proxy errors and rate limits are retryable, not a signature
             # refusal: an outage and a throttle are indistinguishable from outside.
+            raise Refusal("cp_unreachable")
+        if response.status >= 500:
             raise Refusal("cp_unreachable")
         wire.verify_response(
             self._config.cp_response_public_keys_b64url,
@@ -108,9 +116,7 @@ class TargetClient:
         if not isinstance(raw_now, str):
             raise Refusal("response_malformed")
         store_now = wire.parse_stamp(raw_now)
-        skew = abs((store_now - self._clock()).total_seconds())
-        if skew > wire.MAX_SKEW_SECONDS:
-            raise Refusal("clock_skew")
+        wire.check_skew(issued_at, raw_now)
         if response.status >= 400:
             error = document.get("error")
             detail = error if isinstance(error, str) else None

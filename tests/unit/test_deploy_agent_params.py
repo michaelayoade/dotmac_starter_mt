@@ -52,7 +52,7 @@ def test_canonical_render_golden_vector() -> None:
         "-----BEGIN PRIVATE KEY-----",
         "hvs.CAESIabcdefghijkl",
         "AKIAABCDEFGHIJKLMNOP",
-        "eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl",
         "postgres://user:pw@db.example.invalid/x",
         "Qm9yZWRPZlNlY3JldHNBbmRUb2tlbnMxMjM0NTY3ODkwQUJDREVG",
     ],

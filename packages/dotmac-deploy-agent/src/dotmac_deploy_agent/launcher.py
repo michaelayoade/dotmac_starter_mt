@@ -219,7 +219,6 @@ class Launcher:
             planned = canonical_render(materials.params, materials.app_image)
             if render_digest(planned) != materials.params_env_digest:
                 raise Refusal("params_digest_mismatch")
-            _require_governed_app_image(materials)
             require_private_dir(deploy_run_dir)
 
             # Order (DESIGN-rev3 2.6.2): acquire, transfer, render, deliver, run.
@@ -371,12 +370,3 @@ def _credential_text(environ: Mapping[str, str], name: str) -> str:
 
 def _detail(refusal: Refusal) -> dict[str, object]:
     return {} if refusal.detail is None else {"refusal_detail": refusal.detail}
-
-
-def _require_governed_app_image(materials: Materials) -> None:
-    """`APP_IMAGE` must be one of the release images exactly as planned: same
-    loopback repository, same digest. Anything else was not bound by the plan."""
-    if not any(
-        image.planned_reference == materials.app_image for image in materials.images
-    ):
-        raise Refusal("transfer_repository_mismatch")

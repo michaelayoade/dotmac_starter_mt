@@ -26,15 +26,23 @@ from .wire import parse_stamp
 
 SCHEMA: Final = "dotmac.deploy_target_materials/1"
 _NAME: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}")
-_ROLE: Final = re.compile(r"[a-z][a-z0-9_-]{0,63}")
-_SERVICE: Final = re.compile(r"[a-z][a-z0-9_-]{0,63}")
+_SEGMENT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+_ROLE: Final = _SEGMENT
+_SERVICE: Final = _SEGMENT
 _REPOSITORY: Final = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,254}")
-_TOP: Final = frozenset(
+MATERIALS_KEYS: Final = frozenset(
     {
-        "schema", "pending", "store_now", "dispatch_envelope", "plan_snapshot",
-        "params", "app_image", "previous_app_image", "roles",
+        "schema", "pending", "store_now", "dispatch_id", "target_ref", "params",
+        "app_image", "previous_app_image", "roles", "dispatch_envelope",
+        "plan_snapshot",
     }
 )  # fmt: skip
+#: Removed from the first draft: they are READ from the signed plan instead, so a
+#: CP-supplied copy could only ever disagree with what Control signed.
+FORBIDDEN_KEYS: Final = frozenset(
+    {"params_env_digest", "images", "legacy", "lease_ttl_seconds", "bindings"}
+)
+ROLE_KEYS: Final = frozenset({"role", "single_use"})
 MAX_LEASE_TTL: Final = 3600
 
 
@@ -205,6 +213,58 @@ def _parse_roles(raw: object) -> tuple[RoleSpec, ...]:
     return tuple(roles)
 
 
+def primary_image(plan_snapshot: Mapping[str, object]) -> dict[str, object]:
+    """The primary service's image: the one named for the product, or the only one."""
+    binding = plan_snapshot.get("deploy_binding")
+    raw = binding.get("images") if isinstance(binding, dict) else None
+    images = [i for i in raw if isinstance(i, dict)] if isinstance(raw, list) else []
+    product = plan_snapshot.get("product_code")
+    chosen = [i for i in images if i.get("service") == product] or (
+        images if len(images) == 1 else []
+    )
+    if len(chosen) != 1:
+        raise Refusal("materials_invalid")
+    return chosen[0]
+
+
+def expected_app_image(plan_snapshot: Mapping[str, object]) -> str:
+    image = primary_image(plan_snapshot)
+    return f"{image.get('planned_repository')}@{image.get('planned_digest')}"
+
+
+def check_shape(document: Mapping[str, object]) -> None:
+    """The structural contract of the document (Control's `check_materials_shape`),
+    before and independent of any signature."""
+    if not isinstance(document, Mapping):
+        raise Refusal("materials_invalid")
+    if set(document) & FORBIDDEN_KEYS or not set(document) <= MATERIALS_KEYS:
+        raise Refusal("materials_invalid")
+    if document.get("schema") != SCHEMA:
+        raise Refusal("materials_invalid")
+    for key in ("dispatch_envelope", "plan_snapshot"):
+        if not isinstance(document.get(key), Mapping):
+            raise Refusal("materials_invalid")
+    roles = document.get("roles")
+    if not isinstance(roles, list):
+        raise Refusal("materials_invalid")
+    seen: set[str] = set()
+    for row in roles:
+        if not isinstance(row, Mapping) or set(row) != ROLE_KEYS:
+            raise Refusal("materials_invalid")
+        role = row["role"]
+        if (
+            not isinstance(role, str)
+            or not _SEGMENT.fullmatch(role)
+            or role in seen
+            or type(row["single_use"]) is not bool
+        ):
+            raise Refusal("materials_invalid")
+        seen.add(role)
+    snapshot = cast("Mapping[str, object]", document["plan_snapshot"])
+    if document.get("app_image") != expected_app_image(snapshot):
+        raise Refusal("transfer_repository_mismatch")
+
+
 def parse_materials(
     document: Mapping[str, object],
     config: AgentConfig,
@@ -212,8 +272,7 @@ def parse_materials(
     identity: PinnedIdentity,
     store_now: datetime,
 ) -> Materials:
-    if not set(document) <= _TOP or document.get("schema") != SCHEMA:
-        raise Refusal("materials_invalid")
+    check_shape(document)
     # 1. Nothing below is believed until Control's signature and the plan digest hold.
     verified = verify_dispatch(
         document.get("dispatch_envelope"),
@@ -222,6 +281,11 @@ def parse_materials(
         identity=identity,
         store_now=store_now,
     )
+    # The CP-supplied copies, where present, may only agree with what was signed.
+    if document.get("dispatch_id", verified.dispatch_id) != verified.dispatch_id:
+        raise Refusal("materials_invalid")
+    if document.get("target_ref", config.target_ref) != config.target_ref:
+        raise Refusal("materials_target_mismatch")
     # 2. The plan binding is the only source for digest, images, legacy and TTL.
     binding = _mapping(_mapping(document["plan_snapshot"]).get("deploy_binding"))
     ttl = binding.get("lease_ttl_seconds")

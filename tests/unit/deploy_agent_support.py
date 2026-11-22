@@ -240,6 +240,10 @@ def make_materials(**overrides: object) -> dict[str, object]:
     snapshot: dict[str, object] = {
         "deploy_binding": binding,
         "release_ref": "release-1",
+        "product_code": "erp",
+        "environment": "staging",
+        "target_ref": TARGET,
+        "plan_purpose": "foundation_execution",
     }
     snapshot.update(overrides.pop("snapshot_extra", {}))  # type: ignore[arg-type]
     plan_digest = plan_digest_of(snapshot)
@@ -252,6 +256,8 @@ def make_materials(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "schema": "dotmac.deploy_target_materials/1",
         "pending": True,
+        "dispatch_id": statement["dispatch_id"],
+        "target_ref": TARGET,
         "dispatch_envelope": envelope,
         "plan_snapshot": snapshot,
         "params": params,
