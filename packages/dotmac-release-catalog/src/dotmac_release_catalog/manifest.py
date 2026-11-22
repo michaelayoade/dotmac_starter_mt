@@ -164,7 +164,7 @@ _DATABASE_CATALOG = ModuleDatabaseCatalogContributionV1(
 
 module = ModuleManifest(
     code="release_catalog",
-    version="0.1.0a5",
+    version="0.1.0a6",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="rel",

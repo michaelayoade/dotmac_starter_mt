@@ -4,7 +4,23 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
-## 0.1.0a5 — 2026-09-19 — prepared, unreleased (no tag, not on the index)
+## 0.1.0a6 — 2026-11-22 — prepared, unreleased (no tag, not on the index)
+
+**`AttestationKind.DEPLOY_UNIT = "deploy_unit"`.** A new attestation kind for the
+deploy contract a product revision declares. Like every other attestation it is
+held and never fetched: the row records the descriptor's URI and the sha256 of
+its exact bytes, and a consumer fetches, verifies and parses through its own
+transport (ADR-0009). Additive only; no existing kind, column or index changes.
+`ATTESTATION_KINDS` now has seven members.
+
+No migration: `attestation_kind` is a plain `String(40)` column with no CHECK constraint, so the lineage head stays at
+`rl_0002_db_catalog_attestations`.
+
+**Version prepared.** The package declares `0.1.0a6`. Preparation only;
+publication happens through a separate, later `workflow_dispatch` of
+`release-module.yml`.
+
+## 0.1.0a5 — 2026-09-19
 
 **Database catalogue contribution.** The manifest now declares
 `database_catalog=` (`ModuleDatabaseCatalogContributionV1`) at lineage head

@@ -57,7 +57,7 @@ class ArtifactKind(StrEnum):
 class AttestationKind(StrEnum):
     """What a recorded claim about an artifact actually proves.
 
-    Four distinct questions, deliberately not merged into "provenance":
+    Distinct questions, deliberately not merged into "provenance":
 
     * `SBOM` — what is *inside* the artifact.
     * `PROVENANCE` — how and from what the artifact was *built*.
@@ -69,6 +69,9 @@ class AttestationKind(StrEnum):
       one module distribution release.
     * `PRODUCT_DATABASE_CATALOG` — the complete tables-and-columns declaration
       for one product release.
+    * `DEPLOY_UNIT` — the deploy contract the product revision declares. The
+      attestation row records the descriptor's URI and the sha256 of its exact
+      bytes; the catalogue holds that claim and never fetches the document.
 
     An artifact can have any subset. Having none is a legal state and an
     informative one; it is the reason attestations are rows rather than columns
@@ -82,6 +85,8 @@ class AttestationKind(StrEnum):
     PRODUCT_MANIFEST = "product_manifest"
     MODULE_DATABASE_CATALOG = "module_database_catalog"
     PRODUCT_DATABASE_CATALOG = "product_database_catalog"
+    #: The deploy contract the revision declares; held, never fetched.
+    DEPLOY_UNIT = "deploy_unit"
 
 
 #: Every member, for exhaustiveness checks in consumers and in tests.
