@@ -51,7 +51,7 @@ def ensure_traversable_dir(path: Path) -> None:
     if (
         not stat.S_ISDIR(info.st_mode)
         or info.st_uid != os.geteuid()
-        or info.st_mode & 0o022
+        or info.st_mode & 0o066  # traverse only: no group/other read or write
     ):
         raise Refusal("runtime_dir_unsafe")
 

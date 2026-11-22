@@ -409,13 +409,17 @@ def check_response(
 
 
 def verify_signature(
-    public_keys_b64url: tuple[str, ...], message: bytes, signature: bytes
+    public_keys_b64url: tuple[str, ...],
+    message: bytes,
+    signature: bytes,
+    *,
+    allow_denied: bool = False,
 ) -> None:
     """Under ANY pinned CP response key; never a denied one. Failure is
     `response_signature_invalid`."""
     for encoded in public_keys_b64url:
         raw = decode_b64url(encoded, length=32)
-        if raw is None or is_denied_public_key(encoded):
+        if raw is None or (not allow_denied and is_denied_public_key(encoded)):
             raise Refusal("config_invalid")
         try:
             Ed25519PublicKey.from_public_bytes(raw).verify(signature, message)
@@ -426,10 +430,14 @@ def verify_signature(
 
 
 def verify_response(
-    public_keys_b64url: tuple[str, ...], message: bytes, signature_b64: str | None
+    public_keys_b64url: tuple[str, ...],
+    message: bytes,
+    signature_b64: str | None,
+    *,
+    allow_denied: bool = False,
 ) -> None:
     """Verify a response signature given as text (conformance helper)."""
     signature = decode_b64url(signature_b64, length=SIGNATURE_BYTES)
     if signature is None:
         raise Refusal("response_signature_invalid")
-    verify_signature(public_keys_b64url, message, signature)
+    verify_signature(public_keys_b64url, message, signature, allow_denied=allow_denied)

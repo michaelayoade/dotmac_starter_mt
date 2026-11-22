@@ -276,6 +276,7 @@ def make_materials(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "schema": "dotmac.deploy_target_materials/1",
         "pending": True,
+        "store_now": wire.utc_stamp(NOW),
         "dispatch_id": document_dispatch_id,
         "target_ref": target,
         "dispatch_envelope": envelope,
@@ -551,8 +552,10 @@ class Rig:
 
 def prepare_role(rig: Rig, role: str, secrets_namespace: str = "erp") -> None:
     """What enrolment does: the role directory (tmpfiles.d) and the authored config."""
+    rig.config.run_dir.mkdir(parents=True, exist_ok=True)
+    rig.config.run_dir.chmod(0o711)  # RuntimeDirectoryMode: traverse only
     role_dir = rig.config.run_dir / role
-    role_dir.mkdir(parents=True, exist_ok=True)
+    role_dir.mkdir(exist_ok=True)
     role_dir.chmod(0o711)
     authored = rig.config.openbao_config_dir / f"{secrets_namespace}-{role}.hcl"
     authored.write_text(f"# authored config for {role}\n")

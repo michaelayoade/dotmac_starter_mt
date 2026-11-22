@@ -215,6 +215,7 @@ def test_launcher_refuses_dotenv_present_and_never_runs(tmp_path: Path) -> None:
 def test_launcher_refuses_secret_shaped_param(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     params = base_params()
+    params[0]["type"] = "string"
     params[0]["value"] = "ghp_" + "A" * 36
     rig.cp.materials = make_materials(params=params)
     assert rig.launcher.run_once().reason == "params_secret_shaped"

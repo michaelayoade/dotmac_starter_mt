@@ -150,7 +150,7 @@ def test_nonce_is_fresh_per_request_and_replay_is_refused_by_cp(tmp_path: Path) 
     config = make_config(tmp_path, keys)
     cp = FakeCp(keys)
     signer = wire.PopSigner.from_seed(config.credential_id, keys.seed())
-    client = TargetClient(config, signer, cp, clock=lambda: NOW, nonce=lambda: "fixed")
+    client = TargetClient(config, signer, cp, clock=lambda: NOW, nonce=lambda: "0" * 32)
     client.materials()
     with pytest.raises(Refusal) as caught:
         client.materials()  # same nonce

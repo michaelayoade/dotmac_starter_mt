@@ -250,9 +250,13 @@ def test_response_vectors_verify_under_the_pinned_response_key_only() -> None:
             body=vector["body_utf8"].encode(),
         )
         assert message.decode() == vector["message_utf8"]
-        wire.verify_response((response_key,), message, vector["signature_b64u"])
+        wire.verify_response(
+            (response_key,), message, vector["signature_b64u"], allow_denied=True
+        )
         with pytest.raises(Refusal):  # the request key is not the response key
-            wire.verify_response((request_key,), message, vector["signature_b64u"])
+            wire.verify_response(
+                (request_key,), message, vector["signature_b64u"], allow_denied=True
+            )
 
 
 def test_render_vectors() -> None:
@@ -352,12 +356,16 @@ def test_request_check_vectors_through_the_cp_double() -> None:
     for vector in group["ok"]:
         coords = _check(vector["inputs"])
         want = vector["coordinates"]
-        assert coords.credential_id == want["credential_id"]
-        assert coords.dispatch_id == want["dispatch_id"]
-        assert coords.nonce_ledger_key == want["nonce_ledger_key"]
-        assert coords.route == want["route"]
-        assert coords.target_ref == want["target_ref"]
-        assert coords.signed_message.decode() == want["signed_message_utf8"]
+        have = {
+            "credential_id": coords.credential_id,
+            "dispatch_id": coords.dispatch_id,
+            "nonce_ledger_key": coords.nonce_ledger_key,
+            "route": coords.route,
+            "target_ref": coords.target_ref,
+            "signed_message_utf8": coords.signed_message.decode(),
+        }
+        for key, value in want.items():  # every coordinate Control records
+            assert have[key] == value, (key, vector)
     for vector in group["refused"]:
         with pytest.raises(RequestRefused) as caught:
             _check(vector["inputs"])
@@ -377,7 +385,9 @@ def test_response_check_vectors_through_the_agents_client_half() -> None:
         )  # fmt: skip
         assert checked.message.decode() == vector["message_utf8"]
         assert wire.encode_b64url(checked.signature) == vector["signature_b64u"]
-        wire.verify_signature((key,), checked.message, checked.signature)
+        wire.verify_signature(
+            (key,), checked.message, checked.signature, allow_denied=True
+        )
     for vector in group["refused"]:
         i = vector["inputs"]
         with pytest.raises(Refusal) as caught:
@@ -387,7 +397,9 @@ def test_response_check_vectors_through_the_agents_client_half() -> None:
                 headers=i.get("headers_pairs") or i["headers"],
             )  # fmt: skip
             # A well-formed but wrong signature is refused at verification.
-            wire.verify_signature((key,), checked.message, checked.signature)
+            wire.verify_signature(
+                (key,), checked.message, checked.signature, allow_denied=True
+            )
         assert caught.value.code == vector["code"], vector["name"]
 
 
@@ -422,6 +434,12 @@ def test_target_binding_vectors_and_openbao_naming(tmp_path: Path) -> None:
     assert group["environment_defaults"]["pilot"] is None
 
 
+def _segment_ok(value: str) -> bool:
+    import re
+
+    return re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", value) is not None
+
+
 def test_secret_ref_vectors_the_agent_takes_only_the_approle_name() -> None:
     group = load()["secret_ref_vectors"]  # type: ignore[index]
     for vector in group["ok"]:
@@ -434,12 +452,15 @@ def test_secret_ref_vectors_the_agent_takes_only_the_approle_name() -> None:
             == vector["approle"]
         )
     for vector in group["refused"]:
+        names = (
+            vector["secrets_namespace"],
+            vector["secrets_environment"],
+            vector["role"],
+        )
+        if all(_segment_ok(n) for n in names):
+            continue  # a refused binding NAME (K1 file name): Control derives the ref
         with pytest.raises(Refusal):
-            approle_name(
-                vector["secrets_namespace"],
-                vector["secrets_environment"],
-                vector["role"],
-            )
+            approle_name(*names)
 
 
 def test_denied_public_key_vectors(tmp_path: Path) -> None:

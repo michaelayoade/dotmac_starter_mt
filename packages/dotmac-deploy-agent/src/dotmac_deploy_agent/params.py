@@ -101,8 +101,21 @@ def check_alterable(value: str) -> None:
         raise Refusal("params_value_invalid")
 
 
+_INT: Final = re.compile(r"-?[0-9]{1,18}")
+_DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
+
+
 def check_value(value: str, kind: str = "string") -> None:
     check_alterable(value)
+    # Control returns before its secret-shape check for these types, because it
+    # first requires their exact shape: so must the agent, or a token could ride
+    # in an `int` param.
+    if kind in ("int", "duration_seconds") and not _INT.fullmatch(value):
+        raise Refusal("params_value_invalid")
+    if kind == "bool" and value not in ("true", "false"):
+        raise Refusal("params_value_invalid")
+    if kind == "image_digest" and not _DIGEST.fullmatch(value):
+        raise Refusal("params_value_invalid")
     if kind not in _NOT_STRINGLIKE and secret_shaped(value):
         raise Refusal("params_secret_shaped")
 

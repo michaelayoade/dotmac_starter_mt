@@ -120,11 +120,13 @@ class TargetClient:
     def materials(self) -> Reply | None:
         """The pending signed dispatch materials, or None when nothing is pending."""
         reply = self.call("GET", "materials", None)
-        check_shape(reply.document)  # an idle document is exactly the four always-keys
-        if reply.document["target_ref"] != self._config.target_ref:
-            raise Refusal("materials_target_mismatch")
-        if reply.document["pending"] is False:
+        if reply.document.get("pending") is False:
+            check_shape(reply.document)  # idle: exactly the four always-keys
+            if reply.document["target_ref"] != self._config.target_ref:
+                raise Refusal("materials_target_mismatch")
             return None
+        # A pending document is shape-checked and verified by `parse_materials`,
+        # inside the launcher's refusal reporting.
         return reply
 
     def post_observation(self, observation: dict[str, object]) -> Reply:
