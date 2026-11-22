@@ -12,6 +12,13 @@ Not published; no release run, no peeled tag. Held back in
   (`provider.py`, `classify.py`, `config.py`); they were not rewritten.
   `classify.py` differs only in its import block, `config.py` not at all, both
   pinned by `tests/test_classification.py`.
+- Review round: a hard 240 s `SEND_DEADLINE_SECONDS` watchdog; SMTP reply codes
+  no longer go in the HTTP-typed `provider_status_code` (they travel in
+  `error_code`); a rejected credential retries no sooner than 900 s; the
+  post-DATA path reports any exception as unknown and the payload-error catch is
+  limited to the MIME build; a non-ASCII credential is a config fault; EHLO uses
+  the from-domain (no `getfqdn`); the schema pins port 587; the transport refuses
+  `starttls=False`.
 - DELIVERY `email.send.v1`; one Outcome per dispatch.
 - NEW before any I/O: the destination must lie inside a network target the
   operator bound to the installation (`require_network_target`), and the

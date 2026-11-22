@@ -8,6 +8,7 @@ import re
 import smtplib
 import socket
 import ssl
+import time
 from email import policy
 from pathlib import Path
 
@@ -19,12 +20,14 @@ from dotmac_connector_smtp.provider import (
     CODE_TLS_VERIFICATION_FAILED,
     DEFAULT_DATA_TIMEOUT_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
+    SEND_DEADLINE_SECONDS,
     AttachmentRef,
     OutboundMessage,
     SmtpAttachmentError,
     SmtpAuthenticationError,
     SmtpOperatorFault,
     SmtpOutcomeUnknown,
+    SmtpPayloadError,
     SmtpTargetRefused,
     SmtpTransport,
 )
@@ -33,6 +36,7 @@ from smtp_sink_support import BAD_PW, GOOD_PW, OTHER_HOST, TLS_HOST, SmtpSink
 
 HERE = Path(__file__).parent
 DISPATCH = "11111111-2222-3333-4444-555555555555"
+NON_ASCII_PW = "p\u00e4ssword"
 LOOPBACK = [NetworkTarget("127.0.0.0/8", "tcp", 587, 65535)]
 
 
@@ -430,4 +434,85 @@ def test_non_positive_or_non_finite_timeouts_are_refused(
 def test_non_ascii_recipient_is_rejected_without_connecting(sink, trusting) -> None:
     result = send(sink, trusting, msg(address="lëarner@recipient.example.test"))
     assert (result.status, result.response_code) == ("rejected", "non_ascii_address")
+    assert sink.connections == 0
+
+
+# ------------------------------------------------------- wall-clock deadline
+def test_the_send_deadline_is_below_the_300_second_lease() -> None:
+    assert 0 < SEND_DEADLINE_SECONDS <= 240 < 300
+    with pytest.raises(SmtpConfigError):
+        SmtpTransport(deadline=SEND_DEADLINE_SECONDS + 1)
+
+
+def _timed(sink, trusting):
+    started = time.monotonic()
+    transport = SmtpTransport(ssl_context=trusting, timeout=5, deadline=1.0)
+    try:
+        return transport.send(
+            msg(),
+            config=cfg(sink),
+            address="127.0.0.1",
+            password=None,
+            targets=LOOPBACK,
+        ), time.monotonic() - started
+    except SmtpOutcomeUnknown:
+        return None, time.monotonic() - started
+
+
+def test_a_server_trickling_the_greeting_is_cut_off_at_the_deadline(
+    sink, trusting
+) -> None:
+    sink.trickle_greeting = True
+    result, elapsed = _timed(sink, trusting)
+    assert result is not None and result.status == "failed" and not result.payload_sent
+    assert elapsed < 4  # each recv would otherwise be reset for ~30 s
+
+
+def test_a_server_trickling_the_data_reply_is_unknown_at_the_deadline(
+    sink, trusting
+) -> None:
+    sink.trickle_data_reply = True
+    result, elapsed = _timed(sink, trusting)
+    assert result is None  # SmtpOutcomeUnknown, never `failed`
+    assert elapsed < 4 and len(sink.messages) == 1
+
+
+def test_a_post_data_failure_of_any_type_is_unknown(
+    sink, trusting, monkeypatch
+) -> None:
+    def boom(self, message):
+        raise ValueError("not an smtplib error")
+
+    monkeypatch.setattr(smtplib.SMTP, "data", boom)
+    with pytest.raises(SmtpOutcomeUnknown):
+        send(sink, trusting)
+
+
+def test_a_build_error_is_a_payload_error_and_sends_nothing(sink, trusting) -> None:
+    with pytest.raises(SmtpPayloadError):
+        send(sink, trusting, msg(subject="a\r\nBcc: x@y.example"))
+    assert sink.connections == 0
+
+
+def test_a_non_ascii_credential_raises_a_config_error(sink, trusting) -> None:
+    with pytest.raises(SmtpConfigError):
+        send(sink, trusting, config=cfg(sink, username="mailer"), password=NON_ASCII_PW)
+
+
+def test_ehlo_uses_the_from_domain_and_never_the_host_fqdn(
+    sink, trusting, monkeypatch
+) -> None:
+    def forbidden():
+        raise AssertionError("getfqdn called")
+
+    monkeypatch.setattr(socket, "getfqdn", forbidden)
+    assert send(sink, trusting).status == "accepted"
+    assert sink.helo_names and set(sink.helo_names) == {"mail.example.test"}
+
+
+def test_the_transport_refuses_a_plaintext_config_whatever_the_caller_built(
+    sink, trusting
+) -> None:
+    with pytest.raises(SmtpConfigError):
+        send(sink, trusting, config=cfg(sink, starttls=False, production=False))
     assert sink.connections == 0

@@ -24,6 +24,27 @@ SMTP submission connector for the independently deployed Dotmac Integrator
   revision; the only secret is the `smtp_password` binding. Nothing here
   carries a default credential, host or address.
 
+## Destination model: `host` plus a pinned `address`
+
+Michael approved this model (2026-11-22). `host` is the TLS server name the
+certificate is verified against; `address` is the IP literal the connection is
+actually made to, so no name is ever resolved at send time. The **operator**
+binds the installation's network target as a **/32** (or /128) for exactly that
+address, tcp 587 (the schema pins `port` to 587 and the manifest ceiling is tcp
+587 only). The manage scope cannot bind targets and cannot change `address`:
+the Integrator manage caller already refuses destination keys (`host`,
+`address`, `port`, `username`), and any change to them must come with a fresh
+secret, so held credentials are never presented to a new destination.
+
+## Timing and the lease
+
+`SEND_DEADLINE_SECONDS` (240) is a hard wall-clock cap on one whole send: a
+watchdog shuts the socket at the deadline, so a server trickling bytes cannot
+outlast it (before DATA: retryable; after DATA: ambiguous). **The Integrator
+pump must assert at boot that its attempt lease is greater than
+`SEND_DEADLINE_SECONDS`** (not the 285 s nominal per-operation sum, and not its
+own data budget).
+
 Owns no database, queue, retry, consent, rendering or attachment storage.
 Tests are hermetic: a scripted SMTP sink on loopback with throwaway
 certificates; no real network. Run them with

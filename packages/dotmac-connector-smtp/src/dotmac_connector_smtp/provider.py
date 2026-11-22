@@ -42,6 +42,7 @@ import math
 import smtplib
 import socket
 import ssl
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -84,6 +85,15 @@ DEFAULT_TIMEOUT_SECONDS = 15.0
 #: enforces it. Hard enforcement (a construction-time refusal, or lease renewal /
 #: an attempt watchdog) is a follow-up.
 DEFAULT_DATA_TIMEOUT_SECONDS = 40.0
+#: HARD wall-clock cap on one whole send, from the first connect to QUIT. The
+#: per-operation timeouts above are not a wall-clock limit (a server trickling
+#: one byte per interval resets each of them), so a watchdog shuts the socket
+#: down at this deadline: before DATA that surfaces as a retryable connection
+#: failure, after DATA as `SmtpOutcomeUnknown`. It MUST stay below the lease that
+#: guards one attempt (300 s): **the Integrator pump must assert, at boot, that
+#: its lease is greater than `SEND_DEADLINE_SECONDS`.** The nominal budget of
+#: 11 x timeout + 3 x data_timeout (285 s) is NOT the number to check against.
+SEND_DEADLINE_SECONDS = 240.0
 #: Per attachment and in total across one message (raised only by a reviewed
 #: change; the total keeps a message under common 25-35 MiB relay limits).
 DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -192,6 +202,11 @@ class SmtpOperatorFault(SmtpAdapterError):
     and above all no suppression of the recipient."""
 
 
+class SmtpPayloadError(SmtpAdapterError):
+    """The message cannot be built (for example a header with a line break).
+    Raised before any connection; the message cannot succeed as submitted."""
+
+
 class SmtpTargetRefused(SmtpAdapterError):
     """The endpoint is outside the installation's bound network targets (raised
     by `require_network_target` as `NetworkTargetError`; re-typed by the handler
@@ -215,6 +230,46 @@ def _reply_text(raw: bytes | str) -> str:
     return " ".join(text.split())[:RESPONSE_BODY_LIMIT]
 
 
+class _Watchdog:
+    """Shuts the live socket down once the send deadline passes.
+
+    A thread, not a signal: it works off the main thread, and `shutdown` wakes a
+    blocked `recv`/`send` in the sending thread. After the deadline it keeps
+    retrying every half second, so a socket replaced by the TLS upgrade is
+    caught too."""
+
+    def __init__(self, deadline: float) -> None:
+        self._deadline = deadline
+        self._done = threading.Event()
+        self._socks: list[socket.socket] = []
+        self.smtp: smtplib.SMTP | None = None
+        self.fired = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def track(self, sock: socket.socket) -> None:
+        self._socks.append(sock)
+
+    def stop(self) -> None:
+        self._done.set()
+
+    def _run(self) -> None:
+        if self._done.wait(self._deadline):
+            return
+        self.fired = True
+        while True:
+            candidates = list(self._socks)
+            if self.smtp is not None and self.smtp.sock is not None:
+                candidates.append(self.smtp.sock)
+            for sock in candidates:
+                with suppress(Exception):
+                    sock.shutdown(socket.SHUT_RDWR)
+            if self._done.wait(0.5):
+                return
+
+
 class _PinnedSMTP(smtplib.SMTP):
     """`smtplib.SMTP` that connects to an ALREADY CHECKED address.
 
@@ -223,14 +278,29 @@ class _PinnedSMTP(smtplib.SMTP):
     the pinned address that passed `require_network_target`. No name is resolved
     after the check, so DNS cannot redirect a checked destination."""
 
-    def __init__(self, host: str, port: int, *, pinned: str, timeout: float) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        pinned: str,
+        timeout: float,
+        local_hostname: str,
+        watchdog: _Watchdog,
+    ) -> None:
         self._pinned = pinned
-        super().__init__(host, port, timeout=timeout)
+        self._watchdog = watchdog
+        # `local_hostname` is always given: smtplib would otherwise call
+        # `socket.getfqdn()` (a resolver call outside the budget) and EHLO would
+        # disclose this host's own name.
+        super().__init__(host, port, local_hostname=local_hostname, timeout=timeout)
 
     def _get_socket(self, host: str, port: int, timeout: float) -> socket.socket:
-        return socket.create_connection(
+        sock = socket.create_connection(
             (self._pinned, port), timeout, self.source_address
         )
+        self._watchdog.track(sock)
+        return sock
 
 
 class SmtpTransport:
@@ -246,11 +316,16 @@ class SmtpTransport:
         attachment_resolver: AttachmentResolver | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         data_timeout: float = DEFAULT_DATA_TIMEOUT_SECONDS,
+        deadline: float = SEND_DEADLINE_SECONDS,
         ssl_context: ssl.SSLContext | None = None,
         max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES,
         max_total_attachment_bytes: int = DEFAULT_MAX_TOTAL_ATTACHMENT_BYTES,
     ) -> None:
-        for label, value in (("timeout", timeout), ("data_timeout", data_timeout)):
+        for label, value in (
+            ("timeout", timeout),
+            ("data_timeout", data_timeout),
+            ("deadline", deadline),
+        ):
             if (
                 not isinstance(value, int | float)
                 or isinstance(value, bool)
@@ -263,6 +338,12 @@ class SmtpTransport:
         self._max_attachment_bytes = max_attachment_bytes
         self._max_total_attachment_bytes = max_total_attachment_bytes
         self._data_timeout = data_timeout
+        if deadline > SEND_DEADLINE_SECONDS:
+            raise SmtpConfigError(
+                "deadline must not exceed SEND_DEADLINE_SECONDS: it is what keeps "
+                "one send inside the attempt lease"
+            )
+        self._deadline = deadline
         if ssl_context is not None and (
             ssl_context.verify_mode != ssl.CERT_REQUIRED
             or not ssl_context.check_hostname
@@ -286,6 +367,10 @@ class SmtpTransport:
         """`address` is the pinned IP literal of `config.host`; `password` is the
         materialised secret (None when `config.username` is empty)."""
         config.validate()
+        if not config.starttls:
+            # STARTTLS is not optional in this connector, whatever the caller
+            # built: there is no plaintext path to reach.
+            raise SmtpConfigError("STARTTLS is required")
         if config.username and not password:
             raise SmtpConfigError("SMTP password is not held")
         if not message.address.isascii():
@@ -299,7 +384,11 @@ class SmtpTransport:
             )
         except ValueError:
             raise SmtpTargetRefused("endpoint is outside the bound targets") from None
-        built = self._build(message, config)
+        try:
+            built = self._build(message, config)
+        except ValueError:
+            # ONLY the MIME build is covered: nothing has been sent yet.
+            raise SmtpPayloadError("the message cannot be built") from None
         return self._transmit(config, address, password, message.address, built)
 
     @staticmethod
@@ -369,19 +458,28 @@ class SmtpTransport:
         payload: bytes,
     ) -> SendResult:
         smtp: smtplib.SMTP | None = None
+        watchdog = _Watchdog(self._deadline)
+        watchdog.start()
         try:
             # Host goes to the constructor so smtplib sets the TLS server_hostname
             # (certificate hostname verification) from it; the socket goes to the
             # pinned, already-checked address.
             smtp = _PinnedSMTP(
-                cfg.host, cfg.port, pinned=address, timeout=self._timeout
+                cfg.host,
+                cfg.port,
+                pinned=address,
+                timeout=self._timeout,
+                local_hostname=cfg.from_domain,
+                watchdog=watchdog,
             )
+            watchdog.smtp = smtp
             return self._session(smtp, cfg, password, rcpt, payload)
         except smtplib.SMTPConnectError as exc:
             return self._reply_failure(STAGE_SESSION, exc.smtp_code, exc.smtp_error)
         except (OSError, smtplib.SMTPException) as exc:
             return self._connection_failure(exc)
         finally:
+            watchdog.stop()
             if smtp is not None:
                 # Best effort: the outcome is already decided.
                 with suppress(Exception):
@@ -399,22 +497,27 @@ class SmtpTransport:
             code, text = smtp.ehlo()
             if code != 250:
                 return self._reply_failure(STAGE_SESSION, code, text)
-            if cfg.starttls:
-                if not smtp.has_extn("starttls"):
-                    return _failed(CODE_STARTTLS_UNAVAILABLE)
-                context = self._ssl_context or self._default_context()
-                code, text = smtp.starttls(context=context)
-                if code != 220:
-                    return self._reply_failure(STAGE_SESSION, code, text)
-                code, text = smtp.ehlo()
-                if code != 250:
-                    return self._reply_failure(STAGE_SESSION, code, text)
+            if not smtp.has_extn("starttls"):
+                return _failed(CODE_STARTTLS_UNAVAILABLE)
+            context = self._ssl_context or self._default_context()
+            code, text = smtp.starttls(context=context)
+            if code != 220:
+                return self._reply_failure(STAGE_SESSION, code, text)
+            code, text = smtp.ehlo()
+            if code != 250:
+                return self._reply_failure(STAGE_SESSION, code, text)
             if cfg.username:
                 try:
                     smtp.login(cfg.username, password or "")
                 except smtplib.SMTPAuthenticationError as exc:
                     raise SmtpAuthenticationError(
                         f"SMTP server rejected the credentials ({exc.smtp_code})"
+                    ) from None
+                except UnicodeError:
+                    # A non-ASCII username or password cannot be sent: a
+                    # configuration fault, never a payload fault.
+                    raise SmtpConfigError(
+                        "SMTP credentials cannot be encoded"
                     ) from None
             code, text = smtp.mail(parseaddr(cfg.from_address)[1])
             if code != 250:
@@ -443,7 +546,9 @@ class SmtpTransport:
             # smtplib raises this ONLY for a refused DATA command (not 354):
             # the payload never left, so a retry cannot double-send.
             return self._reply_failure(STAGE_DATA, exc.smtp_code, exc.smtp_error)
-        except (OSError, smtplib.SMTPException) as exc:
+        except Exception as exc:
+            # ANY failure once the payload may have left is unknown, not just
+            # the socket and SMTP errors smtplib is documented to raise.
             raise SmtpOutcomeUnknown(
                 f"reply lost after DATA ({type(exc).__name__}); the message may "
                 "have been accepted"
@@ -494,6 +599,7 @@ __all__ = [
     "CODE_TLS_VERIFICATION_FAILED",
     "DEFAULT_DATA_TIMEOUT_SECONDS",
     "DEFAULT_TIMEOUT_SECONDS",
+    "SEND_DEADLINE_SECONDS",
     "PROVIDER_NAME",
     "SUPPORTED_HEADERS",
     "TARGET_PROTOCOL",
@@ -506,6 +612,7 @@ __all__ = [
     "SmtpAuthenticationError",
     "SmtpOperatorFault",
     "SmtpOutcomeUnknown",
+    "SmtpPayloadError",
     "SmtpTargetRefused",
     "SmtpTransport",
 ]

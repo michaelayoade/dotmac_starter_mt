@@ -121,3 +121,17 @@ def test_validate_connection_does_no_io_and_reports_codes_only() -> None:
     assert [d.code for d in PLUGIN.validate_connection(config={}, secrets={})] == [
         "config_invalid"
     ]
+
+
+def test_the_schema_allows_port_587_only() -> None:
+    from jsonschema import Draft202012Validator
+
+    validator = Draft202012Validator(MANIFEST.capabilities[0].config_schema)
+    base = {
+        "host": "mail.example.test",
+        "address": "198.51.100.7",
+        "from_address": "a@mail.example.test",
+    }
+    assert not list(validator.iter_errors({**base, "port": 587}))
+    for port in (25, 465, 588):
+        assert list(validator.iter_errors({**base, "port": port}))

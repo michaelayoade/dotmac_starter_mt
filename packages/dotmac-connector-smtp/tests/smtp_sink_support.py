@@ -12,6 +12,7 @@ import datetime
 import socket
 import ssl
 import threading
+import time
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -33,9 +34,14 @@ class SmtpSink:
         self.greeting = "220 sink ESMTP"
         self.replies: dict[str, str] = {}
         self.drop_after_data = False
+        #: Slow-trickle modes: one byte every 0.2 s, never a line end, so every
+        #: per-operation timeout is reset forever (up to 30 s).
+        self.trickle_greeting = False
+        self.trickle_data_reply = False
         self.accepted_secret = GOOD_PW
         self.messages: list[bytes] = []
         self.commands: list[str] = []
+        self.helo_names: list[str] = []
         self.connections = 0
         self.auth_seen = False
         self.plaintext_auth_seen = False
@@ -60,6 +66,9 @@ class SmtpSink:
         tls = False
         try:
             f = conn.makefile("rwb", buffering=0)
+            if self.trickle_greeting:
+                self._trickle(f)
+                return
             f.write((self.greeting + "\r\n").encode())
             if not self.greeting.startswith("220"):
                 return
@@ -70,6 +79,8 @@ class SmtpSink:
                 cmd = line.decode().rstrip("\r\n")
                 verb = cmd.split(" ", 1)[0].upper()
                 self.commands.append(verb)
+                if verb == "EHLO":
+                    self.helo_names.append(cmd.split(" ", 1)[1])
                 if verb == "EHLO":
                     lines = ["250-sink", "250-AUTH PLAIN"]
                     if self.advertise_starttls and not tls:
@@ -102,6 +113,9 @@ class SmtpSink:
                     while not buf.endswith(b"\r\n.\r\n"):
                         buf += f.readline()
                     self.messages.append(buf[:-5])
+                    if self.trickle_data_reply:
+                        self._trickle(f)
+                        return
                     if self.drop_after_data:
                         conn.close()
                         return
@@ -119,6 +133,12 @@ class SmtpSink:
                 conn.close()
             except OSError:
                 pass
+
+    @staticmethod
+    def _trickle(f) -> None:  # type: ignore[no-untyped-def]
+        for _ in range(150):
+            f.write(b"2")
+            time.sleep(0.2)
 
     def close(self) -> None:
         self._stop = True

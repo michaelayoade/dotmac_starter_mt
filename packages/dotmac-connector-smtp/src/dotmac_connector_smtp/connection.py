@@ -35,7 +35,7 @@ CONFIG_SCHEMA: dict[str, object] = {
     "properties": {
         "host": {"type": "string", "minLength": 1, "maxLength": 253},
         "address": {"type": "string", "minLength": 2, "maxLength": 45},
-        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "port": {"const": 587},
         "username": {"type": "string", "maxLength": 320},
         "from_address": {"type": "string", "minLength": 3, "maxLength": 320},
     },

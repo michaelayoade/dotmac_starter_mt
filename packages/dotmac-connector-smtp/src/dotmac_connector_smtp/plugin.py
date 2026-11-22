@@ -27,7 +27,8 @@ outside the bound targets before a socket exists.
   `RECONCILIATION_REQUIRED`.
 
 No outcome carries a reply body, an address, a message part or the password;
-`error_detail` is a fixed code and `provider_status_code` is the SMTP reply code.
+`error_detail` is a fixed code. The SMTP reply code travels in `error_code`,
+never in the HTTP-typed `provider_status_code`, which the engine acts on.
 """
 
 from __future__ import annotations
@@ -69,6 +70,7 @@ from dotmac_connector_smtp.provider import (
     SmtpAuthenticationError,
     SmtpOperatorFault,
     SmtpOutcomeUnknown,
+    SmtpPayloadError,
     SmtpTargetRefused,
     SmtpTransport,
 )
@@ -174,12 +176,27 @@ def message_from_payload(payload: Mapping[str, object]) -> OutboundMessage:
     )
 
 
-def _outcome(status: OutcomeStatus, code: str, *, reply: int | None = None) -> Outcome:
+#: Minimum delay before a rejected credential is tried again. One bad password
+#: otherwise costs every queued message up to the engine's attempt cap in AUTH
+#: attempts, which can lock the account out (legacy senders share it).
+AUTH_REJECTED_RETRY_AFTER_SECONDS: Final = 900
+
+
+def _outcome(
+    status: OutcomeStatus,
+    code: str,
+    *,
+    retry_after: int | None = None,
+) -> Outcome:
+    # `provider_status_code` is deliberately NEVER set: the SPI defines it as an
+    # HTTP status, and the engine acts on it (500/502/503/504 become retryable,
+    # a 503 pauses the whole installation). An SMTP reply code is not that, so it
+    # travels in `error_code`, the connector's own vocabulary.
     return Outcome(
         status=status,
         error_code=code,
         error_detail=code,
-        provider_status_code=reply,
+        retry_after_seconds=retry_after,
     )
 
 
@@ -193,26 +210,22 @@ def _reply_code(result: SendResult) -> int | None:
 def outcome_for(result: SendResult, *, message_id: str) -> Outcome:
     """Map a definite `SendResult` to an `Outcome` (the ambiguity rule lives here)."""
     reply = _reply_code(result)
+    suffix = f"_{reply}" if reply is not None else ""
     if result.status == "accepted":
-        return Outcome(
-            status=OutcomeStatus.SUCCEEDED,
-            provider_reference=message_id,
-            provider_status_code=reply,
-        )
+        return Outcome(status=OutcomeStatus.SUCCEEDED, provider_reference=message_id)
     if result.payload_sent:
         # The payload left; whatever came back, the message may be on its way.
         # Never retried, never dead-lettered silently: reconcile.
         return _outcome(
             OutcomeStatus.RECONCILIATION_REQUIRED,
-            "smtp_ambiguous_after_data",
-            reply=reply,
+            f"smtp_ambiguous_after_data{suffix}",
         )
     if result.status == "bounced":
-        return _outcome(OutcomeStatus.TERMINAL, "smtp_bounced", reply=reply)
+        return _outcome(OutcomeStatus.TERMINAL, f"smtp_bounced{suffix}")
     if result.status == "rejected":
-        return _outcome(OutcomeStatus.TERMINAL, "smtp_rejected", reply=reply)
+        return _outcome(OutcomeStatus.TERMINAL, f"smtp_rejected{suffix}")
     if reply is not None:
-        return _outcome(OutcomeStatus.RETRYABLE, f"smtp_reply_{reply}", reply=reply)
+        return _outcome(OutcomeStatus.RETRYABLE, f"smtp_reply{suffix}")
     safe = re.sub(r"[^a-z0-9_]", "", (result.response_code or "failed").lower())
     return _outcome(OutcomeStatus.RETRYABLE, f"smtp_{safe or 'failed'}")
 
@@ -254,15 +267,16 @@ class SmtpDeliveryHandler:
         except SmtpAttachmentError:
             return _outcome(OutcomeStatus.TERMINAL, "attachment_refused")
         except SmtpAuthenticationError:
-            return _outcome(OutcomeStatus.RETRYABLE, "smtp_auth_rejected")
+            return _outcome(
+                OutcomeStatus.RETRYABLE,
+                "smtp_auth_rejected",
+                retry_after=AUTH_REJECTED_RETRY_AFTER_SECONDS,
+            )
         except SmtpOperatorFault:
             return _outcome(OutcomeStatus.RETRYABLE, "smtp_operator_fault")
         except SmtpConfigError:
             return _outcome(OutcomeStatus.RETRYABLE, "config_invalid")
-        except ValueError:
-            # EmailMessage / smtplib refusing a header or command containing
-            # line breaks: raised before any connection, the message cannot
-            # succeed as submitted.
+        except SmtpPayloadError:
             return _outcome(OutcomeStatus.TERMINAL, "invalid_payload")
         cfg = endpoint.config
         return outcome_for(

@@ -78,7 +78,7 @@ def test_accepted_is_succeeded_with_the_message_id_as_reference(handler, sink) -
         out.provider_reference
         == "<11111111-2222-3333-4444-555555555555@mail.example.test>"
     )
-    assert out.provider_status_code == 250 and out.error_code is None
+    assert out.provider_status_code is None and out.error_code is None
     assert len(sink.messages) == 1
 
 
@@ -99,6 +99,38 @@ def test_wrong_password_is_retryable_and_never_echoed(handler, sink) -> None:
         "smtp_auth_rejected",
     )
     assert BAD_PW not in repr(out)
+    # One bad password must not cost every queued message an AUTH attempt.
+    assert out.retry_after_seconds is not None and out.retry_after_seconds >= 900
+
+
+def test_a_non_ascii_credential_is_a_config_fault_not_a_payload_fault(
+    handler, sink
+) -> None:
+    out = handler(
+        request(sink, secrets={"smtp_password": "pässword"}, username="mailer")
+    )
+    assert (out.status, out.error_code) == (OutcomeStatus.RETRYABLE, "config_invalid")
+    assert sink.messages == []
+
+
+@pytest.mark.parametrize("reply", ["503 5.5.1 bad sequence", "502 5.5.2", "504 x"])
+def test_smtp_reply_codes_never_reach_the_http_status_field(
+    handler, sink, reply
+) -> None:
+    """a20 treats 500/502/503/504 in `provider_status_code` as retryable and a
+    503 as an installation-wide pause. After DATA that must not happen."""
+    from dotmac_integration.retry import next_state, throttle_cooldown_seconds
+
+    sink.replies["data"] = reply
+    out = handler(request(sink))
+    assert out.status is OutcomeStatus.RECONCILIATION_REQUIRED
+    assert out.provider_status_code is None
+    assert throttle_cooldown_seconds(out) is None
+    assert next_state(out, attempt_count=1) != "retryable"
+    sink.replies["rcpt"] = reply
+    pre = handler(request(sink))
+    assert pre.provider_status_code is None and throttle_cooldown_seconds(pre) is None
+    assert next_state(pre, attempt_count=1) != "retryable"
 
 
 # ------------------------------------------------- AMBIGUOUS after DATA
@@ -119,7 +151,7 @@ def test_any_non_250_final_reply_after_data_is_ambiguous_not_retryable(
     sink.replies["data"] = reply
     out = handler(request(sink))
     assert out.status is OutcomeStatus.RECONCILIATION_REQUIRED
-    assert out.provider_status_code == int(reply[:3])
+    assert out.error_code == f"smtp_ambiguous_after_data_{reply[:3]}"
     assert out.status is not OutcomeStatus.RETRYABLE
 
 
@@ -135,10 +167,10 @@ def test_outcome_for_marks_every_payload_sent_failure_ambiguous() -> None:
 @pytest.mark.parametrize(
     ("key", "reply", "status", "code"),
     [
-        ("rcpt", "550 5.1.1 no such user", OutcomeStatus.TERMINAL, "smtp_bounced"),
-        ("rcpt", "550 5.7.1 denied", OutcomeStatus.TERMINAL, "smtp_rejected"),
+        ("rcpt", "550 5.1.1 no such user", OutcomeStatus.TERMINAL, "smtp_bounced_550"),
+        ("rcpt", "550 5.7.1 denied", OutcomeStatus.TERMINAL, "smtp_rejected_550"),
         ("rcpt", "451 4.7.1 later", OutcomeStatus.RETRYABLE, "smtp_reply_451"),
-        ("data_cmd", "554 5.3.0 refused", OutcomeStatus.TERMINAL, "smtp_rejected"),
+        ("data_cmd", "554 5.3.0 refused", OutcomeStatus.TERMINAL, "smtp_rejected_554"),
         (
             "mail",
             "550 5.7.1 sender denied",
@@ -187,9 +219,7 @@ def test_off_target_is_refused_before_any_connection(handler, sink) -> None:
     assert sink.connections == 0
 
 
-def test_a_config_that_smuggles_its_own_targets_is_overwritten_by_the_engine(
-    handler, sink
-) -> None:
+def test_an_empty_bound_target_list_refuses_every_send(handler, sink) -> None:
     req = request(sink, targets=[])
     assert req.config[NETWORK_TARGETS_CONFIG_KEY] == []
     assert handler(req).error_code == "network_target_refused"
