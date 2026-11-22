@@ -49,7 +49,7 @@ TABLES = (
     DeliveryAttempt,
     DeliveryLegalHold,
 )
-ROUNDS = 5
+ROUNDS = int(os.getenv("INTG_RACE_ROUNDS", "5"))
 
 
 @pytest.fixture(autouse=True)
@@ -346,13 +346,16 @@ def test_replay_versus_claim_never_overwrites_a_live_claim(
         claimed, replayed = _race(claimer, replayer)
         row = _row(schema_factory, delivery_id)
         if claimed:
-            # The claim won the lock first: replay must have refused, and the
-            # live claim must be intact.
-            assert replayed == "NotRepairable"
+            # Two legitimate orderings, both ending in exactly one live claim:
+            #  * claim first: replay saw `in_flight` under the lock and refused;
+            #  * replay first: the claim then took the fresh pending row.
+            assert replayed in ("NotRepairable", "replayed")
             assert row.state == "in_flight"
             assert row.leased_until is not None
-            assert row.attempt_count == 1
+            assert row.attempt_count == 1, "double claim"
         else:
-            # Replay won; the claim then saw a fresh pending row or lost the
-            # race. Never an in_flight row with a reset attempt budget.
-            assert not (row.state == "in_flight" and row.attempt_count == 0)
+            # The claim skipped the locked row; replay won. Never an in_flight
+            # row with a reset attempt budget.
+            assert replayed == "replayed"
+            assert row.state == "pending"
+            assert row.attempt_count == 0
