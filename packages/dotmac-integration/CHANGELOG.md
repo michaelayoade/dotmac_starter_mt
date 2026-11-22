@@ -15,7 +15,15 @@ published a21 (tag `dotmac-integration-v0.1.0a21`); publication remains a separa
   (recorded in the audit trail). `claim_delivery` now claims only `pending` /
   `retryable` rows, under `SELECT ... FOR UPDATE SKIP LOCKED` with the state
   re-verified by the conditional UPDATE. `replay_delivery` also refuses a
-  retention-redacted row. PROVISION's own lease engine is unchanged.
+  retention-redacted row (it locks the row first). PROVISION's own lease engine
+  is unchanged. **Tightening:** EVERY `reconciliation_required` row now needs
+  `acknowledge_possible_duplicate=True` to be replayed, whatever its
+  `error_code` (an inconclusive reconcile overwrites the code; connector-reported
+  ambiguity was previously ungated). The claim refuses any row carrying a
+  retention tombstone, and a NOT_LANDED reconcile re-checks "not redacted" in
+  its UPDATE, so a replay or reconcile racing the purge can never leave a
+  dispatchable tombstone. The claim-path ambiguation is audited with the same
+  `leases.released` event as the sweep (`details.via` is `claim` or `sweep`).
   Connectors without idempotency handling (for example
   `dotmac-connector-whatsapp`) are the beneficiaries: a worker crash after the
   provider call no longer sends the message twice, but such rows now need an

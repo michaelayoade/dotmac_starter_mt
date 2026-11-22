@@ -491,26 +491,36 @@ def replay_delivery(
     `reason` is required. A repair with no stated reason is indistinguishable
     from a mistake when someone reads the trail six months later.
 
-    A row ambiguated by an expired lease (`LEASE_EXPIRED_ERROR_CODE`) may have
-    already reached the provider; it is requeued only when the operator passes
+    A `reconciliation_required` row may have already reached the provider; it
+    is requeued only when the operator passes
     ``acknowledge_possible_duplicate=True``, which the audit record preserves.
     """
-    from dotmac_integration.execution import LEASE_EXPIRED_ERROR_CODE
-    from dotmac_integration.retention import is_delivery_redacted
+    # Lock first, so a concurrent retention purge cannot redact between the
+    # checks below and the write (the claim's own predicate is the backstop).
+    from sqlalchemy import select
 
-    if is_delivery_redacted(delivery):
+    from dotmac_integration.retention import REDACTION_MARKER, is_delivery_redacted
+
+    locked_payload = db.execute(
+        select(DeliveryAttempt.payload_json)
+        .where(DeliveryAttempt.id == delivery.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if is_delivery_redacted(delivery) or (
+        isinstance(locked_payload, dict) and REDACTION_MARKER in locked_payload
+    ):
         raise NotRepairable(
             "delivery payload was redacted by retention; a tombstone is not a "
             "payload and must not be sent"
         )
-    if (
-        delivery.state == "reconciliation_required"
-        and delivery.error_code == LEASE_EXPIRED_ERROR_CODE
-        and not acknowledge_possible_duplicate
+    if delivery.state == "reconciliation_required" and not (
+        acknowledge_possible_duplicate
     ):
+        # EVERY ambiguous row, whatever its `error_code`: that field is
+        # overwritten by an inconclusive reconcile, so it cannot carry the gate.
         raise NotRepairable(
-            "this delivery's lease expired while in flight, so it may already "
-            "have reached the provider. Requeue it only with "
+            "this delivery's outcome is unknown, so it may already have reached "
+            "the provider. Requeue it only with "
             "acknowledge_possible_duplicate=True, or reconcile it against "
             "provider evidence"
         )
@@ -605,17 +615,7 @@ def release_expired_leases(
     from dotmac_integration.execution import ambiguate_expired_delivery_leases
 
     moment = now or datetime.now(UTC)
-    moved = ambiguate_expired_delivery_leases(db, now=moment)
-    if moved:
-        record_operation(
-            db,
-            action="leases.released",
-            entity_type="delivery_attempt",
-            actor_admin_id=actor_admin_id,
-            details={
-                "count": len(moved),
-                "delivery_ids": [str(i) for i in moved],
-                "state": "reconciliation_required",
-            },
-        )
+    moved = ambiguate_expired_delivery_leases(
+        db, now=moment, via="sweep", actor_admin_id=actor_admin_id
+    )
     return len(moved)

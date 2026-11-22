@@ -411,8 +411,9 @@ def _require_valid_result(
     ## The refusal reaches the dispatcher, not the row
 
     Raising leaves the delivery `in_flight` with its lease. That is correct: the
-    engine has not decided anything about this attempt, and a lease expiry hands
-    it to a worker that will try again. The alternative — recording a
+    engine has not decided anything about this attempt, and the connector may
+    already have acted, so a lease expiry moves it to `reconciliation_required`
+    (never to a retry). The alternative — recording a
     connector's malformed result as a terminal state — is the outcome this gate
     exists to prevent.
     """

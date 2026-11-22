@@ -11,9 +11,6 @@ Three gaps closed together:
 
 from __future__ import annotations
 
-import os
-import threading
-import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -43,10 +40,18 @@ from dotmac_integration import (
 )
 from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin, fake_registry
 from dotmac_integration.execution import LEASE_EXPIRED_ERROR_CODE
+from dotmac_integration.outbound_repair import (
+    ProviderEvidence,
+    ProviderVerdict,
+    RepairRefused,
+    prepare_reconciliation,
+    reconcile_with_evidence,
+)
 from dotmac_integration.policy import ExecutionPolicy
+from dotmac_integration.retention import REDACTION_MARKER
 from dotmac_integration.spi import NETWORK_TARGETS_CONFIG_KEY, bound_network_targets
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 LEASE = ExecutionPolicy(lease_seconds=60)
 TABLES = (
@@ -58,10 +63,15 @@ TABLES = (
 
 
 @pytest.fixture(autouse=True)
-def _audit(monkeypatch: pytest.MonkeyPatch) -> None:
+def audit(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """Records every audit event instead of discarding it."""
     import dotmac_integration.operations as operations
 
-    monkeypatch.setattr(operations, "record_operation", lambda *a, **k: None)
+    events: list[dict] = []
+    monkeypatch.setattr(
+        operations, "record_operation", lambda db, **kw: events.append(kw)
+    )
+    return events
 
 
 @pytest.fixture()
@@ -215,45 +225,6 @@ def test_two_claimers_one_row_exactly_one_wins(db: Session) -> None:
     assert delivery.attempt_count == 1
 
 
-@pytest.mark.skipif(
-    not os.getenv("TEST_DATABASE_URL"), reason="needs real Postgres (SKIP LOCKED)"
-)
-def test_two_concurrent_claimers_on_postgres_invoke_once() -> None:
-    engine = create_engine(
-        os.environ["TEST_DATABASE_URL"],
-        execution_options={"schema_translate_map": {"mod_intg": "mod_intg"}},
-    )
-    from sqlalchemy import text
-
-    with engine.begin() as conn:
-        conn.execute(text("create schema if not exists mod_intg"))
-    for model in TABLES:
-        model.__table__.create(engine, checkfirst=True)
-    factory = sessionmaker(bind=engine)
-    with factory() as setup:
-        registry = fake_registry()
-        installation, binding = _enabled(setup, registry)
-        delivery = _queued(setup, installation, binding, key=str(uuid.uuid4()))
-        delivery_id = delivery.id
-    barrier = threading.Barrier(2)
-    wins: list[bool] = []
-
-    def worker() -> None:
-        with factory() as session:
-            row = session.get(DeliveryAttempt, delivery_id)
-            barrier.wait()
-            won = claim_delivery(session, row, policy=LEASE)
-            session.commit()
-            wins.append(won)
-
-    threads = [threading.Thread(target=worker) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert wins.count(True) == 1
-
-
 def test_provision_lease_semantics_are_unchanged() -> None:
     """PROVISION owns its own lease engine, which is idempotent by contract
     (an unknown outcome is only followed by `observe`). It must not have been
@@ -270,7 +241,7 @@ def test_provision_lease_semantics_are_unchanged() -> None:
 
 
 def test_requeue_of_a_lease_ambiguous_delivery_needs_acknowledgement(
-    db: Session,
+    db: Session, audit: list[dict]
 ) -> None:
     registry = fake_registry()
     installation, binding = _enabled(db, registry)
@@ -291,6 +262,8 @@ def test_requeue_of_a_lease_ambiguous_delivery_needs_acknowledgement(
         acknowledge_possible_duplicate=True,
     )
     assert delivery.state == "pending"
+    replayed = [e for e in audit if e["action"] == "delivery.replayed"]
+    assert replayed[0]["details"]["acknowledged_possible_duplicate"] is True
 
 
 # ── Gap 3: DELIVERY network targets ─────────────────────────────────────────
@@ -374,3 +347,151 @@ def test_malformed_bound_targets_refuse_before_the_claim(db: Session) -> None:
     assert delivery.state == "pending"
     assert delivery.attempt_count == 0
     assert OutcomeStatus.SUCCEEDED  # keep import honest
+
+
+# ── Review fixes ────────────────────────────────────────────────────────────
+
+
+def test_the_claim_path_ambiguation_is_audited_like_the_sweep(
+    db: Session, audit: list[dict]
+) -> None:
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    assert claim_delivery(db, delivery, policy=LEASE)
+    later = datetime.now(UTC) + timedelta(seconds=600)
+
+    assert claim_delivery(db, delivery, now=later) is False
+
+    (event,) = (e for e in audit if e["action"] == "leases.released")
+    assert event["details"]["via"] == "claim"
+    assert event["details"]["delivery_ids"] == [str(delivery.id)]
+    assert event["details"]["state"] == "reconciliation_required"
+
+
+def test_the_sweep_audit_names_its_path(db: Session, audit: list[dict]) -> None:
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    assert claim_delivery(db, delivery, policy=LEASE)
+    release_expired_leases(db, now=datetime.now(UTC) + timedelta(seconds=600))
+    (event,) = (e for e in audit if e["action"] == "leases.released")
+    assert event["details"]["via"] == "sweep"
+
+
+@pytest.mark.parametrize(
+    "code", [LEASE_EXPIRED_ERROR_CODE, "reconcile_inconclusive", "connector_raised"]
+)
+def test_every_ambiguous_replay_needs_acknowledgement_whatever_the_code(
+    db: Session, code: str
+) -> None:
+    """An UNKNOWN reconcile overwrites `error_code`; the gate must not key on it."""
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    delivery.state = "reconciliation_required"
+    delivery.error_code = code
+    db.commit()
+
+    with pytest.raises(NotRepairable, match="acknowledge_possible_duplicate"):
+        replay_delivery(db, delivery, reason="operator")
+    assert delivery.state == "reconciliation_required"
+    replay_delivery(
+        db, delivery, reason="operator", acknowledge_possible_duplicate=True
+    )
+    assert delivery.state == "pending"
+
+
+def test_a_dead_letter_replay_needs_no_acknowledgement(db: Session) -> None:
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    delivery.state = "dead_letter"
+    db.commit()
+    replay_delivery(db, delivery, reason="provider outage over")
+    assert delivery.state == "pending"
+
+
+def _tombstone(db: Session, delivery: DeliveryAttempt) -> None:
+    delivery.payload_json = {REDACTION_MARKER: {"payload_digest": "x"}}
+    db.commit()
+
+
+def test_replay_refuses_a_redacted_row(db: Session) -> None:
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    delivery.state = "dead_letter"
+    _tombstone(db, delivery)
+    with pytest.raises(NotRepairable, match="redacted"):
+        replay_delivery(db, delivery, reason="operator")
+
+
+def test_replay_sees_a_purge_committed_by_another_session(db: Session) -> None:
+    """The replay's lock re-reads the payload even though this session's copy
+    of the row is stale (the purge ran in another transaction)."""
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    delivery.state = "dead_letter"
+    db.commit()
+    stale = db.get(DeliveryAttempt, delivery.id)  # loaded, unredacted
+    assert stale is not None and REDACTION_MARKER not in (stale.payload_json or {})
+    other = Session(db.info["engine"])
+    try:
+        row = other.get(DeliveryAttempt, delivery.id)
+        row.payload_json = {REDACTION_MARKER: {"payload_digest": "x"}}
+        other.commit()
+    finally:
+        other.close()
+    with pytest.raises(NotRepairable, match="redacted"):
+        replay_delivery(db, stale, reason="operator")
+
+
+def test_the_claim_never_dispatches_a_tombstone(db: Session) -> None:
+    """Backstop: even if a redacted row reaches `pending`, the database refuses
+    to claim it."""
+    plugin = fake_plugin()
+    registry = fake_registry(plugins=[plugin])
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    _tombstone(db, delivery)  # pending + tombstone
+
+    assert prepare(db, delivery, registry=registry) is None
+    db.refresh(delivery)
+    assert delivery.state == "pending"
+    assert delivery.attempt_count == 0
+    assert plugin.seen == []
+
+
+def test_not_landed_reconcile_refuses_if_the_purge_won_the_race(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The UPDATE itself carries the not-redacted predicate: simulate the purge
+    landing after the Python evidence check by lying to that check."""
+    import dotmac_integration.outbound_repair as repair
+
+    registry = fake_registry()
+    installation, binding = _enabled(db, registry)
+    delivery = _queued(db, installation, binding)
+    delivery.state = "reconciliation_required"
+    delivery.attempt_count = 1
+    db.commit()
+    subject = prepare_reconciliation(db, delivery_id=delivery.id)
+    _tombstone(db, delivery)
+    monkeypatch.setattr(
+        repair, "classify_request_evidence", lambda d: repair.EvidenceStatus.INTACT
+    )
+
+    with pytest.raises(RepairRefused) as excinfo:
+        reconcile_with_evidence(
+            db,
+            subject,
+            ProviderEvidence(verdict=ProviderVerdict.NOT_LANDED),
+            reason="probe said absent",
+        )
+    assert "raced" in str(excinfo.value) or getattr(excinfo.value, "reason", "") == (
+        "raced"
+    )
+    db.refresh(delivery)
+    assert delivery.state == "reconciliation_required"

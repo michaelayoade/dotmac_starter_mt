@@ -608,7 +608,12 @@ LEASE_EXPIRED_ERROR_CODE = "lease_expired_outcome_unknown"
 
 
 def ambiguate_expired_delivery_leases(
-    db: Any, *, now: datetime, delivery_id: Any | None = None
+    db: Any,
+    *,
+    now: datetime,
+    delivery_id: Any | None = None,
+    via: str = "sweep",
+    actor_admin_id: UUID | None = None,
 ) -> list[Any]:
     """Move expired `in_flight` DELIVERY rows to `reconciliation_required`.
 
@@ -660,6 +665,23 @@ def ambiguate_expired_delivery_leases(
             moved.append(row_id)
             # The UPDATE bypasses the session; keep any loaded instance honest.
             db.get(DeliveryAttempt, row_id, populate_existing=True)
+    if moved:
+        # ONE audit event for every path that makes this transition (the sweep
+        # and the claim), so the claim-path ambiguation is never silent.
+        from dotmac_integration import operations
+
+        operations.record_operation(
+            db,
+            action="leases.released",
+            entity_type="delivery_attempt",
+            actor_admin_id=actor_admin_id,
+            details={
+                "count": len(moved),
+                "delivery_ids": [str(i) for i in moved],
+                "state": "reconciliation_required",
+                "via": via,
+            },
+        )
     return moved
 
 
@@ -685,10 +707,14 @@ def claim_delivery(
     """
     from sqlalchemy import or_, select, update
 
+    from dotmac_integration.retention import REDACTION_MARKER
+
     moment = now or datetime.now(UTC)
     # An expired lease is an ambiguous outcome, handled BEFORE the claim so a
     # stranded row can never be taken as if it were fresh work.
-    if ambiguate_expired_delivery_leases(db, now=moment, delivery_id=delivery.id):
+    if ambiguate_expired_delivery_leases(
+        db, now=moment, delivery_id=delivery.id, via="claim"
+    ):
         db.refresh(delivery)
         return False
 
@@ -696,6 +722,10 @@ def claim_delivery(
         DeliveryAttempt.id == delivery.id,
         DeliveryAttempt.state.in_(("pending", "retryable")),
         DeliveryAttempt.leased_until.is_(None),
+        # A retention tombstone is not a payload. Redaction now covers the
+        # replayable terminal states, so a replay racing the purge could leave
+        # a `pending` tombstone; the DATABASE refuses to dispatch it here.
+        DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None),
         # BACKOFF. Without this the public dispatch seam claims a delivery
         # the engine deliberately scheduled for later, and a failing
         # provider is hammered instead of backed off — the retry curve

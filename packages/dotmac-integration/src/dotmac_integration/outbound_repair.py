@@ -104,6 +104,7 @@ from dotmac_integration.models import (
 )
 from dotmac_integration.operations import record_operation, replay_delivery
 from dotmac_integration.retention import (
+    REDACTION_MARKER,
     active_delivery_hold_for,
     is_delivery_redacted,
 )
@@ -1097,13 +1098,20 @@ def reconcile_with_evidence(
     else:
         values = {"error_code": INCONCLUSIVE_CODE, "error_detail": None}
 
+    guards = [
+        DeliveryAttempt.id == subject.delivery_id,
+        DeliveryAttempt.state == _AMBIGUOUS_STATE,
+        DeliveryAttempt.attempt_count == subject.attempt_count,
+    ]
+    if evidence.verdict is ProviderVerdict.NOT_LANDED:
+        # Re-arming must never race the retention purge into a `pending`
+        # tombstone: the database re-checks "not redacted" in the UPDATE.
+        guards.append(
+            DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None)
+        )
     result = db.execute(
         sa.update(DeliveryAttempt)
-        .where(
-            DeliveryAttempt.id == subject.delivery_id,
-            DeliveryAttempt.state == _AMBIGUOUS_STATE,
-            DeliveryAttempt.attempt_count == subject.attempt_count,
-        )
+        .where(*guards)
         .values(**values)
         .execution_options(synchronize_session=False)
     )
