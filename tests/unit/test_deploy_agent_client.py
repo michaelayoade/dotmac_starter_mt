@@ -205,7 +205,13 @@ def test_digest_images_legacy_and_ttl_are_read_only_from_the_signed_plan(
 ) -> None:
     """Top-level CP fields for these are not part of the schema at all."""
     config = make_config(tmp_path, Keys())
-    for field in ("params_env_digest", "images", "legacy", "lease_ttl_seconds"):
+    for field in (
+        "params_env_digest",
+        "images",
+        "legacy",
+        "lease_ttl_seconds",
+        "roles",
+    ):
         document = make_materials()
         document[field] = "anything"
         with pytest.raises(Refusal) as caught:

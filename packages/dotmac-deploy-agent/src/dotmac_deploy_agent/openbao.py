@@ -18,11 +18,13 @@ an exception. The delivery identity has no `role-id` read and no `list`.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Final, cast
 
 from .refusal import Refusal
 from .transport import Transport
 
+LOG = logging.getLogger("dotmac.deploy_agent")
 APPROLE_DELIVERY: Final = "auth/approle-delivery"
 APPROLE_APPS: Final = "auth/approle-apps"
 
@@ -159,7 +161,11 @@ class OpenBaoSession:
         )
         path = self._field(document.get("data"), "creation_path")
         # The lookup may report the path with the namespace prefix (T1 proves which).
-        if path not in (expected, f"{self._namespace}/{expected}"):
+        if path == expected:
+            LOG.info("wrapping creation_path form=bare")
+        elif path == f"{self._namespace}/{expected}":
+            LOG.info("wrapping creation_path form=namespaced")
+        else:
             raise Refusal("secret_wrap_unexpected_path")
 
     def unwrap(self, wrapping_token: str) -> tuple[str, str | None]:

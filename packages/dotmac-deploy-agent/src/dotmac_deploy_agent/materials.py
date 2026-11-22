@@ -33,14 +33,13 @@ _REPOSITORY: Final = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,254}")
 MATERIALS_KEYS: Final = frozenset(
     {
         "schema", "pending", "store_now", "dispatch_id", "target_ref", "params",
-        "app_image", "previous_app_image", "roles", "dispatch_envelope",
-        "plan_snapshot",
+        "app_image", "previous_app_image", "dispatch_envelope", "plan_snapshot",
     }
 )  # fmt: skip
 #: Removed from the first draft: they are READ from the signed plan instead, so a
 #: CP-supplied copy could only ever disagree with what Control signed.
 FORBIDDEN_KEYS: Final = frozenset(
-    {"params_env_digest", "images", "legacy", "lease_ttl_seconds", "bindings"}
+    {"params_env_digest", "images", "legacy", "lease_ttl_seconds", "bindings", "roles"}
 )
 ROLE_KEYS: Final = frozenset({"role", "single_use"})
 MAX_LEASE_TTL: Final = 3600
@@ -244,22 +243,6 @@ def check_shape(document: Mapping[str, object]) -> None:
     for key in ("dispatch_envelope", "plan_snapshot"):
         if not isinstance(document.get(key), Mapping):
             raise Refusal("materials_invalid")
-    roles = document.get("roles")
-    if not isinstance(roles, list):
-        raise Refusal("materials_invalid")
-    seen: set[str] = set()
-    for row in roles:
-        if not isinstance(row, Mapping) or set(row) != ROLE_KEYS:
-            raise Refusal("materials_invalid")
-        role = row["role"]
-        if (
-            not isinstance(role, str)
-            or not _SEGMENT.fullmatch(role)
-            or role in seen
-            or type(row["single_use"]) is not bool
-        ):
-            raise Refusal("materials_invalid")
-        seen.add(role)
     snapshot = cast("Mapping[str, object]", document["plan_snapshot"])
     if document.get("app_image") != expected_app_image(snapshot):
         raise Refusal("transfer_repository_mismatch")
@@ -304,7 +287,8 @@ def parse_materials(
         app_image=app_image,
         previous_app_image=previous,
         params_env_digest=_digest(binding.get("params_env_digest")),
-        roles=_parse_roles(document.get("roles")),
+        # Roles come ONLY from the signed plan: mint for nothing else.
+        roles=_parse_roles(binding.get("roles", [])),
         legacy=_parse_legacy(binding.get("legacy")),
         images=_parse_images(binding.get("images")),
         lease_ttl_seconds=ttl,

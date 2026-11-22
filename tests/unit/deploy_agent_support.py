@@ -236,6 +236,7 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "active_binding_names": overrides.pop("active_binding_names", []),
         "legacy": overrides.pop("legacy", None),
         "companion_order": None,
+        "roles": overrides.pop("roles", []),
     }
     snapshot: dict[str, object] = {
         "deploy_binding": binding,
@@ -263,7 +264,6 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "params": params,
         "app_image": app_image,
         "previous_app_image": PREVIOUS_IMAGE,
-        "roles": [],
     }
     document.update(overrides)
     return document

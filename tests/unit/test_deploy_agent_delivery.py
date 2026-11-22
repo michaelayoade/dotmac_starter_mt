@@ -278,3 +278,68 @@ def test_the_launcher_hands_the_runner_the_signed_plan_digest(tmp_path: Path) ->
     assert spec.agent_config == rig.config.config_path
     assert dict(spec.bindings_env) == dict(rig.config.bindings_env)
     assert spec.credentials_directory == rig.environ["CREDENTIALS_DIRECTORY"]
+
+
+def test_roles_come_only_from_the_signed_plan(tmp_path: Path) -> None:
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    document = make_materials(roles=ROLES[:1])
+    document["roles"] = [{"role": "evil", "single_use": False}]  # CP-supplied, unsigned
+    rig.cp.materials = document
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "materials_invalid")
+    assert rig.bao.paths == [] and rig.runner.specs == []
+    # And a plan that binds no roles mints nothing.
+    rig.cp.materials = make_materials()
+    assert rig.launcher.run_once().outcome == "completed"
+    assert rig.bao.paths == []
+
+
+def test_the_creation_path_form_seen_is_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    rig = deliver_rig(tmp_path, ROLES[:1])
+    rig.launcher.run_once()
+    assert "creation_path form=bare" in caplog.text
+    caplog.clear()
+    rig2 = deliver_rig(tmp_path / "ns", ROLES[:1])
+    rig2.bao.lookup_path = (
+        "staging/erp/auth/approle-apps/role/erp-staging-web/secret-id"
+    )
+    rig2.launcher.run_once()
+    assert "creation_path form=namespaced" in caplog.text
+
+
+def test_no_file_in_the_run_directory_is_group_or_world_accessible(
+    tmp_path: Path,
+) -> None:
+    """RuntimeDirectoryMode 0711 is traverse-only: the product directory and the
+    per-role directories may carry `x` for others and nothing else; every other
+    directory is 0700 and every file has no group or other bit at all."""
+    import stat
+
+    rig = deliver_rig(tmp_path)
+    rig.runner.effect = lambda spec: _snapshot(rig, seen)
+    seen: list[tuple[Path, int]] = []
+    rig.launcher.run_once()
+    seen += _snapshot(rig, [])
+    assert seen
+    traverse_only = {
+        rig.config.run_dir,
+        *(rig.config.run_dir / r["role"] for r in ROLES),
+    }
+    for path, mode in seen:
+        if stat.S_ISDIR(mode):
+            if path in traverse_only:
+                assert mode & 0o066 == 0, path  # no group/other read or write
+            else:
+                assert mode & 0o077 == 0, path
+        else:
+            assert mode & 0o077 == 0, path
+
+
+def _snapshot(rig: Rig, into: list[tuple[Path, int]]) -> list[tuple[Path, int]]:
+    for path in sorted(rig.config.run_dir.rglob("*")):
+        into.append((path, path.lstat().st_mode))
+    into.append((rig.config.run_dir, rig.config.run_dir.lstat().st_mode))
+    return into
