@@ -19,7 +19,7 @@ allocation (this ships with the next allocated release).
   and installs nothing; the composing assembly declares the contract (owner
   `starter/delivery`, command schema, no result schema) and a connector claims
   its digest. Pinned digest
-  `5e84feda870c42573615d32e0b90d5cd7204b40ecbe01c9567d86a0c3d85247c`, tested in
+  `b746eb0073de9d148cc659dd3e7282a19d40e1e0296ade4a8ec8223ba651be52`, tested in
   `tests/unit/test_email_send_contract.py`. A schema change is a new `.vN` id.
 
 ## 0.1.0a110 — Release inventory

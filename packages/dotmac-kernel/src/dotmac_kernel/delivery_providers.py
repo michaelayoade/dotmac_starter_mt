@@ -843,10 +843,11 @@ EMAIL_SEND_COMMAND_SCHEMA: dict[str, object] = {
     "additionalProperties": False,
     "required": ["dispatch_id", "address"],
     "description": (
-        "At least one of text/html must be a string. text, html and each header "
-        "value are limited in UTF-8 BYTES (MAX_PART_BYTES), which JSON Schema "
-        "cannot count: maxLength bounds characters only, and the producer and "
-        "the connector enforce the byte limit."
+        "At least one of text/html must be a string. text and html are limited "
+        "in UTF-8 BYTES (MAX_PART_BYTES), which JSON Schema cannot count: "
+        "maxLength bounds characters only, and the producer and the connector "
+        "enforce the byte limit. Each header value is limited in CHARACTERS "
+        "(MAX_HEADER_VALUE_LENGTH) and may not contain CR or LF."
     ),
     "anyOf": [
         {"required": ["text"], "properties": {"text": {"type": "string"}}},
@@ -877,7 +878,11 @@ EMAIL_SEND_COMMAND_SCHEMA: dict[str, object] = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                name: {"type": "string", "maxLength": MAX_HEADER_VALUE_LENGTH}
+                name: {
+                    "type": "string",
+                    "maxLength": MAX_HEADER_VALUE_LENGTH,
+                    "not": {"pattern": "[\\r\\n]"},
+                }
                 for name in ALLOWED_HEADERS
             },
         },

@@ -17,7 +17,7 @@ from dotmac_kernel.delivery_providers import (
 #: The digest a connector claims (copied, never derived by the connector). A
 #: change to the schema changes this; the published contract is then succeeded
 #: by a new `.vN` id (ADR-0024 11), not edited.
-PUBLISHED_DIGEST = "5e84feda870c42573615d32e0b90d5cd7204b40ecbe01c9567d86a0c3d85247c"
+PUBLISHED_DIGEST = "b746eb0073de9d148cc659dd3e7282a19d40e1e0296ade4a8ec8223ba651be52"
 
 CONTRACT = CapabilityContract(
     capability_id=EMAIL_SEND_CAPABILITY_ID,
@@ -77,6 +77,9 @@ def test_valid_commands_are_accepted(payload: dict[str, object]) -> None:
         {**GOOD, "text": "x", "subject": "a\r\nBcc: z@y.example"},
         {**GOOD, "text": "x", "subject": "a\nb"},
         {**GOOD, "text": "x" * (1024 * 1024 + 1)},
+        {**GOOD, "text": "x", "headers": {"Reply-To": "h@b.example\r\nBcc: z@y.x"}},
+        {**GOOD, "text": "x", "headers": {"Reply-To": "h@b.example\n"}},
+        {**GOOD, "text": "x", "headers": {"Reply-To": "h@b.example" + "x" * 998}},
         {**GOOD, "text": "x", "unknown": 1},
         {**GOOD, "text": "x", "attachments": [{"kind": "document"}]},
         {
@@ -101,4 +104,3 @@ def test_malformed_commands_are_refused(payload: dict[str, object]) -> None:
 def test_header_names_follow_the_kernel_allowlist() -> None:
     headers = EMAIL_SEND_COMMAND_SCHEMA["properties"]["headers"]["properties"]  # type: ignore[index]
     assert set(headers) == set(ALLOWED_HEADERS)
-
