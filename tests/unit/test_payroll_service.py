@@ -318,6 +318,7 @@ def test_finalization_creates_employee_and_external_liabilities_and_settles_part
             run_id=run.id,
             approved_by_id=creator,
             approved_at=NOW,
+            separation_of_duties=True,
         )
     approve_payroll_run(
         db, tenant_id=tenant.id, run_id=run.id, approved_by_id=approver, approved_at=NOW
