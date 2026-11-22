@@ -24,6 +24,7 @@ from dotmac_collections.holds import (
 from dotmac_collections.models import (
     CollectionCase,
     CollectionNoticeRequest,
+    CollectionStepAttempt,
     CollectionSubjectAccess,
 )
 from dotmac_collections.receivables import (
@@ -594,7 +595,11 @@ def test_lift_re_arms_the_ladder_and_holds_again_when_still_past_the_instant(
     )
     lifted = _lift(db, at=hold_from + timedelta(hours=3), timer=timer)
     assert isinstance(lifted, HoldLifted)
-    assert _handle(timer, db, "next_step", str(opened.case_id)) is not None
+    # The step was long past due when the hold lifted: skipped, never re-sent.
+    assert _handle(timer, db, "next_step", str(opened.case_id)) is None
+    assert [a.request_kind for a in db.scalars(select(CollectionStepAttempt))] == [
+        "skipped"
+    ]
     assert len(_events(db, True)) == 2
     assert (
         get_collection_subject_state(db, scope=SCOPE, subject_ref=SUBJECT).state
@@ -902,14 +907,141 @@ def test_the_exposure_wake_is_accepted_and_retired_once_actionable(
         )
 
 
+def _ladder(db: Session) -> UUID:
+    """Notices at due + 7 days and due + 30 days, counted from the due date."""
+
+    from dotmac_collections.policies import (
+        PolicyPublicationV1,
+        PolicyStepDraftV1,
+        PolicyVersionDraftV1,
+    )
+    from dotmac_collections.service import (
+        CollectionPolicyService,
+        CreateCollectionPolicyV1,
+    )
+
+    CollectionPolicyService.create(
+        db,
+        CreateCollectionPolicyV1(
+            policy_id=uuid4(),
+            scope=SCOPE,
+            policy_code="standard_arrears",
+            description="Ladder",
+        ),
+    )
+    version_id = uuid4()
+    CollectionPolicyService.publish(
+        db,
+        scope=SCOPE,
+        draft=PolicyVersionDraftV1(
+            policy_code="standard_arrears",
+            reason_code="invoice_overdue",
+            collection_timing="arrears",
+            grace=None,
+            steps=tuple(
+                PolicyStepDraftV1(
+                    code=f"notice_{days}",
+                    ordinal=ordinal,
+                    offset=timedelta(days=days),
+                    offset_anchor="exposure_at",
+                    request_kind="notice",
+                    action_code=None,
+                    purpose_code="overdue_notice",
+                    effect_scope=None,
+                    receipt_required=False,
+                    retry_offsets=(),
+                )
+                for ordinal, days in ((1, 7), (2, 30))
+            ),
+        ),
+        publication=PolicyPublicationV1(
+            policy_version_id=version_id,
+            version=1,
+            effective_from=NOW,
+            actor_ref="staff:1",
+            reason="ladder",
+            published_at=NOW,
+        ),
+    )
+    return version_id
+
+
+def _skips(db: Session) -> list[str]:
+    return [
+        a.policy_step_code
+        for a in db.scalars(select(CollectionStepAttempt))
+        if a.request_kind == "skipped"
+    ]
+
+
 def test_reminders_count_from_the_due_date_not_from_when_the_case_opened(
     db: Session,
 ) -> None:
-    policy = _policy(db)
+    policy = _ladder(db)
     timer = FakeCollectionsTimer()
     due = NOW + DUE_AFTER
-    late = due + timedelta(days=20)
     obs = _observation(due_at=due, hold_from=None)
-    opened = _assess(db, policy, obs, timer, late)
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=2))
     step = _handle(timer, db, "next_step", str(opened.case_id))
-    assert step is not None and step.due_at == due
+    assert step is not None and step.due_at == due + timedelta(days=7)
+    assert _skips(db) == []
+
+
+def test_a_case_opened_after_the_30_day_notice_skips_both_and_sends_neither(
+    db: Session,
+) -> None:
+    policy = _ladder(db)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    obs = _observation(due_at=due, hold_from=None)
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=45))
+    assert isinstance(opened, CaseAssessed)
+    assert [i for i in timer.identities if i.purpose == "next_step"] == []
+    assert _skips(db) == ["notice_7", "notice_30"]
+    assert db.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_a_case_opened_at_due_plus_10_arms_only_the_30_day_notice(
+    db: Session,
+) -> None:
+    policy = _ladder(db)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    obs = _observation(due_at=due, hold_from=None)
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=10))
+    step = _handle(timer, db, "next_step", str(opened.case_id))
+    assert step is not None and step.due_at == due + timedelta(days=30)
+    assert _skips(db) == ["notice_7"]
+    assert db.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_a_resumed_case_skips_the_reminders_that_fell_due_while_paused(
+    db: Session,
+) -> None:
+    policy = _ladder(db)
+    timer = FakeCollectionsTimer()
+    due = NOW + DUE_AFTER
+    obs = _observation(due_at=due, hold_from=None)
+    opened = _assess(db, policy, obs, timer, due + timedelta(days=1))
+
+    def move(to_state: str, at: datetime) -> None:
+        CollectionCaseService.transition(
+            db,
+            command=CaseLifecycleCommandV1(
+                command_id=uuid4(),
+                idempotency_key=f"move:{to_state}",
+                scope=SCOPE,
+                case_id=opened.case_id,
+                actor_ref="staff:1",
+                reason_code="staff_decision",
+                occurred_at=at,
+            ),
+            to_state=to_state,  # type: ignore[arg-type]
+            timer=timer,
+        )
+
+    move("paused", due + timedelta(days=2))
+    move("active", due + timedelta(days=12))
+    step = _handle(timer, db, "next_step", str(opened.case_id))
+    assert step is not None and step.due_at == due + timedelta(days=30)
+    assert _skips(db) == ["notice_7"]

@@ -570,7 +570,7 @@ def test_step_due_under_a_live_hold_writes_no_notice(
     tenant_id, _ = _seed_tenants(admin_url)
     scope = TenantScope(tenant_id)
     with _tenant_session(app_url, tenant_id) as session:
-        policy = _publish_policy(session, scope)
+        policy = _publish_ladder(session, scope)
         timer = FakeCollectionsTimer()
         opened = _assess_open(session, scope, policy, timer, NOW)
         assert isinstance(opened, CaseAssessed)
@@ -582,7 +582,7 @@ def test_step_due_under_a_live_hold_writes_no_notice(
             command=ProcessCollectionStepDueV1(
                 scope=scope,
                 trigger=_trigger(timer, session, scope, opened.case_id, "next_step"),
-                processed_at=NOW,
+                processed_at=NOW + timedelta(days=7),
             ),
             reader=_reader(_held_position(scope)),
             timer=timer,
@@ -601,7 +601,7 @@ def test_the_last_lift_re_arms_the_ladder_of_each_active_case(
     scope = TenantScope(tenant_id)
     subject = "subscriber:concurrency"
     with _tenant_session(app_url, tenant_id) as session:
-        policy = _publish_policy(session, scope)
+        policy = _publish_ladder(session, scope)
         timer = FakeCollectionsTimer()
         CollectionHoldService.place(
             session, _place_command(scope, subject, "dispute:a")
@@ -633,7 +633,7 @@ def test_two_simultaneous_last_lifts_still_re_arm_the_ladder(
     subject = "subscriber:concurrency"
     timer = FakeCollectionsTimer()
     with _tenant_session(app_url, tenant_id) as session:
-        policy = _publish_policy(session, scope)
+        policy = _publish_ladder(session, scope)
         for ref in ("dispute:one", "dispute:two"):
             CollectionHoldService.place(session, _place_command(scope, subject, ref))
         opened = _assess_open(session, scope, policy, timer, NOW)
@@ -787,7 +787,7 @@ def test_last_lift_racing_a_case_opening_arms_the_ladder_or_refuses(
     subject = "subscriber:concurrency"
     timer = FakeCollectionsTimer()
     with _tenant_session(app_url, tenant_id) as session:
-        policy = _publish_policy(session, scope)
+        policy = _publish_ladder(session, scope)
         CollectionHoldService.place(
             session, _place_command(scope, subject, "dispute:r")
         )
@@ -874,3 +874,122 @@ def test_last_lift_racing_a_case_opening_arms_the_ladder_or_refuses(
             assert isinstance(lifted, HoldLifted)
         # Either way the new case ends with its reminder steps armed.
         assert timer.current(session, step) is not None
+
+
+def _publish_ladder(session, scope) -> uuid.UUID:
+    """Notices at due + 7 days and due + 30 days (counted from the due date)."""
+
+    from dotmac_collections.policies import (
+        PolicyPublicationV1,
+        PolicyStepDraftV1,
+        PolicyVersionDraftV1,
+    )
+    from dotmac_collections.service import (
+        CollectionPolicyService,
+        CreateCollectionPolicyV1,
+    )
+
+    code = f"ladder_{uuid.uuid4().hex}"
+    CollectionPolicyService.create(
+        session,
+        CreateCollectionPolicyV1(
+            policy_id=uuid.uuid4(),
+            scope=scope,
+            policy_code=code,
+            description="Skip-past-due ladder",
+        ),
+    )
+    version_id = uuid.uuid4()
+    CollectionPolicyService.publish(
+        session,
+        scope=scope,
+        draft=PolicyVersionDraftV1(
+            policy_code=code,
+            reason_code="invoice_overdue",
+            collection_timing="arrears",
+            grace=None,
+            steps=tuple(
+                PolicyStepDraftV1(
+                    code=f"notice_{days}",
+                    ordinal=ordinal,
+                    offset=timedelta(days=days),
+                    offset_anchor="exposure_at",
+                    request_kind="notice",
+                    action_code=None,
+                    purpose_code="overdue_notice",
+                    effect_scope=None,
+                    receipt_required=False,
+                    retry_offsets=(),
+                )
+                for ordinal, days in ((1, 7), (2, 30))
+            ),
+        ),
+        publication=PolicyPublicationV1(
+            policy_version_id=version_id,
+            version=1,
+            effective_from=NOW - timedelta(days=400),
+            actor_ref="service:canary",
+            reason="ladder",
+            published_at=NOW - timedelta(days=400),
+        ),
+    )
+    return version_id
+
+
+def _skipped_steps(session) -> list[str]:
+    from dotmac_collections.models import CollectionStepAttempt
+
+    return sorted(
+        a.policy_step_code
+        for a in session.scalars(select(CollectionStepAttempt))
+        if a.request_kind == "skipped"
+    )
+
+
+def test_a_case_opened_over_30_days_late_sends_neither_notice(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_ladder(session, scope)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, DUE + timedelta(days=45))
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        step = TimerIdentityV1(
+            scope,
+            "collections.case",
+            "collection_case",
+            str(opened.case_id),
+            "next_step",
+        )
+        assert timer.current(session, step) is None
+        assert _skipped_steps(session) == ["notice_30", "notice_7"]
+        assert session.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+def test_a_case_opened_at_due_plus_10_arms_only_the_30_day_notice(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_ladder(session, scope)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, DUE + timedelta(days=10))
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        step = TimerIdentityV1(
+            scope,
+            "collections.case",
+            "collection_case",
+            str(opened.case_id),
+            "next_step",
+        )
+        handle = timer.current(session, step)
+        assert handle is not None and handle.due_at == DUE + timedelta(days=30)
+        assert _skipped_steps(session) == ["notice_7"]
+        assert session.scalars(select(CollectionNoticeRequest)).all() == []

@@ -1763,6 +1763,7 @@ class CollectionCaseService:
                             scope=command.scope,
                             case_row=row,
                             recorded_at=assessed_at,
+                            skip_past_due=opened,
                         )
                     _sync_hold_timer(
                         session,
@@ -1860,6 +1861,7 @@ class CollectionCaseService:
                             scope=command.scope,
                             case_row=row,
                             recorded_at=command.occurred_at,
+                            skip_past_due=True,
                         )
                 else:
                     _cancel_case_timer(
@@ -2576,6 +2578,8 @@ def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgre
             step=step,
         )
         if request is None:
+            if _step_skipped(db, scope, case_row.id, step.step_code):
+                continue  # passed over, never sent
             return _StepProgress(step, False, request_at, accepted_notice_receipt_at)
         if not step.receipt_required:
             request_at = _stored_utc(request.requested_at)
@@ -2595,6 +2599,71 @@ def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgre
         if step.request_kind == "notice":
             accepted_notice_receipt_at = _stored_utc(receipt.observed_at)
     return _StepProgress(None, False, request_at, accepted_notice_receipt_at)
+
+
+def _step_skipped(db: Session, scope: Scope, case_id: UUID, step_code: str) -> bool:
+    model = _models(scope).step_attempt
+    return (
+        db.scalar(
+            _where_scope(
+                select(model.id)
+                .where(
+                    model.case_id == case_id,
+                    model.policy_step_code == step_code,
+                    model.request_kind == "skipped",
+                )
+                .limit(1),
+                scope,
+                model,
+            )
+        )
+        is not None
+    )
+
+
+def _skip_past_due_steps(
+    db: Session, *, scope: Scope, case_row: _CaseRow, now: datetime
+) -> None:
+    """On open or resume, pass over reminders already due before ``now``.
+
+    Only notice steps counted from the due date can be judged without the earlier
+    steps' outcomes; the first step that is not yet due (or is not of that kind) ends
+    the pass. Each is recorded as a ``skipped`` step attempt, never sent, so replay and
+    audit see it.
+    """
+
+    anchor = _stored_utc(case_row.due_at or case_row.opened_at)
+    for step in _policy_steps(db, scope, case_row.policy_version_id):
+        if _latest_step_request(
+            db, scope=scope, case_id=case_row.id, step=step
+        ) is not None or _step_skipped(db, scope, case_row.id, step.step_code):
+            continue
+        due = anchor + timedelta(seconds=step.offset_seconds)
+        if (
+            step.request_kind != "notice"
+            or step.offset_anchor != "exposure_at"
+            or due >= now.astimezone(UTC)
+        ):
+            return
+        key = (
+            f"collections:{scope_segment(scope)}:{case_row.id}:{step.step_code}:skipped"
+        )
+        _append_attempt(
+            db,
+            scope=scope,
+            case_id=case_row.id,
+            policy_step_code=step.step_code,
+            attempt_ordinal=_next_attempt_ordinal(
+                db, scope=scope, case_id=case_row.id, step_code=step.step_code
+            ),
+            request_kind="skipped",
+            request_id=uuid5(NAMESPACE_URL, key),
+            fingerprint=fingerprint_of(
+                {"reason": "past_due_on_open", "step_due_at": due.isoformat()}
+            ),
+            attempted_at=now,
+        )
+        db.flush()
 
 
 def _step_due_at(case_row: _CaseRow, progress: _StepProgress) -> datetime:
@@ -2626,7 +2695,10 @@ def _schedule_next_policy_step(
     scope: Scope,
     case_row: _CaseRow,
     recorded_at: datetime,
+    skip_past_due: bool = False,
 ) -> None:
+    if skip_past_due:
+        _skip_past_due_steps(db, scope=scope, case_row=case_row, now=recorded_at)
     progress = _step_progress(db, scope, case_row)
     if progress.step is None or progress.request_pending:
         return
@@ -2734,7 +2806,7 @@ def _append_attempt(
     case_id: UUID,
     policy_step_code: str,
     attempt_ordinal: int,
-    request_kind: Literal["notice", "action"],
+    request_kind: Literal["notice", "action", "skipped"],
     request_id: UUID,
     fingerprint: str,
     attempted_at: datetime,
@@ -3724,6 +3796,7 @@ class CollectionHoldService:
                         scope=command.scope,
                         case_row=_case(session, command.scope, case_id),
                         recorded_at=command.lifted_at,
+                        skip_past_due=True,
                     )
             _recompute_subject(
                 session,

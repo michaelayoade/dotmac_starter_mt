@@ -57,6 +57,12 @@ unchanged.
   at once). A hold instant that moves later disengages; leaving `active` disengages.
 - `collection_cases.due_at` (the exposure's verified due date): reminders anchored on
   `exposure_at` count from the due date, not from when the case opened.
+- Late cases never re-send past reminders (ruling 2026-11-22): when a case opens, resumes
+  or its last hold lifts, every notice step counted from the due date whose instant is
+  already before that moment is passed over and recorded as a `skipped` step attempt
+  (cl_0002 widens the attempt-kind check to `notice`, `action`, `skipped`), and the
+  ladder carries on from the first step not yet due. The first step that is an action,
+  or counts from a request or receipt, ends the pass. Replay and audit read the skips.
 - `republish_subject_state` (`RepublishSubjectStateV1`): re-emits the subject's current
   state under the next sequence version, for a product that must apply the state on
   service activation or transfer and would otherwise see a stale version.

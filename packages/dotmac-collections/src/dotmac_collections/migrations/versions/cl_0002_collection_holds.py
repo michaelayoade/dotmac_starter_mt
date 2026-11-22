@@ -43,7 +43,23 @@ def _created_at() -> sa.Column[datetime]:
     )
 
 
+def _allow_skipped_attempts(table: str, constraint: str, kinds: str) -> None:
+    """A skipped reminder is recorded as a step attempt of kind ``skipped``."""
+
+    op.drop_constraint(constraint, table, schema=_SCHEMA, type_="check")
+    op.create_check_constraint(
+        constraint, table, f"request_kind IN ({kinds})", schema=_SCHEMA
+    )
+
+
+_KINDS_A2 = "'notice', 'action'"
+_KINDS_A3 = "'notice', 'action', 'skipped'"
+
+
 def _upgrade_tenant_plane() -> None:
+    _allow_skipped_attempts(
+        "collection_step_attempts", "ck_collection_step_attempts_kind", _KINDS_A3
+    )
     op.add_column(
         "collection_cases",
         sa.Column("access_hold_from", sa.DateTime(timezone=True)),
@@ -154,6 +170,11 @@ def _upgrade_tenant_plane() -> None:
 
 
 def _upgrade_platform_plane() -> None:
+    _allow_skipped_attempts(
+        "platform_collection_step_attempts",
+        "ck_platform_collection_step_attempts_kind",
+        _KINDS_A3,
+    )
     op.add_column(
         "platform_collection_cases",
         sa.Column("access_hold_from", sa.DateTime(timezone=True)),
@@ -307,6 +328,11 @@ def downgrade() -> None:
         for table in reversed(PLATFORM_TABLES):
             op.drop_table(table, schema=_SCHEMA)
         op.execute(f"DROP SEQUENCE {_SCHEMA}.{PLATFORM_SEQUENCE};")
+        _allow_skipped_attempts(
+            "platform_collection_step_attempts",
+            "ck_platform_collection_step_attempts_kind",
+            _KINDS_A2,
+        )
         op.drop_column("platform_collection_cases", "due_at", schema=_SCHEMA)
         op.drop_column(
             "platform_collection_cases", "access_hold_engaged_at", schema=_SCHEMA
@@ -316,6 +342,9 @@ def downgrade() -> None:
         for table in reversed(TENANT_TABLES):
             op.drop_table(table, schema=_SCHEMA)
         op.execute(f"DROP SEQUENCE {_SCHEMA}.{TENANT_SEQUENCE};")
+        _allow_skipped_attempts(
+            "collection_step_attempts", "ck_collection_step_attempts_kind", _KINDS_A2
+        )
         op.drop_column("collection_cases", "due_at", schema=_SCHEMA)
         op.drop_column("collection_cases", "access_hold_engaged_at", schema=_SCHEMA)
         op.drop_column("collection_cases", "access_hold_from", schema=_SCHEMA)
