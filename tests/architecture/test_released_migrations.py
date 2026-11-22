@@ -8336,6 +8336,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a7": (
+        "dotmac-payroll",
+        "6f3a0b9df85e3a99dfd7e1654845cb2fa776299c",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+            "py_0002_mode_and_run_cancel.py": (
+                "8743517c31f90ec941bf57a6ddb93040c4b2b468c06bec0b633b0900e2805135"
+            ),
+            "py_0003_settlement_reversal.py": (
+                "4ef14914aab73e7b40ba21f060a05eba5878bfc7621534618c17ac68efc42135"
+            ),
+            "py_0004_liability_adjustments.py": (
+                "fa09a903d2368e366d31e62986c8ef9d499ca3b1be4ce7c8d4a41af46d474e5f"
+            ),
+        },
+    ),
     "dotmac-payroll-v0.1.0a6": (
         "dotmac-payroll",
         "cd9f72b0874312d9217e481f359ccaa5376603b3",
