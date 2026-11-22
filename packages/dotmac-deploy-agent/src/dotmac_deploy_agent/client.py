@@ -57,7 +57,7 @@ class TargetClient:
             f"/{endpoint}"
         )
 
-    def _call(
+    def call(
         self, method: str, endpoint: str, payload: dict[str, object] | None
     ) -> Reply:
         path = self._path(endpoint)
@@ -123,10 +123,10 @@ class TargetClient:
 
     def materials(self) -> Reply | None:
         """The pending signed dispatch materials, or None when nothing is pending."""
-        reply = self._call("GET", "materials", None)
+        reply = self.call("GET", "materials", None)
         if reply.document.get("pending") is False:
             return None
         return reply
 
     def post_observation(self, observation: dict[str, object]) -> Reply:
-        return self._call("POST", "observations", observation)
+        return self.call("POST", "observations", observation)

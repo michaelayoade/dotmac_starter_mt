@@ -99,3 +99,40 @@ def test_the_legacy_source_is_only_lstat_checked_never_opened() -> None:
 def test_no_shell_true_anywhere() -> None:
     for path in SOURCE.glob("*.py"):
         assert "shell=True" not in path.read_text(), path.name
+
+
+UNIT = (
+    ROOT
+    / "packages/dotmac-deploy-agent/deploy/systemd"
+    / "dotmac-deploy-agent@.service"
+)
+
+
+def unit_directives(text: str) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        if line.startswith(("#", "[")) or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        found.setdefault(key.strip(), []).append(value.strip())
+    return found
+
+
+def test_the_unit_is_non_root_capability_free_and_carries_no_environment() -> None:
+    directives = unit_directives(UNIT.read_text())
+    assert directives["User"] == ["dotmac-deploy"]
+    assert directives["CapabilityBoundingSet"] == [""]
+    assert directives["AmbientCapabilities"] == [""]
+    assert directives["NoNewPrivileges"] == ["true"]
+    assert "Environment" not in directives and "EnvironmentFile" not in directives
+    # Secret-zero and the PoP key are credentials, not environment.
+    assert all(
+        v.startswith(("pop-key:", "openbao-delivery-token:"))
+        for v in directives["LoadCredential"]
+    )
+
+
+def test_the_unit_guard_bites() -> None:
+    planted = "User=root\nAmbientCapabilities=CAP_CHOWN\nEnvironment=X=1\n"
+    directives = unit_directives(planted)
+    assert directives["AmbientCapabilities"] != [""] and "Environment" in directives

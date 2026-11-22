@@ -27,10 +27,13 @@ _SECRET_REF: Final = re.compile(
     r"bao://([a-z0-9][a-z0-9_-]*)/([a-z0-9][a-z0-9_-]*)/kv/"
     r"([a-z][a-z0-9_-]*)/([A-Za-z][A-Za-z0-9_]*)"
 )
+_REPOSITORY: Final = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,254}")
+_ARCHIVE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _TOP: Final = frozenset(
     {
         "schema", "pending", "store_now", "dispatch_id", "target_ref", "params",
         "app_image", "previous_app_image", "params_env_digest", "bindings", "legacy",
+        "images", "lease_ttl_seconds",
     }
 )  # fmt: skip
 
@@ -60,6 +63,24 @@ class LegacyPolicy:
 
 
 @dataclass(frozen=True)
+class ImageSpec:
+    """One release image. For `source = transfer`, `planned_repository` is the
+    loopback repository Control planned and pinned with the SAME manifest digest."""
+
+    name: str
+    source: str
+    repository: str
+    manifest_digest: str
+    planned_repository: str
+    image_id: str | None
+    archive: str | None
+
+    @property
+    def planned_reference(self) -> str:
+        return f"{self.planned_repository}@{self.manifest_digest}"
+
+
+@dataclass(frozen=True)
 class Materials:
     dispatch_id: str
     target_ref: str
@@ -69,6 +90,8 @@ class Materials:
     params_env_digest: str
     bindings: tuple[RoleBindings, ...]
     legacy: LegacyPolicy | None
+    images: tuple[ImageSpec, ...]
+    lease_ttl_seconds: int
 
 
 def _exact(value: object, keys: frozenset[str]) -> dict[str, object]:
@@ -175,6 +198,45 @@ def parse_materials(document: Mapping[str, object], config: AgentConfig) -> Mate
             _text(row["version"], _ID), names, sha, parse_stamp(expires)
         )
 
+    images: list[ImageSpec] = []
+    image_names: set[str] = set()
+    for item in _list(document.get("images")):
+        row = _exact(
+            item,
+            frozenset(
+                {
+                    "name", "source", "repository", "manifest_digest",
+                    "planned_repository", "image_id", "archive",
+                }
+            ),
+        )  # fmt: skip
+        name = _text(row["name"], _ROLE)
+        manifest = _text(row["manifest_digest"], DIGEST)
+        image_id = row["image_id"]
+        archive = row["archive"]
+        if (
+            name in image_names
+            or row["source"] not in ("transfer", "pull")
+            or not (image_id is None or _text(image_id, DIGEST))
+            or not (archive is None or _text(archive, _ARCHIVE))
+        ):
+            raise Refusal("materials_invalid")
+        image_names.add(name)
+        images.append(
+            ImageSpec(
+                name,
+                str(row["source"]),
+                _text(row["repository"], _REPOSITORY),
+                manifest,
+                _text(row["planned_repository"], _REPOSITORY),
+                cast("str | None", image_id),
+                cast("str | None", archive),
+            )
+        )
+    ttl = document.get("lease_ttl_seconds")
+    if type(ttl) is not int or not 60 <= ttl <= 3600:
+        raise Refusal("lease_ttl_invalid")
+
     return Materials(
         dispatch_id=_text(document.get("dispatch_id"), _ID),
         target_ref=config.target_ref,
@@ -184,4 +246,6 @@ def parse_materials(document: Mapping[str, object], config: AgentConfig) -> Mate
         params_env_digest=expected_digest,
         bindings=tuple(roles),
         legacy=legacy,
+        images=tuple(images),
+        lease_ttl_seconds=ttl,
     )

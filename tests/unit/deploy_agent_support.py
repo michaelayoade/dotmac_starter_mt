@@ -24,17 +24,22 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from dotmac_deploy_agent import wire
 from dotmac_deploy_agent.client import TargetClient
+from dotmac_deploy_agent.commands import CommandResult, ReadOnlyCommands
 from dotmac_deploy_agent.config import AgentConfig
 from dotmac_deploy_agent.launcher import Launcher
+from dotmac_deploy_agent.lease import LeaseClient
 from dotmac_deploy_agent.openbao import OpenBaoClient
 from dotmac_deploy_agent.params import Param, canonical_render, render_digest
+from dotmac_deploy_agent.refusal import Refusal
 from dotmac_deploy_agent.runner import RunResult, RunSpec
+from dotmac_deploy_agent.transfer import TransferResult
 from dotmac_deploy_agent.transport import Response
 
 TARGET = "erp/staging/host-a"
 NOW = datetime(2027, 1, 6, 12, 0, 0, tzinfo=UTC)
 IMAGE_DIGEST = "sha256:" + "a" * 64
 APP_IMAGE = f"127.0.0.1:5000/org/app@{IMAGE_DIGEST}"
+MANIFEST_DIGEST = IMAGE_DIGEST
 PREVIOUS_IMAGE = "127.0.0.1:5000/org/app@sha256:" + "b" * 64
 
 
@@ -80,6 +85,11 @@ def make_config(tmp_path: Path, keys: Keys, **overrides: object) -> AgentConfig:
         "foundation_argv": ("/usr/local/bin/foundation-run",),
         "openbao_url": "http://192.0.2.10:8200",
         "openbao_agent_config_dir": state / "bao",
+        "registry_binary": Path("/usr/local/bin/registry"),
+        "registry_binary_sha256": "d" * 64,
+        "skopeo_path": Path("/usr/bin/skopeo"),
+        "skopeo_sha256": "e" * 64,
+        "reconcile_containers": ("erp-app",),
         "runtime_root": root,
     }
     values.update(overrides)
@@ -106,6 +116,20 @@ def to_params(rows: list[dict[str, object]]) -> list[Param]:
     ]
 
 
+def base_images() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "app",
+            "source": "transfer",
+            "repository": "registry.example.invalid/org/app",
+            "manifest_digest": MANIFEST_DIGEST,
+            "planned_repository": "127.0.0.1:5000/org/app",
+            "image_id": "sha256:" + "f" * 64,
+            "archive": "app.oci.tar",
+        }
+    ]
+
+
 def make_materials(**overrides: object) -> dict[str, object]:
     params = overrides.pop("params", None) or base_params()
     app_image = str(overrides.pop("app_image", APP_IMAGE))
@@ -122,6 +146,8 @@ def make_materials(**overrides: object) -> dict[str, object]:
         ),
         "bindings": [],
         "legacy": None,
+        "images": base_images(),
+        "lease_ttl_seconds": 900,
     }
     document.update(overrides)
     return document
@@ -143,6 +169,23 @@ class FakeCp:
         self.omit_signature = False
         self.status_5xx = False
         self.handlers: dict[str, Callable[[dict[str, object]], dict[str, object]]] = {}
+        self.standing = "CLEAN"
+        self.lease_log: list[tuple[str, dict[str, object]]] = []
+        self.handlers = {
+            "lease/standing": lambda _p: {"standing": self.standing},
+            "lease/acquire": self._acquire,
+            "lease/covers": lambda p: self._log("lease/covers", p) | {"covers": True},
+            "lease/release": lambda p: self._log("lease/release", p)
+            | {"released": True},
+        }
+
+    def _log(self, endpoint: str, payload: dict[str, object]) -> dict[str, object]:
+        self.lease_log.append((endpoint, payload))
+        return {}
+
+    def _acquire(self, payload: dict[str, object]) -> dict[str, object]:
+        self._log("lease/acquire", payload)
+        return {"lease_id": "lease-1", "ttl_seconds": payload["ttl_seconds"]}
 
     def request(
         self, method: str, path: str, headers: Mapping[str, str], body: bytes
@@ -259,6 +302,43 @@ class FakeRunner:
         return RunResult(None if self.timed_out else self.exit_code, self.timed_out)
 
 
+class FakeTransfer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.error: Refusal | None = None
+
+    def transfer_all(self, images, *, ttl_seconds):  # type: ignore[no-untyped-def]
+        self.calls.append(tuple(i.name for i in images))
+        if self.error is not None:
+            raise self.error
+        return tuple(
+            TransferResult(
+                i.name,
+                i.image_id or "sha256:" + "0" * 64,
+                i.planned_reference,
+                True,
+                True,
+            )
+            for i in images
+            if i.source == "transfer"
+        )
+
+
+class FakeCommands:
+    """Scripted external commands. `script` maps a verb tuple to a result."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.script: dict[tuple[str, ...], CommandResult] = {}
+
+    def run(self, argv: tuple[str, ...], *, timeout: float) -> CommandResult:
+        self.calls.append(argv)
+        for verbs, result in self.script.items():
+            if argv[1 : 1 + len(verbs)] == verbs:
+                return result
+        return CommandResult(0, b"")
+
+
 @dataclass
 class Rig:
     config: AgentConfig
@@ -268,6 +348,8 @@ class Rig:
     bao: FakeBaoTransport
     launcher: Launcher
     environ: dict[str, str]
+    transfer: FakeTransfer
+    commands: FakeCommands
 
 
 def make_rig(
@@ -285,13 +367,17 @@ def make_rig(
     env = environ if environ is not None else {}
     signer = wire.PopSigner.from_seed(config.credential_id, keys.seed())
     client = TargetClient(config, signer, cp, clock=lambda: NOW)
+    transfer = FakeTransfer()
+    commands = FakeCommands()
     launcher = Launcher(
         config,
         client,
         runner,
         OpenBaoClient(bao, "delivery-token", "staging/erp"),
+        LeaseClient(client),
+        transfer,
+        ReadOnlyCommands(commands),
         environ=env,
         clock=lambda: NOW,
     )
-    return Rig(config, keys, cp, runner, bao, launcher, env)
-
+    return Rig(config, keys, cp, runner, bao, launcher, env, transfer, commands)

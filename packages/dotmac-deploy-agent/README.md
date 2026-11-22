@@ -25,4 +25,12 @@ design leaves open (header names, signed-message layout, endpoint paths, the
 materials schema, the sort rule that places `APP_IMAGE` among the other lines).
 Each is pinned by a test vector so alignment is a one-file change.
 
+## Packaging
+
+`deploy/systemd/dotmac-deploy-agent@.service` (instance = product, no
+capabilities, tmpfs RuntimeDirectory, credentials only), `deploy/launcher.sh`
+(root-owned release, pinned digest and Sigstore identity read from root-owned
+files) and `deploy/config.example.toml`. The signed build and the pinned
+registry binary and skopeo checksums are the separate WP9 release gate.
+
 Nothing here is enabled, published or enrolled.

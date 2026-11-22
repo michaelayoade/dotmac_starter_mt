@@ -63,11 +63,17 @@ class AgentConfig:
     foundation_argv: tuple[str, ...]
     openbao_url: str
     openbao_agent_config_dir: Path
+    registry_binary: Path
+    registry_binary_sha256: str
+    skopeo_path: Path
+    skopeo_sha256: str
+    reconcile_containers: tuple[str, ...]
     cp_ca_file: Path | None = None
     runtime_root: Path = Path("/run/dotmac")
     pop_key_credential: str = "pop-key"  # nosec B105 - a credential NAME, not a value
     delivery_token_credential: str = "openbao-delivery-token"  # nosec B105
     legacy_source_path: Path | None = None
+    docker_path: Path = Path("/usr/bin/docker")
     poll_seconds: int = 45
     foundation_timeout_seconds: int = 2700
     version: str = "0.1.0a1"
@@ -91,6 +97,16 @@ class AgentConfig:
     def run_dir(self) -> Path:
         """`/run/dotmac/<product>`: the systemd RuntimeDirectory."""
         return self.runtime_root / self.product
+
+    @property
+    def inbox_dir(self) -> Path:
+        """`/run/dotmac/<product>/images`: the attended archive inbox (0700)."""
+        return self.run_dir / "images"
+
+    @property
+    def registry_dir(self) -> Path:
+        """Transient registry config and tmpfs storage; deleted at teardown."""
+        return self.run_dir / "registry"
 
     @property
     def deploy_run_dir(self) -> Path:
@@ -147,6 +163,9 @@ class AgentConfig:
             self.deploy_dir,
             self.openbao_agent_config_dir,
             self.runtime_root,
+            self.registry_binary,
+            self.skopeo_path,
+            self.docker_path,
         ]
         if self.cp_ca_file is not None:
             paths.append(self.cp_ca_file)
@@ -158,6 +177,15 @@ class AgentConfig:
             not self.foundation_argv
             or not os.path.isabs(self.foundation_argv[0])
             or not all(isinstance(part, str) and part for part in self.foundation_argv)
+        ):
+            raise Refusal("config_invalid")
+        # The registry binary and skopeo are pinned at enrolment (DESIGN-rev3 s2.7).
+        if not _HEX64.fullmatch(self.registry_binary_sha256) or not _HEX64.fullmatch(
+            self.skopeo_sha256
+        ):
+            raise Refusal("config_invalid")
+        if not self.reconcile_containers or not all(
+            _ID.fullmatch(name) for name in self.reconcile_containers
         ):
             raise Refusal("config_invalid")
         if not 30 <= self.poll_seconds <= 60:
@@ -184,7 +212,9 @@ class AgentConfig:
             "cp_spki_sha256", "state_dir", "deploy_dir", "foundation_argv",
             "openbao_url", "openbao_agent_config_dir", "cp_ca_file", "runtime_root",
             "pop_key_credential", "delivery_token_credential", "legacy_source_path",
-            "poll_seconds", "foundation_timeout_seconds",
+            "poll_seconds", "foundation_timeout_seconds", "registry_binary",
+            "registry_binary_sha256", "skopeo_path", "skopeo_sha256",
+            "reconcile_containers", "docker_path",
         }  # fmt: skip
         if not set(values) <= known:
             raise Refusal("config_invalid")
@@ -216,6 +246,8 @@ class AgentConfig:
                 if type(number) is not int:
                     raise Refusal("config_invalid")
                 extra[name] = number
+        if "docker_path" in values:
+            extra["docker_path"] = Path(text("docker_path"))
         if "runtime_root" in values:
             extra["runtime_root"] = Path(text("runtime_root"))
         return cls(
@@ -231,5 +263,10 @@ class AgentConfig:
             openbao_agent_config_dir=Path(text("openbao_agent_config_dir")),
             cp_ca_file=optional_path("cp_ca_file"),
             legacy_source_path=optional_path("legacy_source_path"),
+            registry_binary=Path(text("registry_binary")),
+            registry_binary_sha256=text("registry_binary_sha256"),
+            skopeo_path=Path(text("skopeo_path")),
+            skopeo_sha256=text("skopeo_sha256"),
+            reconcile_containers=texts("reconcile_containers"),
             **extra,  # type: ignore[arg-type]
         )

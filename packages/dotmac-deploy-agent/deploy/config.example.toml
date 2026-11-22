@@ -1,0 +1,20 @@
+# Keys by name; every value below is a placeholder (documentation ranges only).
+# Root-owned, not group/other writable. Read by a dedicated non-root user.
+cp_url = "https://cp.example.invalid"
+target_ref = "erp/staging/host-a"            # <product>/<environment>/<host_alias>
+credential_id = "cred-placeholder"
+cp_response_public_keys_b64 = ["<base64 32-byte Ed25519 public key>"]
+cp_spki_sha256 = ["<hex sha256 of the pinned CP SPKI>"]
+state_dir = "/var/lib/dotmac-deploy-agent/erp"
+deploy_dir = "/opt/dotmac/erp"
+foundation_argv = ["/opt/dotmac-deploy-agent/venv/bin/dotmac-deploy", "<arguments>"]
+openbao_url = "http://192.0.2.10:8200"       # over WireGuard only
+openbao_agent_config_dir = "/var/lib/dotmac-deploy-agent/erp/openbao-agent"
+registry_binary = "/usr/local/libexec/dotmac/registry"
+registry_binary_sha256 = "<hex, pinned at enrolment>"
+skopeo_path = "/usr/bin/skopeo"
+skopeo_sha256 = "<hex, pinned at enrolment>"
+reconcile_containers = ["erp-app"]
+# Optional, existing apps only (M11): the relocated original, checked by lstat.
+# The content is read ONLY through $CREDENTIALS_DIRECTORY/legacy.
+# legacy_source_path = "/etc/dotmac/legacy/erp-staging-host-a.env"

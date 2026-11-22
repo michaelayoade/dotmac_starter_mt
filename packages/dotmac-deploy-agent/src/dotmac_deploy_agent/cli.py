@@ -15,13 +15,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .client import TargetClient
+from .commands import ReadOnlyCommands, SubprocessCommands, SubprocessRegistryLauncher
 from .config import AgentConfig, refuse_db_environment
 from .credentials import read_credential
 from .files import ensure_private_dir
 from .launcher import Launcher
+from .lease import LeaseClient
 from .openbao import OpenBaoClient
 from .refusal import Refusal
 from .runner import SubprocessRunner
+from .transfer import ImageTransfer
 from .transport import HttpsTransport, OpenBaoTransport
 from .wire import PopSigner
 
@@ -54,7 +57,17 @@ def build_launcher(config: AgentConfig) -> Launcher:
         f"{config.environment}/{config.product}",
     )
     runner = SubprocessRunner(config.foundation_argv, config.foundation_timeout_seconds)
-    return Launcher(config, client, runner, openbao, environ=environ)
+    commands = SubprocessCommands()
+    return Launcher(
+        config,
+        client,
+        runner,
+        openbao,
+        LeaseClient(client),
+        ImageTransfer(config, commands, SubprocessRegistryLauncher()),
+        ReadOnlyCommands(commands),
+        environ=environ,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

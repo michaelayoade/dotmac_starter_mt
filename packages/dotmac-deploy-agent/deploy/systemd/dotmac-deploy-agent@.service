@@ -1,0 +1,48 @@
+# Instance = product, e.g. dotmac-deploy-agent@erp.service. Outbound only.
+# Per-host drop-ins (installed by the governed enrolment, never by the agent):
+#   ReadWritePaths=<deploy_dir>          the product's Compose directory
+#   LoadCredential=legacy:/etc/dotmac/legacy/<target>.env   (M11, existing apps only)
+[Unit]
+Description=Dotmac deploy agent for %i (launch only)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dotmac-deploy
+Group=dotmac-deploy
+# Docker-group reach is root-equivalent (W-c): the control is against other uids
+# and silent drift, not against root.
+SupplementaryGroups=docker
+# tmpfs: params.env, the legacy copy, the image inbox, role files, the registry.
+RuntimeDirectory=dotmac/%i
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
+StateDirectory=dotmac-deploy-agent/%i
+StateDirectoryMode=0700
+UMask=0077
+# Secret-zero and the PoP key arrive as credentials, never as environment.
+LoadCredential=pop-key:/etc/dotmac-deploy-agent/%i/pop-key
+LoadCredential=openbao-delivery-token:/etc/dotmac-deploy-agent/%i/openbao-delivery-token
+ExecStart=/opt/dotmac-deploy-agent/launcher.sh --config /etc/dotmac-deploy-agent/%i/config.toml
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+# A run in flight is finished or fenced by Foundation, not cut off by the agent.
+TimeoutStopSec=infinity
+NoNewPrivileges=true
+# No capabilities: a secret_id cannot be chown'd to a container uid by the agent.
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/run/dotmac/%i /var/lib/dotmac-deploy-agent/%i
+
+[Install]
+WantedBy=multi-user.target

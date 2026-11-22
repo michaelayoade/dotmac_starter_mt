@@ -60,6 +60,7 @@ CODES: Final = frozenset(
         "transfer_repository_mismatch",
         "transfer_digest_mismatch",
         "transfer_command_failed",
+        "transfer_deadline_exceeded",
         # reconcile (lane B)
         "reconcile_unavailable",
     }
