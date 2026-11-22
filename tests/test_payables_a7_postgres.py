@@ -300,7 +300,7 @@ def test_stamp_update_as_app_user_is_refused(
             text("SELECT set_config('app.current_tenant', :t, true)"),
             {"t": str(tenant)},
         )
-        with pytest.raises(DBAPIError):
+        with pytest.raises(DBAPIError, match="cannot be changed"):
             conn.execute(
                 text(
                     "UPDATE mod_payables.supplier_payments"
