@@ -844,7 +844,9 @@ EMAIL_SEND_COMMAND_SCHEMA: dict[str, object] = {
         },
         "address": {
             "type": "string",
-            "pattern": '^[^\\s<>"@,;:()\\[\\]\\\\]{1,64}@[^\\s<>"@,;:()\\[\\]\\\\]{1,255}$',
+            "pattern": (
+                '^[^\\s<>"@,;:()\\[\\]\\\\]{1,64}@' '[^\\s<>"@,;:()\\[\\]\\\\]{1,255}$'
+            ),
         },
         "subject": {"type": ["string", "null"], "maxLength": 998},
         "text": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
