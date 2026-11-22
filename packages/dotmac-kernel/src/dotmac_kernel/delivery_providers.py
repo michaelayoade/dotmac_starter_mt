@@ -821,7 +821,79 @@ def send(
     return Sent(receipt=receipt)
 
 
+#: The capability id of the email send contract a delivery connector serves
+#: (ADR-0024 10: the owning domain publishes the payload contract; a connector
+#: only claims its digest). `.v1` is part of the identity: a schema change is a
+#: new id, never an edit of this one.
+EMAIL_SEND_CAPABILITY_ID = "email.send.v1"
+
+#: The command payload of `email.send.v1`: one already-rendered, already
+#: addressed message. It mirrors `OutboundMessage` for the email channel, with
+#: the dispatch id as a string and attachments by reference only (never bytes).
+#: A DELIVERY capability publishes a command schema and no result schema: the
+#: effect is the outcome.
+EMAIL_SEND_COMMAND_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["dispatch_id", "address"],
+    "anyOf": [{"required": ["text"]}, {"required": ["html"]}],
+    "properties": {
+        "dispatch_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+        },
+        "address": {
+            "type": "string",
+            "pattern": '^[^\\s<>"@,;:()\\[\\]\\\\]{1,64}@[^\\s<>"@,;:()\\[\\]\\\\]{1,255}$',
+        },
+        "subject": {"type": ["string", "null"], "maxLength": 998},
+        "text": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
+        "html": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
+        "headers": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                name: {"type": "string", "maxLength": MAX_HEADER_VALUE_LENGTH}
+                for name in ALLOWED_HEADERS
+            },
+        },
+        "attachments": {
+            "type": "array",
+            "maxItems": MAX_ATTACHMENTS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["kind", "ref", "filename", "content_type"],
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_.-]*$",
+                        "maxLength": MAX_ATTACHMENT_KIND_LENGTH,
+                    },
+                    "ref": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": MAX_ATTACHMENT_REF_LENGTH,
+                    },
+                    "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": MAX_ATTACHMENT_FILENAME_LENGTH,
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": sorted(ALLOWED_ATTACHMENT_CONTENT_TYPES),
+                    },
+                },
+            },
+        },
+    },
+}
+
+
 __all__ = [
+    "EMAIL_SEND_CAPABILITY_ID",
+    "EMAIL_SEND_COMMAND_SCHEMA",
     "ALLOWED_ATTACHMENT_CONTENT_TYPES",
     "ALLOWED_HEADERS",
     "MAX_PART_BYTES",
