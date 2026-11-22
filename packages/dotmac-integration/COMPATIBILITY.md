@@ -346,7 +346,7 @@ existing installation pins are untouched. A connector targeting SPI >=1.7
 must declare its ceiling explicitly, including the explicit "no fleet
 traffic" of an empty declaration.
 
-### DELIVERY crash safety, retention and targets (unpublished a21 source)
+### DELIVERY crash safety, retention and targets (unpublished a22 allocation)
 
 A DELIVERY connector call is not idempotent by contract, so the engine never
 treats an expired lease as "did not run": `release_expired_leases` and

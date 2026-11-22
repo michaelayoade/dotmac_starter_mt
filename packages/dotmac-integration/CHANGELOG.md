@@ -1,15 +1,9 @@
 # Changelog — dotmac-integration
 
-## 0.1.0a21 — unpublished integrated source
+## 0.1.0a22 — unpublished allocation
 
-Adds immutable dispatch snapshots and original receipt/credential-context retry
-checks from PR #883. The additive `ig_0018_dispatch_snapshot` follows released
-`ig_0017_provisioning`; published migrations and a20 remain unchanged. This
-source allocation supplies no production accepting authority, credential
-assignment producer, transport negotiation, consumer enrollment or cutover.
-Publication and installed consumer qualification remain separate gates.
-
-Also in this unpublished source (three DELIVERY fixes, no migration):
+Three DELIVERY fixes; no migration and no SPI change. Allocated as the successor of
+published a21 (tag `dotmac-integration-v0.1.0a21`); publication remains a separate gate.
 
 - **BEHAVIOUR CHANGE: no resend after a crash.** An `in_flight` DELIVERY row
   whose lease expired is now moved to `reconciliation_required`
@@ -38,6 +32,18 @@ Also in this unpublished source (three DELIVERY fixes, no migration):
   overwriting any same-named config entry, exactly as the PROVISION path does;
   a malformed stored value raises `DispatchUnavailable` before the claim.
   `spi.require_network_target` therefore works for DELIVERY connectors.
+- Review follow-ups covered by tests: a handler that reported success but whose
+  result recording raised before the DB write leaves `in_flight`; on expiry it is
+  ambiguous and never re-claimed (no second invoke).
+
+## 0.1.0a21 — released 2026-11-01
+
+Adds immutable dispatch snapshots and original receipt/credential-context retry
+checks from PR #883. The additive `ig_0018_dispatch_snapshot` follows released
+`ig_0017_provisioning`; published migrations and a20 remain unchanged. This
+source allocation supplies no production accepting authority, credential
+assignment producer, transport negotiation, consumer enrollment or cutover.
+Publication and installed consumer qualification remain separate gates.
 
 ## 0.1.0a20 — released 2026-10-28: durable PROVISION runtime and SPI 1.7 fleet targets
 

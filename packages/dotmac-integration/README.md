@@ -1,7 +1,8 @@
 # dotmac-integration
 
-Source candidate: **0.1.0a21 is unpublished**. Published a20 remains the
-installation baseline. Dispatch-snapshot source preparation does not establish
+Source candidate: **0.1.0a22 is an unpublished allocation** (DELIVERY
+crash-safety, terminal-state retention and DELIVERY network targets). Published
+a21 (tag `dotmac-integration-v0.1.0a21`) remains the installation baseline. Dispatch-snapshot source preparation does not establish
 production credential custody, an accepting authority or consumer adoption.
 
 The external connector control plane (ADR-0024): installations, immutable
