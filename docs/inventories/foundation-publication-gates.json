@@ -8,7 +8,7 @@
    "gate": "gate2_evidence",
    "ruling": {
     "register": "dotmac-debt-register",
-    "version": 2156
+    "version": 2155
    },
    "required_evidence": [
     "R6",

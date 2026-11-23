@@ -161,7 +161,7 @@ class World:
                 "status": "PASS",
                 "reviewed_by": "michael",
                 "recorded_at": "2026-11-23T10:00:00Z",
-                "register_ref": "dotmac-debt-register v2156",
+                "register_ref": "dotmac-debt-register v2155",
             }
             if identifier == gate.E3_ID:
                 item["sha256"] = self.baseline_digest(source)
@@ -343,8 +343,8 @@ def test_the_policy_parser_accepts_the_shipped_shape():
         {"facility": "dotmac-*"},
         {"gate": "lane3_rehearsal"},
         {"gate": "anything"},
-        {"ruling": {"register": "dotmac-debt-register", "version": "2156"}},
-        {"ruling": {"register": "elsewhere", "version": 2156}},
+        {"ruling": {"register": "dotmac-debt-register", "version": "2155"}},
+        {"ruling": {"register": "elsewhere", "version": 2155}},
         {"required_evidence": []},
         {"required_evidence": ["R6", "R6", "E3"]},
         {"required_evidence": ["R6", "r11", "E3"]},
@@ -964,7 +964,7 @@ def test_the_release_record_carries_the_gate_and_the_cited_receipts(
     assert row["gate2_signature_sha256"] == gate_json["signature_sha256"]
     assert row["gate2_signer_fingerprint"] == gate_json["signer_fingerprint"]
     assert row["e3_baseline_sha256"] == gate_json["e3_baseline_sha256"]
-    assert row["ruling"] == {"register": "dotmac-debt-register", "version": 2156}
+    assert row["ruling"] == {"register": "dotmac-debt-register", "version": 2155}
     assert row["evidence"] == gate_json["evidence"]
     # Idempotent; a disagreeing row refuses rather than overwriting.
     assert (

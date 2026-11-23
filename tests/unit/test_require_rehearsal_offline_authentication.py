@@ -202,8 +202,11 @@ def test_release_transport_is_environment_only_and_retains_only_public_files():
         ".rehearsal/offline-result.sshsig",
     }
     assert retained["with"]["if-no-files-found"] == "error"
-    # An `if:` could skip or reorder retention relative to the gate.
-    assert "if" not in retained
+    # An `if:` could skip or reorder retention relative to the gate. The ONLY
+    # condition allowed is the one that scopes this Lane 3 artifact to the Lane 3
+    # gate (the Gate 2 path has no `.rehearsal/` to retain); the gate-exclusivity
+    # guard in `test_foundation_publication_gate.py` covers the rest.
+    assert retained.get("if") == "steps.gate.outputs.gate == 'lane3_rehearsal'"
     assert steps.index(gate) < steps.index(retained)
 
 

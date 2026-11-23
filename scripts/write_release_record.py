@@ -2033,7 +2033,7 @@ def write_publication_gate_record(
             return []
     ledger["records"].append(row)
     PUBLICATION_RECORDS.write_text(
-        json.dumps(ledger, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(ledger, indent=1) + "\n", encoding="utf-8"
     )
     return [f"recorded the {publication_gate} publication gate for {tag}"]
 
