@@ -22,6 +22,9 @@ ALLOWED = {
 }
 
 
+_DOCKER_ARGV0 = r"(?:str\()?(?:\w+\.)*docker_path\)?"
+
+
 def docker_verbs() -> list[tuple[str, str, str]]:
     """`(file, enclosing function, verb)` for every argv built with `docker_path`."""
     found: list[tuple[str, str, str]] = []
@@ -37,10 +40,8 @@ def docker_verbs() -> list[tuple[str, str, str]]:
                 second = node.elts[1]
                 # an argv starts with `<config>.docker_path` (str() of it, or bare);
                 # other tuples that merely mention a `*_path` name are not argv
-                if (
-                    re.fullmatch(r"(?:str\()?(?:\w+\.)*docker_path\)?", first)
-                    and isinstance(second, ast.Constant)
-                ):
+                is_argv = re.fullmatch(_DOCKER_ARGV0, first) is not None
+                if is_argv and isinstance(second, ast.Constant):
                     found.append((path.name, function.name, str(second.value)))
     return found
 
