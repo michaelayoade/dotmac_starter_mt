@@ -18,7 +18,9 @@ polkit.addRule(function (action, subject) {
 // JOB ROLES ONLY: the agent may START (never restart) the static one-shot units of
 // an enrolled job role: its render unit and its purge unit. @ENROLLED_JOB_UNITS@ is
 // a JSON array, e.g. ["openbao-agent@erp-import.service",
-// "dotmac-job-purge@erp-import.service"]. Empty at enrolment unless a job role is named.
+// "dotmac-secrets-purge@erp-import.service"]. EXACT names only (W-12a), no wildcard:
+// each import render unit `openbao-agent@<ns>-<role>-<S12>.service` and each purge
+// unit. Empty at enrolment unless a job role is named.
 polkit.addRule(function (action, subject) {
   var enrolledJobs = @ENROLLED_JOB_UNITS@;
   if (

@@ -50,6 +50,13 @@ INVOCATION = "a1" * 16
 RENDER_OK = f"Result=success\nExecMainStatus=0\nInvocationID={INVOCATION}\n".encode()
 
 
+def loaded(materials: tuple[str, ...]) -> bytes:
+    names = ",".join(sorted(m.lower() for m in materials))
+    return (
+        f"LoadState=loaded\nDescription=Render job secrets materials={names}\n".encode()
+    )
+
+
 def stem_of(rig: Rig, materials: tuple[str, ...]) -> str:
     from dotmac_deploy_agent.openbao_config import job_unit_stem
 
@@ -132,7 +139,13 @@ def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
             (secrets / name).chmod(0o400)
     rig.systemctl.script = {
         ("--property=Result,ExecMainStatus,InvocationID",): CommandResult(0, RENDER_OK),
-        ("--property=LoadState",): CommandResult(0, b"LoadState=loaded\n"),
+        **{
+            (
+                "--property=LoadState,Description",
+                f"openbao-agent@{stem_of(rig, m)}.service",
+            ): CommandResult(0, loaded(m))
+            for m in (BOTH, OWNER)
+        },
         **rig.systemctl.script,
     }
     rig.commands.script[("image", "inspect")] = CommandResult(
@@ -288,7 +301,7 @@ def test_purge_removes_the_agents_secret_id_starts_the_purge_unit_and_destroys_t
     deliver(rig)
     assert rig.launcher.purge_job_role("import") == 0
     assert not (rig.config.role_dir("import") / "secret_id").exists()
-    assert started(rig, "dotmac-job-purge@erp-import.service")
+    assert started(rig, "dotmac-secrets-purge@erp-import.service")
     assert tracked(rig) == []
     assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
     # the renders are the purge unit's to remove (as the container uid), never the agent's
@@ -309,7 +322,7 @@ def test_a_failed_purge_unit_still_destroys_the_accessor_then_reports(
     rig = job_rig(tmp_path)
     deliver(rig)
     rig.systemctl.script = {
-        ("dotmac-job-purge@erp-import.service",): CommandResult(1, b""),
+        ("dotmac-secrets-purge@erp-import.service",): CommandResult(1, b""),
         **rig.systemctl.script,
     }
     with pytest.raises(Refusal) as failed:
@@ -327,7 +340,7 @@ def test_agent_start_purges_a_stale_job_secret_and_accessor(tmp_path: Path) -> N
         not (rig.config.role_dir("import") / "secret_id").exists()
         and tracked(rig) == []
     )
-    assert started(rig, "dotmac-job-purge@erp-import.service")
+    assert started(rig, "dotmac-secrets-purge@erp-import.service")
 
 
 def test_agent_start_with_openbao_unreachable_keeps_tracking_and_does_not_crash(
@@ -381,13 +394,17 @@ def test_the_job_kit_keeps_secrets_0700_and_verifies_inside_the_render_unit() ->
     tmpfiles = (KIT / "enrolment/tmpfiles.d/dotmac-job-role.conf.template").read_text()
     assert "/@ROLE@/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in tmpfiles
     assert "0710" not in tmpfiles and "W pending" not in tmpfiles  # no widening (N2)
-    purge = (KIT / "enrolment/systemd/dotmac-job-purge@.service").read_text()
+    purge = (KIT / "enrolment/systemd/dotmac-secrets-purge@.service").read_text()
     assert (
         "[Install]" not in purge and "WantedBy" not in purge and "Type=oneshot" in purge
     )
-    assert "-mindepth 1 -maxdepth 1 -type f -delete" in purge
+    assert "ExecStart=/usr/bin/false" in purge  # an unenrolled role purges nothing
+    dropin = (KIT / "enrolment/systemd/secrets-purge.conf.template").read_text()
+    assert "-mindepth 1 -maxdepth 1 -type f -delete" in dropin
+    assert "User=@OWNER_USER@" in dropin  # the owning uid (F26)
+    assert not (KIT / "enrolment/systemd/dotmac-job-purge@.service").exists()
     render = (KIT / "enrolment/systemd/job-render.conf.template").read_text()
-    assert "ExecStartPost=/usr/local/libexec/dotmac/job-verify " in render
+    assert "ExecStartPost=/usr/local/libexec/dotmac/verify-job-render " in render
     assert "Type=oneshot" in render
     polkit = (
         KIT / "enrolment/polkit/50-dotmac-deploy-agent.rules.template"
@@ -401,7 +418,7 @@ def test_the_job_kit_keeps_secrets_0700_and_verifies_inside_the_render_unit() ->
 def run_verify(directory: Path, *names: str) -> int:
     import subprocess
 
-    script = KIT / "enrolment/libexec/job-verify.sh"
+    script = KIT / "enrolment/libexec/verify-job-render.sh"
     return subprocess.run(  # noqa: S603
         ["/bin/sh", str(script), str(directory), *names],
         check=False,
@@ -580,7 +597,7 @@ def test_files_and_accessor_are_purged_after_a_failing_run_and_before_the_receip
         and tracked(rig) == []
     )
     assert (
-        started(rig, "dotmac-job-purge@erp-import.service")
+        started(rig, "dotmac-secrets-purge@erp-import.service")
         and receipt(rig)["exit_code"] == 3
     )
     assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
@@ -590,7 +607,9 @@ def test_a_timed_out_job_is_purged_too(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     rig.runner.timed_out = True
     assert refused(rig) == ("failed", "runner_timeout")
-    assert tracked(rig) == [] and started(rig, "dotmac-job-purge@erp-import.service")
+    assert tracked(rig) == [] and started(
+        rig, "dotmac-secrets-purge@erp-import.service"
+    )
 
 
 def test_a_crash_inside_the_run_is_purged(tmp_path: Path) -> None:
@@ -1324,7 +1343,9 @@ def test_a_set_with_no_loaded_unit_is_refused_before_anything_is_minted(
 ) -> None:
     rig = job_rig(tmp_path)
     rig.systemctl.script = {
-        ("--property=LoadState",): CommandResult(0, b"LoadState=not-found\n"),
+        ("--property=LoadState,Description",): CommandResult(
+            0, b"LoadState=not-found\n"
+        ),
         **rig.systemctl.script,
     }
     assert refused(rig) == ("refused", "job_files_invalid")
@@ -1357,3 +1378,80 @@ def test_rq3_apply_mode_flags_come_from_the_plans_closed_arg_list(
         dispatch_id="dispatch-2",
     )
     assert refused(rig) == ("completed", None)
+
+
+# -- P-SEC rev6 ----------------------------------------------------------------
+def test_s12_shared_vectors() -> None:
+    """The one S12 vector P-SEC, Control and Foundation also test against."""
+    from dotmac_deploy_agent.openbao_config import material_set_id
+
+    assert (
+        material_set_id(("LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"))
+        == "0dcc661ea25f"
+    )
+    assert (
+        material_set_id(("MIGRATION_DATABASE_URL", "LEGACY_DATABASE_URL"))
+        == "0dcc661ea25f"
+    )
+    assert material_set_id(("MIGRATION_DATABASE_URL",)) == "c8cd75e18839"
+    assert material_set_id(()) == "4f53cda18c2b"
+
+
+def test_a_unit_whose_description_lists_another_set_is_a_collision_and_is_refused(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    key = (
+        "--property=LoadState,Description",
+        f"openbao-agent@{stem_of(rig, BOTH)}.service",
+    )
+    rig.systemctl.script = {
+        key: CommandResult(0, loaded(OWNER)),
+        **rig.systemctl.script,
+    }
+    assert refused(rig) == ("refused", "job_files_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == []
+
+
+def test_a_unit_description_without_the_materials_key_is_refused(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    key = (
+        "--property=LoadState,Description",
+        f"openbao-agent@{stem_of(rig, BOTH)}.service",
+    )
+    rig.systemctl.script = {
+        key: CommandResult(0, b"LoadState=loaded\nDescription=Render\n"),
+        **rig.systemctl.script,
+    }
+    assert refused(rig) == ("refused", "job_files_invalid")
+
+
+def test_staged_inputs_need_only_acl_read_not_world_readable(tmp_path: Path) -> None:
+    """Staged inputs are 0440 with read ACLs; the agent hashes with plain read."""
+    rig, digest_ = work_rig(tmp_path)
+    staged = tmp_path / "work" / "import" / "in" / "manifest.json"
+    staged.chmod(0o440)
+    assert staged.stat().st_mode & 0o007 == 0  # not world-readable
+    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    assert refused(rig) == ("completed", None)
+
+
+def test_the_polkit_start_list_is_exact_names_only_no_wildcard() -> None:
+    polkit = (
+        KIT / "enrolment/polkit/50-dotmac-deploy-agent.rules.template"
+    ).read_text()
+    code = "\n".join(
+        ln for ln in polkit.splitlines() if not ln.lstrip().startswith("//")
+    )
+    assert "@ENROLLED_JOB_UNITS@" in code
+    for wild in (
+        "*",
+        "startsWith",
+        'indexOf(action.lookup("unit")) === 0',
+        "match(",
+        "RegExp",
+    ):
+        assert wild not in code, wild
+    assert code.count('enrolledJobs.indexOf(action.lookup("unit")) !== -1') == 1

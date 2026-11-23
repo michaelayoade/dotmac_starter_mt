@@ -581,7 +581,9 @@ class Launcher:
                     self.config, job.role, job.materials, required_uid=self.root_uid
                 )
                 # ... and a loaded render unit exists for this material set.
-                require_render_unit(self.config, self.commands, job.role, config_stem)
+                require_render_unit(
+                    self.config, self.commands, job.role, config_stem, job.materials
+                )
             require_private_dir(deploy_run_dir)
             if not getattr(self.runner, "job_entry_available", False):
                 # Before any lease, mint or file: nothing is spent on a job that
