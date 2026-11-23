@@ -25,6 +25,13 @@ def ready(tmp_path: Path) -> Rig:
     return rig
 
 
+MARKER = (409, {"error": "reconcile_marker_required"})
+
+
+def reconciles(rig: Rig) -> list[dict[str, object]]:
+    return [o for o in rig.cp.observations if o["kind"] == "reconcile"]
+
+
 def endpoints(rig: Rig) -> list[str]:
     return [name for name, _ in rig.cp.lease_log]
 
@@ -143,8 +150,10 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
         0,
         b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64 + b"\n",
     )
+    rig.cp.overrides["lease/acquire"] = MARKER  # CP withholds the marker
     result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("reconcile_reported", None)
+    # The facts are posted, then acquire is attempted and CP's refusal stops the cycle.
+    assert (result.outcome, result.reason) == ("refused", "lease_refused")
     # No lease, no transfer, no run, no params, no secrets: only the observation.
     assert endpoints(rig) == []
     assert rig.transfer.calls == [] and rig.runner.specs == []
@@ -155,7 +164,7 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
     assert rig.commands.calls
     for argv in rig.commands.calls:
         assert argv[1] in {"inspect", "ps"} or argv[1:3] == ("image", "inspect")
-    [observation] = rig.cp.observations
+    [observation] = reconciles(rig)
     assert observation["kind"] == "reconcile" and observation["outcome"] == "reconciled"
     assert (
         observation["dispatch_id"] == "dispatch-0"
@@ -213,8 +222,9 @@ def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
     rig.cp.standing = "EXPIRED_UNRELEASED"
     rig.cp.expired_run = "dispatch-0"
     rig.commands.script[("inspect",)] = CommandResult(1, b"")
-    assert rig.launcher.run_once().outcome == "reconcile_reported"
-    [observation] = rig.cp.observations
+    rig.cp.overrides["lease/acquire"] = MARKER
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = reconciles(rig)
     assert observation["details"]["containers"] == []  # type: ignore[index]
     # the agent reports facts: never `not_needed`, never a verdict on the host
     assert observation["outcome"] == "reconciled"
@@ -224,6 +234,7 @@ def expired_rig(tmp_path: Path) -> Rig:
     rig = ready(tmp_path)
     rig.cp.standing = "EXPIRED_UNRELEASED"
     rig.cp.expired_run = "dispatch-0"
+    rig.cp.overrides["lease/acquire"] = MARKER
     rig.commands.script[("image", "inspect")] = CommandResult(
         0, b'["' + REPO_DIGEST.encode() + b'"]'
     )
@@ -238,8 +249,8 @@ def test_an_image_that_cannot_be_read_makes_the_observation_failed(
 ) -> None:
     rig = expired_rig(tmp_path)
     rig.commands.script[("image", "inspect")] = CommandResult(1, b"")
-    assert rig.launcher.run_once().outcome == "reconcile_reported"
-    [observation] = rig.cp.observations
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = reconciles(rig)
     assert (observation["outcome"], observation["reason"]) == (
         "failed",
         "reconcile_unavailable",
@@ -272,18 +283,29 @@ def test_reconcile_is_posted_once_per_expired_dispatch_and_observed_digest(
     tmp_path: Path,
 ) -> None:
     rig = expired_rig(tmp_path)
-    assert rig.launcher.run_once().outcome == "reconcile_reported"
-    for _ in range(3):  # every later poll sees the same facts
-        assert rig.launcher.run_once().outcome == "reconcile_waiting"
-    assert len(rig.cp.observations) == 1
+    for _ in range(
+        4
+    ):  # CP keeps withholding the marker; every poll sees the same facts
+        assert rig.launcher.run_once().outcome == "refused"
+    assert len(reconciles(rig)) == 1
     rig.commands.script[("inspect",)] = CommandResult(
-        0, b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"e" * 64
+        0,
+        b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"e" * 64,
     )
-    assert rig.launcher.run_once().outcome == "reconcile_reported"  # the digest changed
-    assert len(rig.cp.observations) == 2
+    rig.launcher.run_once()
+    assert len(reconciles(rig)) == 2  # the digest changed
     rig.cp.expired_run = "dispatch-9"  # another expired dispatch posts afresh
-    assert rig.launcher.run_once().outcome == "reconcile_reported"
-    assert len(rig.cp.observations) == 3
+    rig.launcher.run_once()
+    assert len(reconciles(rig)) == 3
+
+
+def test_a_marker_that_control_issued_lets_the_same_cycle_acquire_and_run(
+    tmp_path: Path,
+) -> None:
+    rig = expired_rig(tmp_path)
+    del rig.cp.overrides["lease/acquire"]  # CP's acquire now succeeds
+    assert rig.launcher.run_once().outcome == "completed"
+    assert len(reconciles(rig)) == 1 and len(rig.runner.specs) == 1
 
 
 def test_the_standing_never_changes_on_the_agents_word(tmp_path: Path) -> None:
