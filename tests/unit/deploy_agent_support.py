@@ -462,6 +462,7 @@ class FakeBaoTransport:
         self.fail_lookup = False
         self.lookup_path: str | None = None
         self.fail_destroy = False
+        self.deny_login = False  # the DELIVERY identity itself is refused
         self.deny_mint: str | None = None  # a substring of the mint path to 403
         self.revoked = False
 
@@ -473,6 +474,8 @@ class FakeBaoTransport:
         self.requests.append((method, path, dict(headers), payload))
         assert headers["X-Vault-Namespace"] == self.namespace
         if path == "/v1/auth/approle-delivery/login":
+            if self.deny_login:
+                return Response(403, {}, b"{}")
             assert set(payload) == {"role_id", "secret_id"}
             return self._ok({"auth": {"client_token": self.TOKEN}})
         if path == "/v1/auth/token/revoke-self":

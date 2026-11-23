@@ -6,3 +6,7 @@
 Type=oneshot
 Restart=no
 RemainAfterExit=no
+# The file set is checked INSIDE the unit, as the container uid (User= comes from
+# instance.conf): a mismatch, a wrong mode or an undeclared file fails the unit.
+# @DECLARED_FILES@ is the space-separated lower-case file names of THIS config.
+ExecStartPost=/usr/local/libexec/dotmac/job-verify /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets @DECLARED_FILES@

@@ -39,12 +39,13 @@ from .job_delivery import (
     deliver_job_secret_id,
     purge_job_role,
     render_job_credentials,
+    require_render_unit,
 )
-from .jobs import job_env
+from .jobs import check_apply_class, check_job_inputs, job_env
 from .journal import AccessorStore, ExecutedDispatches
 from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient, LeaseKeeper
 from .legacy import prepare_legacy, remove_legacy_copy
-from .materials import Materials, RoleSpec, parse_materials
+from .materials import Materials, parse_materials
 from .observation import (
     Outbox,
     build_observation,
@@ -55,7 +56,7 @@ from .observation import (
 )
 from .observation_v2 import kind_for_operation
 from .openbao import OpenBaoSession
-from .openbao_config import check_authored_configs
+from .openbao_config import check_authored_configs, job_config_stem
 from .params import (
     PARAMS_FILE,
     PostRun,
@@ -565,8 +566,8 @@ class Launcher:
         job = materials.dispatched_job
         if job is None:
             raise Refusal("materials_invalid")
-        env_materials = {material for material, _ in job.env}
-        credential_names = tuple(m for m in job.materials if m not in env_materials)
+        # Foundation's secret files are EXACTLY the job's materials.
+        credential_names = job.materials
         details: dict[str, object] = {"params_env_digest": materials.params_env_digest}
         receipt: dict[str, object] = {
             "name": job.name,
@@ -591,6 +592,22 @@ class Launcher:
             if render_digest(planned) != materials.params_env_digest:
                 raise Refusal("params_digest_mismatch")
             job_lines = job_env(job)  # signed values vs the signed digest
+            definition = next((d for d in materials.jobs if d.name == job.name), None)
+            check_apply_class(  # RQ-3: re-derived from the signed plan
+                job, definition.apply_flags if definition is not None else ()
+            )
+            check_job_inputs(  # RQ-2: input sha256s
+                self.config.secrets_root, job, self.config.job_work_root
+            )
+            config_stem = None
+            if job.role is not None:
+                # RQ-4: the authored config whose file set equals the materials,
+                # or refuse with nothing minted.
+                config_stem = job_config_stem(
+                    self.config, job.role, job.materials, required_uid=self.root_uid
+                )
+                # ... and a loaded render unit exists for this material set.
+                require_render_unit(self.config, self.commands, job.role, config_stem)
             require_private_dir(deploy_run_dir)
             if not getattr(self.runner, "job_entry_available", False):
                 # Before any lease, mint or file: nothing is spent on a job that
@@ -613,13 +630,19 @@ class Launcher:
             self.executed.record(materials.dispatch_id, order)  # before the mint
             secrets_dir = deploy_run_dir
             secret_files: tuple[str, ...] = ()
+            invocation: str | None = None
             if job.role is not None:
                 secrets_dir = self.config.role_dir(job.role) / "secrets"
                 self.purge_job_role(job.role)  # before every mint
                 receipt["accessor_prefix"] = self._mint_job_role(materials, job.role)
-                secret_files = render_job_credentials(
-                    self.config, self.commands, job.role, credential_names
+                secret_files, invocation = render_job_credentials(
+                    self.config,
+                    self.commands,
+                    job.role,
+                    credential_names,
+                    config_stem,
                 )
+                receipt["render_invocation"] = invocation
                 receipt["files"] = list(secret_files)
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
                 raise Refusal("lease_unavailable")
@@ -642,6 +665,7 @@ class Launcher:
                     job_secrets_dir=secrets_dir,
                     job_argv_digest=job.argv_digest,
                     job_secret_files=secret_files,
+                    job_render_invocation=invocation,
                 )
             )
             receipt["exit_code"] = result.exit_code
@@ -684,12 +708,7 @@ class Launcher:
         return CycleResult(outcome, reason, materials.dispatch_id)
 
     def _mint_job_role(self, materials: Materials, role: str) -> str:
-        check_authored_configs(
-            self.config,
-            self.config.secrets_namespace,
-            (RoleSpec(role, True),),
-            required_uid=self.root_uid,
-        )
+        # The authored config was checked by `job_config_stem` before anything.
         session = self._bao_session()
         try:
             return deliver_job_secret_id(
