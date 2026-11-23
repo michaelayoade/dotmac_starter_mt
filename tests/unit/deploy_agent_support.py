@@ -532,6 +532,9 @@ class FakeRunner:
         self.effect = effect
         self.seen_params: bytes | None = None
         self.seen_mode: int | None = None
+        #: What Foundation's stdout tail holds for a `run_job` (None: nothing).
+        self.receipt: dict[str, object] | None = {"status": "ok"}
+        self.receipt_error: str | None = None
 
     def run(self, spec: RunSpec) -> RunResult:
         self.specs.append(spec)
@@ -539,7 +542,13 @@ class FakeRunner:
         self.seen_mode = spec.params_env.stat().st_mode & 0o777
         if self.effect is not None:
             self.effect(spec)
-        return RunResult(None if self.timed_out else self.exit_code, self.timed_out)
+        job = spec.job_name is not None
+        return RunResult(
+            None if self.timed_out else self.exit_code,
+            self.timed_out,
+            self.receipt if job else None,
+            (self.receipt_error or "missing") if job and self.receipt is None else None,
+        )
 
 
 class FakeTransfer:

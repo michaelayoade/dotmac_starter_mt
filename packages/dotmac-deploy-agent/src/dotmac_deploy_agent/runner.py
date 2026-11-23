@@ -7,6 +7,7 @@ variable names below are the agent-to-bindings contract (WP5a reads them).
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess  # nosec B404 - argv list, shell=False, absolute executable
@@ -50,10 +51,36 @@ class RunSpec:
     job_bound_seconds: int | None = None
 
 
+#: Foundation writes its job receipt as the LAST JSON line of its stdout. The agent
+#: keeps at most this many trailing bytes (the job's own stdio is DEVNULL inside
+#: Foundation, so no job output is mixed in).
+MAX_RECEIPT_BYTES: Final = 64 * 1024
+
+
 @dataclass(frozen=True)
 class RunResult:
     exit_code: int | None
     timed_out: bool
+    #: A `run_job` invocation only: Foundation's receipt (the last JSON line of its
+    #: stdout) or, when there is none, why (`missing` / `malformed`).
+    receipt: dict[str, object] | None = None
+    receipt_error: str | None = None
+
+
+def parse_receipt(tail: bytes) -> tuple[dict[str, object] | None, str | None]:
+    """The last non-empty line must be a JSON object, else `missing`/`malformed`."""
+    lines = [
+        ln for ln in tail.decode("utf-8", errors="replace").splitlines() if ln.strip()
+    ]
+    if not lines:
+        return None, "missing"
+    try:
+        document = json.loads(lines[-1])
+    except ValueError:
+        return None, "malformed"
+    if not isinstance(document, dict):
+        return None, "malformed"
+    return document, None
 
 
 class Runner(Protocol):
@@ -129,18 +156,32 @@ class SubprocessRunner:
     def run(self, spec: RunSpec) -> RunResult:
         if spec.job_name is not None and not self.job_entry_available:
             raise Refusal("foundation_job_entry_unavailable")
+        capture: int | None = None
+        if spec.job_name is not None:
+            # An anonymous file (opened, then unlinked) rather than a pipe: nothing
+            # has to drain it while the job runs, and only the TAIL is ever read.
+            path = spec.params_env.parent / f".foundation-stdout-{os.getpid()}"
+            try:
+                capture = os.open(
+                    path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+                )
+                os.unlink(path)
+            except OSError:
+                raise Refusal("runner_start_failed") from None
         try:
             process = subprocess.Popen(  # nosec B603  # noqa: S603
                 list(self._argv),
                 env=runner_environment(spec),
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
+                stdout=capture if capture is not None else subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 shell=False,
                 start_new_session=True,
                 close_fds=True,
             )
         except OSError:
+            if capture is not None:
+                os.close(capture)
             raise Refusal("runner_start_failed") from None
         bound = spec.job_bound_seconds if spec.job_bound_seconds else self._timeout
         grace = (
@@ -149,15 +190,28 @@ class SubprocessRunner:
             else self._grace
         )
         try:
-            return RunResult(process.wait(timeout=bound), False)
-        except subprocess.TimeoutExpired:
-            # SIGTERM only first: Foundation stops and removes its job container and
-            # writes its receipt. SIGKILL skips that `finally`, so it comes only
-            # after the grace, as a last resort.
-            os.killpg(process.pid, signal.SIGTERM)
             try:
-                process.wait(timeout=grace)
+                code = process.wait(timeout=bound)
+                result = RunResult(code, False)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            return RunResult(None, True)
+                # SIGTERM only first: Foundation stops and removes its job container
+                # and writes its receipt. SIGKILL skips that `finally`, so it comes
+                # only after the grace, as a last resort.
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=grace)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                result = RunResult(None, True)
+            if capture is None:
+                return result
+            size = os.fstat(capture).st_size
+            tail = os.pread(
+                capture, MAX_RECEIPT_BYTES, max(0, size - MAX_RECEIPT_BYTES)
+            )
+            receipt, error = parse_receipt(tail)
+            return RunResult(result.exit_code, result.timed_out, receipt, error)
+        finally:
+            if capture is not None:
+                os.close(capture)

@@ -34,6 +34,7 @@ CODES: Final = frozenset(
         "job_mint_refused",
         "job_image_absent",
         "job_container_orphaned",
+        "job_receipt_invalid",
         "job_apply_class_mismatch",
         "job_input_mismatch",
         "foundation_job_entry_unavailable",

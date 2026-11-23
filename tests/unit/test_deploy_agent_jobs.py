@@ -2010,3 +2010,90 @@ def test_the_enrolment_readback_refuses_a_missing_dropin_and_an_enabled_instance
         env={"PATH": "/usr/bin:/bin", "SYSTEMCTL": str(enabled), "UNIT_DIR": str(unit_dir)},
     )  # fmt: skip
     assert done.returncode != 0  # job instances are never enabled
+
+
+# -- F-H: Foundation's job receipt is the last JSON line of its stdout ------------
+def real_receipt(tmp_path: Path, script: str):  # type: ignore[no-untyped-def]
+    return run_real(tmp_path, script, bound=10, grace=1.0)[0]
+
+
+def test_fh_the_last_json_line_of_foundation_stdout_is_the_receipt(
+    tmp_path: Path,
+) -> None:
+    script = 'echo starting; echo \'{"step": 1}\'; echo \'{"job": "import", "exit_code": 0}\''
+    result = real_receipt(tmp_path, script)
+    assert result.exit_code == 0 and result.receipt_error is None
+    assert result.receipt == {"job": "import", "exit_code": 0}  # the LAST line wins
+
+
+def test_fh_no_output_is_a_missing_receipt(tmp_path: Path) -> None:
+    result = real_receipt(tmp_path, "true")
+    assert result.receipt is None and result.receipt_error == "missing"
+
+
+@pytest.mark.parametrize("last", ["not json", "[1, 2]", '"text"', "42", '{"a": '])
+def test_fh_a_last_line_that_is_not_a_json_object_is_malformed(
+    tmp_path: Path, last: str
+) -> None:
+    result = real_receipt(tmp_path, f"echo '{{\"ok\": true}}'; echo '{last}'")
+    assert result.receipt is None and result.receipt_error == "malformed"
+
+
+def test_fh_only_the_tail_is_kept_when_stdout_is_large(tmp_path: Path) -> None:
+    from dotmac_deploy_agent.runner import MAX_RECEIPT_BYTES
+
+    script = (
+        f"i=0; while [ $i -lt {MAX_RECEIPT_BYTES // 40 + 500} ]; do "
+        "echo 'noise noise noise noise noise noise noise'; i=$((i+1)); done; "
+        "echo '{\"final\": true}'"
+    )
+    result = real_receipt(tmp_path, script)
+    assert result.receipt == {"final": True}
+
+
+def test_fh_a_receipt_written_on_sigterm_is_captured(tmp_path: Path) -> None:
+    script = 'trap \'echo "{\\"stopped\\": true}"; exit 0\' TERM; /bin/sleep 30 & wait'
+    result, _ = run_real(tmp_path, script, bound=1, grace=5.0)
+    assert result.timed_out and result.receipt == {"stopped": True}
+
+
+def test_fh_a_deploy_run_never_captures_stdout(tmp_path: Path) -> None:
+    from dotmac_deploy_agent.runner import RunSpec, SubprocessRunner
+
+    runner = SubprocessRunner(("/bin/sh", "-c", "echo '{\"x\": 1}'"), 30)
+    spec = RunSpec(
+        "d", "erp/staging/h", "erp", "sha256:" + "a" * 64, tmp_path / "p", None
+    )
+    result = runner.run(spec)
+    assert result.receipt is None and result.receipt_error is None
+
+
+def test_fh_the_receipt_reaches_the_job_receipt(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.runner.receipt = {"job": "import", "exit_code": 0, "rows": 3}
+    assert refused(rig) == ("completed", None)
+    assert receipt(rig)["foundation"] == {"job": "import", "exit_code": 0, "rows": 3}
+
+
+def test_fh_a_clean_exit_without_a_readable_receipt_is_not_success(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.runner.receipt = None
+    rig.runner.receipt_error = "malformed"
+    assert refused(rig) == ("failed", "job_receipt_invalid")
+    assert receipt(rig)["foundation_receipt"] == "malformed"
+    assert tracked(rig) == []  # still purged
+
+
+def test_fh_a_failing_job_with_no_receipt_is_flagged_not_reclassified(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.runner.exit_code = 3
+    rig.runner.receipt = None
+    assert refused(rig) == ("failed", None)
+    assert (
+        receipt(rig)["foundation_receipt"] == "missing"
+        and receipt(rig)["exit_code"] == 3
+    )

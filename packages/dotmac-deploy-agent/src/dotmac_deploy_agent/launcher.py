@@ -686,6 +686,11 @@ class Launcher:
                 )
             )
             receipt["exit_code"] = result.exit_code
+            # Foundation's own receipt (the last JSON line of its stdout), or why not.
+            if result.receipt is not None:
+                receipt["foundation"] = result.receipt
+            else:
+                receipt["foundation_receipt"] = result.receipt_error or "missing"
             details["runner"] = {
                 "exit_code": result.exit_code,
                 "timed_out": result.timed_out,
@@ -694,6 +699,9 @@ class Launcher:
                 outcome, reason = "failed", "runner_timeout"
             elif result.exit_code != 0:
                 outcome = "failed"
+            elif result.receipt is None:
+                # exit 0 with no readable receipt cannot be trusted as success
+                outcome, reason = "failed", "job_receipt_invalid"
         except Refusal as refusal:
             outcome = "failed" if ran else "refused"
             reason = refusal.code
