@@ -130,4 +130,9 @@ class TargetClient:
         return reply
 
     def post_observation(self, observation: dict[str, object]) -> Reply:
+        if self._config.target_api_version == 2:
+            # The PoP-signed observation envelope (kind deploy|reconcile|job) is
+            # defined by Control's target_api_v2.json, which has not landed. The wire
+            # format is not guessed: the observation stays in the outbox until it is.
+            raise Refusal("observation_envelope_unavailable")
         return self.call("POST", "observations", observation)

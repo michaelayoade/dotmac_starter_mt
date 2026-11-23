@@ -252,8 +252,6 @@ def make_materials(**overrides: object) -> dict[str, object]:
     jobs = overrides.pop("jobs", None)
     dispatched = overrides.pop("dispatched_job", None)
     scoped = {n for j in (jobs or []) for n in j["params"]}  # type: ignore[index, union-attr]
-    if dispatched is not None:
-        scoped |= set(dispatched["params"])  # type: ignore[index]
     serving = [r for r in params if r["name"] not in scoped]  # type: ignore[attr-defined]
     try:
         digest = render_digest(canonical_render(to_params(serving), app_image))  # type: ignore[arg-type]

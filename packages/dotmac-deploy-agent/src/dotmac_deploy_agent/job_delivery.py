@@ -9,11 +9,11 @@ leave a valid, untracked `secret_id` behind.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import stat
-from pathlib import Path
 from typing import Final
 
 from .commands import Commands
@@ -27,6 +27,7 @@ from .delivery import (
 )
 from .files import remove_file, write_private
 from .journal import AccessorStore
+from .materials import ImageSpec
 from .openbao import OpenBaoSession, mint_path
 from .refusal import Refusal
 
@@ -80,36 +81,47 @@ def deliver_job_secret_id(
     return accessor[:8]
 
 
+def purge_unit_name(secrets_namespace: str, role: str) -> str:
+    return f"dotmac-job-purge@{secrets_namespace}-{role}.service"
+
+
 def purge_job_role(
     config: AgentConfig,
+    commands: Commands,
     store: AccessorStore,
     role: str,
     session: OpenBaoSession | None,
-    rendered: tuple[str, ...] = (),
 ) -> int:
-    """Remove every file in the job role's directory (the `secret_id`, the named
-    rendered files and anything else rendered there), then destroy every tracked
-    accessor (a no-op once consumed, a kill if not). Files go even when OpenBao is
-    down; an accessor that cannot be destroyed stays tracked."""
-    role_dir = config.role_dir(role)
-    for name in rendered:
-        if not _FILENAME.fullmatch(name):
-            raise Refusal("runtime_dir_unsafe")  # never a path
+    """After a job, at agent start and before every mint.
+
+    The agent removes only its OWN `secret_id`. The rendered files sit in
+    `secrets/`, which the agent never lists, reads or deletes in: the static
+    `dotmac-job-purge@<ns>-<role>` unit removes them as the container uid (started
+    through the enrolled polkit rule). Then every tracked accessor is destroyed (a
+    no-op once consumed, a kill if not). Each step runs even if the one before
+    failed; an accessor that cannot be destroyed stays tracked. Raises after the
+    steps if the purge unit could not be started."""
     try:
-        for entry in os.scandir(role_dir):
-            if not entry.is_dir(follow_symlinks=False):
-                remove_file(Path(entry.path))
-    except FileNotFoundError:
-        pass
+        remove_file(config.role_dir(role) / SECRET_ID_FILE)
     except OSError:
         raise Refusal("runtime_dir_unsafe") from None  # not ours to remove
+    purged = (
+        _systemctl(
+            config, commands, "start", purge_unit_name(config.secrets_namespace, role)
+        )
+        is not None
+    )
     state = store.load(role)
-    if session is None:
-        return len(state.retire)
-    kept = [a for a in state.retire if not _destroy(session, config, role, a)]
-    state.retire = kept
-    store.save(role, state)
-    LOG.info("job role purged role=%s tracked=%d", role, len(kept))
+    kept = state.retire
+    if session is not None:
+        kept = [a for a in state.retire if not _destroy(session, config, role, a)]
+        state.retire = kept
+        store.save(role, state)
+    LOG.info(
+        "job role purged role=%s tracked=%d purge_unit=%s", role, len(kept), purged
+    )
+    if not purged:
+        raise Refusal("job_files_invalid", "purge_unit_failed")
     return len(kept)
 
 
@@ -119,49 +131,71 @@ def render_job_credentials(
     role: str,
     names: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Render once, then verify. Starts the static `openbao-agent@<ns>-<role>`
-    (it logs in with the one secret_id, renders and exits) and checks every named
-    file: a regular file, mode 0400, owned by the enrolled uid. The role directory
-    is the job's: this only reads it. Returns the verified file names (never
-    values)."""
-    if (
-        _systemctl(config, commands, "start", unit_name(config.secrets_namespace, role))
-        is None
-    ):
-        raise Refusal("job_files_invalid")
+    """Render once, then verify WITHOUT listing or reading `secrets/`.
+
+    Starts the static one-shot `openbao-agent@<ns>-<role>` (it logs in with the one
+    secret_id, renders and exits), requires `Result=success` and `ExecMainStatus=0`
+    from `systemctl show` as the render-and-login signal, then `lstat`s each
+    DECLARED `secrets/<lower(name)>`: a regular, non-empty file, mode 0400, owned
+    by the enrolled uid. Narrowing to the declared files is Foundation's per-file
+    read-only mounts, not a deletion here. Returns the verified names."""
+    unit = unit_name(config.secrets_namespace, role)
+    if _systemctl(config, commands, "start", unit) is None:
+        raise Refusal("job_files_invalid", "render_unit_failed")
+    shown = _systemctl(
+        config, commands, "show", "--property=Result,ExecMainStatus", unit
+    )
+    fields = dict(
+        line.split("=", 1)
+        for line in (shown or b"").decode("utf-8", "replace").splitlines()
+        if "=" in line
+    )
+    if fields.get("Result") != "success" or fields.get("ExecMainStatus") != "0":
+        raise Refusal("job_files_invalid", "render_not_successful")
     uid = config.job_secrets_uid if config.job_secrets_uid is not None else os.geteuid()
-    role_dir = config.role_dir(role)
-    declared = {material.lower() for material in names}
-    removed: list[str] = []
-    try:
-        for entry in os.scandir(role_dir):
-            # M2: the authored config renders every path its role reads. Only the
-            # dispatched job's declared materials may be mounted: remove the rest
-            # (an owner-only job never sees the LEGACY file).
-            # The secret_id is spent by the one login, so it goes too.
-            if entry.name not in declared:
-                if entry.is_dir(follow_symlinks=False):
-                    raise Refusal("job_files_invalid")
-                remove_file(Path(entry.path))
-                removed.append(entry.name)
-    except OSError:
-        raise Refusal("job_files_invalid") from None
+    secrets = config.role_dir(role) / "secrets"
     verified: list[str] = []
     for material in names:
         name = material.lower()
         if not _FILENAME.fullmatch(name):
             raise Refusal("job_files_invalid")
         try:
-            info = (role_dir / name).lstat()
+            info = (secrets / name).lstat()
         except OSError:
             raise Refusal("job_files_invalid") from None
         if (
             not stat.S_ISREG(info.st_mode)
             or stat.S_IMODE(info.st_mode) != 0o400
             or info.st_uid != uid
+            or info.st_size == 0
         ):
             raise Refusal("job_files_invalid")
         verified.append(name)
-    if removed:
-        LOG.info("job role dir narrowed role=%s removed=%d", role, len(removed))
     return tuple(verified)
+
+
+def check_images_present(
+    config: AgentConfig, commands: Commands, images: tuple[ImageSpec, ...]
+) -> None:
+    """A role job runs an image that is already on the host: confirm each planned
+    image by DIGEST with a read-only `docker image inspect`, or refuse. Nothing is
+    transferred or pulled."""
+    for image in images:
+        reference = f"{image.planned_repository}@{image.planned_digest}"
+        try:
+            result = commands.run(
+                (
+                    str(config.docker_path),
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{json .RepoDigests}}",
+                    reference,
+                ),
+                timeout=60.0,
+            )
+            listed = json.loads(result.stdout) if result.exit_code == 0 else None
+        except (Refusal, ValueError):
+            raise Refusal("job_image_absent") from None
+        if not isinstance(listed, list) or reference not in listed:
+            raise Refusal("job_image_absent")
