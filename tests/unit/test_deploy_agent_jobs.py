@@ -795,3 +795,28 @@ def test_a_dispatched_job_is_parsed_only_from_a_run_job_statement() -> None:
     with pytest.raises(Refusal):
         plan_dispatched_job(binding, "deploy")
     assert plan_dispatched_job({"dispatched_job": None}, "deploy") is None
+
+
+# -- N-1: observation envelope switch (v2 format not published yet) ---------
+def test_target_api_v1_posts_the_observation_as_before(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    assert last(rig)["schema"] == "dotmac.deploy_observation/1"
+    assert rig.config.target_api_version == 1
+
+
+def test_target_api_v2_does_not_guess_an_envelope_and_keeps_the_observation_in_the_outbox(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path, target_api_version=2)
+    rig.cp.materials = make_materials(statement={"operation": "run_job"})  # a refusal
+    assert rig.launcher.run_once().outcome == "refused"
+    assert rig.cp.observations == []  # nothing posted in an unpublished format
+    assert len(rig.launcher.outbox.pending()) == 1  # sealed, retried later
+
+
+def test_target_api_version_is_validated(tmp_path: Path) -> None:
+    from tests.unit.deploy_agent_support import Keys, make_config
+
+    with pytest.raises(Refusal):
+        make_config(tmp_path, Keys(), target_api_version=3)

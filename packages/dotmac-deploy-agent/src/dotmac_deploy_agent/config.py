@@ -129,6 +129,11 @@ class AgentConfig:
     #: `dispatched_job.role` that is not listed is refused. Empty by default, so
     #: every role job is refused until enrolment names one.
     job_roles: tuple[str, ...] = ()
+    #: The target-API generation the agent speaks. 1 (default) posts today's
+    #: unsigned `dotmac.deploy_observation/1`. 2 is the PoP-signed observation
+    #: envelope of Control's `target_api_v2.json`, which is not published yet: until
+    #: it is, 2 refuses to post (the observation stays in the outbox).
+    target_api_version: int = 1
     #: uid the rendered job files must belong to (None: the agent's own uid).
     job_secrets_uid: int | None = None
     poll_seconds: int = 45
@@ -275,6 +280,8 @@ class AgentConfig:
             set(self.job_roles)
         ) != len(self.job_roles):
             raise Refusal("config_invalid")
+        if self.target_api_version not in (1, 2):
+            raise Refusal("config_invalid")
         if self.job_secrets_uid is not None and not 1 <= self.job_secrets_uid < 2**31:
             raise Refusal("config_invalid")  # never root
         if not 30 <= self.poll_seconds <= 60:
@@ -316,7 +323,7 @@ class AgentConfig:
             "runtime_secret_id_ttl_seconds", "migrate_secret_id_ttl_seconds",
             "wrap_ttl_seconds", "secrets_namespace", "secrets_environment",
             "secrets_root", "dispatch_max_age_seconds", "settle_seconds", "job_roles",
-            "job_secrets_uid",
+            "job_secrets_uid", "target_api_version",
         }  # fmt: skip
         if not set(values) <= known:
             raise Refusal("config_invalid")
@@ -370,6 +377,11 @@ class AgentConfig:
                 if type(number) is not int:
                     raise Refusal("config_invalid")
                 extra[name] = number
+        if "target_api_version" in values:
+            version = values["target_api_version"]
+            if type(version) is not int:
+                raise Refusal("config_invalid")
+            extra["target_api_version"] = version
         if "job_roles" in values:
             extra["job_roles"] = texts("job_roles")
         if "job_secrets_uid" in values:
