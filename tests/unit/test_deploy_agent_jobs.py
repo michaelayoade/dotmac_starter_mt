@@ -89,6 +89,9 @@ def dispatched(**kw: object) -> dict[str, object]:
         "argv": ["python", "-m", "erp_v2.importer", "execute"],
         "timeout_seconds": 600,
         "window": {"window_id": "w1", "closes_at": CLOSES},
+        "inputs": [],
+        "output_dir": "/job/out",
+        "apply_class": False,
     }
     row.update(kw)
     return row
@@ -1003,6 +1006,18 @@ def work_rig(tmp_path: Path, content: bytes = b"manifest") -> tuple[Rig, str]:
     return rig, "sha256:" + hashlib.sha256(content).hexdigest()
 
 
+BASE_ARGV = ["python", "-m", "erp_v2.importer", "execute"]
+
+
+def with_input(digest_: str, **kw: object) -> dict[str, object]:
+    """`dispatched()` overrides: one input, its flag and path present in argv."""
+    entry = one_input(digest_, **kw)
+    return {
+        "inputs": [entry],
+        "argv": [*BASE_ARGV, str(entry["flag"]), str(entry["path"])],
+    }
+
+
 def one_input(digest_: str, **kw: object) -> dict[str, object]:
     row: dict[str, object] = {
         "flag": "--manifest",
@@ -1015,7 +1030,7 @@ def one_input(digest_: str, **kw: object) -> dict[str, object]:
 
 def test_rq2_an_input_whose_sha256_matches_the_plan_is_accepted(tmp_path: Path) -> None:
     rig, digest_ = work_rig(tmp_path)
-    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    rig.cp.materials = run_job_materials(dispatched(**with_input(digest_)))
     assert refused(rig) == ("completed", None)
 
 
@@ -1023,9 +1038,7 @@ def test_rq2_an_input_digest_mismatch_is_refused_before_any_lease_or_mint(
     tmp_path: Path,
 ) -> None:
     rig, _ = work_rig(tmp_path)
-    rig.cp.materials = run_job_materials(
-        dispatched(inputs=[one_input("sha256:" + "0" * 64)])
-    )
+    rig.cp.materials = run_job_materials(dispatched(**with_input("sha256:" + "0" * 64)))
     assert refused(rig) == ("refused", "job_input_mismatch")
     assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.runner.specs == []
 
@@ -1034,22 +1047,20 @@ def test_rq2_a_missing_or_symlinked_input_is_a_mismatch(tmp_path: Path) -> None:
     rig, digest_ = work_rig(tmp_path)
     inputs = tmp_path / "work" / "import" / "in"
     (inputs / "manifest.json").unlink()
-    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    rig.cp.materials = run_job_materials(dispatched(**with_input(digest_)))
     assert refused(rig) == ("refused", "job_input_mismatch")  # missing
     real = tmp_path / "real.json"
     real.write_bytes(b"manifest")
     (inputs / "manifest.json").symlink_to(real)
     rig.cp.materials = run_job_materials(
-        dispatched(inputs=[one_input(digest_)]), dispatch_id="dispatch-2"
+        dispatched(**with_input(digest_)), dispatch_id="dispatch-2"
     )
     assert refused(rig) == ("refused", "job_input_mismatch")  # a symlink
 
 
 def test_rq2_inputs_without_a_work_root_are_refused(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)  # no job_work_root configured
-    rig.cp.materials = run_job_materials(
-        dispatched(inputs=[one_input("sha256:" + "0" * 64)])
-    )
+    rig.cp.materials = run_job_materials(dispatched(**with_input("sha256:" + "0" * 64)))
     assert refused(rig) == ("refused", "job_input_mismatch")
 
 
@@ -1169,7 +1180,10 @@ def test_rq3_apply_class_is_rederived_from_the_signed_plan(
     tmp_path: Path, extra: dict[str, object], declared: bool, expected: str | None
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(dispatched(apply_class=declared, **extra))
+    flagged = definition(args=[{"flag": "--apply", "type": "bool", "apply_mode": True}])
+    rig.cp.materials = run_job_materials(
+        dispatched(apply_class=declared, **extra), jobs=[flagged]
+    )
     result = refused(rig)
     if expected is None:
         assert result == ("completed", None)
@@ -1178,11 +1192,76 @@ def test_rq3_apply_class_is_rederived_from_the_signed_plan(
         assert rig.bao.paths == []
 
 
-def test_rq3_a_plan_without_a_stated_class_is_not_refused_until_the_contract_carries_it(
-    tmp_path: Path,
+@pytest.mark.parametrize("missing", ["apply_class", "inputs", "output_dir"])
+def test_the_v2_dispatched_job_keys_are_required(tmp_path: Path, missing: str) -> None:
+    rig = job_rig(tmp_path)
+    job = dispatched()
+    del job[missing]
+    rig.cp.materials = run_job_materials(job)
+    assert refused(rig) == ("refused", "materials_invalid")
+    assert rig.bao.paths == []
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"apply_class": "yes"},
+        {"apply_class": 1},
+        {"output_dir": "/var/out"},
+        {"output_dir": "/job/in"},
+    ],
+)
+def test_a_non_bool_apply_class_or_a_foreign_output_dir_is_refused(
+    tmp_path: Path, bad: dict[str, object]
 ) -> None:
     rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(dispatched(**bad))
+    assert refused(rig) == ("refused", "materials_invalid")
+
+
+def test_rq3_apply_choices_and_an_applying_command_make_a_plan_apply_class(
+    tmp_path: Path,
+) -> None:
+    choice = definition(
+        args=[
+            {
+                "flag": "--mode",
+                "type": "enum",
+                "choices": ["plan", "apply"],
+                "apply_choices": ["apply"],
+            }
+        ]
+    )
+    plan = ["python", "-m", "erp_v2.importer", "execute", "--mode", "plan"]
+    apply = [*plan[:-1], "apply"]
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=plan, apply_class=False), jobs=[choice]
+    )
+    assert refused(rig) == ("completed", None)  # the plan choice is not apply
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=apply, apply_class=False),
+        jobs=[choice],
+        dispatch_id="dispatch-2",
+    )
+    assert refused(rig) == (
+        "refused",
+        "job_apply_class_mismatch",
+    )  # the apply choice is
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=apply, apply_class=True),
+        jobs=[choice],
+        dispatch_id="dispatch-3",
+    )
     assert refused(rig) == ("completed", None)
+    command = definition(apply_command=True)
+    rig.cp.materials = run_job_materials(
+        dispatched(apply_class=False), jobs=[command], dispatch_id="dispatch-4"
+    )
+    assert refused(rig) == (
+        "refused",
+        "job_apply_class_mismatch",
+    )  # the command applies
 
 
 def test_rq4_an_owner_only_job_renders_exactly_the_owner_file(tmp_path: Path) -> None:
@@ -1434,7 +1513,7 @@ def test_staged_inputs_need_only_acl_read_not_world_readable(tmp_path: Path) -> 
     staged = tmp_path / "work" / "import" / "in" / "manifest.json"
     staged.chmod(0o440)
     assert staged.stat().st_mode & 0o007 == 0  # not world-readable
-    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    rig.cp.materials = run_job_materials(dispatched(**with_input(digest_)))
     assert refused(rig) == ("completed", None)
 
 
@@ -1571,42 +1650,46 @@ def test_r61_a_job_with_no_deadline_cannot_be_started() -> None:
         runner_environment(spec)
 
 
+POST_RUN = (
+    "--filter",
+    "label=dotmac.dispatch_id=dispatch-1",
+)  # only the after-run proof
+
+
 def test_r61_the_agent_proves_no_container_remains_before_purge_and_release(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
     assert refused(rig) == ("completed", None)
-    [call] = ps_filter(rig)
-    assert "label=dotmac.dispatch_id=dispatch-1" in call and "-a" in call
-    order = [c[-1] for c in rig.systemctl.calls if "start" in c]
-    assert any(
-        "secrets-purge" in u for u in order
-    )  # the purge ran, after a clean proof
+    proof = [c for c in ps_filter(rig) if "label=dotmac.dispatch_id=dispatch-1" in c]
+    assert len(proof) == 1 and "-a" in proof[0]
+    purged = [c[-1] for c in rig.systemctl.calls if "secrets-purge" in " ".join(c)]
+    assert len(purged) == 2  # before the mint and after the run, after a clean proof
 
 
-def test_r61_a_remaining_container_holds_the_lease_purges_nothing_and_pages(
+def test_rev7_a_surviving_container_still_gets_the_purge_and_only_holds_the_lease(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[("ps",)] = CommandResult(0, b"3f2a9c1b7d44\n")
+    rig.commands.script[POST_RUN] = CommandResult(0, b"3f2a9c1b7d44\n")
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("failed", "job_container_orphaned")
-    assert "lease/release" not in [
-        e for e, _ in rig.cp.lease_log
-    ]  # held, never released
-    assert tracked(rig) != []  # the accessor was NOT destroyed
+    assert "lease/release" not in [e for e, _ in rig.cp.lease_log]  # HELD
+    assert tracked(rig) == []  # the accessor was destroyed regardless
+    assert not (rig.config.role_dir("import") / "secret_id").exists()
     purges = [c for c in rig.systemctl.calls if "secrets-purge" in " ".join(c)]
-    assert len(purges) == 1  # only the one BEFORE the mint; none after the run
-    assert (secrets_dir(rig) / "migration_database_url").exists()  # renders untouched
+    assert len(purges) == 2  # the purge unit ran after the run too
     done = last(rig)
-    assert done["details"]["page"] is True and receipt(rig)["orphaned"] is True  # type: ignore[index]
+    assert done["details"]["page"] is True  # type: ignore[index]
+    assert receipt(rig)["orphan_container"] is True
+    assert "contained" not in json.dumps(done)  # never claims containment
 
 
 def test_r61_an_unreadable_container_listing_is_treated_as_an_orphan(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[("ps",)] = CommandResult(1, b"")
+    rig.commands.script[POST_RUN] = CommandResult(1, b"")
     assert refused(rig) == ("failed", "job_container_orphaned")
 
 
@@ -1616,7 +1699,50 @@ def test_r61_a_job_that_never_started_needs_no_container_proof(tmp_path: Path) -
     assert ps_filter(rig) == []
 
 
-def test_r61_agent_start_does_not_purge_under_a_possibly_running_container(
+def preflight_calls(rig: Rig) -> list[tuple[str, ...]]:
+    return [
+        c
+        for c in ps_filter(rig)
+        if "label=dotmac.dispatch_id" in c and "label=dotmac.job" in c
+    ]
+
+
+def test_rev7_the_preflight_lists_stopped_containers_carrying_both_job_labels(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.jobs import JOB_DISPATCH_LABEL, JOB_MARKER_LABEL
+
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    [call] = preflight_calls(rig)
+    assert "-a" in call  # stopped ones included
+    assert call.count("--filter") == 2
+    assert f"label={JOB_DISPATCH_LABEL}" in call and f"label={JOB_MARKER_LABEL}" in call
+
+
+@pytest.mark.parametrize("kind", ["job", "serving"])
+def test_rev7_an_orphan_blocks_every_lease_job_or_serving(
+    tmp_path: Path, kind: str
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("--filter", "label=dotmac.job")] = CommandResult(
+        0, b"abc123\n"
+    )
+    if kind == "serving":
+        rig.cp.materials = make_materials()
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "job_container_orphaned")
+    assert rig.cp.lease_log == [] and rig.bao.paths == [] and rig.runner.specs == []
+    assert rig.transfer.calls == []
+
+
+def test_rev7_an_unreadable_preflight_blocks_too(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("--filter", "label=dotmac.job")] = CommandResult(1, b"")
+    assert refused(rig) == ("refused", "job_container_orphaned")
+
+
+def test_rev7_agent_start_still_purges_and_the_orphan_blocks_the_next_lease(
     tmp_path: Path,
 ) -> None:
     from dotmac_deploy_agent.observation import mark_inflight
@@ -1627,7 +1753,54 @@ def test_r61_agent_start_does_not_purge_under_a_possibly_running_container(
     rig.commands.script[("ps",)] = CommandResult(0, b"abc123\n")
     rig.cp.materials = None
     assert rig.launcher.run_once().outcome == "idle"
-    assert (rig.config.role_dir("import") / "secret_id").exists() and tracked(rig) != []
+    assert not (rig.config.role_dir("import") / "secret_id").exists()  # purged anyway
+    assert tracked(rig) == []
+    rig.cp.materials = run_job_materials(dispatch_id="dispatch-2")
+    assert refused(rig) == ("refused", "job_container_orphaned")  # nothing new starts
+
+
+def test_rev7_the_deadline_always_binds_to_what_the_lease_leaves(
+    tmp_path: Path,
+) -> None:
+    """timeout 600 in a 720 s lease; setup eats 200 s: the budget shrinks, never grows."""
+    from dotmac_deploy_agent.jobs import (
+        JOB_STOP_MARGIN,
+        JOB_TEARDOWN_RESERVE,
+        JOB_TERM_GRACE,
+    )
+
+    rig = job_rig(tmp_path)
+    acquired = int(rig.epoch[0])
+    original = rig.systemctl.run
+
+    def slow(argv, *, timeout):  # type: ignore[no-untyped-def]
+        if "start" in argv and "openbao-agent@" in argv[-1]:
+            rig.epoch[0] += 200  # the render took 200 s
+        return original(argv, timeout=timeout)
+
+    rig.systemctl.run = slow  # type: ignore[method-assign]
+    assert refused(rig) == ("completed", None)
+    spec = rig.runner.specs[0]
+    reserve = JOB_STOP_MARGIN + JOB_TERM_GRACE + JOB_TEARDOWN_RESERVE
+    assert spec.job_deadline == acquired + 720 - reserve  # not now + 600
+    assert spec.job_deadline < acquired + 200 + 600
+    assert (
+        spec.job_bound_seconds == spec.job_deadline - (acquired + 200) + JOB_STOP_MARGIN
+    )
+
+
+def test_rev7_setup_that_uses_the_whole_lease_leaves_no_run(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    original = rig.systemctl.run
+
+    def slower(argv, *, timeout):  # type: ignore[no-untyped-def]
+        if "start" in argv and "openbao-agent@" in argv[-1]:
+            rig.epoch[0] += 700
+        return original(argv, timeout=timeout)
+
+    rig.systemctl.run = slower  # type: ignore[method-assign]
+    assert refused(rig) == ("failed", "lease_unavailable")
+    assert rig.runner.specs == [] and tracked(rig) == []  # purged, nothing ran
 
 
 def run_real(tmp_path: Path, script: str, *, bound: int = 1, grace: float = 1.0):  # type: ignore[no-untyped-def]
