@@ -5,3 +5,6 @@
 # dispatch, from the environment or from the plan (RULING-agent-contract R2).
 job_uid = @JOB_UID@
 job_user = "@JOB_USER@"
+# Host root of the staged job inputs (`<inputs_root>/<job>/in/<name>`): absolute, never
+# under /run/dotmac, equal to the agent config's `job_work_root`.
+inputs_root = "@INPUTS_ROOT@"

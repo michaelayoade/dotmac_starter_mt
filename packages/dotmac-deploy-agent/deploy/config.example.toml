@@ -1,5 +1,9 @@
 # Keys by name; every value below is a placeholder (documentation ranges only).
-# Root-owned, not group/other writable. Read by a dedicated non-root user.
+# Installed as /etc/dotmac/deploy-agent/<product>.toml, mode 0644 root:root (the
+# non-root agent must be able to READ it; never 0600), not group/other writable.
+# One instance per product: the systemd instance name IS the product segment of
+# target_ref (`dotmac-deploy-agent@erp`), so two products run side by side with
+# disjoint run, state and lock directories. Read-back: libexec/check-agent-config.sh.
 cp_url = "https://cp.example.invalid"
 target_ref = "erp/staging/host-a"            # <product>/<environment>/<host_alias>
 credential_id = "cred-placeholder"

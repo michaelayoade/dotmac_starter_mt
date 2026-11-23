@@ -68,6 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         refuse_db_environment(os.environ)
         config = AgentConfig.load(args.config)
+        config.check_instance(os.environ)
         ensure_private_dir(config.state_dir)
         lock_path = config.state_dir / "agent.lock"
         descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)

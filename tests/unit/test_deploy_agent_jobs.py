@@ -2133,12 +2133,22 @@ def test_fh_the_capture_file_lives_in_the_agents_own_run_directory(
 
 
 # -- the job identity file Foundation reads (kit) --------------------------------
+INPUTS = "/var/lib/dotmac/erp-v2/job-work"
+
+
 def identity_file(
-    tmp_path: Path, uid: str = "10040", user: str = "dotmac-erp-import"
+    tmp_path: Path,
+    uid: str = "10040",
+    user: str = "dotmac-erp-import",
+    inputs: str = INPUTS,
 ) -> Path:
     template = (KIT / "enrolment/job-identity.toml.template").read_text()
     path = tmp_path / "job-identity.toml"
-    path.write_text(template.replace("@JOB_UID@", uid).replace("@JOB_USER@", user))
+    path.write_text(
+        template.replace("@JOB_UID@", uid)
+        .replace("@JOB_USER@", user)
+        .replace("@INPUTS_ROOT@", inputs)
+    )
     path.chmod(0o644)
     return path
 
@@ -2160,11 +2170,18 @@ def test_the_job_identity_template_is_valid_toml_with_exactly_the_two_keys(
     import tomllib
 
     document = tomllib.loads(identity_file(tmp_path).read_text())
-    assert document == {"job_uid": 10040, "job_user": "dotmac-erp-import"}
+    assert document == {
+        "job_uid": 10040,
+        "job_user": "dotmac-erp-import",
+        "inputs_root": INPUTS,
+    }
 
 
 def test_the_identity_readback_accepts_the_enrolled_file(tmp_path: Path) -> None:
-    assert run_identity(identity_file(tmp_path)) == (0, "dotmac-erp-import 10040")
+    assert run_identity(identity_file(tmp_path)) == (
+        0,
+        f"dotmac-erp-import 10040 {INPUTS}",
+    )
 
 
 @pytest.mark.parametrize(
@@ -2216,4 +2233,130 @@ def test_the_job_identity_never_travels_in_dispatch_env_or_the_agent_code() -> N
     text = "".join(p.read_text() for p in src.glob("*.py"))
     assert (
         "job_uid" not in text and "JOB_UID" not in text and "job-identity" not in text
+    )
+
+
+@pytest.mark.parametrize(
+    "inputs", ["relative/path", "/run/dotmac/erp/in", "/", "/var/../etc", "/a b"]
+)
+def test_the_identity_readback_refuses_a_bad_inputs_root(
+    tmp_path: Path, inputs: str
+) -> None:
+    assert run_identity(identity_file(tmp_path, inputs=inputs))[0] != 0
+
+
+def test_the_identity_inputs_root_must_equal_the_agent_job_work_root(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "agent.toml"
+    config.write_text(f'job_work_root = "{INPUTS}"\n')
+    assert run_identity(identity_file(tmp_path), AGENT_CONFIG=str(config))[0] == 0
+    config.write_text('job_work_root = "/var/lib/other"\n')
+    assert run_identity(identity_file(tmp_path), AGENT_CONFIG=str(config))[0] != 0
+
+
+def run_config_check(path: Path, **extra: str) -> int:
+    import subprocess
+
+    return subprocess.run(  # noqa: S603
+        ["/bin/sh", str(KIT / "enrolment/libexec/check-agent-config.sh"), str(path)],
+        check=False, capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "EXPECT_OWNER": str(os.geteuid()), **extra},
+    ).returncode  # fmt: skip
+
+
+def test_the_agent_config_readback_wants_0644_not_0600(tmp_path: Path) -> None:
+    config = tmp_path / "erp.toml"
+    config.write_text("x = 1\n")
+    config.chmod(0o644)
+    assert run_config_check(config) == 0
+    for mode in (0o600, 0o664, 0o666, 0o640):
+        config.chmod(mode)
+        assert run_config_check(config) != 0, oct(mode)  # unreadable or writable
+    config.chmod(0o644)
+    assert run_config_check(config, EXPECT_OWNER=str(os.geteuid() + 1)) != 0
+
+
+def test_no_kit_or_doc_asks_for_a_0600_agent_config() -> None:
+    root = Path(__file__).resolve().parents[2] / "packages/dotmac-deploy-agent"
+    for path in [root / "README.md", root / "deploy/config.example.toml"]:
+        text = path.read_text()
+        assert (
+            "0600" not in text.replace("never 0600", "") and "mode 600" not in text
+        ), path.name
+    assert "0644" in (root / "deploy/config.example.toml").read_text()
+
+
+def test_there_is_no_job_secrets_uid_key_anywhere() -> None:
+    root = Path(__file__).resolve().parents[2]
+    here = Path(__file__).resolve()
+    hits = [
+        str(p)
+        for base in ("packages/dotmac-deploy-agent", "tests/unit")
+        for p in (root / base).rglob("*")
+        if p.is_file()
+        and p != here
+        and p.suffix in {".py", ".md", ".toml", ".template", ".sh", ".service", ".conf"}
+        and "job_secrets_uid" in p.read_text()
+    ]
+    assert hits == []
+
+
+def test_the_instance_name_is_the_product_segment_and_two_instances_run_side_by_side(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.refusal import Refusal
+
+    from tests.unit.deploy_agent_support import Keys, make_config
+
+    def instance(product: str) -> object:
+        return make_config(
+            tmp_path / product,
+            Keys(),
+            target_ref=f"{product}/staging/host-a",
+            runtime_root=tmp_path / "run",
+            state_dir=tmp_path / "state" / product,
+        )
+
+    (tmp_path / "erp").mkdir()
+    (tmp_path / "erp-companion").mkdir()
+    erp, companion = instance("erp"), instance("erp-companion")
+    assert erp.product == "erp" and erp.run_dir == tmp_path / "run" / "erp"  # type: ignore[attr-defined]
+
+    def paths(c):  # type: ignore[no-untyped-def]
+        return {
+            c.run_dir,
+            c.deploy_run_dir,
+            c.state_dir,
+            c.state_dir / "agent.lock",
+            c.state_dir / "role-job.lock",
+        }
+
+    assert paths(erp).isdisjoint(paths(companion))  # nothing is shared
+    # what systemd sets for `dotmac-deploy-agent@erp` and `@erp-companion`
+    erp.check_instance(
+        {
+            "RUNTIME_DIRECTORY": str(tmp_path / "run" / "erp"),
+            "STATE_DIRECTORY": str(tmp_path / "state" / "erp"),
+        }
+    )  # type: ignore[attr-defined]
+    companion.check_instance(
+        {"RUNTIME_DIRECTORY": str(tmp_path / "run" / "erp-companion")}
+    )  # type: ignore[attr-defined]
+    erp.check_instance({})  # type: ignore[attr-defined]  # outside systemd: nothing to compare
+    with pytest.raises(
+        Refusal
+    ) as wrong:  # the ERP config started as the companion's instance
+        erp.check_instance(
+            {"RUNTIME_DIRECTORY": str(tmp_path / "run" / "erp-companion")}
+        )  # type: ignore[attr-defined]
+    assert wrong.value.code == "config_invalid"
+    with pytest.raises(Refusal):
+        erp.check_instance(
+            {"STATE_DIRECTORY": str(tmp_path / "state" / "erp-companion")}
+        )  # type: ignore[attr-defined]
+    unit = (KIT / "systemd/dotmac-deploy-agent@.service").read_text()
+    assert (
+        "RuntimeDirectory=dotmac-deploy-agent/%i" in unit
+        and "StateDirectory=dotmac-deploy-agent/%i" in unit
     )

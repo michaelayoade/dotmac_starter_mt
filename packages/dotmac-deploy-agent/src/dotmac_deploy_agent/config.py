@@ -296,6 +296,18 @@ class AgentConfig:
         if not 3600 <= self.runtime_secret_id_ttl_seconds <= 90 * 86400:
             raise Refusal("config_invalid")
 
+    def check_instance(self, environ: Mapping[str, str]) -> None:
+        """The systemd instance name IS the product segment of `target_ref`: the unit's
+        `RuntimeDirectory`/`StateDirectory` (`.../%i`) must be the directories this
+        config names, or two instances could share or cross state. Outside systemd
+        (neither variable set) there is nothing to compare."""
+        runtime = environ.get("RUNTIME_DIRECTORY")
+        state = environ.get("STATE_DIRECTORY")
+        if runtime is not None and Path(runtime) != self.run_dir:
+            raise Refusal("config_invalid", "instance_runtime_dir")
+        if state is not None and Path(state) != self.state_dir:
+            raise Refusal("config_invalid", "instance_state_dir")
+
     @classmethod
     def load(cls, path: Path) -> AgentConfig:
         if os.geteuid() == 0:
