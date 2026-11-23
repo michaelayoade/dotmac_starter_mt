@@ -60,6 +60,7 @@ from typing import Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import lane3_e10_receipt
 from dotmac_deployment_foundation.lease import release_path
 
 __all__ = [
@@ -71,6 +72,7 @@ __all__ = [
     "RunResult",
     "StageRefused",
     "StagedFile",
+    "StagedRun",
     "clock_skew_argv",
     "launch_argv",
     "load_staged_file",
@@ -498,6 +500,100 @@ def _ok(result: RunResult, code: str) -> RunResult:
     return result
 
 
+def _require_receipt_for_target(
+    receipt: object,
+    *,
+    pin: PinnedHostKey,
+    host_id: str,
+    execution_context: StagedFile | None,
+) -> None:
+    """The receipt must be for THIS pin, alias and host (and context), pre-network."""
+    if not isinstance(receipt, lane3_e10_receipt.E10ReceiptRef):
+        raise StageRefused("e10-receipt-required")
+    try:
+        receipt.require_pin_matches(
+            ssh_fingerprint=pin.fingerprint, alias=pin.alias, host_id=host_id
+        )
+        if execution_context is not None:
+            lane3_e10_receipt.require_enrolment_matches(execution_context.data, receipt)
+    except lane3_e10_receipt.ReceiptRefused as exc:
+        raise StageRefused(exc.code) from None
+
+
+_STAGED_KEY: Final = os.urandom(32)
+
+
+def _staged_token(
+    run_dir: str,
+    host_id: str,
+    run_id: str,
+    receipt_digest: str,
+    files: tuple[tuple[str, str], ...],
+) -> str:
+    material = ["staged-run", run_dir, host_id, run_id, receipt_digest]
+    material += [f"{name}={digest}" for name, digest in files]
+    return hmac.new(_STAGED_KEY, "\x00".join(material).encode(), "sha256").hexdigest()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StagedRun:
+    """What :func:`stage_artifacts` staged: the run directory, host, run and files.
+
+    Token-bound like :class:`ClockSkewPassed`: it cannot be built by a caller, and
+    `dataclasses.replace` onto another host, run, directory or digest fails the
+    token at construction and at every use. `drive` and `launch_argv` take THIS,
+    never a caller-supplied mapping of what was staged.
+    """
+
+    run_dir: str
+    host_id: str
+    run_id: str
+    #: `E10ReceiptRef.digest()` of the receipt staging checked. Token-covered, so
+    #: the skew step and `drive` can refuse a different receipt.
+    receipt_digest: str
+    #: `(relative name, sha256)` for every file staged, sorted.
+    files: tuple[tuple[str, str], ...]
+    _token: str = dataclasses.field(default="", repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.verify()
+
+    def verify(self) -> None:
+        try:
+            expected = _staged_token(
+                self.run_dir,
+                self.host_id,
+                self.run_id,
+                self.receipt_digest,
+                tuple(self.files),
+            )
+        except (TypeError, ValueError, AttributeError):
+            raise StageRefused("staged-run-forged") from None
+        if not hmac.compare_digest(str(self._token), expected):
+            raise StageRefused("staged-run-forged")
+
+    def digest_of(self, name: str) -> str | None:
+        self.verify()
+        for staged_name, digest in self.files:
+            if staged_name == name:
+                return digest
+        return None
+
+    def require_for(self, *, run_dir: str, host_id: str, run_id: str) -> None:
+        """Refuse unless this is the staging of exactly this directory, host, run."""
+        self.verify()
+        if (self.run_dir, self.host_id, self.run_id) != (run_dir, host_id, run_id):
+            raise StageRefused("staged-run-not-this-lease")
+
+    def require_receipt(self, receipt: object) -> None:
+        """Refuse unless `receipt` is the very receipt staging checked."""
+        self.verify()
+        if not isinstance(receipt, lane3_e10_receipt.E10ReceiptRef):
+            raise StageRefused("e10-receipt-required")
+        if receipt.digest() != self.receipt_digest:
+            raise StageRefused("receipt-not-the-stagings")
+
+
 def stage_artifacts(
     *,
     run: Runner,
@@ -506,19 +602,26 @@ def stage_artifacts(
     pin: PinnedHostKey,
     connect_timeout: int,
     host_id: str,
+    run_id: str,
+    receipt: lane3_e10_receipt.E10ReceiptRef,
     artifacts: Mapping[str, StagedFile],
     lease: StagedFile,
     lease_filename: str,
     wheelhouse: Mapping[str, StagedFile],
-) -> str:
+) -> StagedRun:
     """Create the per-run directory and ship every artifact by digest.
 
     Each file lands, is hashed again ON THE TARGET, and must equal the digest the
-    launcher computed from the very bytes it sent. Returns the run directory.
+    launcher computed from the very bytes it sent. Returns the :class:`StagedRun`
+    (run directory, host, run and every file's digest, token-bound).
+
+    The E10 receipt is checked against the pin, the alias, the host and the
+    staged execution context BEFORE the first remote call, so one target's DSN or
+    context can never be shipped to a host the receipt is not for.
     """
     if not isinstance(identity, LaunchIdentity):
         raise StageRefused("ssh-identity-required")
-    identity.require_for(host_id=host_id)
+    identity.require_for(host_id=host_id, run_id=run_id)
     if set(artifacts) != set(ARTIFACT_NAMES):
         raise StageRefused("artifact-set-not-the-closed-set")
     if lease_filename != expected_lease_filename(host_id) or not _LEASE_NAME.fullmatch(
@@ -533,6 +636,12 @@ def stage_artifacts(
     for name, staged in wheelhouse.items():
         _require_staged(name, staged)
     requirements = requirements_for(wheelhouse)
+    _require_receipt_for_target(
+        receipt,
+        pin=pin,
+        host_id=host_id,
+        execution_context=artifacts["execution-context.json"],
+    )
 
     def remote(command: str, stdin: bytes | None = None) -> RunResult:
         return run(
@@ -594,7 +703,16 @@ def stage_artifacts(
         ),
         "isolated-install",
     )
-    return run_dir
+    files = tuple(sorted((relative, staged.sha256) for relative, staged, _ in plan))
+    receipt_digest = receipt.digest()
+    return StagedRun(
+        run_dir=run_dir,
+        host_id=host_id,
+        run_id=run_id,
+        receipt_digest=receipt_digest,
+        files=files,
+        _token=_staged_token(run_dir, host_id, run_id, receipt_digest, files),
+    )
 
 
 # ── clock and launch ────────────────────────────────────────────────────────
@@ -693,6 +811,9 @@ def require_clock_skew(
     pin: PinnedHostKey,
     connect_timeout: int,
     extra_env: Mapping[str, str],
+    staged: StagedRun,
+    receipt: lane3_e10_receipt.E10ReceiptRef,
+    execution_context: StagedFile,
 ) -> ClockSkewPassed:
     """Run CP's skew check on the target; only exit 0 yields the proof.
 
@@ -702,6 +823,28 @@ def require_clock_skew(
     """
     if not run_id or not host_id:
         raise StageRefused("clock-skew-binding-required")
+    # The identity must be the one built for THIS lease: its host and its run.
+    # Refused BEFORE anything is run on the target.
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    identity.require_for(host_id=host_id, run_id=run_id)
+    # The skew command exports the DSN on the target: the staging must be this
+    # run's, and the receipt must be for this pin, alias and host, BEFORE it runs.
+    if not isinstance(staged, StagedRun):
+        raise StageRefused("staged-run-required")
+    staged.require_for(run_dir=run_dir, host_id=host_id, run_id=run_id)
+    # The same receipt staging checked, and the same context: the enrolment is
+    # checked here exactly as staging checked it.
+    try:
+        _require_staged("execution-context.json", execution_context)
+    except StageRefused:
+        raise StageRefused("execution-context-digest-mismatch") from None
+    if staged.digest_of("execution-context.json") != execution_context.sha256:
+        raise StageRefused("execution-context-not-the-staged-file")
+    _require_receipt_for_target(
+        receipt, pin=pin, host_id=host_id, execution_context=execution_context
+    )
+    staged.require_receipt(receipt)
     result = run(
         clock_skew_argv(
             run_dir=run_dir,
@@ -736,6 +879,7 @@ def launch_argv(
     skew: ClockSkewPassed,
     run_id: str,
     host_id: str,
+    staged: StagedRun,
 ) -> list[str]:
     """The session, in the candidate venv, `-E -P`, with the channel on stdio.
 
@@ -756,6 +900,10 @@ def launch_argv(
     # The binding matches; the TOKEN must still cover exactly these values, which
     # catches a proof whose fields were changed after it was issued.
     skew.verify()
+    # What is launched is what was staged: same directory, host and run.
+    if not isinstance(staged, StagedRun):
+        raise StageRefused("staged-run-required")
+    staged.require_for(run_dir=run_dir, host_id=host_id, run_id=run_id)
     tail = "venv/bin/python -E -P scripts/lane3_target_session.py"
     return ssh_argv(
         destination=destination,
@@ -773,8 +921,21 @@ def teardown_argv(
     identity: LaunchIdentity,
     pin: PinnedHostKey,
     connect_timeout: int,
+    host_id: str,
+    run_id: str,
 ) -> list[str]:
-    """Remove the per-run directory. Best effort; the run's verdict is fixed."""
+    """Remove the per-run directory. Best effort; the run's verdict is fixed.
+
+    The identity must be the one built for this host AND run, so a key that was
+    proven for another lease can never remove this run's directory.
+    """
+    if not isinstance(identity, LaunchIdentity):
+        raise StageRefused("ssh-identity-required")
+    if not isinstance(host_id, str) or not host_id:
+        raise StageRefused("teardown-binding-required")
+    if not isinstance(run_id, str) or not run_id:
+        raise StageRefused("teardown-binding-required")
+    identity.require_for(host_id=host_id, run_id=run_id)
     if not _RUN_DIR.fullmatch(run_dir):
         raise StageRefused("run-directory-unexpected")
     return ssh_argv(

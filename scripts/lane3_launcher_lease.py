@@ -40,6 +40,7 @@ from typing import Any, Final
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import exposure_rehearsal_runner as controller_half
+import lane3_e10_receipt
 from dotmac_deployment_foundation.controller_identity import (
     ControllerSshFingerprintV1,
 )
@@ -53,6 +54,7 @@ from lane3_e10_receipt import E10ReceiptRef
 from lane3_lease_store import (
     HeldLease,
     LeaseStore,
+    ReprovisionMarker,
     StoreRefused,
     require_database_time,
 )
@@ -60,6 +62,7 @@ from lane3_lease_store import (
 __all__ = [
     "EVIDENCE_FILE",
     "RELEASE_FILE",
+    "UNCONFIRMED_RELEASE_FILE",
     "LeaseCustodyRefused",
     "Terminal",
     "parse_terminal",
@@ -82,6 +85,8 @@ class LeaseCustodyRefused(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+        #: Set only when a store refused a release that had been built.
+        self.release_record: Any = None
 
 
 def take_custody(
@@ -92,11 +97,33 @@ def take_custody(
     controller_identity: ControllerSshFingerprintV1,
     ttl_seconds: int,
     e10_receipt: E10ReceiptRef,
+    reprovision: ReprovisionMarker | None = None,
 ) -> HeldLease:
     """The exclusively held lease, or a refusal. The store is a required input.
 
     A store that cannot supply database time is refused before anything is taken.
+    The receipt must be for this host. An optional :class:`ReprovisionMarker` is
+    passed through only when it is typed, names this host and cites THIS receipt
+    (the one the new lease is taken under); anything else is refused before the
+    store is touched. The store still decides whether the receipt is a newer
+    incarnation. The lease the store returns must carry the receipt it was
+    asked to take it under.
     """
+    if not isinstance(e10_receipt, E10ReceiptRef):
+        raise LeaseCustodyRefused("e10-receipt-required")
+    if e10_receipt.host_id != host_id:
+        raise LeaseCustodyRefused("receipt-host-id-mismatch")
+    try:
+        lane3_e10_receipt.require_vm_slot(e10_receipt)
+    except lane3_e10_receipt.ReceiptRefused as exc:
+        raise LeaseCustodyRefused(exc.code) from None
+    if reprovision is not None:
+        if not isinstance(reprovision, ReprovisionMarker):
+            raise LeaseCustodyRefused("reprovision-marker-untyped")
+        if reprovision.host_id != host_id:
+            raise LeaseCustodyRefused("reprovision-marker-for-another-host")
+        if reprovision.e10_receipt != e10_receipt:
+            raise LeaseCustodyRefused("reprovision-receipt-mismatch")
     try:
         checked = require_database_time(store)
         held = checked.acquire_exclusive(
@@ -105,9 +132,12 @@ def take_custody(
             controller_identity=controller_identity,
             ttl_seconds=ttl_seconds,
             e10_receipt=e10_receipt,
+            reprovision=reprovision,
         )
     except StoreRefused as exc:
         raise LeaseCustodyRefused(exc.code) from None
+    if held.e10_receipt != e10_receipt:
+        raise LeaseCustodyRefused("lease-receipt-mismatch")
     if controller_identity != held.lease.controller_identity_fingerprint:
         raise LeaseCustodyRefused("lease-names-another-controller")
     return held
@@ -299,6 +329,18 @@ def release_with_record(
         outcome = TerminalOutcome(refusal=refusal)
     else:
         return "", None
+    # The release's `vm_slot` is the E10 receipt's, never a free argument.
+    # An argument of None is UNSET (it is replaced by the receipt's slot, which
+    # `take_custody` already required before launch); only a DIFFERENT value
+    # refuses.
+    slot = held.e10_receipt.vm_slot
+    given = getattr(release_args, "vm_slot", None)
+    if given is not None and given != slot:
+        raise LeaseCustodyRefused("release-vm-slot-mismatch")
+    try:
+        release_args.vm_slot = slot
+    except AttributeError:
+        pass
     ctx = controller_half.TerminalContext()
     ctx.lease = held.lease if terminal.lease_in_hand else None
     ctx.controller_identity = controller_identity
@@ -317,7 +359,11 @@ def release_with_record(
     try:
         digest = store.release(held, release=release, host_mutated=host_mutated)
     except StoreRefused as exc:
-        raise LeaseCustodyRefused(exc.code) from None
+        refused = LeaseCustodyRefused(exc.code)
+        # The release that WAS sent, so a commit-unknown can still leave a copy
+        # (marked unconfirmed) for whoever reads standing afterwards.
+        refused.release_record = release
+        raise refused from None
     return digest, release
 
 
@@ -329,6 +375,8 @@ def release_for(terminal: Terminal, **kwargs: Any) -> str:
 # The names the existing `exposure-rehearsal.yml` upload step publishes
 # (`lane3-terminal-release`), so these records reach the store on every outcome.
 RELEASE_FILE: Final = "lane3-lease-release.json"
+#: A release whose commit is UNKNOWN (store dropped after the write was sent).
+UNCONFIRMED_RELEASE_FILE: Final = "lane3-lease-release-unconfirmed.json"
 EVIDENCE_FILE: Final = "lane3-terminal-evidence.json"
 
 
@@ -344,6 +392,7 @@ def write_terminal_records(
     evidence: dict[str, Any],
     release_record: Any | None,
     released_at: str | None = None,
+    unconfirmed_record: Any | None = None,
 ) -> list[pathlib.Path]:
     """Create-only terminal records for EVERY outcome. Never overwrites.
 
@@ -365,4 +414,15 @@ def write_terminal_records(
     path = directory / EVIDENCE_FILE
     _create_only(path, json.dumps(evidence, indent=2, allow_nan=False) + "\n")
     written.append(path)
+    # The evidence is on disk BEFORE the unconfirmed copy is built, so a failure
+    # in building the copy cannot lose it.
+    if unconfirmed_record is not None:
+        path = directory / UNCONFIRMED_RELEASE_FILE
+        wrapper = {
+            "unconfirmed": True,
+            "note": "store-commit-unknown: read standing before trusting this copy",
+            "release": dict(unconfirmed_record.as_document()),
+        }
+        _create_only(path, json.dumps(wrapper, indent=2, allow_nan=False))
+        written.append(path)
     return written

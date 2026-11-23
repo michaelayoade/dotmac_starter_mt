@@ -478,6 +478,11 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-learning"
         / "src/dotmac_learning/migrations/versions"
     ),
+    "dotmac-money-flows": (
+        REPO_ROOT
+        / "packages/dotmac-money-flows"
+        / "src/dotmac_money_flows/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -562,6 +567,7 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-ticketing": "tk_*.py",
     "dotmac-deployment-control": "dc_*.py",
     "dotmac-learning": "lr_*.py",
+    "dotmac-money-flows": "mf_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -643,6 +649,7 @@ TAG_PREFIXES: dict[str, str] = {
     "dotmac-ticketing": "dotmac-ticketing-v",
     "dotmac-deployment-control": "dotmac-deployment-control-v",
     "dotmac-learning": "dotmac-learning-v",
+    "dotmac-money-flows": "dotmac-money-flows-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -8336,6 +8343,24 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payroll ──
+    "dotmac-payroll-v0.1.0a7": (
+        "dotmac-payroll",
+        "6f3a0b9df85e3a99dfd7e1654845cb2fa776299c",
+        {
+            "py_0001_payroll.py": (
+                "7778ff65a7ede98bf4aa8d8659a0d8bddf66f703355c5f4e3878c78473f5c8fd"
+            ),
+            "py_0002_mode_and_run_cancel.py": (
+                "8743517c31f90ec941bf57a6ddb93040c4b2b468c06bec0b633b0900e2805135"
+            ),
+            "py_0003_settlement_reversal.py": (
+                "4ef14914aab73e7b40ba21f060a05eba5878bfc7621534618c17ac68efc42135"
+            ),
+            "py_0004_liability_adjustments.py": (
+                "fa09a903d2368e366d31e62986c8ef9d499ca3b1be4ce7c8d4a41af46d474e5f"
+            ),
+        },
+    ),
     "dotmac-payroll-v0.1.0a6": (
         "dotmac-payroll",
         "cd9f72b0874312d9217e481f359ccaa5376603b3",
@@ -8861,6 +8886,19 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-money-flows ──
+    "dotmac-money-flows-v0.1.0a1": (
+        "dotmac-money-flows",
+        "2cac7c246b9a36580b9cd22360eb2d74ff8e0829",
+        {
+            "mf_0001_settle_instances.py": (
+                "fa10195f884f7e6d7404e03af52d90003d24b91b7813f6c93ee1ea0c2f3ea03e"
+            ),
+            "mf_0002_funded_charge_instances.py": (
+                "f33b75e1ce84a3cfea69bd535067ea640dc614da4d61a575eb6c89c2f327842e"
+            ),
+        },
+    ),
 }
 
 
@@ -9121,6 +9159,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
     "dotmac-learning": frozenset(),
+    "dotmac-money-flows": frozenset(),
 }
 
 

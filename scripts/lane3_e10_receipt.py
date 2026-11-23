@@ -37,6 +37,7 @@ __all__ = [
     "E10ReceiptRef",
     "ReceiptRefused",
     "require_enrolment_matches",
+    "require_vm_slot",
     "validate_incarnation_fingerprint",
 ]
 
@@ -141,6 +142,35 @@ class E10ReceiptRef:
         if not isinstance(destroyed, datetime) or destroyed.tzinfo is None:
             raise ReceiptRefused("receipt-destruction-time-invalid")
 
+    def digest(self) -> str:
+        """A stable `sha256:` digest over every field, for binding to a staging.
+
+        A launcher-local binding token, not a document: the fields are joined
+        in declaration order (name and value, NUL-separated), nothing is
+        serialised as JSON.
+        """
+        parts: list[str] = []
+        for field in dataclasses.fields(self):
+            value = getattr(self, field.name)
+            text = value.isoformat() if isinstance(value, datetime) else value
+            parts.append(f"{field.name}={text}")
+        return "sha256:" + hashlib.sha256("\x00".join(parts).encode()).hexdigest()
+
+    def require_pin_matches(
+        self, *, ssh_fingerprint: str, alias: str, host_id: str
+    ) -> None:
+        """The pin/alias/host part of :meth:`require_matches`, with no store time.
+
+        Run BEFORE the first remote call, so a receipt for another VM is refused
+        while nothing (no DSN, no context) has been shipped to any host.
+        """
+        if ssh_fingerprint != self.ssh_host_key_fingerprint:
+            raise ReceiptRefused("receipt-ssh-fingerprint-mismatch")
+        if alias != self.vm_alias:
+            raise ReceiptRefused("receipt-alias-mismatch")
+        if host_id != self.host_id:
+            raise ReceiptRefused("receipt-host-id-mismatch")
+
     def require_matches(
         self,
         *,
@@ -172,6 +202,21 @@ class E10ReceiptRef:
             raise ReceiptRefused("receipt-machine-id-mismatch")
         if self.incarnation_key_destroyed_at > store_time:
             raise ReceiptRefused("incarnation-key-not-destroyed-before-launch")
+
+
+def require_vm_slot(receipt: E10ReceiptRef) -> str:
+    """The receipt's `vm_slot`, or a refusal BEFORE launch.
+
+    The release document's `vm_slot` is sourced from the receipt. A NULL or
+    off-grammar value means no lease release can ever be written, so the host
+    would stay held after it was mutated. Refuse while nothing has been touched.
+    """
+    slot = receipt.vm_slot
+    if slot is None:
+        raise ReceiptRefused("receipt-vm-slot-required")
+    if not isinstance(slot, str) or not _VM_SLOT.fullmatch(slot):
+        raise ReceiptRefused("receipt-vm-slot-invalid")
+    return slot
 
 
 MAX_CONTEXT_BYTES: Final = 1024 * 1024

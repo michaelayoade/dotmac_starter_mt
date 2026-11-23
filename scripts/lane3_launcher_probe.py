@@ -37,12 +37,14 @@ import json
 import pathlib
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any, Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import exposure_rehearsal_runner as controller_half
 import lane3_inside_vantage as inside_vantage
+import lane3_negative_proof as negative_proof
 from dotmac_deployment_foundation.rehearsal import RequirementStatus
 
 PASSED = RequirementStatus.EXECUTED_PASSED
@@ -58,6 +60,7 @@ __all__ = [
     "ProbeInputs",
     "default_measurers",
     "measure_external_rows",
+    "measure_post_compensation",
 ]
 
 
@@ -164,6 +167,39 @@ def _row(code: str, status: RequirementStatus, detail: str, *evidence: str) -> d
     }
 
 
+def _external_row(
+    evidence: dict[str, Any], code: str, key: str, want_reachable: bool, note: str
+) -> dict:
+    """One external judgement. The single definition, shared by the window rows
+    (items 11-13) and the post-compensation probe (S8b)."""
+    probe = controller_half._probe(evidence, key)
+    reachable = bool(probe.get("reachable"))
+    # ABSENCE FAILS here too: defaulting the control to "fired" would read an
+    # unmeasured control as a satisfied one.
+    if "positive_control_fired" not in probe:
+        raise controller_half.EvidenceIncomplete(
+            f"the {key!r} probe carries no `positive_control_fired`. An "
+            "unmeasured control must never read as a fired one"
+        )
+    control = bool(probe["positive_control_fired"])
+    # ABSENCE FAILS: a negative probe against a port where nothing listens
+    # measures an absent service, not an enforced exposure.
+    if "service_running" not in probe:
+        raise controller_half.EvidenceIncomplete(
+            f"the {key!r} probe carries no `service_running`. An unmeasured "
+            "negative must never read as a pass"
+        )
+    running = bool(probe["service_running"])
+    ok = reachable == want_reachable and control and running
+    return _row(
+        code,
+        PASSED if ok else FAILED,
+        f"{note}: reachable={reachable} (wanted {want_reachable}), "
+        f"positive control fired={control}, service running={running}",
+        f"probe:{key}",
+    )
+
+
 def measure_external_rows(
     inputs: ProbeInputs,
     qualified_evidence: dict[str, Any],
@@ -197,34 +233,7 @@ def measure_external_rows(
         ("external_v4", "v4_pair", False, "IPv4 negative with its tcp/22 control"),
     )
     for code, key, want_reachable, note in external:
-        probe = controller_half._probe(evidence, key)
-        reachable = bool(probe.get("reachable"))
-        # ABSENCE FAILS here too: defaulting the control to "fired" would read an
-        # unmeasured control as a satisfied one.
-        if "positive_control_fired" not in probe:
-            raise controller_half.EvidenceIncomplete(
-                f"the {key!r} probe carries no `positive_control_fired`. An "
-                "unmeasured control must never read as a fired one"
-            )
-        control = bool(probe["positive_control_fired"])
-        # ABSENCE FAILS: a negative probe against a port where nothing listens
-        # measures an absent service, not an enforced exposure.
-        if "service_running" not in probe:
-            raise controller_half.EvidenceIncomplete(
-                f"the {key!r} probe carries no `service_running`. An unmeasured "
-                "negative must never read as a pass"
-            )
-        running = bool(probe["service_running"])
-        ok = reachable == want_reachable and control and running
-        rows.append(
-            _row(
-                code,
-                PASSED if ok else FAILED,
-                f"{note}: reachable={reachable} (wanted {want_reachable}), "
-                f"positive control fired={control}, service running={running}",
-                f"probe:{key}",
-            )
-        )
+        rows.append(_external_row(evidence, code, key, want_reachable, note))
 
     behaviour = evidence.get("closed_port_behaviour")
     rows.append(
@@ -294,3 +303,48 @@ def measure_external_rows(
         )
     )
     return ExternalMeasurement(rows=rows, document=evidence)
+
+
+def measure_post_compensation(
+    inputs: ProbeInputs,
+    qualified_evidence: dict[str, Any],
+    *,
+    dispatch_id: str,
+    host_id: str,
+    measurers: Measurers | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> bytes:
+    """The negative target's post-compensation probe (S8b), as closed bytes.
+
+    Taken in the bounded window the negative session opens AFTER its compensation
+    and BEFORE its own cleanup, with the stack up. The two existing judgements are
+    reused unchanged: `external_negative_v6` and `external_v4`, both wanted
+    UNREACHABLE, each needing its own tcp/22 positive control to fire and the
+    service to be running. `positive_v6` is a different row and is not used.
+    An expectation is never relaxed here: a legitimately reachable compensated
+    host is a fixture fact that needs a ruling.
+    """
+    measure = measurers if measurers is not None else default_measurers()
+    evidence = copy.deepcopy(qualified_evidence)
+    probe_phase = measure.probe_phase(inputs.namespace())
+    evidence["probes"] = probe_phase.get("probes", {})
+    rows = [
+        _external_row(
+            evidence,
+            "external_negative_v6",
+            "negative_v6",
+            False,
+            "the loopback-bound v6 socket, service RUNNING, after compensation",
+        ),
+        _external_row(
+            evidence,
+            "external_v4",
+            "v4_pair",
+            False,
+            "IPv4 negative with its tcp/22 control, after compensation",
+        ),
+    ]
+    moment = (clock or (lambda: datetime.now(UTC)))()
+    return negative_proof.build_probe(
+        dispatch_id=dispatch_id, host_id=host_id, measured_at=moment, rows=rows
+    )
