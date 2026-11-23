@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from dotmac_deploy_agent.commands import CommandResult, ReadOnlyCommands
+from dotmac_deploy_agent.observation import mark_inflight
 from dotmac_deploy_agent.refusal import Refusal
 
 from tests.unit.deploy_agent_support import (
@@ -14,6 +15,8 @@ from tests.unit.deploy_agent_support import (
     make_materials,
     make_rig,
 )
+
+REPO_DIGEST = "127.0.0.1:5000/org/app@sha256:" + "a" * 64
 
 
 def ready(tmp_path: Path) -> Rig:
@@ -132,6 +135,10 @@ def test_standing_refusal_stops_the_cycle(tmp_path: Path) -> None:
 def test_reconcile_observation_read_only(tmp_path: Path) -> None:
     rig = ready(tmp_path)
     rig.cp.standing = "EXPIRED_UNRELEASED"
+    rig.cp.expired_run = "dispatch-0"
+    rig.commands.script[("image", "inspect")] = CommandResult(
+        0, b'["' + REPO_DIGEST.encode() + b'"]'
+    )
     rig.commands.script[("inspect",)] = CommandResult(
         0,
         b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64 + b"\n",
@@ -149,16 +156,22 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
     for argv in rig.commands.calls:
         assert argv[1] in {"inspect", "ps"} or argv[1:3] == ("image", "inspect")
     [observation] = rig.cp.observations
-    assert observation["kind"] == "reconcile"
-    details = observation["details"]
-    assert details["standing"] == "EXPIRED_UNRELEASED"  # type: ignore[index]
-    assert details["containers"] == [  # type: ignore[index]
-        {
-            "name": "erp-app",
-            "image_ref": "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
-            "image_id": "sha256:" + "f" * 64,
-        }
-    ]
+    assert observation["kind"] == "reconcile" and observation["outcome"] == "reconciled"
+    assert (
+        observation["dispatch_id"] == "dispatch-0"
+    )  # the EXPIRED dispatch, not the pending one
+    assert observation["details"] == {
+        "expired_dispatch_id": "dispatch-0",
+        "configured": ["erp-app"],
+        "containers": [
+            {
+                "name": "erp-app",
+                "image_ref": "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
+                "image_id": "sha256:" + "f" * 64,
+                "repo_digests": [REPO_DIGEST],
+            }
+        ],
+    }
 
 
 @pytest.mark.parametrize(
@@ -198,39 +211,93 @@ def test_read_only_commands_pass_inspection() -> None:
 def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
     rig = ready(tmp_path)
     rig.cp.standing = "EXPIRED_UNRELEASED"
+    rig.cp.expired_run = "dispatch-0"
     rig.commands.script[("inspect",)] = CommandResult(1, b"")
     assert rig.launcher.run_once().outcome == "reconcile_reported"
-    assert rig.cp.observations[0]["details"]["containers"] == []  # type: ignore[index]
+    [observation] = rig.cp.observations
+    assert observation["details"]["containers"] == []  # type: ignore[index]
+    # the agent reports facts: never `not_needed`, never a verdict on the host
+    assert observation["outcome"] == "reconciled"
 
 
-@pytest.mark.parametrize(
-    ("running", "last_pin", "expected"),
-    [
-        (b"", None, "not_needed"),  # nothing of the stack runs
-        (
-            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
-            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
-            "reconciled",
-        ),
-        (
-            b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"f" * 64,
-            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
-            "failed",
-        ),
-        (
-            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
-            None,
-            "failed",
-        ),
-    ],
-)
-def test_reconcile_reports_control_s_outcome_words(
-    tmp_path: Path, running: bytes, last_pin: str | None, expected: str
-) -> None:
+def expired_rig(tmp_path: Path) -> Rig:
     rig = ready(tmp_path)
     rig.cp.standing = "EXPIRED_UNRELEASED"
-    rig.commands.script[("inspect",)] = CommandResult(0 if running else 1, running)
-    if last_pin:
-        (rig.config.state_dir / "last_app_image").write_text(last_pin)
+    rig.cp.expired_run = "dispatch-0"
+    rig.commands.script[("image", "inspect")] = CommandResult(
+        0, b'["' + REPO_DIGEST.encode() + b'"]'
+    )
+    rig.commands.script[("inspect",)] = CommandResult(
+        0, b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64
+    )
+    return rig
+
+
+def test_an_image_that_cannot_be_read_makes_the_observation_failed(
+    tmp_path: Path,
+) -> None:
+    rig = expired_rig(tmp_path)
+    rig.commands.script[("image", "inspect")] = CommandResult(1, b"")
     assert rig.launcher.run_once().outcome == "reconcile_reported"
-    assert rig.cp.observations[0]["outcome"] == expected
+    [observation] = rig.cp.observations
+    assert (observation["outcome"], observation["reason"]) == (
+        "failed",
+        "reconcile_unavailable",
+    )
+
+
+def test_the_expired_dispatch_comes_from_the_standing_and_a_missing_one_refuses(
+    tmp_path: Path,
+) -> None:
+    rig = expired_rig(tmp_path)
+    rig.cp.expired_run = None  # an old Control that does not name it
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = rig.cp.observations
+    assert (
+        observation["dispatch_id"] == "dispatch-1"
+        and observation["reason"] == "reconcile_unavailable"
+    )
+
+
+def test_a_local_inflight_record_that_disagrees_with_the_expired_dispatch_refuses(
+    tmp_path: Path,
+) -> None:
+    rig = expired_rig(tmp_path)
+    rig.cp.expired_run = "dispatch-7"
+    mark_inflight(rig.config.state_dir, "dispatch-3")
+    assert rig.launcher.run_once().outcome == "refused"
+
+
+def test_reconcile_is_posted_once_per_expired_dispatch_and_observed_digest(
+    tmp_path: Path,
+) -> None:
+    rig = expired_rig(tmp_path)
+    assert rig.launcher.run_once().outcome == "reconcile_reported"
+    for _ in range(3):  # every later poll sees the same facts
+        assert rig.launcher.run_once().outcome == "reconcile_waiting"
+    assert len(rig.cp.observations) == 1
+    rig.commands.script[("inspect",)] = CommandResult(
+        0, b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"e" * 64
+    )
+    assert rig.launcher.run_once().outcome == "reconcile_reported"  # the digest changed
+    assert len(rig.cp.observations) == 2
+    rig.cp.expired_run = "dispatch-9"  # another expired dispatch posts afresh
+    assert rig.launcher.run_once().outcome == "reconcile_reported"
+    assert len(rig.cp.observations) == 3
+
+
+def test_the_standing_never_changes_on_the_agents_word(tmp_path: Path) -> None:
+    rig = expired_rig(tmp_path)
+    rig.launcher.run_once()
+    assert rig.cp.standing == "EXPIRED_UNRELEASED"
+    assert [e for e, _ in rig.cp.lease_log] == []  # no acquire, no release
+
+
+def test_a_refusal_is_reported_once_per_dispatch_and_reason_not_once_per_poll(
+    tmp_path: Path,
+) -> None:
+    rig = ready(tmp_path)
+    rig.cp.overrides["lease/standing"] = (403, {"error": "credential_revoked"})
+    for _ in range(4):
+        assert rig.launcher.run_once().outcome == "refused"
+    assert len(rig.cp.observations) == 1

@@ -101,9 +101,7 @@ def test_every_ok_observation_is_reproduced_byte_for_byte_and_signature_for_sign
         )  # type: ignore[index]
 
 
-@pytest.mark.parametrize(
-    "internal", ["completed", "failed", "refused", "reconciled", "not_needed"]
-)
+@pytest.mark.parametrize("internal", ["completed", "failed", "refused", "reconciled"])
 def test_the_agents_own_record_converts_to_a_statement_the_vectors_accept(
     internal: str,
 ) -> None:
