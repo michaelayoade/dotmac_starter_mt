@@ -301,7 +301,13 @@ def settle_accessors(
             if state.candidate is None:
                 continue  # nothing to promote (state changed under us)
             kept: list[str] = []
-            for old in state.retire:
+            # Promoting the candidate replaces `current`: the id it held is older
+            # than a candidate the unit has now run on, so it retires too, never
+            # silently forgotten while still valid.
+            older = list(state.retire)
+            if state.current and state.current != state.candidate.accessor:
+                older.append(state.current)
+            for old in sorted(set(older)):
                 if _destroy(session, config, role, old):
                     destroyed += 1
                 else:

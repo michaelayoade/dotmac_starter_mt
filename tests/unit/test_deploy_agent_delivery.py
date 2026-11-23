@@ -634,20 +634,22 @@ def test_an_issued_candidate_the_unit_is_running_is_promoted_not_destroyed(
 ) -> None:
     """A crash after a SUCCESSFUL restart leaves `issued`; the unit entered active
     after the mint, so it runs that id. Destroying it first would leave the unit
-    on a dead id if the next mint failed."""
+    on a dead id if the next mint failed. Minted 100 s ago: promoted and tracked,
+    but not yet old enough for settlement to destroy anything."""
     rig = deliver_rig(tmp_path, WEB)
-    _seed_issued(rig, at=1_700_000_000)
+    _seed_issued(rig, at=1_799_999_900)
     rig.systemctl.script[("show",)] = CommandResult(
         0,
         b"ActiveState=active\nNRestarts=0\nActiveEnterTimestampMonotonic=1000\n"
-        b"ActiveEnterTimestamp=@1700000050\n",
+        b"ActiveEnterTimestamp=@1799999950\n",
     )
     rig.launcher.run_once()
     destroys = [r[3] for r in rig.bao.requests if r[1].endswith("/destroy")]
-    assert {"secret_id_accessor": "accessor-running"} not in destroys
+    assert destroys == []  # nothing destroyed: the running id is superseded, not killed
     now = state(rig, "web")
-    assert "accessor-running" in now["retire"]  # superseded, destroyed only later
-    assert "accessor-old" in now["retire"]
+    # Both older ids wait on the list until the NEW candidate proves itself.
+    assert sorted(now["retire"]) == ["accessor-old", "accessor-running"]  # type: ignore[arg-type]
+    assert now["candidate"]["accessor"] == "accessor-wrap-1"  # type: ignore[index]
 
 
 def test_an_issued_candidate_is_promoted_when_the_unit_start_time_is_unknown(
@@ -665,15 +667,55 @@ def test_settlement_tracks_an_issued_candidate_the_unit_is_running(
     tmp_path: Path,
 ) -> None:
     rig = deliver_rig(tmp_path, WEB)
-    _seed_issued(rig, at=1_700_000_000)
+    _seed_issued(rig, at=1_799_999_900)  # 105 s before the cycle: not yet settled
     rig.systemctl.script[("show",)] = CommandResult(
         0,
         b"ActiveState=active\nNRestarts=2\nActiveEnterTimestampMonotonic=77\n"
-        b"ActiveEnterTimestamp=@1700000900\n",
+        b"ActiveEnterTimestamp=@1799999950\n",
     )
     idle_cycle(rig, 5)
     candidate = state(rig, "web")["candidate"]
     assert candidate["stage"] == "restarted" and candidate["nrestarts"] == "2"  # type: ignore[index]
+    assert not any(r[1].endswith("/destroy") for r in rig.bao.requests)
+
+
+def test_promoting_a_settled_candidate_retires_the_id_it_replaces(
+    tmp_path: Path,
+) -> None:
+    """A stable candidate replaces `current`; the old `current` is destroyed too,
+    never dropped from tracking while still valid."""
+    rig = deliver_rig(tmp_path, WEB)
+    store = rig.config.state_dir / "accessors"
+    store.mkdir(mode=0o700, exist_ok=True)
+    (store / "web.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "current": "accessor-old",
+                "candidate": {
+                    "accessor": "accessor-new",
+                    "stage": "restarted",
+                    "at": 1_700_000_000,
+                    "nrestarts": "0",
+                    "active_enter": "1000",
+                },
+                "retire": ["accessor-older"],
+            }
+        )
+    )
+    idle_cycle(rig, 5)  # the default unit matches the recorded NRestarts/enter
+    destroyed = [
+        r[3]["secret_id_accessor"]
+        for r in rig.bao.requests
+        if r[1].endswith("/destroy")
+    ]
+    assert sorted(destroyed) == ["accessor-old", "accessor-older"]
+    settled = state(rig, "web")
+    assert (settled["current"], settled["candidate"], settled["retire"]) == (
+        "accessor-new",
+        None,
+        [],
+    )
 
 
 @pytest.mark.parametrize(
