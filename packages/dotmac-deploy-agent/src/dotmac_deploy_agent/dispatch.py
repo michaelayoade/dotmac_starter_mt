@@ -101,6 +101,8 @@ class PinnedIdentity:
 class VerifiedDispatch:
     dispatch_id: str
     plan_digest: str
+    execution_sequence: int
+    attempt_no: int
 
 
 def fingerprint_of(public_key: bytes) -> str:
@@ -242,4 +244,7 @@ def verify_dispatch(
         or plan_digest_of(plan_snapshot) != plan_digest
     ):
         raise Refusal("dispatch_plan_mismatch")
-    return VerifiedDispatch(dispatch_id, plan_digest)
+    sequence, attempt = statement["execution_sequence"], statement["attempt_no"]
+    if any(type(n) is not int or n < 1 for n in (sequence, attempt)):
+        raise Refusal("dispatch_envelope_invalid")
+    return VerifiedDispatch(dispatch_id, plan_digest, sequence, attempt)

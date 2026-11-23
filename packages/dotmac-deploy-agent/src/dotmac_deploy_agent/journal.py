@@ -34,6 +34,7 @@ class ExecutedDispatches:
     def __init__(self, state_dir: Path) -> None:
         self._dir = state_dir / "executed"
         ensure_private_dir(self._dir)
+        self._water = state_dir / "high_water.json"
 
     def _path(self, dispatch_id: str) -> Path:
         return self._dir / sha256_hex(dispatch_id.encode())
@@ -45,8 +46,36 @@ class ExecutedDispatches:
         if self.seen(dispatch_id):
             raise Refusal("dispatch_replayed")
 
-    def record(self, dispatch_id: str) -> None:
+    def record(self, dispatch_id: str, sequence: tuple[int, int] | None = None) -> None:
         write_private(self._path(dispatch_id), b"executed\n", 0o600)
+        if sequence is not None and sequence > self.high_water():
+            write_private(
+                self._water,
+                json.dumps(
+                    {"execution_sequence": sequence[0], "attempt_no": sequence[1]}
+                ).encode(),
+                0o600,
+            )
+
+    def high_water(self) -> tuple[int, int]:
+        """`(execution_sequence, attempt_no)` of the newest executed dispatch."""
+        if not os.path.lexists(self._water):
+            return (0, 0)
+        try:
+            raw = json.loads(self._water.read_bytes())
+            seq, attempt = raw["execution_sequence"], raw["attempt_no"]
+            if type(seq) is not int or type(attempt) is not int:
+                raise ValueError
+        except (OSError, ValueError, KeyError, TypeError):
+            raise Refusal("dispatch_journal_invalid") from None
+        return (seq, attempt)
+
+    def refuse_superseded(self, sequence: tuple[int, int]) -> None:
+        """Refuse anything at or below the high-water mark. The per-id journal
+        cannot order dispatches: an older one that was refused before delivery
+        would otherwise still run after a newer one has executed."""
+        if sequence <= self.high_water():
+            raise Refusal("dispatch_superseded")
 
 
 @dataclass

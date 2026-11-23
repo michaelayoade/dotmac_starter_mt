@@ -23,6 +23,8 @@ CODES: Final = frozenset(
         "dispatch_signature_invalid",
         "dispatch_plan_mismatch",
         "dispatch_replayed",
+        "dispatch_superseded",
+        "dispatch_journal_invalid",
         "dispatch_stale",
         "secrets_naming_mismatch",
         "accessor_state_invalid",

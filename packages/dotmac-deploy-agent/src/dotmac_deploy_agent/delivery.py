@@ -47,6 +47,8 @@ _SHOW = (
     "--property=ActiveState",
     "--property=NRestarts",
     "--property=ActiveEnterTimestampMonotonic",
+    "--property=ActiveEnterTimestamp",
+    "--timestamp=unix",
 )
 
 
@@ -102,6 +104,36 @@ def unit_state(
     return state
 
 
+def active_enter_epoch(info: dict[str, str] | None) -> int | None:
+    """When the unit last entered `active`, as epoch seconds (`@N` under
+    `--timestamp=unix`), or None when unknown."""
+    value = (info or {}).get("ActiveEnterTimestamp", "")
+    if value.startswith("@") and value[1:].isdigit():
+        return int(value[1:])
+    return None
+
+
+def _promote_issued(
+    config: AgentConfig, commands: Commands, role: str, candidate: Candidate
+) -> Candidate | None:
+    """A crash after a SUCCESSFUL restart but before the `restarted` save leaves an
+    `issued` candidate that the unit is actually running. If the unit entered
+    `active` at or after the candidate was minted (or that cannot be told), treat
+    it as running: record it as `restarted` so it is superseded, not destroyed.
+    Returns None when the unit never re-entered `active` after the mint."""
+    info = unit_state(config, commands, unit_name(config.secrets_namespace, role))
+    entered = active_enter_epoch(info)
+    if entered is not None and entered < candidate.at:
+        return None
+    return Candidate(
+        candidate.accessor,
+        "restarted",
+        candidate.at,
+        (info or {}).get("NRestarts"),
+        (info or {}).get("ActiveEnterTimestampMonotonic"),
+    )
+
+
 def _destroy(
     session: OpenBaoSession, config: AgentConfig, role: str, accessor: str
 ) -> bool:
@@ -138,13 +170,21 @@ def deliver_secret_ids(
 
         if not spec.single_use:
             # A candidate stuck at `issued` is a crash between unwrap and a
-            # confirmed restart: the file may or may not hold it. Nothing may
-            # refer to it any more, so drop the file and the accessor.
+            # confirmed restart. If the unit re-entered `active` after the mint it
+            # IS running it: promote (it is superseded below, destroyed only once
+            # a newer id is stable). Otherwise the unit never saw it: drop the
+            # file and the accessor.
             if state.candidate is not None and state.candidate.stage == "issued":
-                remove_file(target)
-                if not _destroy(session, config, spec.role, state.candidate.accessor):
-                    state.retire.append(state.candidate.accessor)
-                state.candidate = None
+                promoted = _promote_issued(config, commands, spec.role, state.candidate)
+                if promoted is not None:
+                    state.candidate = promoted
+                else:
+                    remove_file(target)
+                    if not _destroy(
+                        session, config, spec.role, state.candidate.accessor
+                    ):
+                        state.retire.append(state.candidate.accessor)
+                    state.candidate = None
             # Everything the unit may be running is now older than what we mint.
             superseded = [state.current] if state.current else []
             if state.candidate is not None:
@@ -242,6 +282,11 @@ def settle_accessors(
     eligible: list[str] = []
     for role in store.roles():
         state = store.load(role)
+        if state.candidate is not None and state.candidate.stage == "issued":
+            promoted = _promote_issued(config, commands, role, state.candidate)
+            if promoted is not None:  # the unit is running it: track that
+                state.candidate = promoted
+                store.save(role, state)
         if state.candidate is not None and _stable(
             config, commands, role, state.candidate, now
         ):

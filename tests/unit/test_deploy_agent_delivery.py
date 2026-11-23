@@ -15,6 +15,7 @@ from dotmac_deploy_agent.openbao import mint_path
 from dotmac_deploy_agent.runner import RunSpec, runner_environment
 
 from tests.unit.deploy_agent_support import (
+    AUTHORED,
     FakeBaoTransport,
     Rig,
     make_materials,
@@ -276,7 +277,7 @@ def test_a_candidate_left_at_issued_by_a_crash_is_dropped_before_minting_again(
                 "candidate": {
                     "accessor": "accessor-lost",
                     "stage": "issued",
-                    "at": 1,
+                    "at": 1_900_000_000,  # minted AFTER the unit last entered active
                     "nrestarts": None,
                     "active_enter": None,
                 },
@@ -409,7 +410,7 @@ def test_a_role_directory_that_enrolment_did_not_create_is_refused(
     tmp_path: Path,
 ) -> None:
     rig = make_rig(tmp_path)
-    (rig.config.openbao_config_dir / "erp-web.hcl").write_text("# authored\n")
+    (rig.config.openbao_config_dir / "erp-web.hcl").write_text(AUTHORED)
     (rig.config.openbao_config_dir / "erp-web.hcl").chmod(0o644)
     rig.cp.materials = make_materials(roles=WEB)
     result = rig.launcher.run_once()
@@ -446,7 +447,7 @@ def test_authored_configs_are_checked_and_their_digest_reported(tmp_path: Path) 
     digest = rig.cp.observations[0]["details"]["openbao_config"]["web"]  # type: ignore[index]
     assert digest.startswith("sha256:") and len(digest) == 71
     authored = rig.config.openbao_config_dir / "erp-web.hcl"
-    assert authored.read_text() == "# authored config for web\n"
+    assert authored.read_text() == AUTHORED
 
 
 @pytest.mark.parametrize("case", ["missing", "writable", "symlink"])
@@ -602,3 +603,112 @@ def test_the_launcher_hands_the_runner_the_signed_plan_digest(tmp_path: Path) ->
     assert spec.plan_digest.startswith("sha256:")
     assert spec.agent_config == rig.config.config_path
     assert dict(spec.bindings_env) == dict(rig.config.bindings_env)
+
+
+# -- R2-L4, N1 ---------------------------------------------------------------
+
+
+def _seed_issued(rig: Rig, at: int) -> None:
+    store = rig.config.state_dir / "accessors"
+    store.mkdir(mode=0o700, exist_ok=True)
+    (store / "web.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "current": "accessor-old",
+                "candidate": {
+                    "accessor": "accessor-running",
+                    "stage": "issued",
+                    "at": at,
+                    "nrestarts": None,
+                    "active_enter": None,
+                },
+                "retire": [],
+            }
+        )
+    )
+
+
+def test_an_issued_candidate_the_unit_is_running_is_promoted_not_destroyed(
+    tmp_path: Path,
+) -> None:
+    """A crash after a SUCCESSFUL restart leaves `issued`; the unit entered active
+    after the mint, so it runs that id. Destroying it first would leave the unit
+    on a dead id if the next mint failed."""
+    rig = deliver_rig(tmp_path, WEB)
+    _seed_issued(rig, at=1_700_000_000)
+    rig.systemctl.script[("show",)] = CommandResult(
+        0,
+        b"ActiveState=active\nNRestarts=0\nActiveEnterTimestampMonotonic=1000\n"
+        b"ActiveEnterTimestamp=@1700000050\n",
+    )
+    rig.launcher.run_once()
+    destroys = [r[3] for r in rig.bao.requests if r[1].endswith("/destroy")]
+    assert {"secret_id_accessor": "accessor-running"} not in destroys
+    now = state(rig, "web")
+    assert "accessor-running" in now["retire"]  # superseded, destroyed only later
+    assert "accessor-old" in now["retire"]
+
+
+def test_an_issued_candidate_is_promoted_when_the_unit_start_time_is_unknown(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, WEB)
+    _seed_issued(rig, at=1_700_000_000)
+    rig.systemctl.script[("show",)] = CommandResult(0, b"ActiveState=active\n")
+    rig.launcher.run_once()
+    destroys = [r[3] for r in rig.bao.requests if r[1].endswith("/destroy")]
+    assert {"secret_id_accessor": "accessor-running"} not in destroys
+
+
+def test_settlement_tracks_an_issued_candidate_the_unit_is_running(
+    tmp_path: Path,
+) -> None:
+    rig = deliver_rig(tmp_path, WEB)
+    _seed_issued(rig, at=1_700_000_000)
+    rig.systemctl.script[("show",)] = CommandResult(
+        0,
+        b"ActiveState=active\nNRestarts=2\nActiveEnterTimestampMonotonic=77\n"
+        b"ActiveEnterTimestamp=@1700000900\n",
+    )
+    idle_cycle(rig, 5)
+    candidate = state(rig, "web")["candidate"]
+    assert candidate["stage"] == "restarted" and candidate["nrestarts"] == "2"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "hcl",
+    [
+        "template_config {\n  exit_on_retry_failure = true\n}\n",  # no exit_on_err
+        'auto_auth {\n  method "approle" {\n    exit_on_err = true\n  }\n}\n',  # no retry
+        AUTHORED.replace("exit_on_err = true", "exit_on_err = false"),
+        AUTHORED.replace(
+            "exit_on_retry_failure = true", "# exit_on_retry_failure = true"
+        ),
+        AUTHORED.replace("exit_on_err = true", "// exit_on_err = true"),
+        "# authored config\n",
+    ],
+)
+def test_an_authored_config_that_does_not_exit_on_auth_failure_is_refused(
+    tmp_path: Path, hcl: str
+) -> None:
+    """N1: without both settings a bad secret_id leaves the Agent retrying while
+    the unit stays active, so the settle check would destroy live predecessors."""
+    rig = deliver_rig(tmp_path, WEB)
+    (rig.config.openbao_config_dir / "erp-web.hcl").write_text(hcl)
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "openbao_config_invalid")
+    assert rig.bao.paths == []  # no login, no mint for an unsafe config
+
+
+def test_both_exit_settings_are_accepted_in_any_spacing(tmp_path: Path) -> None:
+    from dotmac_deploy_agent.openbao_config import missing_exit_settings
+
+    assert missing_exit_settings(AUTHORED) == []
+    assert (
+        missing_exit_settings(
+            "exit_on_err=true\nexit_on_retry_failure   =   true # ok\n"
+        )
+        == []
+    )
+    assert missing_exit_settings("") == ["exit_on_err", "exit_on_retry_failure"]

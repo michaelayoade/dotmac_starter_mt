@@ -309,6 +309,8 @@ class Launcher:
             # Before any lease, transfer or secret: CP can re-serve an old signed
             # dispatch, so one already taken to delivery or run is refused.
             self.executed.refuse_replay(materials.dispatch_id)
+            order = (materials.execution_sequence, materials.attempt_no)
+            self.executed.refuse_superseded(order)
             refuse_preexisting_overrides(self.config.deploy_dir)
             planned = canonical_render(materials.params, materials.app_image)
             if render_digest(planned) != materials.params_env_digest:
@@ -352,7 +354,7 @@ class Launcher:
 
             # The first irreversible step: recorded durably BEFORE it, so a crash
             # makes the dispatch un-repeatable rather than repeatable.
-            self.executed.record(materials.dispatch_id)
+            self.executed.record(materials.dispatch_id, order)
             delivered = self._deliver(materials, details)
             details["delivered_roles"] = [
                 {

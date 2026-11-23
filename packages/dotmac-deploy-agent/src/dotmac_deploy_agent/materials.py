@@ -109,6 +109,9 @@ class Materials:
     #: whenever the plan binds roles.
     secrets_namespace: str | None = None
     secrets_environment: str | None = None
+    #: From the signed statement: the ordering the replay journal enforces.
+    execution_sequence: int = 0
+    attempt_no: int = 0
 
 
 def _list(value: object) -> list[object]:
@@ -390,4 +393,6 @@ def parse_materials(
         ),
         secrets_namespace=secrets_namespace,  # type: ignore[arg-type]
         secrets_environment=secrets_environment,  # type: ignore[arg-type]
+        execution_sequence=verified.execution_sequence,
+        attempt_no=verified.attempt_no,
     )

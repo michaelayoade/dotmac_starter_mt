@@ -9,6 +9,7 @@ which authored bytes the role will run with.
 
 from __future__ import annotations
 
+import re
 import stat
 from pathlib import Path
 
@@ -19,6 +20,25 @@ from .materials import RoleSpec
 from .refusal import Refusal
 
 LIMIT = 256 * 1024
+#: "Continuously active" proves a working login ONLY if the OpenBao Agent EXITS
+#: when authentication fails; by default `auto_auth` retries with backoff and the
+#: process stays up. A config without BOTH settings could let a unit whose new
+#: secret_id never worked pass the settle check, so its predecessors would be
+#: destroyed while still in use.
+REQUIRED_SETTINGS = ("exit_on_err", "exit_on_retry_failure")
+
+
+def missing_exit_settings(text: str) -> list[str]:
+    """Names of the required settings that are not set to `true` on a live
+    (uncommented) line."""
+    live = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith(("#", "//"))
+    )
+    return [
+        name
+        for name in REQUIRED_SETTINGS
+        if not re.search(rf"(?m)^\s*{name}\s*=\s*true\s*(?:#.*|//.*)?$", live)
+    ]
 
 
 def config_path(config: AgentConfig, secrets_namespace: str, role: str) -> Path:
@@ -51,7 +71,11 @@ def check_authored_configs(
         ):
             raise Refusal("openbao_config_invalid")
         try:
-            digests[spec.role] = digest(read_regular(path, limit=LIMIT))
+            content = read_regular(path, limit=LIMIT)
         except Refusal:
             raise Refusal("openbao_config_invalid") from None
+        missing = missing_exit_settings(content.decode("utf-8", errors="replace"))
+        if missing:
+            raise Refusal("openbao_config_invalid", missing[0])
+        digests[spec.role] = digest(content)
     return digests

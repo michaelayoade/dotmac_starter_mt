@@ -56,7 +56,17 @@ IMAGE_DIGEST = "sha256:" + "a" * 64
 APP_IMAGE = f"127.0.0.1:5000/org/app@{IMAGE_DIGEST}"
 PREVIOUS_IMAGE = "127.0.0.1:5000/org/app@sha256:" + "b" * 64  # a previously applied pin
 DISPATCH_KEY_ID = "control-dispatch-1"
-UNIT_ACTIVE = b"ActiveState=active\nNRestarts=0\nActiveEnterTimestampMonotonic=1000\n"
+#: A unit that entered `active` BEFORE the rig's epoch (1_800_000_000).
+UNIT_ACTIVE = (
+    b"ActiveState=active\nNRestarts=0\nActiveEnterTimestampMonotonic=1000\n"
+    b"ActiveEnterTimestamp=@1799999000\n"
+)
+#: What an authored OpenBao Agent config must carry (live lines, both true).
+AUTHORED = (
+    "# authored config\n"
+    'auto_auth {\n  method "approle" {\n    exit_on_err = true\n  }\n}\n'
+    "template_config {\n  exit_on_retry_failure = true\n}\n"
+)
 
 #: A stand-in for Control's dispatch signing key. Shared so `make_materials()`
 #: works without a rig; a test that needs a rogue signer passes its own.
@@ -188,6 +198,9 @@ def make_statement(
     plan_digest: str, *, dispatch_id: str = "dispatch-1", **overrides: object
 ) -> dict[str, object]:
     raw = DISPATCH_KEY.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    # Control orders dispatches by (execution_sequence, attempt_no); the fixtures
+    # follow the dispatch id's trailing number so later ids sort later.
+    digits = "".join(c for c in dispatch_id.rsplit("-", 1)[-1] if c.isdigit())
     statement: dict[str, object] = {
         "schema": "dotmac.deployment-dispatch",
         "version": 1,
@@ -199,7 +212,7 @@ def make_statement(
         "authorization_key_id": "control-authorization-1",
         "authorization_public_key_fingerprint": "sha256:" + "1" * 64,
         "authorization_envelope_digest": "sha256:" + "2" * 64,
-        "execution_sequence": 1,
+        "execution_sequence": int(digits or 1),
         "attempt_no": 1,
         "rollout_ref": "rollout-1",
         "target_id": "target-1",
@@ -574,7 +587,7 @@ def prepare_role(rig: Rig, role: str, secrets_namespace: str | None = None) -> N
         directory.mkdir(exist_ok=True)
         directory.chmod(0o711)
     authored = rig.config.openbao_config_dir / f"{namespace}-{role}.hcl"
-    authored.write_text(f"# authored config for {role}\n")
+    authored.write_text(AUTHORED)
     authored.chmod(0o644)
 
 

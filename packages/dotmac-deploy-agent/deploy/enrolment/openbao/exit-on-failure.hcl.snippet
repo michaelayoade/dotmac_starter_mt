@@ -1,0 +1,14 @@
+# Required in every authored OpenBao Agent config (W11). The deploy agent refuses a
+# config whose live lines do not set BOTH to true, because "the unit stayed active"
+# only proves a working login if the Agent EXITS when authentication fails.
+# P-SEC T1 must prove it: with a deliberately bad secret_id, the unit's NRestarts
+# increases.
+auto_auth {
+  method "approle" {
+    exit_on_err = true
+    # ... mount_path, config { role_id_file_path, secret_id_file_path }
+  }
+}
+template_config {
+  exit_on_retry_failure = true
+}

@@ -1,6 +1,6 @@
 # Instance = product, e.g. dotmac-deploy-agent@erp.service. Outbound only.
 # Per-host drop-ins (installed by the governed enrolment, never by the agent):
-#   ReadWritePaths=<deploy_dir>          the product's Compose directory
+#   ReadWritePaths=<deploy_dir> /run/dotmac/<secrets_namespace>   (agent-paths.conf.template)
 #   LoadCredential=legacy:/etc/dotmac/legacy/<target>.env   (M11, existing apps only)
 # Enrolment kit (root-installed, per host): deploy/enrolment/.
 [Unit]
@@ -50,9 +50,11 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-# /run/dotmac: the per-role directories tmpfiles.d made; the agent writes only
-# `secret_id` into them. Its own state is the RuntimeDirectory above.
-ReadWritePaths=/run/dotmac /var/lib/dotmac-deploy-agent/%i
+# Only the instance's own state is writable here. The per-role directories under
+# /run/dotmac/<secrets_namespace> and the Compose directory are added by the
+# per-host drop-in (deploy/enrolment/systemd/agent-paths.conf.template), so the
+# agent cannot write another instance's namespace.
+ReadWritePaths=/var/lib/dotmac-deploy-agent/%i
 
 [Install]
 WantedBy=multi-user.target

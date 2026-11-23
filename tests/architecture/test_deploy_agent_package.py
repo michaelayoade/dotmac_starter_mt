@@ -218,6 +218,8 @@ def test_the_agent_unit_owns_only_its_own_runtime_directory() -> None:
     assert directives["RuntimeDirectory"] == ["dotmac-deploy-agent/%i"]
     assert directives["RuntimeDirectoryMode"] == ["0700"]
     assert not any("/run/dotmac/%i" in v for vs in directives.values() for v in vs)
-    assert directives["ReadWritePaths"] == [
-        "/run/dotmac /var/lib/dotmac-deploy-agent/%i"
-    ]
+    # R2-L3: only the instance's own state; the per-host drop-in adds the rest.
+    assert directives["ReadWritePaths"] == ["/var/lib/dotmac-deploy-agent/%i"]
+    paths = (KIT / "systemd/agent-paths.conf.template").read_text()
+    assert "ReadWritePaths=/run/dotmac/@SECRETS_NAMESPACE@ @DEPLOY_DIR@" in paths
+    assert "ReadWritePaths=/run/dotmac " not in paths

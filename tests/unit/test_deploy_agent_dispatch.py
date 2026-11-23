@@ -287,3 +287,71 @@ def test_a_pinned_dispatch_identity_whose_seed_is_published_is_refused(
     with pytest.raises(Refusal) as caught:
         read_identity(path, owner_uid=os.geteuid())
     assert caught.value.code == "dispatch_identity_invalid"
+
+
+def test_an_older_dispatch_refused_earlier_cannot_run_after_a_newer_one_executed(
+    tmp_path: Path,
+) -> None:
+    """R2-L2: the per-id journal cannot order dispatches; the high-water mark on
+    (execution_sequence, attempt_no) can."""
+    from tests.unit.deploy_agent_support import make_rig
+
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(dispatch_id="dispatch-1")  # seq 1
+    rig.cp.overrides["lease/acquire"] = (409, {"error": "lease-held"})
+    assert rig.launcher.run_once().reason == "lease_refused"  # refused, not executed
+    del rig.cp.overrides["lease/acquire"]
+    rig.cp.materials = make_materials(dispatch_id="dispatch-2")  # seq 2
+    assert rig.launcher.run_once().outcome == "completed"
+    minted = (len(rig.bao.paths), len(rig.transfer.calls), len(rig.cp.lease_log))
+    rig.cp.materials = make_materials(dispatch_id="dispatch-1")  # the older one returns
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "dispatch_superseded")
+    assert (
+        len(rig.bao.paths),
+        len(rig.transfer.calls),
+        len(rig.cp.lease_log),
+    ) == minted
+    assert len(rig.runner.specs) == 1
+    assert rig.launcher.executed.high_water() == (2, 1)
+
+
+def test_a_later_attempt_of_the_same_sequence_is_newer_and_an_earlier_one_is_not(
+    tmp_path: Path,
+) -> None:
+    from tests.unit.deploy_agent_support import make_rig
+
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(
+        dispatch_id="dispatch-5", statement={"attempt_no": 2}
+    )
+    assert rig.launcher.run_once().outcome == "completed"
+    rig.cp.materials = make_materials(
+        dispatch_id="dispatch-5b", statement={"execution_sequence": 5, "attempt_no": 1}
+    )
+    assert rig.launcher.run_once().reason == "dispatch_superseded"
+    rig.cp.materials = make_materials(
+        dispatch_id="dispatch-5c", statement={"execution_sequence": 5, "attempt_no": 3}
+    )
+    assert rig.launcher.run_once().outcome == "completed"
+
+
+def test_a_corrupt_high_water_mark_refuses_rather_than_resetting(
+    tmp_path: Path,
+) -> None:
+    from tests.unit.deploy_agent_support import make_rig
+
+    rig = make_rig(tmp_path)
+    (rig.config.state_dir / "high_water.json").write_text("{not json")
+    rig.cp.materials = make_materials()
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "dispatch_journal_invalid")
+    assert rig.runner.specs == []
+
+
+def test_a_malformed_sequence_in_the_signed_statement_is_refused(
+    tmp_path: Path,
+) -> None:
+    for bad in (0, -1, "1", True):
+        document = make_materials(statement={"execution_sequence": bad})
+        assert refused(tmp_path, document) == "dispatch_envelope_invalid"

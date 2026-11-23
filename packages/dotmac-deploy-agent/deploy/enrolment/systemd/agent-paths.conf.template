@@ -1,0 +1,7 @@
+# Drop-in: /etc/systemd/system/dotmac-deploy-agent@@INSTANCE@.service.d/10-paths.conf
+# The ONLY writable paths beyond the instance's own state: the per-role directories
+# tmpfiles.d made for this instance's one secrets namespace (the agent writes only
+# `secret_id` into them) and the product's Compose directory. Without this drop-in
+# the agent cannot deliver (ProtectSystem=strict): enrolment fails closed.
+[Service]
+ReadWritePaths=/run/dotmac/@SECRETS_NAMESPACE@ @DEPLOY_DIR@
