@@ -779,3 +779,43 @@ def test_an_invalid_lease_max_seconds_is_refused(tmp_path: Path, bad: object) ->
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")
     assert "lease/acquire" not in [n for n, _ in rig.cp.lease_log]
+
+
+# -- P-SEC rev5 RQ-1: a run_job lease is never renewed ---------------------------
+
+
+def test_a_run_job_never_starts_a_keeper_and_never_renews(tmp_path: Path) -> None:
+    from tests.unit.test_deploy_agent_jobs import job_rig
+
+    rig = job_rig(tmp_path)  # ttl = max = timeout + 120, a signed run_job plan
+    spy: list[str] = []
+    original = rig.launcher.lease.keeper
+
+    def spying(lease, *, dispatch_id):  # type: ignore[no-untyped-def]
+        spy.append(dispatch_id)
+        return original(lease, dispatch_id=dispatch_id)
+
+    rig.launcher.lease.keeper = spying  # type: ignore[method-assign]
+    assert rig.launcher.run_once().outcome == "completed"
+    assert spy == []  # no keeper, so no thread and no renew
+    assert rig.launcher.lease.last_keeper is None
+    assert "lease/renew" not in [name for name, _ in rig.cp.lease_log]
+    assert rig.cp.lease_log[0][0] == "lease/acquire"
+    assert "renewals" not in rig.cp.observations[-1]["details"].get("lease", {})  # type: ignore[union-attr]
+
+
+def test_only_the_serving_path_names_the_keeper() -> None:
+    import ast
+
+    from dotmac_deploy_agent import launcher
+
+    tree = ast.parse(Path(launcher.__file__).read_text())
+    users = {
+        fn.name
+        for fn in ast.walk(tree)
+        if isinstance(fn, ast.FunctionDef)
+        and any(
+            isinstance(n, ast.Attribute) and n.attr == "keeper" for n in ast.walk(fn)
+        )
+    }
+    assert users == {"_execute"}  # never `_execute_job`

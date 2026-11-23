@@ -82,7 +82,7 @@ JOB_PARAMS_FILE = "job-params.env"
 
 @dataclass(frozen=True)
 class CycleResult:
-    # idle | completed | refused | failed | integrity_violation | reconcile_reported
+    # idle | completed | refused | failed | integrity_violation
     outcome: str
     reason: str | None = None
     dispatch_id: str | None = None
@@ -340,13 +340,11 @@ class Launcher:
             )
             return CycleResult("refused", refusal.code, materials.dispatch_id)
         if standing == EXPIRED_UNRELEASED:
-            # The v2 standing has no "reconciled" value: Control issues the marker
-            # from this read-only observation, and the acquire below is what proves
-            # it (`reconcile_marker_required` stops the run). If the observation
-            # cannot be made, nothing proceeds.
-            reconciled = self._reconcile(materials.dispatch_id, standing)
-            if reconciled.outcome not in ("reconcile_reported", "reconcile_waiting"):
-                return reconciled
+            # Post the (de-duplicated) facts, then still try to acquire: CP's
+            # `reconcile_marker_required` is what stops the cycle, never the standing.
+            stopped = self._reconcile(materials.dispatch_id, standing)
+            if stopped is not None:
+                return stopped
         if materials.dispatched_job is not None:
             return self._execute_job(materials)
         return self._execute(materials, reply)
@@ -363,9 +361,11 @@ class Launcher:
             raise Refusal("reconcile_unavailable")
         return run
 
-    def _reconcile(self, pending_dispatch_id: str, standing: str) -> CycleResult:
-        """Read-only: report the facts about the EXPIRED dispatch and stop. Control
-        decides the marker. Posted once per (expired dispatch, observed digest)."""
+    def _reconcile(self, pending_dispatch_id: str, standing: str) -> CycleResult | None:
+        """Read-only: report the facts about the EXPIRED dispatch. Control decides the
+        marker. Posted once per (expired dispatch, observed digest). Returns a result
+        only when the expired dispatch cannot be named (the cycle then stops); None
+        means carry on to acquire."""
         _ = standing
         try:
             expired = self._expired_dispatch()
@@ -378,11 +378,10 @@ class Launcher:
             self.config, self.read_only, expired_dispatch_id=expired, clock=self.clock
         )
         marker = observed or f"failed:{observation.get('reason')}"
-        if self._reconcile_posted.seen(expired, marker):
-            return CycleResult("reconcile_waiting", None, pending_dispatch_id)
-        self._report(observation)
-        self._reconcile_posted.remember(expired, marker, replace=True)
-        return CycleResult("reconcile_reported", None, pending_dispatch_id)
+        if not self._reconcile_posted.seen(expired, marker):
+            self._report(observation)
+            self._reconcile_posted.remember(expired, marker, replace=True)
+        return None
 
     def _observation(
         self,
