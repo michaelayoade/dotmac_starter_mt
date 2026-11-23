@@ -8,6 +8,7 @@ A crash leaves the lease to expire: it never leaves a second writer.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,18 +24,105 @@ MAX_TTL: Final = 3600
 RUN_MARGIN: Final = 120
 #: A run given less than this is not started: the lease is spent already.
 MIN_RUN_SECONDS: Final = 60
-_ALREADY_RELEASED: Final = "lease-already-released"
+#: Signed renew refusals (Control `_v2`): the lease is gone or at its total cap.
+RENEW_REFUSALS: Final = frozenset(
+    {"lease_not_held", "lease_expired", "lease_max_reached"}
+)
+#: How often the keeper thread looks at the clock; a renew is due every ttl/3.
+POLL_SECONDS: Final = 2.0
 
 
 @dataclass(frozen=True)
 class Lease:
     lease_id: str
     ttl_seconds: int
-    #: Local monotonic time at which this lease is over. Measured from BEFORE the
-    #: acquire request left, so it never outlives CP's own clock for the lease.
-    #: The default (0.0) reads as already over: a lease built without one fails
-    #: closed.
+    #: Local monotonic time at which the CURRENT grant is over. Measured from
+    #: BEFORE the request left, so it never outlives CP's own clock. The default
+    #: (0.0) reads as already over: a lease built without one fails closed.
     deadline: float = 0.0
+    #: Local monotonic time the lease was first requested, and the most it may be
+    #: held in total (`lease_max_seconds`). The run budget comes from these, not
+    #: from the current grant, because renewal keeps the grant alive.
+    started: float = 0.0
+    max_seconds: int = 0
+
+
+class LeaseKeeper:
+    """Renews the lease every ttl/3 through transfer and the Foundation run.
+
+    `tick` is the whole logic (the thread only calls it), so it is testable with
+    an injected clock. A refused renewal stops renewing and records `lease_lost`;
+    it NEVER kills or signals Foundation: the run ends inside its own budget, and
+    an expired lease already forces EXPIRED_UNRELEASED, then a reconcile, before
+    the next acquire.
+    """
+
+    def __init__(self, client: LeaseClient, lease: Lease, *, dispatch_id: str) -> None:
+        self._client = client
+        self._dispatch_id = dispatch_id
+        self._lease = lease
+        self._ttl = lease.ttl_seconds  # a grant never exceeds the first one
+        self._last_ok = lease.deadline - lease.ttl_seconds
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.renewals = 0
+        self.lease_lost: str | None = None
+
+    @property
+    def lease(self) -> Lease:
+        return self._lease
+
+    def tick(self) -> None:
+        if self.lease_lost is not None:
+            return
+        now = self._client.monotonic()
+        lease = self._lease
+        if now >= lease.deadline:
+            self.lease_lost = "lease_expired_locally"  # nothing renewed it in time
+            return
+        if now >= lease.started + lease.max_seconds:
+            return  # the plan's total is spent: nothing left to renew into
+        if now < self._last_ok + self._ttl / 3:
+            return
+        try:
+            renewed = self._client.renew(lease, dispatch_id=self._dispatch_id)
+        except Refusal as refusal:
+            if refusal.detail in RENEW_REFUSALS:
+                self.lease_lost = refusal.detail
+            # Anything else (unreachable, 5xx) is retried on the next tick; the
+            # deadline check above turns a long outage into `lease_lost`.
+            return
+        self._lease = renewed
+        self._last_ok = renewed.deadline - renewed.ttl_seconds
+        self.renewals += 1
+
+    def start(self) -> None:
+        if not self._client.background or self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._loop, name="dotmac-lease-keeper", daemon=True
+        )
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.tick()
+            except Exception:  # a keeper must never raise into the run
+                self.lease_lost = self.lease_lost or "lease_keeper_failed"
+            self._stop.wait(self._client.poll_seconds)
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=30)
+            self._thread = None
+
+    def as_details(self) -> dict[str, object]:
+        details: dict[str, object] = {"renewals": self.renewals}
+        if self.lease_lost is not None:
+            details["lease_lost"] = self.lease_lost
+        return details
 
 
 class LeaseClient:
@@ -43,9 +131,17 @@ class LeaseClient:
         client: TargetClient,
         *,
         monotonic: Callable[[], float] = time.monotonic,
+        background: bool = True,
+        poll_seconds: float = POLL_SECONDS,
     ) -> None:
         self._client = client
         self._monotonic = monotonic
+        self.background = background
+        self.poll_seconds = poll_seconds
+        self.last_keeper: LeaseKeeper | None = None
+
+    def monotonic(self) -> float:
+        return self._monotonic()
 
     @staticmethod
     def _refuse_as_lease(refusal: Refusal) -> Refusal:
@@ -69,7 +165,9 @@ class LeaseClient:
             raise Refusal("response_malformed")
         return value
 
-    def acquire(self, *, dispatch_id: str, ttl_seconds: int) -> Lease:
+    def acquire(
+        self, *, dispatch_id: str, ttl_seconds: int, max_seconds: int | None = None
+    ) -> Lease:
         if not 1 <= ttl_seconds <= MAX_TTL:
             raise Refusal("lease_ttl_invalid")
         sent = self._monotonic()
@@ -88,7 +186,9 @@ class LeaseClient:
             except Refusal:
                 pass
             raise Refusal("lease_ttl_invalid")
-        return Lease(lease_id, granted, sent + granted)
+        # No `lease_max_seconds` means one grant is all the plan allows (job plans).
+        total = granted if max_seconds is None else max_seconds
+        return Lease(lease_id, granted, sent + granted, sent, total)
 
     def covers(self, lease: Lease, *, dispatch_id: str) -> bool:
         reply = self._post(
@@ -96,27 +196,48 @@ class LeaseClient:
         )
         return reply.document.get("covers") is True
 
+    def renew(self, lease: Lease, *, dispatch_id: str) -> Lease:
+        """`POST lease/renew {lease_id, dispatch_run}` -> `{lease_id, ttl_seconds}`.
+        A grant is never longer than the first one the plan bound."""
+        sent = self._monotonic()
+        reply = self._post(
+            "renew", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}
+        )
+        granted = reply.document.get("ttl_seconds")
+        if (
+            reply.document.get("lease_id") != lease.lease_id
+            or type(granted) is not int
+            or not 0 < granted <= lease.ttl_seconds
+        ):
+            raise Refusal("lease_refused", "renew_malformed")
+        return Lease(
+            lease.lease_id, lease.ttl_seconds, sent + granted, lease.started,
+            lease.max_seconds,
+        )  # fmt: skip
+
+    def keeper(self, lease: Lease, *, dispatch_id: str) -> LeaseKeeper:
+        self.last_keeper = LeaseKeeper(self, lease, dispatch_id=dispatch_id)
+        return self.last_keeper
+
     def remaining(self, lease: Lease) -> float:
-        return lease.deadline - self._monotonic()
+        """What is left of the plan's TOTAL, not of the current grant."""
+        return lease.started + lease.max_seconds - self._monotonic()
 
     def run_budget(self, lease: Lease, *, configured_seconds: int) -> int:
-        """Seconds the Foundation run may take so that it is over, killed if need
-        be, BEFORE the lease ends. There is no renew (s2.6.2: acquire, covers,
-        release, standing): a run outliving its lease would leave the host to a
-        second writer, so the run is clipped to the lease, never the lease to the
-        run. Too little left refuses the run."""
+        """`min(timeout, lease_max - elapsed - 120)`. Renewal keeps the lease alive
+        for the whole budget, so the run is never cut short by a grant ending; the
+        margin covers the runner's TERM-to-KILL wait and the release. Too little
+        left refuses the run."""
         budget = int(self.remaining(lease)) - RUN_MARGIN
         if budget < MIN_RUN_SECONDS:
             raise Refusal("lease_exhausted")
         return min(configured_seconds, budget)
 
     def release(self, lease: Lease, *, host_mutated: bool) -> None:
-        try:
-            self._post(
-                "release", {"lease_id": lease.lease_id, "host_mutated": host_mutated}
-            )
-        except Refusal as refusal:
-            # The contract calls a second release a replay, not an error.
-            if refusal.detail == _ALREADY_RELEASED:
-                return
-            raise
+        reply = self._post(
+            "release", {"lease_id": lease.lease_id, "host_mutated": host_mutated}
+        )
+        # A second release is a signed 200 replay `{released, replay}`; any 4xx
+        # already raised above as a refusal.
+        if reply.document.get("released") is not True:
+            raise Refusal("lease_refused", "release_malformed")

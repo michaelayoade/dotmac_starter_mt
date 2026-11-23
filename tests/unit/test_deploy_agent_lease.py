@@ -56,7 +56,7 @@ def test_lease_order_acquire_transfer_run_release(tmp_path: Path) -> None:
         "lease-host-mutated",
         "lease-foreign-run",
         "lease-ttl-invalid",
-        "reconcile-marker-required",
+        "reconcile_marker_required",
     ],
 )
 def test_agent_stops_on_lease_refusal(tmp_path: Path, code: str) -> None:
@@ -221,12 +221,16 @@ def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
 
 
 def with_double(
-    tmp_path: Path, *, strict: bool = False, **config: object
+    tmp_path: Path,
+    *,
+    max_seconds: int | None = None,
+    materials: dict[str, object] | None = None,
+    **config: object,
 ) -> tuple[Rig, DeployLeaseDouble, LeaseClock]:
     rig = make_rig(tmp_path, **config)
-    rig.cp.materials = make_materials()
+    rig.cp.materials = materials or make_materials()
     clock = LeaseClock()
-    double = DeployLeaseDouble(clock, strict_double_release=strict)
+    double = DeployLeaseDouble(clock, max_seconds=max_seconds)
     install(rig, double, clock)
     return rig, double, clock
 
@@ -295,7 +299,7 @@ def test_d_lease_expired_before_the_run_then_reconcile_heals(tmp_path: Path) -> 
     assert details["lease_release_refusal"] == "lease-expired"
     # Expired unreleased: standing says so, and a fresh acquire is refused...
     assert double.standing() == "EXPIRED_UNRELEASED"
-    with pytest.raises(LeaseRefused, match="reconcile-marker-required"):
+    with pytest.raises(LeaseRefused, match="reconcile_marker_required"):
         double.acquire({"dispatch_run": "dispatch-1", "ttl_seconds": 900})
     # ...so the next cycle only observes (read-only), and posts it.
     rig.cp.observations.clear()
@@ -332,13 +336,13 @@ def test_reconcile_marker_is_refused_when_the_observed_release_differs(
     assert double.standing() == "EXPIRED_UNRELEASED"  # restore-and-fix-forward path
 
 
-def test_the_run_is_clipped_to_the_lease_not_the_lease_to_the_run(
+def test_a_plan_without_a_max_gets_one_grant_and_the_run_fits_it(
     tmp_path: Path,
 ) -> None:
     rig, _, clock = with_double(tmp_path)  # lease 900 s, Foundation timeout 2700 s
     spend_in_transfer(rig, clock, 100)
     assert rig.launcher.run_once().outcome == "completed"
-    # 900 - 100 spent - 120 margin: the run ends, killed if need be, inside the lease.
+    # lease_max (= one grant) 900 - 100 spent - 120 margin.
     assert rig.runner.specs[0].timeout_seconds == 680
     assert rig.cp.observations[0]["details"]["run_budget_seconds"] == 680  # type: ignore[index]
 
@@ -372,31 +376,6 @@ def test_a_run_that_outlives_its_lease_leaves_it_unreleased(tmp_path: Path) -> N
     assert details["lease_released"] is False  # ...but the lease is NOT released
     assert details["lease_release_refusal"] == "lease-expired"
     assert double.standing() == "EXPIRED_UNRELEASED"  # next acquire needs a reconcile
-
-
-def test_the_double_models_both_readings_of_a_second_release() -> None:
-    # Contract `retry_idempotency`: a replay. s2.9 row: a refusal. Unresolved.
-    for strict in (False, True):
-        double = DeployLeaseDouble(LeaseClock(), strict_double_release=strict)
-        double.acquire({"dispatch_run": "r", "ttl_seconds": 60})
-        double.release({"lease_id": "lease-1", "host_mutated": False})
-        if strict:
-            with pytest.raises(LeaseRefused, match="lease-already-released"):
-                double.release({"lease_id": "lease-1", "host_mutated": False})
-        else:
-            assert double.release({"lease_id": "lease-1", "host_mutated": False}) == {
-                "released": True,
-                "replay": True,
-            }
-
-
-def test_client_treats_an_already_released_lease_as_released(tmp_path: Path) -> None:
-    rig, double, clock = with_double(tmp_path, strict=True)
-    client = rig.launcher.lease
-    lease = client.acquire(dispatch_id="d", ttl_seconds=60)
-    client.release(lease, host_mutated=False)
-    client.release(lease, host_mutated=False)  # lease-already-released: no error
-    assert [n for n, _ in double.log].count("lease/release") == 2
 
 
 def test_acquire_by_the_same_run_returns_its_lease(tmp_path: Path) -> None:
@@ -456,3 +435,242 @@ def test_reconcile_keeps_only_well_formed_repo_digests(tmp_path: Path) -> None:
     rig.launcher.run_once()
     [container] = rig.cp.observations[0]["details"]["containers"]  # type: ignore[index]
     assert container["repo_digests"] == ["r.example/a@sha256:" + "c" * 64]
+
+
+# -- ruling 4: renewal (S5) and signed replay on a second release (S6) -------------
+
+
+def renew_in_transfer(rig: Rig, clock: LeaseClock, *steps: float) -> None:
+    """Transfer that takes `steps` seconds in turn, ticking the keeper after each."""
+    original = rig.transfer.transfer_all
+
+    def slow(images, *, ttl_seconds):  # type: ignore[no-untyped-def]
+        for step in steps:
+            clock.advance(step)
+            rig.launcher.lease.last_keeper.tick()  # type: ignore[union-attr]
+        return original(images, ttl_seconds=ttl_seconds)
+
+    rig.transfer.transfer_all = slow  # type: ignore[method-assign]
+
+
+def long_plan(**more: object) -> dict[str, object]:
+    return make_materials(lease_ttl_seconds=900, lease_max_seconds=3000, **more)
+
+
+def test_the_lease_is_renewed_every_third_of_the_ttl(tmp_path: Path) -> None:
+    rig, double, clock = with_double(
+        tmp_path,
+        max_seconds=3000,
+        materials=long_plan(),
+        foundation_timeout_seconds=7200,
+    )
+    # 100 s: not due. 200 s more (300 = ttl/3): due. Then 300 s: due again.
+    renew_in_transfer(rig, clock, 100, 200, 300)
+    assert rig.launcher.run_once().outcome == "completed"
+    renews = [p for n, p in double.log if n == "lease/renew"]
+    assert renews == [{"lease_id": "lease-1", "dispatch_run": "dispatch-1"}] * 2
+    lease_details = rig.cp.observations[0]["details"]["lease"]  # type: ignore[index]
+    assert lease_details["renewals"] == 2 and "lease_lost" not in lease_details
+    # Budget = min(timeout, lease_max - elapsed - 120) = 3000 - 600 - 120.
+    assert rig.runner.specs[0].timeout_seconds == 2280
+    assert double.standing() == "CLEAN"
+
+
+def test_a_lease_renewed_past_one_grant_covers_the_whole_run(tmp_path: Path) -> None:
+    rig, double, clock = with_double(
+        tmp_path,
+        max_seconds=3000,
+        materials=long_plan(),
+        foundation_timeout_seconds=7200,
+    )
+    # The first grant ended at 900 s; renewals kept the lease live well past it.
+    renew_in_transfer(rig, clock, 300, 300, 300, 300)
+    rig.runner.effect = lambda _s: None
+    assert rig.launcher.run_once().outcome == "completed"
+    assert double.log[-1][0] == "lease/release"
+    assert clock.t - 1000 == 1200  # beyond the 900 s first grant
+    assert rig.cp.observations[0]["details"]["lease_released"] is True  # type: ignore[index]
+
+
+def test_a_refused_renewal_records_lease_lost_and_never_kills_the_run(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(
+        tmp_path,
+        max_seconds=3000,
+        materials=long_plan(),
+        foundation_timeout_seconds=7200,
+    )
+    renew_in_transfer(rig, clock, 300)  # one good renewal
+    keeper_ticks: list[int] = []
+
+    def during_run(_spec: object) -> None:
+        double.row = None  # CP no longer holds the lease
+        clock.advance(300)
+        rig.launcher.lease.last_keeper.tick()  # type: ignore[union-attr]
+        clock.advance(300)
+        rig.launcher.lease.last_keeper.tick()  # type: ignore[union-attr]
+        keeper_ticks.append(1)
+
+    rig.runner.effect = during_run
+    result = rig.launcher.run_once()
+    assert result.outcome == "completed"  # Foundation was not stopped early
+    details = rig.cp.observations[0]["details"]  # type: ignore[index]
+    assert details["lease"]["lease_lost"] == "lease_not_held"
+    assert details["run_budget_seconds"] == rig.runner.specs[0].timeout_seconds
+    # Renewing stopped at the first refusal: one good renew, one refused, no more.
+    assert [n for n, _ in double.log].count("lease/renew") == 2
+
+
+def test_a_keeper_that_missed_its_window_records_lease_lost_locally(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    keeper = client.keeper(
+        client.acquire(dispatch_id="d", ttl_seconds=300), dispatch_id="d"
+    )
+    clock.advance(301)  # the grant is over and nothing renewed it
+    keeper.tick()
+    assert keeper.lease_lost == "lease_expired_locally"
+    assert [n for n, _ in double.log] == ["lease/acquire"]  # no call into a dead lease
+
+
+def test_a_transient_renew_failure_is_retried_not_lost(tmp_path: Path) -> None:
+    rig, double, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    keeper = client.keeper(
+        client.acquire(dispatch_id="d", ttl_seconds=300), dispatch_id="d"
+    )
+    clock.advance(100)
+    rig.cp.raw_status["lease/renew"] = 503
+    keeper.tick()
+    assert keeper.lease_lost is None and keeper.renewals == 0
+    del rig.cp.raw_status["lease/renew"]
+    clock.advance(10)
+    keeper.tick()
+    assert keeper.renewals == 1
+
+
+@pytest.mark.parametrize(
+    "code", ["lease_not_held", "lease_expired", "lease_max_reached"]
+)
+def test_each_signed_renew_refusal_is_lease_lost(tmp_path: Path, code: str) -> None:
+    rig, _, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    keeper = client.keeper(
+        client.acquire(dispatch_id="d", ttl_seconds=300), dispatch_id="d"
+    )
+    clock.advance(100)
+    rig.cp.overrides["lease/renew"] = (409, {"error": code})
+    keeper.tick()
+    assert keeper.lease_lost == code
+
+
+def test_the_double_refuses_renewal_at_the_max_and_after_release() -> None:
+    clock = LeaseClock()
+    double = DeployLeaseDouble(clock, max_seconds=600)
+    double.acquire({"dispatch_run": "r", "ttl_seconds": 300})
+    ask = {"lease_id": "lease-1", "dispatch_run": "r"}
+    clock.advance(250)
+    assert double.renew(ask) == {"lease_id": "lease-1", "ttl_seconds": 300}
+    clock.advance(250)  # held 500: only 100 s of the total are left
+    assert double.renew(ask) == {"lease_id": "lease-1", "ttl_seconds": 100}
+    clock.advance(100)  # held 600 = max, the last grant just ended
+    with pytest.raises(LeaseRefused, match="lease_max_reached"):
+        double.renew(ask)
+    with pytest.raises(LeaseRefused, match="lease_not_held"):
+        double.renew({**ask, "dispatch_run": "other"})
+
+
+def test_a_renewal_may_not_grant_more_than_the_first_ttl(tmp_path: Path) -> None:
+    rig, _, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    lease = client.acquire(dispatch_id="d", ttl_seconds=300)
+    rig.cp.handlers["lease/renew"] = lambda _p: {
+        "lease_id": "lease-1",
+        "ttl_seconds": 900,
+    }
+    with pytest.raises(Refusal) as caught:
+        client.renew(lease, dispatch_id="d")
+    assert caught.value.detail == "renew_malformed"
+
+
+def test_run_budget_comes_from_the_total_not_the_current_grant(
+    tmp_path: Path,
+) -> None:
+    rig, _, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    lease = client.acquire(dispatch_id="d", ttl_seconds=900, max_seconds=3000)
+    clock.advance(500)
+    assert client.run_budget(lease, configured_seconds=7200) == 2380
+    clock.advance(2330)  # 170 s of the total left: under margin 120 + minimum 60
+    with pytest.raises(Refusal) as caught:
+        client.run_budget(lease, configured_seconds=7200)
+    assert caught.value.code == "lease_exhausted"
+
+
+def test_a_second_release_is_a_signed_replay_and_a_4xx_is_a_refusal(
+    tmp_path: Path,
+) -> None:
+    rig, double, _ = with_double(tmp_path)
+    client = rig.launcher.lease
+    lease = client.acquire(dispatch_id="d", ttl_seconds=60)
+    client.release(lease, host_mutated=False)
+    client.release(lease, host_mutated=False)  # signed 200 {released, replay: true}
+    assert double.release({"lease_id": "lease-1", "host_mutated": False}) == {
+        "released": True,
+        "replay": True,
+    }
+    rig.cp.overrides["lease/release"] = (409, {"error": "lease-already-released"})
+    with pytest.raises(Refusal) as caught:
+        client.release(lease, host_mutated=False)
+    assert (caught.value.code, caught.value.detail) == (
+        "lease_refused",
+        "lease-already-released",
+    )
+    rig.cp.overrides["lease/release"] = (200, {"released": False})
+    with pytest.raises(Refusal):
+        client.release(lease, host_mutated=False)
+
+
+def test_the_keeper_thread_renews_and_stops_cleanly(tmp_path: Path) -> None:
+    import time as real_time
+
+    rig, double, clock = with_double(tmp_path)
+    client = LeaseClient(
+        rig.launcher.client,
+        monotonic=clock.monotonic,
+        background=True,
+        poll_seconds=0.01,
+    )
+    lease = client.acquire(dispatch_id="d", ttl_seconds=300)
+    keeper = client.keeper(lease, dispatch_id="d")
+    clock.advance(150)  # due
+    keeper.start()
+    for _ in range(500):
+        if keeper.renewals:
+            break
+        real_time.sleep(0.01)
+    keeper.stop()
+    assert keeper.renewals >= 1 and keeper.lease_lost is None
+    assert [n for n, _ in double.log].count("lease/renew") == keeper.renewals
+
+
+def test_a_plan_binding_carries_lease_max_seconds(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(lease_ttl_seconds=900, lease_max_seconds=3000)
+    rig.launcher.run_once()
+    assert rig.cp.lease_log[0] == (
+        "lease/acquire",
+        {"dispatch_run": "dispatch-1", "ttl_seconds": 900},
+    )
+
+
+@pytest.mark.parametrize("bad", [899, 10801, True, "3000", 0])
+def test_an_invalid_lease_max_seconds_is_refused(tmp_path: Path, bad: object) -> None:
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(lease_ttl_seconds=900, lease_max_seconds=bad)
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")
+    assert "lease/acquire" not in [n for n, _ in rig.cp.lease_log]

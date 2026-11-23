@@ -9,14 +9,22 @@ It mirrors the production lease CLASS next to the rehearsal class:
 * a lease that expired unreleased sets standing `EXPIRED_UNRELEASED`, and the
   next acquire is refused until a reconcile marker exists; the marker is issued
   only when the observed release equals the expected one;
-* acquire by the SAME run returns its lease; a second release is a replay
-  (contract `retry_idempotency`), or `lease-already-released` when `strict`;
-* closed refusal codes come from the #266 store (`REFUSAL_CODES`).
+* acquire by the SAME run returns its lease;
+* renew grants `min(plan ttl, lease_max - held)`; signed refusals
+  `lease_not_held`, `lease_expired`, `lease_max_reached`;
+* a second release is a signed 200 replay `{released, replay}`, never a 4xx;
+* other refusal codes come from the #266 store (`REFUSAL_CODES`).
 
-Provisional, because s2.6.2 and the vendored contract do not pin them: the
-request/response BODY keys (taken from the agent client), the standing values
-other than `EXPIRED_UNRELEASED`, and the marker refusal code. Time is injected:
-`LeaseClock` is the one clock both the agent's lease budget and this store use.
+Bodies (architect r3 Q-c; Control's `target_api_v2.json` becomes the authority
+and this must be re-checked against it when it lands):
+  acquire {dispatch_run, ttl_seconds} -> {lease_id, ttl_seconds}
+  covers  {lease_id, dispatch_run}    -> {covers}
+  renew   {lease_id, dispatch_run}    -> {lease_id, ttl_seconds}
+  release {lease_id, host_mutated}    -> {released, replay}
+  standing                            -> {standing}
+Still provisional: the standing values other than `EXPIRED_UNRELEASED`.
+Time is injected: `LeaseClock` is the one clock the agent's lease budget and this
+store share.
 """
 
 from __future__ import annotations
@@ -29,7 +37,8 @@ from dotmac_deploy_agent.client import TargetClient
 from dotmac_deploy_agent.lease import LeaseClient
 
 MAX_TTL = 3600
-MARKER_REQUIRED = "reconcile-marker-required"  # provisional name
+MARKER_REQUIRED = "reconcile_marker_required"  # signed 409 on acquire (r3 Q-c)
+MAX_SECONDS = 10800
 
 
 class LeaseClock:
@@ -56,15 +65,18 @@ class LeaseRefused(Exception):
 class _Row:
     lease_id: str
     run: str
+    ttl: int
+    acquired_at: float
     expires_at: float
     released: bool = False
     mutated: bool | None = None
 
 
 class DeployLeaseDouble:
-    def __init__(self, clock: LeaseClock, *, strict_double_release: bool = False):
+    def __init__(self, clock: LeaseClock, *, max_seconds: int | None = None):
         self.clock = clock
-        self.strict = strict_double_release
+        #: The plan's `lease_max_seconds`; None means "one grant" (= its ttl).
+        self.max_seconds = max_seconds
         self.row: _Row | None = None
         self.marker = False
         self.rehearsal_live = False  # the other class holds the shared row
@@ -90,6 +102,7 @@ class DeployLeaseDouble:
             "lease/standing": lambda _p: {"standing": self.standing()},
             "lease/acquire": self.acquire,
             "lease/covers": self.covers,
+            "lease/renew": self.renew,
             "lease/release": self.release,
         }
 
@@ -114,7 +127,9 @@ class DeployLeaseDouble:
             raise LeaseRefused(409, MARKER_REQUIRED)
         self.counter += 1
         self.marker = False
-        self.row = _Row(f"lease-{self.counter}", run, self.clock.t + ttl)
+        self.row = _Row(
+            f"lease-{self.counter}", run, ttl, self.clock.t, self.clock.t + ttl
+        )
         return {"lease_id": self.row.lease_id, "ttl_seconds": ttl}
 
     def covers(self, payload: dict[str, object]) -> dict[str, object]:
@@ -126,19 +141,37 @@ class DeployLeaseDouble:
             raise LeaseRefused(409, "lease-foreign-run")
         return {"covers": True}
 
+    def renew(self, payload: dict[str, object]) -> dict[str, object]:
+        self.log.append(("lease/renew", dict(payload)))
+        row = self.row
+        if (
+            row is None
+            or row.released
+            or payload.get("lease_id") != row.lease_id
+            or payload.get("dispatch_run") != row.run
+        ):
+            raise LeaseRefused(409, "lease_not_held")
+        total = row.ttl if self.max_seconds is None else self.max_seconds
+        held = self.clock.t - row.acquired_at
+        if held >= total:  # the cap and the last grant end together: the cap wins
+            raise LeaseRefused(409, "lease_max_reached")
+        if self.clock.t >= row.expires_at:
+            raise LeaseRefused(409, "lease_expired")
+        grant = max(1, min(row.ttl, int(total - held)))
+        row.expires_at = self.clock.t + grant
+        return {"lease_id": row.lease_id, "ttl_seconds": grant}
+
     def release(self, payload: dict[str, object]) -> dict[str, object]:
         self.log.append(("lease/release", dict(payload)))
         row = self._held(payload)
         if not isinstance(payload.get("host_mutated"), bool):
             raise LeaseRefused(400, "host-mutated-required")
         if row.released:
-            if self.strict:
-                raise LeaseRefused(409, "lease-already-released")
-            return {"released": True, "replay": True}
+            return {"released": True, "replay": True}  # signed 200, never a 4xx
         if self.clock.t >= row.expires_at:
             raise LeaseRefused(409, "lease-expired")  # stays unreleased
         row.released, row.mutated = True, payload["host_mutated"]  # type: ignore[assignment]
-        return {"released": True}
+        return {"released": True, "replay": False}
 
     def _held(self, payload: dict[str, object]) -> _Row:
         row = self.row
@@ -168,7 +201,8 @@ class DeployLeaseDouble:
 
 def install(rig: object, double: DeployLeaseDouble, clock: LeaseClock) -> None:
     """Route the rig's lease endpoints to `double` and give the launcher a lease
-    client on the shared clock. Refusals come back as signed 4xx bodies."""
+    client on the shared clock, with no keeper thread (tests call `tick`).
+    Refusals come back as signed 4xx bodies."""
     cp = rig.cp  # type: ignore[attr-defined]
     launcher = rig.launcher  # type: ignore[attr-defined]
     cp.handlers = double.handlers()
@@ -185,4 +219,4 @@ def install(rig: object, double: DeployLeaseDouble, clock: LeaseClock) -> None:
 
     cp.request = request
     client: TargetClient = launcher.client
-    launcher.lease = LeaseClient(client, monotonic=clock.monotonic)
+    launcher.lease = LeaseClient(client, monotonic=clock.monotonic, background=False)

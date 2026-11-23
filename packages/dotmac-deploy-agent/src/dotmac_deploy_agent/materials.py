@@ -61,6 +61,8 @@ STATEMENT_KEYS: Final = frozenset(
     {"dispatch_id", "target_ref", "product_code", "environment", "plan_digest"}
 )
 MAX_LEASE_TTL: Final = 3600
+#: Total a plan may hold one lease across renewals (Control's hard maximum).
+MAX_LEASE_SECONDS: Final = 10800
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,9 @@ class Materials:
     #: The one job a `run_job` plan runs (its spec is also the last of `jobs`).
     operation: str = "deploy"
     dispatched_job: DispatchedJob | None = None
+    #: The most this run may hold the host lease in total, renewals included
+    #: (`lease_max_seconds`; a plan without one holds no more than one grant).
+    lease_max_seconds: int = 0
 
 
 def _list(value: object) -> list[object]:
@@ -373,6 +378,9 @@ def parse_materials(
     ttl = binding.get("lease_ttl_seconds")
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
+    max_seconds = binding.get("lease_max_seconds", ttl)
+    if type(max_seconds) is not int or not ttl <= max_seconds <= MAX_LEASE_SECONDS:
+        raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
     jobs = plan_jobs(snapshot)
     dispatched = plan_dispatched_job(binding, verified.operation)
@@ -421,6 +429,7 @@ def parse_materials(
         legacy=_parse_legacy(binding.get("legacy")),
         images=_parse_images(binding.get("images")),
         lease_ttl_seconds=ttl,
+        lease_max_seconds=max_seconds,
         active_binding_names=tuple(
             _text(n, _NAME) for n in _list(binding.get("active_binding_names", []))
         ),

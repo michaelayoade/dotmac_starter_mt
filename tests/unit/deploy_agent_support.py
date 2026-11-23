@@ -279,6 +279,8 @@ def make_materials(**overrides: object) -> dict[str, object]:
         binding["dispatched_job"] = dispatched
     target = str(overrides.pop("target_ref", TARGET))
     product, environment, _host = target.split("/")
+    if "lease_max_seconds" in overrides:
+        binding["lease_max_seconds"] = overrides.pop("lease_max_seconds")
     snapshot: dict[str, object] = {
         "deploy_binding": binding,
         "release_ref": "release-1",

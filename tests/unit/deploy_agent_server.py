@@ -28,6 +28,7 @@ _HEADERS = (
 )
 _VERBS = {
     **wire.ROUTES,
+    **wire.PENDING_V2_ROUTES,
     "resolve": "POST",
     "consume": "POST",
     "committed/<dispatch_id>": "GET",

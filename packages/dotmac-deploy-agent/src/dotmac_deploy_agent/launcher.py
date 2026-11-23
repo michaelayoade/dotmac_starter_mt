@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from .client import Reply, TargetClient
 from .commands import Commands
@@ -40,7 +41,7 @@ from .job_delivery import (
 )
 from .jobs import job_env
 from .journal import AccessorStore, ExecutedDispatches
-from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient
+from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient, LeaseKeeper
 from .legacy import prepare_legacy, remove_legacy_copy
 from .materials import Materials, RoleSpec, parse_materials
 from .observation import (
@@ -348,6 +349,7 @@ class Launcher:
         outcome, reason = "completed", None
         deploy_run_dir = self.config.deploy_run_dir
         lease: Lease | None = None
+        keeper: LeaseKeeper | None = None
         try:
             # Before any lease, transfer or secret: CP can re-serve an old signed
             # dispatch, so one already taken to delivery or run is refused.
@@ -364,11 +366,16 @@ class Launcher:
             lease = self.lease.acquire(
                 dispatch_id=materials.dispatch_id,
                 ttl_seconds=materials.lease_ttl_seconds,
+                max_seconds=materials.lease_max_seconds,
             )
             details["lease"] = {
                 "lease_id": lease.lease_id,
                 "ttl_seconds": lease.ttl_seconds,
+                "max_seconds": lease.max_seconds,
             }
+            # Renewed every ttl/3 through transfer and the run; see LeaseKeeper.
+            keeper = self.lease.keeper(lease, dispatch_id=materials.dispatch_id)
+            keeper.start()
             transferred = self.transfer.transfer_all(
                 materials.images, ttl_seconds=lease.ttl_seconds
             )
@@ -461,6 +468,12 @@ class Launcher:
             remove_legacy_copy(deploy_run_dir)
             remove_single_use_files(self.config, materials.roles)
             shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+            if keeper is not None:
+                keeper.stop()  # before release: no renew may race the release
+                details["lease"] = {
+                    **cast("dict[str, object]", details["lease"]),
+                    **keeper.as_details(),
+                }
             if lease is not None:
                 details["lease_released"] = self._release(
                     lease, host_mutated=ran, details=details
