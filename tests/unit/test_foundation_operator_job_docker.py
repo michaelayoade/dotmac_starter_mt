@@ -5,8 +5,12 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import shutil
+import signal
 import subprocess
+import threading
+import time
 import uuid
 
 import pytest
@@ -16,6 +20,7 @@ from dotmac_deployment_foundation.operator_job import (
     OperatorJobRefusal,
     SecretMount,
     material_set_id,
+    run_operator_job,
 )
 from dotmac_deployment_foundation.providers.compose_operator_job import (
     ComposeOperatorJobEffects,
@@ -23,7 +28,12 @@ from dotmac_deployment_foundation.providers.compose_operator_job import (
     verify_container_shape,
 )
 
-from tests.unit.foundation_operator_job_support import make_plan
+from tests.unit.foundation_operator_job_support import (
+    PAIR,
+    FakeAuthority,
+    make_bindings,
+    make_plan,
+)
 
 DOCKER = "/usr/bin/docker"
 
@@ -131,17 +141,22 @@ def test_no_other_module_spells_a_provisional_key() -> None:
     assert offenders == []
 
 
-# T16: the T5-T8 checks against a REAL `docker inspect` (needs a Docker daemon)
+# T16: the shape, ownership, run and signal checks against a REAL Docker daemon.
+#
+# REQUIRED in CI (review ruling 8): the `foundation-operator-job-docker` job sets
+# DOTMAC_REQUIRE_DOCKER=1, under which a missing daemon FAILS and the job fails
+# on any skipped test. Elsewhere, without a daemon, these skip.
+REQUIRED = os.environ.get("DOTMAC_REQUIRE_DOCKER") == "1"
+
+
 def _docker_ok() -> bool:
-    if shutil.which("docker") is None:
+    docker = shutil.which("docker")
+    if docker is None:
         return False
     try:
         return (
             subprocess.run(  # noqa: S603  # nosec B603
-                [shutil.which("docker") or "/usr/bin/docker", "info"],
-                capture_output=True,
-                timeout=30,
-                check=False,
+                [docker, "info"], capture_output=True, timeout=30, check=False
             ).returncode
             == 0
         )
@@ -149,7 +164,14 @@ def _docker_ok() -> bool:
         return False
 
 
-needs_docker = pytest.mark.skipif(not _docker_ok(), reason="no Docker daemon")
+needs_docker = pytest.mark.skipif(
+    not REQUIRED and not _docker_ok(), reason="no Docker daemon"
+)
+
+
+def test_t16_a_docker_daemon_is_present_when_the_gate_requires_it() -> None:
+    if REQUIRED:
+        assert _docker_ok(), "DOTMAC_REQUIRE_DOCKER=1 but no usable Docker daemon"
 
 
 def _docker(*args: str, check: bool = True, stdin: str | None = None) -> str:
@@ -166,66 +188,255 @@ def _docker(*args: str, check: bool = True, stdin: str | None = None) -> str:
     return done.stdout
 
 
+def _build(tag: str, *, owned: bool) -> str:
+    fix = "chown 10001:10001 /job/out && chmod 0700 /job/out" if owned else "true"
+    _docker(
+        "build",
+        "-t",
+        tag,
+        "-",
+        stdin=(
+            "FROM busybox:1.36\n"
+            f"RUN mkdir -p /job/out && {fix}\n"
+            "ENV T16_IMAGE_ENV=1\n"
+        ),
+    )
+    return _docker("image", "inspect", "--format", "{{.Id}}", tag).strip()
+
+
+class _Env:
+    def __init__(self, tmp_path) -> None:
+        self.token = uuid.uuid4().hex[:10]
+        self.tags: list[str] = []
+        self.tmp = tmp_path
+        self.product = f"t16x{self.token}"
+        self.network = f"{self.product}_back"
+        _docker(
+            "network",
+            "create",
+            "--label",
+            f"{contract.LABEL_COMPOSE_PROJECT}={self.product}",
+            "--label",
+            f"{contract.LABEL_COMPOSE_NETWORK}=back",
+            self.network,
+        )
+        self.volumes: list[str] = []
+        self.secret = tmp_path / "s1"
+        self.secret.write_bytes(b"not-a-real-secret")
+        self.manifest = tmp_path / "manifest.json"
+        self.manifest.write_bytes(b"{}")
+        for path in (self.secret, self.manifest):
+            path.chmod(0o444)
+
+    def image(self, *, owned: bool = True) -> str:
+        tag = f"dotmac-t16-{self.token}-{len(self.tags)}"
+        self.tags.append(tag)
+        return _build(tag, owned=owned)
+
+    def plan(self, argv, image_id: str, *, timeout: int = 60, name: str = "a"):
+        sid = f"{self.token}{name}"
+        digest = "sha256:" + hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+        volume = f"dotmac-t16-out-{sid}"
+        self.volumes.append(volume)
+        return dataclasses.replace(
+            make_plan(),
+            product=self.product,
+            dispatch_id=f"t16-{sid}",
+            argv=tuple(argv),
+            role="",
+            materials=(),
+            scoped_names=(),
+            secret_files=(),
+            params_env_digest="",
+            render_unit="",
+            secret_mounts=(
+                SecretMount(source=str(self.secret), target="/run/secrets/dotmac/S1"),
+            ),
+            input_mounts=(
+                InputMount(
+                    "--manifest", str(self.manifest), "/job/in/manifest.json", digest
+                ),
+            ),
+            image_ref=image_id,
+            networks=(self.network,),
+            network_codes=("back",),
+            container_name=f"dotmac-t16-{sid}",
+            volume_name=volume,
+            timeout_seconds=timeout,
+            entrypoint=(),
+            job_uid=None,
+            job_user_name="",
+            user="10001:10001",
+        )
+
+    def effects(self, plan, cls=ComposeOperatorJobEffects):
+        now = int(time.time())
+        from dotmac_deployment_foundation.operator_job import argv_digest
+
+        return cls(
+            docker_bin=shutil.which("docker") or DOCKER,
+            environ={
+                contract.ENV_JOB: plan.name,
+                contract.ENV_ARGV_DIGEST: argv_digest(plan.argv),
+                contract.ENV_SECRET_FILES: "",
+                contract.ENV_DEADLINE: str(now + 900),
+            },
+        )
+
+    def authority(self):
+        authority = FakeAuthority()
+        authority.lease_expires_at = int(time.time()) + 1800
+        return authority
+
+    def leftovers(self, plan) -> str:
+        return _docker(
+            "ps",
+            "-a",
+            "-q",
+            "--filter",
+            f"label={contract.LABEL_DISPATCH_ID}={plan.dispatch_id}",
+        ).strip()
+
+    def close(self) -> None:
+        _docker("ps", "-a", "-q", "--filter", f"network={self.network}", check=False)
+        for volume in self.volumes:
+            _docker("volume", "rm", "-f", volume, check=False)
+        _docker("network", "rm", self.network, check=False)
+        for tag in self.tags:
+            _docker("image", "rm", "-f", tag, check=False)
+
+
 @pytest.fixture
-def real_container(tmp_path):
-    token = uuid.uuid4().hex[:10]
-    tag = f"dotmac-t16-{token}"
-    network = f"dotmac-t16-net-{token}"
-    dockerfile = (
-        "FROM busybox:1.36\n"
-        "RUN mkdir -p /job/out && chown 10001:10001 /job/out && chmod 0700 /job/out\n"
-        "ENV T16_IMAGE_ENV=1\n"
-    )
-    _docker("build", "-t", tag, "-", stdin=dockerfile)
-    image_id = _docker("image", "inspect", "--format", "{{.Id}}", tag).strip()
-    _docker("network", "create", network)
-    secret = tmp_path / "migration_database_url"
-    secret.write_bytes(b"not-a-real-secret")
-    manifest = tmp_path / "manifest.json"
-    manifest.write_bytes(b"{}")
-    for path in (secret, manifest):
-        path.chmod(0o444)
-    plan = dataclasses.replace(
-        make_plan(),
-        image_ref=image_id,
-        networks=(network,),
-        container_name=f"dotmac-t16-{token}",
-        volume_name=f"dotmac-t16-out-{token}",
-        secret_mounts=(
-            SecretMount(
-                source=str(secret), target="/run/secrets/dotmac/MIGRATION_DATABASE_URL"
-            ),
-        ),
-        input_mounts=(
-            InputMount(
-                "--manifest",
-                str(manifest),
-                "/job/in/manifest.json",
-                "sha256:" + "0" * 64,
-            ),
-        ),
-        scoped_names=(),
-        user="10001:10001",
-    )
-    effects = ComposeOperatorJobEffects(docker_bin=shutil.which("docker") or DOCKER)
+def env(tmp_path):
+    handle = _Env(tmp_path)
     try:
-        effects.create_volume(plan.volume_name, dispatch_id=plan.dispatch_id)
-        yield plan, effects, image_id
+        yield handle
     finally:
-        _docker("rm", "-f", plan.container_name, check=False)
-        _docker("volume", "rm", plan.volume_name, check=False)
-        _docker("network", "rm", network, check=False)
-        _docker("image", "rm", "-f", tag, check=False)
+        # remove any container this test's dispatches left behind
+        for line in _docker(
+            "ps",
+            "-a",
+            "-q",
+            "--filter",
+            f"label={contract.LABEL_ROLE_JOB}=1",
+            check=False,
+        ).split():
+            _docker("rm", "-f", line, check=False)
+        handle.close()
+
+
+def _run(env, plan, effects=None, authority=None):
+    return run_operator_job(
+        plan,
+        effects or env.effects(plan),
+        make_bindings(authority or env.authority()),
+        pair=PAIR,
+        target="host-a",
+    )
 
 
 @needs_docker
-def test_t16_a_real_container_passes_and_tampering_is_refused(real_container) -> None:
-    plan, effects, _ = real_container
+def test_t16_a_real_run_succeeds_writes_the_volume_and_leaves_nothing(env) -> None:
+    image = env.image()
+    plan = env.plan(
+        ["sh", "-c", "cat /job/in/manifest.json >/dev/null && echo ok > /job/out/r"],
+        image,
+    )
+    receipt = _run(env, plan)
+    assert receipt.outcome == "succeeded", receipt.reason
+    assert receipt.container_removed and env.leftovers(plan) == ""
+
+
+@needs_docker
+def test_t16_secret_and_input_binds_are_read_only_at_runtime(env) -> None:
+    image = env.image()
+    script = (
+        "if echo x >> /run/secrets/dotmac/S1 2>/dev/null; then exit 9; fi; "
+        "if echo x >> /job/in/manifest.json 2>/dev/null; then exit 8; fi; exit 0"
+    )
+    plan = env.plan(["sh", "-c", script], image)
+    assert _run(env, plan).outcome == "succeeded"
+
+
+@needs_docker
+def test_t16_a_nonzero_exit_is_failed_and_removed(env) -> None:
+    plan = env.plan(["sh", "-c", "exit 3"], env.image())
+    receipt = _run(env, plan)
+    assert receipt.outcome == "failed" and receipt.exit_code == 3
+    assert env.leftovers(plan) == ""
+
+
+@needs_docker
+def test_t16_a_timeout_stops_removes_and_reports_runner_timeout(env) -> None:
+    script = 'trap "exit 0" TERM; sleep 120 & wait'
+    plan = env.plan(["sh", "-c", script], env.image(), timeout=3)
+    receipt = _run(env, plan)
+    assert receipt.outcome == "runner_timeout" and receipt.exit_status == 3
+    assert env.leftovers(plan) == ""
+
+
+@needs_docker
+def test_t16_sigterm_mid_run_stops_removes_and_reports_interrupted(env) -> None:
+    script = 'trap "exit 0" TERM; sleep 120 & wait'
+    plan = env.plan(["sh", "-c", script], env.image(), timeout=100)
+
+    class Interrupting(ComposeOperatorJobEffects):
+        def start_and_wait(self, name, *, timeout_seconds):
+            threading.Timer(1.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+            return super().start_and_wait(name, timeout_seconds=timeout_seconds)
+
+    started = time.monotonic()
+    receipt = _run(env, plan, env.effects(plan, Interrupting))
+    assert receipt.outcome == "interrupted" and receipt.exit_status == 3
+    assert time.monotonic() - started < 60  # (o): all within 60 s
+    assert receipt.container_removed and env.leftovers(plan) == ""
+
+
+@needs_docker
+def test_t16_the_image_out_dir_owner_is_read_from_the_image(env) -> None:
+    owned = env.image(owned=True)
+    plan = env.plan(["sh", "-c", "exit 0"], owned)
+    effects = env.effects(plan)
+    assert effects.stat_image_dir(
+        owned,
+        "/job/out",
+        probe_name=f"{plan.container_name}-p",
+        dispatch_id=plan.dispatch_id,
+    ) == (10001, 10001, 0o700)
+    assert env.leftovers(plan) == ""
+    # an image whose /job/out is root-owned is refused before any container
+    bad_image = env.image(owned=False)
+    bad = env.plan(["sh", "-c", "exit 0"], bad_image, name="b")
+    receipt = _run(env, bad)
+    assert receipt.outcome == "refused" and receipt.reason == "job_shape_refused"
+    assert env.leftovers(bad) == ""
+
+
+@needs_docker
+def test_t16_network_labels_are_read_and_a_plain_network_is_refused(env) -> None:
+    plan = env.plan(["sh", "-c", "exit 0"], env.image())
+    effects = env.effects(plan)
+    labels = effects.network_labels(env.network)
+    assert labels is not None and labels[contract.LABEL_COMPOSE_PROJECT] == env.product
+    assert effects.network_labels("bridge") is not None
+    other = dataclasses.replace(
+        plan, networks=("bridge",), network_codes=("back",), dispatch_id="t16-plain"
+    )
+    receipt = _run(env, other)
+    assert receipt.reason == "job_shape_refused"
+
+
+@needs_docker
+def test_t16_a_real_container_passes_and_tampering_is_refused(env) -> None:
+    plan = env.plan(["sh", "-c", "exit 0"], env.image(), name="c")
+    effects = env.effects(plan)
+    _docker("volume", "create", plan.volume_name)
     assert effects.create_container(plan, env_file=None).ok
     container = effects.inspect_container(plan.container_name)
     image = effects.inspect_image(plan.image_ref)
     verify_container_shape(plan, container, image)  # passes on the real inspect
     assert container["Config"]["Labels"][contract.LABEL_DISPATCH_ID] == plan.dispatch_id
+    assert container["Config"]["Labels"][contract.LABEL_ROLE_JOB] == "1"
 
     def refused(mutate) -> None:
         copy = json.loads(json.dumps(container))
@@ -244,13 +455,15 @@ def test_t16_a_real_container_passes_and_tampering_is_refused(real_container) ->
     refused(lambda c: c["NetworkSettings"]["Networks"].update(bridge={}))
     refused(lambda c: c["Config"]["Env"].append("EXTRA_NAME=1"))
     refused(lambda c: c["Config"].update(User="0:0"))
+    refused(lambda c: c["HostConfig"].update(CapDrop=[]))
+    refused(lambda c: c["HostConfig"].update(SecurityOpt=["seccomp=unconfined"]))
 
 
 @needs_docker
-def test_t16_a_real_privileged_or_restarting_container_is_refused(
-    real_container,
-) -> None:
-    plan, effects, _ = real_container
+def test_t16_a_real_privileged_or_restarting_container_is_refused(env) -> None:
+    plan = env.plan(["sh", "-c", "exit 0"], env.image(), name="d")
+    effects = env.effects(plan)
+    _docker("volume", "create", plan.volume_name)
     argv = build_create_argv(shutil.which("docker") or DOCKER, plan, env_file=None)
     index = argv.index("--restart")
     tampered = [
@@ -268,3 +481,17 @@ def test_t16_a_real_privileged_or_restarting_container_is_refused(
     with pytest.raises(OperatorJobRefusal) as excinfo:
         verify_container_shape(plan, container, effects.inspect_image(plan.image_ref))
     assert excinfo.value.code == "job_shape_refused"
+
+
+@needs_docker
+def test_t16_label_scoped_removal_removes_only_that_dispatch(env) -> None:
+    image = env.image()
+    one = env.plan(["sh", "-c", "exit 0"], image, name="e")
+    two = env.plan(["sh", "-c", "exit 0"], image, name="f")
+    for plan in (one, two):
+        _docker("volume", "create", plan.volume_name)
+        assert env.effects(plan).create_container(plan, env_file=None).ok
+    effects = env.effects(one)
+    removed = effects.remove_dispatch_containers(one.dispatch_id)
+    assert len(removed) == 1
+    assert env.leftovers(one) == "" and env.leftovers(two) != ""

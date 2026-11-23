@@ -483,6 +483,38 @@ jobs:
 
   # The reference unit lane keeps its locked older framework. This disjoint
   # suite qualifies the document opt-in on Academy's actual framework pair.
+  # Review ruling 8 (PR #1149): T16 needs a real Docker daemon and is REQUIRED,
+  # not optional. DOTMAC_REQUIRE_DOCKER=1 turns "no daemon" into a failure, and
+  # the junit check below turns any skipped test into a failure, so the gate
+  # cannot pass by skipping. It covers the operator-job shape (e)-(j), the
+  # /job/out ownership (n) and the signal/stop/remove (o) checks.
+  foundation-operator-job-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - run: '[ -d .venv ] || python -m venv .venv'
+      - run: poetry install
+      - name: Real-Docker operator-job tests (a skip fails the gate)
+        env:
+          DOTMAC_REQUIRE_DOCKER: "1"
+        run: poetry run pytest tests/unit/test_foundation_operator_job_docker.py -q -rs --junitxml=operator-job-docker.xml
+      - name: Refuse any skipped test
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("operator-job-docker.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          skipped, tests = int(suite.get("skipped", "0")), int(suite.get("tests", "0"))
+          print(f"tests={tests} skipped={skipped}")
+          assert tests >= 15 and skipped == 0, "T16 must run, never skip"
+          PY
+
   console-document-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
