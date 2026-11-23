@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "dotmac-connector-smtp"
+version = "0.1.0a1"
+description = "Dotmac Integrator delivery connector for SMTP submission: STARTTLS with hostname verification, operator-bound network target, classified outcomes"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_smtp", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_smtp/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# Floor: the first published dotmac-integration carrying SPI 1.7 (a20): the
+# manifest fleet-target ceiling, `require_network_target` and the engine-owned
+# `_network_targets` config key this connector relies on to refuse before any
+# I/O. Standard library only otherwise (smtplib, ssl, email); NO dotmac-kernel
+# dependency (the moved logic imports no kernel type).
+dotmac-integration = ">=0.1.0a20"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+smtp = "dotmac_connector_smtp:PLUGIN"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -44,7 +44,7 @@ All relevant Git-hosted CI gates must be green before merge.
 
 ## Adding things (pointers, not duplicates)
 
-- **A feature package** — README § "Starting a project from this template"
+- **A feature package** — [Choose features and branding](docs/guides/build-a-product.md)
   and `CLAUDE.md` § Extension points: package + `feature.py`, register in
   `FEATURE_MODULES`, add to the import-linter independence contract,
   isolation test first.

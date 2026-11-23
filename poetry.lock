@@ -938,6 +938,23 @@ type = "directory"
 url = "packages/dotmac-connector-remita"
 
 [[package]]
+name = "dotmac-connector-smtp"
+version = "0.1.0a1"
+description = "Dotmac Integrator delivery connector for SMTP submission: STARTTLS with hostname verification, operator-bound network target, classified outcomes"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a20"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-smtp"
+
+[[package]]
 name = "dotmac-connector-sub-accounting"
 version = "0.1.0a1"
 description = "Sub invoice-accounting-sync feed, POLL-only observation connector"
@@ -1044,23 +1061,6 @@ sqlalchemy = "==2.0.51"
 [package.source]
 type = "directory"
 url = "packages/dotmac-delivery-resend"
-
-[[package]]
-name = "dotmac-delivery-smtp"
-version = "0.1.0a1"
-description = "SMTP delivery adapter for the kernel delivery-provider seam: STARTTLS-required, classified outcomes, UI-entered settings"
-optional = false
-python-versions = ">=3.11,<3.14"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-dotmac-kernel = ">=0.1.0a109"
-
-[package.source]
-type = "directory"
-url = "packages/dotmac-delivery-smtp"
 
 [[package]]
 name = "dotmac-deployment-control"
@@ -1417,7 +1417,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a110"
+version = "0.1.0a110+dev"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1682,7 +1682,7 @@ url = "packages/dotmac-party"
 
 [[package]]
 name = "dotmac-payables"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Tenant supplier-liability and payment-obligation authority"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1916,7 +1916,7 @@ url = "packages/dotmac-referrals"
 
 [[package]]
 name = "dotmac-release-catalog"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4599,4 +4599,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "e3ea42c3c7d5007953929adc1fab51ac5603be6618cfba554b8389121efcef53"
+content-hash = "9ce10a3a0d7b9e5c62fb0491cbc51e35b76cd3a816a5abe911e66d27ac071b9d"

@@ -37,9 +37,8 @@ FIXTURE = ARCH / "fixtures" / "comms_writer_academy"
 # writer: a new finding there changes this set and the change is reviewed.
 EXPECTED_EXEMPT_FINDINGS: frozenset[str] = frozenset(
     {
-        "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py::direct_smtp::import:smtplib#1",
-        "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py::direct_smtp::call:SMTP#1",
-        "packages/dotmac-delivery-smtp/src/dotmac_delivery_smtp/provider.py::direct_smtp::call:starttls#1",
+        "packages/dotmac-connector-smtp/src/dotmac_connector_smtp/provider.py::direct_smtp::import:smtplib#1",
+        "packages/dotmac-connector-smtp/src/dotmac_connector_smtp/provider.py::direct_smtp::call:starttls#1",
     }
 )
 

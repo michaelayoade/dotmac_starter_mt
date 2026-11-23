@@ -97,6 +97,11 @@
       "reason": "DECLARED BY THE RRR ISSUANCE SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-remita-v0.1.0a1 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.reference.issuance.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 manifest is preserved as POLL_ONLY_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an ERP shadow cutover before that tag exists.",
       "state": "declared-unpublished"
     },
+    "dotmac-connector-smtp": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED AND MECHANICALLY HELD BACK. The SMTP delivery connector (Academy companion work package B4) has no published tag and release_enabled is false, so it is available only to development composition and both release resolves refuse it. Release needs its own approval after the Integrator delivers engine-owned network targets to DELIVERY handlers (dispatch.prepare does not today, so the connector fails closed) and the outbound pump exists. Remove this row only in the same change that satisfies those gates, enables the reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source conformance is not adoption and must not be used to bypass the hold or edit the declaration down.",
+      "state": "never-published"
+    },
     "dotmac-connector-sub-accounting": {
       "declared": "0.1.0a1",
       "reason": "INTENDED AND MECHANICALLY HELD BACK. The greenfield Sub invoices/accounting-sync/v2 POLL connector has no published tag and holds no release-connectors.json allowlist row, so it is available only to development composition and both release resolves refuse it. ERP's own ProductPort descriptor v3 (invoices.accounting_sync.observation.v1) that this connector's claims_contract_digest pins against stays configured_disabled, an isolated ERP Integrator instance is templated but not deployed, and no production binding, scope, or activation has been authorized. Remove this row only in the same change that authorizes and lands a reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source and cross-repo fixture conformance are not adoption and must not be used to bypass the hold or edit the declaration down.",
@@ -106,11 +111,6 @@
       "declared": "0.1.0a4",
       "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
-    },
-    "dotmac-delivery-smtp": {
-      "declared": "0.1.0a1",
-      "reason": "Unpublished SMTP delivery adapter (S11, P-1): source and tests only, extracted product-first from Academy. No release is authorized and the package is not allowlisted. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
-      "state": "never-published"
     },
     "dotmac-deployment-foundation": {
       "declared": "0.4.0a1",
@@ -137,6 +137,16 @@
       "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a22 carries the DELIVERY crash-safety, terminal-state retention and DELIVERY network-target fixes; published 0.1.0a21 (tag dotmac-integration-v0.1.0a21) remains immutable. This gap is NOT to be repaired by editing the version down. Remove this row in the a22 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a22 from the exact merged revision and records its verification; allocation is not publication.",
       "state": "declared-unpublished"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a110+dev",
+      "reason": "Unpublished source successor to verified 0.1.0a110. It publishes the email.send.v1 command contract (EMAIL_SEND_COMMAND_SCHEMA) for the delivery domain; definition only, no allocation. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently reviewed release record that publishes the next kernel version.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-payables": {
+      "declared": "0.1.0a7",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a6 is published and tagged and its migration bytes remain unchanged. 0.1.0a7 makes separation of duties on supplier payments an optional per-tenant policy (D-9, Michael's no-compulsory-two-person ruling) through a keyword-only separation_of_duties parameter (default false, never compulsory) on prepare, approve, record and reverse, a per-row separation_enforced stamp and the additive pa_0007 migration. It relaxes the owner rule and the ck_supplier_payments_sod CHECK per row, only when the stamp is false. Publication happens only through the release lane after review and Michael's separate release go; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
+      "state": "declared-unpublished"
+    },
     "dotmac-positioning": {
       "declared": "0.2.0a2",
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.2.0a1 is the last published and tagged version (dotmac-positioning-v0.2.0a1) and its released po_0001 bytes are unchanged. 0.2.0a2 adds po_0002_observation_holds: neutral retention holds on observations, honoured by prune_observations, so a product-owned decision can pin evidence under an opaque reference without positioning learning what the reference means. No subject, address or business data enters positioning (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.2.0a2 publication, never by editing the declared version down.",
@@ -150,6 +160,11 @@
     "dotmac-referrals": {
       "declared": "0.1.0a2",
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a1 is the last published and tagged version (dotmac-referrals-v0.1.0a1) and its released rf_0001 bytes are unchanged. 0.1.0a2 adds rf_0002_service_location_ref and referral capture V2, which may carry an opaque service-location ref; V1 is unchanged. The module holds the opaque token only, never coordinates or address text (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.1.0a2 publication, never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-release-catalog": {
+      "declared": "0.1.0a6",
+      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a5 remains the last published and tagged version (dotmac-release-catalog-v0.1.0a5); 0.1.0a6 adds AttestationKind.DEPLOY_UNIT and AttestationKind.PRODUCT_SPEC (the deploy contract and the Foundation product.toml a product revision declares; held, never fetched), so src/ no longer matches the bytes the a5 tag names and a bare 0.1.0a5 would make one version name two vocabularies. No migration. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a6 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {

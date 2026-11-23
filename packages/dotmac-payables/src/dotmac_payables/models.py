@@ -12,6 +12,7 @@ from dotmac_kernel.models import Base, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -94,12 +95,17 @@ SUPPLIER_PAYMENT_EVIDENCE_CHECK = (
     + " AND reversed_by IS NOT NULL AND reversed_at IS NOT NULL"
     " AND reversal_reason IS NOT NULL AND reversal_date IS NOT NULL)"
 )
+# D-9: separation of duties is an optional per-tenant policy. The policy in force
+# is stamped on each row at preparation (`separation_enforced`, immutable); the
+# database relaxes the check for a row only when that stamp is false.
 SUPPLIER_PAYMENT_SOD_CHECK = (
+    "NOT separation_enforced OR ("
     "(approved_by IS NULL OR lower(approved_by) <> lower(prepared_by))"
     " AND (recorded_by IS NULL OR (lower(recorded_by) <> lower(prepared_by)"
     " AND lower(recorded_by) <> lower(approved_by)))"
     " AND (reversed_by IS NULL OR (lower(reversed_by) <> lower(recorded_by)"
     " AND lower(reversed_by) <> lower(approved_by)))"
+    ")"
 )
 
 
@@ -655,6 +661,9 @@ class SupplierPayment(Base, TimestampMixin):
     wht_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     net_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    separation_enforced: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true()
+    )
     status: Mapped[SupplierPaymentStatus] = mapped_column(
         _enum(SupplierPaymentStatus, "payables_supplier_payment_status"),
         nullable=False,

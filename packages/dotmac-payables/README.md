@@ -4,8 +4,19 @@
 liabilities, due-date payment obligations, credit applications and immutable
 settlement/accounting observations.
 
-Version `0.1.0a6` is an unpublished candidate and is not adopted by this change.
-It adds the cash-basis release of deferred input tax at payment (a declared
+Version `0.1.0a7` is an unpublished candidate and is not adopted by this change.
+It makes separation of duties on supplier payments an optional per-tenant policy
+(D-9; Michael's ruling that two-person approval is never compulsory). Prepare,
+approve, record and reverse take a keyword-only `separation_of_duties` (default
+`False`: separation is OFF by default, per Michael's no-compulsory-two-person ruling;
+a caller that wants two-person approval passes `True`, and assemblies pass the tenant
+policy explicitly). `create_supplier_payment` stamps the policy in force on the row
+(`separation_enforced`, immutable, migration `pa_0007`) and the later steps enforce
+`stamp or parameter` (the stricter value wins). The database
+`ck_supplier_payments_sod` check relaxes per row, and only when that row's stamp is
+false.
+
+Version `0.1.0a6` added the cash-basis release of deferred input tax at payment (a declared
 `TaxDeferralPolicy`, proportional with an exact final remainder, reversed with the
 payment), verifier-bound no-GL admission of the deferral already released on settled
 historical invoices and of historical overpayments as supplier credits, withholding

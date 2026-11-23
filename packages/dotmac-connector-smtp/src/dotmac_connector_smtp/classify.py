@@ -31,11 +31,14 @@ from __future__ import annotations
 
 import re
 
-from dotmac_kernel.delivery_models import (
-    DELIVERY_BOUNCED,
-    DELIVERY_FAILED,
-    DELIVERY_REJECTED,
-)
+#: Outcome vocabulary of the moved table. The VALUES are the kernel delivery
+#: receipt statuses the table was written against (`dotmac_kernel.delivery_models`
+#: `DELIVERY_BOUNCED` / `DELIVERY_FAILED` / `DELIVERY_REJECTED`); a connector
+#: distribution depends on `dotmac-integration` only, so the three literals are
+#: restated here and pinned by the golden test rather than imported.
+DELIVERY_BOUNCED = "bounced"
+DELIVERY_FAILED = "failed"
+DELIVERY_REJECTED = "rejected"
 
 STAGE_SESSION = "session"
 STAGE_MAIL = "mail"

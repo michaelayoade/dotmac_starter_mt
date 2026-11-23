@@ -12,6 +12,7 @@ from dotmac_payables.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = ROOT / "migrations/versions/pa_0001_payables.py"
+SEVENTH_MIGRATION = ROOT / "migrations/versions/pa_0007_separation_policy.py"
 SIXTH_MIGRATION = ROOT / "migrations/versions/pa_0006_tax_release_hist_credit.py"
 FIFTH_MIGRATION = ROOT / "migrations/versions/pa_0005_reversal_settled_history.py"
 FOURTH_MIGRATION = ROOT / "migrations/versions/pa_0004_supplier_payments.py"
@@ -139,7 +140,7 @@ def test_payables_lineage_loads_as_one_alembic_head() -> None:
     config.set_main_option("script_location", str(ROOT / "migrations"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["pa_0006_tax_release_hist_credit"]
+    assert scripts.get_heads() == ["pa_0007_separation_policy"]
     assert scripts.get_bases() == ["pa_0001_payables"]
 
 
@@ -212,7 +213,13 @@ def test_migration_check_text_matches_the_model() -> None:
         migration.SUPPLIER_PAYMENT_EVIDENCE_CHECK
         == models.SUPPLIER_PAYMENT_EVIDENCE_CHECK
     )
-    assert migration.SUPPLIER_PAYMENT_SOD_CHECK == models.SUPPLIER_PAYMENT_SOD_CHECK
+    # a7 (D-9) relaxes the separation predicate per row; the a5 text is the
+    # unconditional predicate the a7 text wraps.
+    a7 = import_module("dotmac_payables.migrations.versions.pa_0007_separation_policy")
+    assert a7.SUPPLIER_PAYMENT_SOD_CHECK == models.SUPPLIER_PAYMENT_SOD_CHECK
+    assert models.SUPPLIER_PAYMENT_SOD_CHECK == (
+        "NOT separation_enforced OR (" + migration.SUPPLIER_PAYMENT_SOD_CHECK + ")"
+    )
 
 
 def test_a5_migration_is_additive_guarded_and_forward_only() -> None:
@@ -280,4 +287,28 @@ def test_a6_migration_is_additive_tenant_safe_and_forward_only() -> None:
     columns = models.SupplierPaymentTaxRelease.__table__.c
     assert {"deferral_account_ref", "release_account_ref", "amount"} <= set(
         columns.keys()
+    )
+
+
+def test_a7_migration_stamps_the_policy_and_forbids_changing_it() -> None:
+    source = SEVENTH_MIGRATION.read_text(encoding="utf-8")
+    assert 'down_revision = "pa_0006_tax_release_hist_credit"' in source
+    assert len("pa_0007_separation_policy") <= 32  # alembic_version.version_num
+    assert "separation_enforced" in models.SupplierPayment.__table__.c
+    # NOT NULL, column default true: existing rows stay strict.
+    assert "nullable=False" in source
+    assert "server_default=sa.true()" in source
+    # The stamp cannot change once written.
+    assert "supplier_payments_guard_policy" in source
+    assert "BEFORE UPDATE ON mod_payables.supplier_payments" in source
+    # Downgrade refuses while any row was written under the relaxed policy.
+    down = source.split("def downgrade")[1]
+    assert "WHERE NOT separation_enforced" in down
+    assert "RuntimeError" in down
+
+
+def test_a7_downgrade_locks_the_table_before_the_relaxed_row_check() -> None:
+    down = SEVENTH_MIGRATION.read_text(encoding="utf-8").split("def downgrade")[1]
+    assert down.index("SHARE ROW EXCLUSIVE MODE") < down.index(
+        "WHERE NOT separation_enforced"
     )

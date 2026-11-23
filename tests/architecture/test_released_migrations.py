@@ -9130,11 +9130,10 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-network-observability": frozenset(),
     "dotmac-network-topology": frozenset(),
     "dotmac-party": frozenset(),
-    # `pa_0006` adds the deferred-VAT release policy and rows, the historical
-    # deferral position and the historical supplier credit; still editable until
-    # `dotmac-payables` 0.1.0a6 is tagged. `pa_0001` to `pa_0005` stay byte-frozen
-    # by the 0.1.0a5 entry.
-    "dotmac-payables": frozenset(),
+    # `pa_0007` stamps the optional separation-of-duties policy on each supplier
+    # payment (D-9); still editable until `dotmac-payables` 0.1.0a7 is tagged.
+    # `pa_0001` to `pa_0006` stay byte-frozen by the 0.1.0a6 entry.
+    "dotmac-payables": frozenset({"pa_0007_separation_policy.py"}),
     # `py_0004` adds audited liability adjustments; editable until
     # `dotmac-payroll` 0.1.0a6 is tagged.
     "dotmac-payroll": frozenset(),

@@ -5,7 +5,6 @@ dead-letter predicates and `settle_dispatch`. The PG half is
 from __future__ import annotations
 
 import pytest
-from dotmac_delivery_smtp import SmtpOutcomeUnknown
 from dotmac_kernel.delivery import (
     DeliveryDeferred,
     DeliveryError,
@@ -26,22 +25,11 @@ from dotmac_kernel.messaging.relay import (
 from dotmac_kernel.models import Tenant
 
 
-def test_smtp_outcome_unknown_is_the_kernel_unknown_outcome() -> None:
-    exc = SmtpOutcomeUnknown("reply lost after DATA (TimeoutError)")
-    assert isinstance(exc, DeliveryOutcomeUnknown)
+def test_unknown_outcome_carries_its_reason_and_is_not_a_hold_or_input_error() -> None:
+    exc = DeliveryOutcomeUnknown("reply lost after DATA (TimeoutError)")
     assert exc.reason == "reply lost after DATA (TimeoutError)"
     # Not a hold and not a malformed-input error: neither mapping may catch it.
     assert not isinstance(exc, DeliveryDeferred | DeliveryError)
-
-
-def test_smtp_unknown_outcome_reason_carries_no_recipient() -> None:
-    from dotmac_delivery_smtp.provider import SmtpAdapterError
-
-    exc = SmtpOutcomeUnknown(
-        "reply lost after DATA (TimeoutError); may have been accepted"
-    )
-    assert isinstance(exc, SmtpAdapterError) and isinstance(exc, DeliveryOutcomeUnknown)
-    assert "@" not in exc.reason
 
 
 def test_unknown_and_terminal_are_distinct_from_holds_and_errors() -> None:

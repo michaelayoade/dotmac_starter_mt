@@ -6,6 +6,22 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased
+
+No version is bumped or allocated here; kernel releases are owned by the release
+allocation (this ships with the next allocated release).
+
+- `dotmac_kernel.delivery_providers` publishes the `email.send.v1` payload
+  contract for the delivery domain: `EMAIL_SEND_CAPABILITY_ID` and
+  `EMAIL_SEND_COMMAND_SCHEMA` (one rendered message: `dispatch_id`, `address`,
+  `text`/`html`, `subject`, the five allowlisted `headers`, attachments by
+  reference). Definition only: the kernel does not import `dotmac-integration`
+  and installs nothing; the composing assembly declares the contract (owner
+  `starter/delivery`, command schema, no result schema) and a connector claims
+  its digest. Pinned digest
+  `b746eb0073de9d148cc659dd3e7282a19d40e1e0296ade4a8ec8223ba651be52`, tested in
+  `tests/unit/test_email_send_contract.py`. A schema change is a new `.vN` id.
+
 ## 0.1.0a110 — Release inventory
 
 This inventories source after the published and tagged `0.1.0a109` (source
