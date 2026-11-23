@@ -48,7 +48,12 @@ def observe_containers(
             timeout=30.0,
         )
         if result.exit_code != 0:
-            continue  # a container that is not there is itself an observation
+            # Only PROVEN absence is an observation: `docker inspect` also fails when
+            # the daemon is down, so ask the listing, and treat anything but a
+            # successful, empty answer as "could not observe" (reported as failed).
+            if not _absent(config, commands, name):
+                raise Refusal("reconcile_unavailable")
+            continue
         parts = result.stdout.decode("utf-8", errors="replace").split()
         if len(parts) != 2:
             raise Refusal("reconcile_unavailable")
@@ -58,6 +63,22 @@ def observe_containers(
             )
         )
     return tuple(found)
+
+
+def _absent(config: AgentConfig, commands: Commands, name: str) -> bool:
+    listing = commands.run(
+        (
+            str(config.docker_path),
+            "ps",
+            "-a",
+            "--filter",
+            f"name=^/{name}$",
+            "--format",
+            "{{.ID}}",
+        ),
+        timeout=30.0,
+    )
+    return listing.exit_code == 0 and not listing.stdout.strip()
 
 
 def _repo_digests(

@@ -1,4 +1,4 @@
-# /etc/dotmac/deploy-agent/job-identity.toml  (mode 0644, root:root)
+# /etc/dotmac/deploy-agent/job-identity.toml  (mode 0640, root:dotmac-deploy)
 # Written at enrolment, together with the creation of the job user (for the import
 # role: `dotmac-erp-import`, uid:gid 10040:10040, C-29, NOT in the docker group).
 # Foundation reads the job identity from THIS root-owned file: it never comes from a

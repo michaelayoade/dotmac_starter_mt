@@ -1,6 +1,7 @@
 # Keys by name; every value below is a placeholder (documentation ranges only).
-# Installed as /etc/dotmac/deploy-agent/<product>.toml, mode 0644 root:root (the
-# non-root agent must be able to READ it; never 0600), not group/other writable.
+# Installed as /etc/dotmac/deploy-agent/<product>.toml, mode 0640 root:dotmac-deploy (the
+# non-root agent reads it through its group; never 0600, never world-readable), and
+# not group/other writable.
 # One instance per product: the systemd instance name IS the product segment of
 # target_ref (`dotmac-deploy-agent@erp`), so two products run side by side with
 # disjoint run, state and lock directories. Read-back: libexec/check-agent-config.sh.
@@ -12,6 +13,7 @@ cp_spki_sha256 = ["<hex sha256 of the pinned CP SPKI>"]
 state_dir = "/var/lib/dotmac-deploy-agent/erp"
 deploy_dir = "/opt/dotmac/erp"
 foundation_argv = ["/opt/dotmac-deploy-agent/venv/bin/dotmac-deploy", "<arguments>"]
+foundation_remove_job_argv = ["/opt/dotmac-deploy-agent/venv/bin/dotmac-deploy", "remove-job"]   # role jobs only; the agent appends --dispatch-id/--execute/--target
 openbao_url = "http://192.0.2.10:8200"       # over WireGuard only
 openbao_config_dir = "/etc/dotmac/openbao"            # authored, root-owned; the agent only checks and reports
 registry_binary = "/usr/local/libexec/dotmac/registry"

@@ -11,6 +11,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from collections.abc import Callable, Mapping
@@ -48,6 +49,7 @@ from .jobs import (
     JOB_TERM_GRACE,
     check_apply_class,
     check_job_inputs,
+    foundation_receipt_matches,
     job_env,
 )
 from .journal import AccessorStore, ExecutedDispatches
@@ -86,6 +88,7 @@ from .transport import Transport
 from .wire import utc_stamp
 
 LOG = logging.getLogger("dotmac.deploy_agent")
+_CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}")
 JOB_PARAMS_FILE = "job-params.env"
 
 
@@ -156,11 +159,15 @@ class Launcher:
         """A7, at agent start: a crash mid-job leaves a `secret_id` file and maybe
         a live accessor. Files go first; accessors are destroyed when OpenBao is
         reachable and stay tracked (retried next cycle) when it is not."""
-        if self._orphan_preflight():
+        found, remains = self._clear_orphans()
+        if found:
             # P-SEC rev7: files and accessors are STILL purged (a surviving
-            # container is no reason to leave DSNs on tmpfs); the preflight blocks
-            # every later lease instead.
-            LOG.error("a job container survives from an earlier run: leases blocked")
+            # container is no reason to leave DSNs on tmpfs). A container found at
+            # agent start was removed by label (R5-H1); if one remains, leases stay
+            # blocked by the preflight.
+            LOG.error(
+                "a job container survived an earlier run: removed=%s", not remains
+            )
         for role in self.job_accessors.roles():
             try:
                 self.purge_job_role(role)
@@ -359,16 +366,18 @@ class Launcher:
             stopped = self._reconcile(materials.dispatch_id, standing)
             if stopped is not None:
                 return stopped
-        if self._orphan_preflight():
+        found, remains = self._clear_orphans()
+        if found:
             # Before ANY lease, job or serving: a labelled job container (stopped
-            # ones included) from an earlier run blocks everything until a human
-            # has dealt with it.
+            # ones included) from an earlier run is removed by label, re-proved, and
+            # the cycle is refused and paged either way (a leftover container is an
+            # anomaly); the next poll proceeds if none remains.
             self._report(
                 self._observation(
                     materials.dispatch_id,
                     "refused",
                     "job_container_orphaned",
-                    {"page": True},
+                    {"page": True, "removed": not remains},
                     kind=kind_for_operation(materials.operation),
                 )
             )
@@ -687,8 +696,21 @@ class Launcher:
             )
             receipt["exit_code"] = result.exit_code
             # Foundation's own receipt (the last JSON line of its stdout), or why not.
+            # (details.foundation, not details.job.foundation: nested one level less,
+            # so its `inputs` items stay inside Control's depth limit; R5-H2.)
+            receipt_ok = False
             if result.receipt is not None:
-                receipt["foundation"] = result.receipt
+                details["foundation"] = result.receipt
+                receipt_ok = foundation_receipt_matches(
+                    result.receipt,
+                    dispatch_id=materials.dispatch_id,
+                    job=job.name,
+                    render_invocation=invocation,
+                )
+                if not receipt_ok:
+                    receipt["foundation_receipt"] = (
+                        "mismatch"  # another run's, or a refusal
+                    )
             else:
                 receipt["foundation_receipt"] = result.receipt_error or "missing"
             details["runner"] = {
@@ -699,8 +721,8 @@ class Launcher:
                 outcome, reason = "failed", "runner_timeout"
             elif result.exit_code != 0:
                 outcome = "failed"
-            elif result.receipt is None:
-                # exit 0 with no readable receipt cannot be trusted as success
+            elif not receipt_ok:
+                # exit 0 with no readable receipt of THIS run cannot be trusted
                 outcome, reason = "failed", "job_receipt_invalid"
         except Refusal as refusal:
             outcome = "failed" if ran else "refused"
@@ -712,7 +734,14 @@ class Launcher:
             # files go and the accessor is destroyed regardless. It only HOLDS the
             # lease (never released: it expires unreleased) and pages. The receipt
             # says `orphan_container` and never claims the container was contained.
-            orphaned = ran and self._job_container_present(materials.dispatch_id)
+            orphaned = False
+            if ran and self._job_container_present(materials.dispatch_id):
+                # R5-H1: ask Foundation to remove THIS dispatch's container, then
+                # prove it again. Only a container that REMAINS holds the lease and
+                # pages; a removed one is a routine failed run, not an anomaly.
+                self._remove_job_containers(materials.dispatch_id)
+                orphaned = self._job_container_present(materials.dispatch_id)
+                receipt["orphan_removed"] = not orphaned
             if orphaned:
                 outcome, reason = "failed", "job_container_orphaned"
                 receipt["orphan_container"] = True
@@ -743,12 +772,62 @@ class Launcher:
         )
         return CycleResult(outcome, reason, materials.dispatch_id)
 
-    def _orphan_preflight(self) -> bool:
-        """True if ANY container carries both job labels (`docker ps -a` lists the
-        stopped ones too), or the listing cannot be read: fail closed."""
-        return self._ps_present(
-            (f"label={JOB_DISPATCH_LABEL}", f"label={JOB_MARKER_LABEL}")
-        )
+    def _orphan_ids(self) -> list[str] | None:
+        """Ids of every container carrying BOTH job labels (`docker ps -a` lists the
+        stopped ones too); None when the listing cannot be read: fail closed."""
+        argv = [str(self.config.docker_path), "ps", "-a"]
+        for expression in (f"label={JOB_DISPATCH_LABEL}", f"label={JOB_MARKER_LABEL}"):
+            argv += ["--filter", expression]
+        argv += ["--format", "{{.ID}}"]
+        try:
+            result = self.read_only.run(tuple(argv), timeout=15.0)
+        except Refusal:
+            return None
+        if result.exit_code != 0:
+            return None
+        ids = result.stdout.decode("ascii", errors="replace").split()
+        return ids if all(_CONTAINER_ID.fullmatch(i) for i in ids) else None
+
+    def _clear_orphans(self) -> tuple[bool, bool]:
+        """`(found, remains)`: remove every container carrying both job labels with a
+        label-scoped `docker rm -f <id>` (R5-H1; Foundation's `remove-job` needs the
+        signed pair of THAT dispatch, which the agent does not hold for an old one),
+        then prove again. An unreadable listing is found AND remaining."""
+        ids = self._orphan_ids()
+        if ids is None:
+            return True, True
+        if not ids:
+            return False, False
+        for container in ids:
+            try:
+                self.commands.run(
+                    (str(self.config.docker_path), "rm", "-f", container), timeout=30.0
+                )
+            except Refusal:
+                pass  # re-proved below
+        again = self._orphan_ids()
+        return True, again is None or bool(again)
+
+    def _remove_job_containers(self, dispatch_id: str) -> None:
+        """Foundation's `remove-job --dispatch-id <id> --execute`: label-scoped to ONE
+        dispatch. Best effort: the caller re-proves with `docker ps -a`."""
+        argv = self.config.foundation_remove_job_argv
+        if not argv:
+            return  # not configured: the container then remains, and pages
+        try:
+            self.commands.run(
+                (
+                    *argv,
+                    "--dispatch-id",
+                    dispatch_id,
+                    "--execute",
+                    "--target",
+                    self.config.target_ref,
+                ),
+                timeout=90.0,
+            )
+        except Refusal:
+            pass
 
     def _ps_present(self, filters: tuple[str, ...]) -> bool:
         argv = [str(self.config.docker_path), "ps", "-a"]

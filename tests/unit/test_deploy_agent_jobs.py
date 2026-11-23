@@ -1629,9 +1629,8 @@ def test_r61_foundation_gets_an_absolute_deadline_and_the_agent_bound_is_later(
     assert refused(rig) == ("completed", None)
     spec = rig.runner.specs[0]
     assert spec.job_deadline == int(rig.epoch[0]) + 600  # start + timeout_seconds
-    assert (
-        spec.job_bound_seconds == 600 + JOB_STOP_MARGIN > 600
-    )  # Foundation stops first
+    # SIGTERM at the deadline itself: Foundation's own 90 s headroom is inside it
+    assert JOB_STOP_MARGIN == 0 and spec.job_bound_seconds == 600
     env = runner_environment(spec)
     assert env["DOTMAC_DEPLOY_JOB_DEADLINE"] == str(spec.job_deadline)
 
@@ -1639,7 +1638,7 @@ def test_r61_foundation_gets_an_absolute_deadline_and_the_agent_bound_is_later(
 def test_r61_the_margin_and_grace_fit_inside_the_lease_margin() -> None:
     from dotmac_deploy_agent.jobs import JOB_STOP_MARGIN, JOB_TERM_GRACE, LEASE_MARGIN
 
-    assert 0 < JOB_STOP_MARGIN and 0 < JOB_TERM_GRACE
+    assert JOB_STOP_MARGIN == 0 and JOB_TERM_GRACE == 60  # SIGKILL only after 60 s
     assert JOB_STOP_MARGIN + JOB_TERM_GRACE < LEASE_MARGIN
 
 
@@ -1741,7 +1740,7 @@ def test_rev7_an_orphan_blocks_every_lease_job_or_serving(
 ) -> None:
     rig = job_rig(tmp_path)
     rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(
-        0, b"abc123\n"
+        0, b"3f2a9c1b7d44\n"
     )
     if kind == "serving":
         rig.cp.materials = make_materials()
@@ -1765,7 +1764,7 @@ def test_rev7_agent_start_still_purges_and_the_orphan_blocks_the_next_lease(
     rig = job_rig(tmp_path)
     deliver(rig)  # an accessor and a secret_id from the run that was interrupted
     mark_inflight(rig.config.state_dir, "dispatch-1")
-    rig.commands.script[("ps",)] = CommandResult(0, b"abc123\n")
+    rig.commands.script[("ps",)] = CommandResult(0, b"3f2a9c1b7d44\n")
     rig.cp.materials = None
     assert rig.launcher.run_once().outcome == "idle"
     assert not (rig.config.role_dir("import") / "secret_id").exists()  # purged anyway
@@ -2088,9 +2087,12 @@ def test_fh_a_deploy_run_never_captures_stdout(tmp_path: Path) -> None:
 
 def test_fh_the_receipt_reaches_the_job_receipt(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
-    rig.runner.receipt = {"job": "import", "exit_code": 0, "rows": 3}
     assert refused(rig) == ("completed", None)
-    assert receipt(rig)["foundation"] == {"job": "import", "exit_code": 0, "rows": 3}
+    # at details.foundation (one level up), not details.job.foundation (R5-H2)
+    document = last(rig)["details"]
+    assert document["foundation"]["job"] == "import"  # type: ignore[index]
+    assert document["foundation"]["dispatch_id"] == "dispatch-1"  # type: ignore[index]
+    assert "foundation" not in receipt(rig)
 
 
 def test_fh_a_clean_exit_without_a_readable_receipt_is_not_success(
@@ -2168,8 +2170,14 @@ def identity_file(
         .replace("@JOB_USER@", user)
         .replace("@INPUTS_ROOT@", inputs)
     )
-    path.chmod(0o644)
+    path.chmod(0o640)  # root:dotmac-deploy in production
     return path
+
+
+def group_of(path: Path) -> str:
+    import grp
+
+    return grp.getgrgid(path.stat().st_gid).gr_name
 
 
 def run_identity(path: Path, **extra: str) -> tuple[int, str]:
@@ -2178,7 +2186,7 @@ def run_identity(path: Path, **extra: str) -> tuple[int, str]:
     done = subprocess.run(  # noqa: S603
         ["/bin/sh", str(KIT / "enrolment/libexec/check-job-identity.sh")],
         capture_output=True, text=True, check=False,
-        env={"PATH": "/usr/bin:/bin", "IDENTITY_FILE": str(path), "EXPECT_OWNER": str(os.geteuid()), "CHECK_USER": "0", **extra},
+        env={"PATH": "/usr/bin:/bin", "IDENTITY_FILE": str(path), "EXPECT_OWNER": str(os.geteuid()), "EXPECT_GROUP": group_of(path), "CHECK_USER": "0", **extra},
     )  # fmt: skip
     return done.returncode, done.stdout.strip()
 
@@ -2226,7 +2234,11 @@ def test_the_identity_readback_refuses_a_wrong_mode_a_symlink_and_a_missing_file
     path.chmod(0o666)
     assert run_identity(path)[0] != 0  # group/other-writable
     path.chmod(0o600)
-    assert run_identity(path)[0] != 0  # not 0644
+    assert run_identity(path)[0] != 0  # not 0640
+    path.chmod(0o644)
+    assert run_identity(path)[0] != 0  # world-readable is not allowed (R5-L2)
+    path.chmod(0o640)
+    assert run_identity(path, EXPECT_GROUP="no-such-group")[0] != 0  # wrong group
     link = tmp_path / "link.toml"
     link.symlink_to(
         identity_file(tmp_path / "x") if (tmp_path / "x").mkdir() is None else path
@@ -2280,20 +2292,25 @@ def run_config_check(path: Path, **extra: str) -> int:
     return subprocess.run(  # noqa: S603
         ["/bin/sh", str(KIT / "enrolment/libexec/check-agent-config.sh"), str(path)],
         check=False, capture_output=True,
-        env={"PATH": "/usr/bin:/bin", "EXPECT_OWNER": str(os.geteuid()), **extra},
+        env={"PATH": "/usr/bin:/bin", "EXPECT_OWNER": str(os.geteuid()), "EXPECT_GROUP": group_of(path), **extra},
     ).returncode  # fmt: skip
 
 
-def test_the_agent_config_readback_wants_0644_not_0600(tmp_path: Path) -> None:
+def test_the_agent_config_readback_wants_0640_root_group_not_0600_or_world_readable(
+    tmp_path: Path,
+) -> None:
     config = tmp_path / "erp.toml"
     config.write_text("x = 1\n")
-    config.chmod(0o644)
+    config.chmod(0o640)
     assert run_config_check(config) == 0
-    for mode in (0o600, 0o664, 0o666, 0o640):
+    for mode in (0o600, 0o644, 0o660, 0o666):
         config.chmod(mode)
-        assert run_config_check(config) != 0, oct(mode)  # unreadable or writable
-    config.chmod(0o644)
+        assert run_config_check(config) != 0, oct(
+            mode
+        )  # unreadable, public or writable
+    config.chmod(0o640)
     assert run_config_check(config, EXPECT_OWNER=str(os.geteuid() + 1)) != 0
+    assert run_config_check(config, EXPECT_GROUP="no-such-group") != 0
 
 
 def test_no_kit_or_doc_asks_for_a_0600_agent_config() -> None:
@@ -2303,7 +2320,8 @@ def test_no_kit_or_doc_asks_for_a_0600_agent_config() -> None:
         assert (
             "0600" not in text.replace("never 0600", "") and "mode 600" not in text
         ), path.name
-    assert "0644" in (root / "deploy/config.example.toml").read_text()
+    example = (root / "deploy/config.example.toml").read_text()
+    assert "0640 root:dotmac-deploy" in example and "0644" not in example
 
 
 def test_there_is_no_job_secrets_uid_key_anywhere() -> None:
@@ -2379,3 +2397,241 @@ def test_the_instance_name_is_the_product_segment_and_two_instances_run_side_by_
         "RuntimeDirectory=dotmac-deploy-agent/%i" in unit
         and "StateDirectory=dotmac-deploy-agent/%i" in unit
     )
+
+
+# -- r5 R5-H1: remove the orphan, re-prove, hold only if one REMAINS ---------------
+REMOVE = ("/opt/dotmac/dotmac-deploy", "remove-job")
+ORPHAN_ID = b"3f2a9c1b7d44\n"
+
+
+def stateful_ps(rig: Rig, *, cleared_by: str, dispatch_only: bool) -> None:
+    """`docker ps -a` lists a container until `cleared_by` has run (rm -f / remove-job)."""
+    original = rig.commands.run
+
+    def run(argv, *, timeout):  # type: ignore[no-untyped-def]
+        if len(argv) > 1 and argv[1] == "ps":
+            gone = any(cleared_by in " ".join(c) for c in rig.systemctl.calls)
+            wanted = ("label=dotmac.dispatch_id=dispatch-1" in argv) == dispatch_only
+            if wanted and not gone:
+                return CommandResult(0, ORPHAN_ID)
+        return original(argv, timeout=timeout)
+
+    rig.commands.run = run  # type: ignore[method-assign]
+
+
+@pytest.mark.parametrize("timed_out", [False, True], ids=["exit", "sigkilled"])
+def test_r5h1_an_orphan_after_the_run_is_removed_by_foundation_then_released(
+    tmp_path: Path, timed_out: bool
+) -> None:
+    rig = job_rig(tmp_path, foundation_remove_job_argv=REMOVE)
+    rig.runner.timed_out = timed_out  # the SIGKILL case: Foundation's finally never ran
+    stateful_ps(rig, cleared_by="remove-job", dispatch_only=True)
+    result = rig.launcher.run_once()
+    expected = ("failed", "runner_timeout") if timed_out else ("completed", None)
+    assert (result.outcome, result.reason) == expected  # a routine run, not an anomaly
+    [call] = [c for c in rig.systemctl.calls if "remove-job" in c]
+    assert call == (
+        *REMOVE,
+        "--dispatch-id",
+        "dispatch-1",
+        "--execute",
+        "--target",
+        rig.config.target_ref,
+    )
+    assert "lease/release" in [e for e, _ in rig.cp.lease_log]  # released, not held
+    assert tracked(rig) == [] and receipt(rig)["orphan_removed"] is True
+    assert "page" not in last(rig)["details"] and "orphan_container" not in receipt(rig)  # type: ignore[operator]
+
+
+def test_r5h1_an_orphan_that_survives_removal_holds_the_lease_and_pages(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path, foundation_remove_job_argv=REMOVE)
+    rig.commands.script[POST_RUN] = CommandResult(0, ORPHAN_ID)  # never goes away
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("failed", "job_container_orphaned")
+    assert any("remove-job" in c for c in rig.systemctl.calls)  # it was tried
+    assert "lease/release" not in [e for e, _ in rig.cp.lease_log]
+    assert (
+        receipt(rig)["orphan_container"] is True
+        and receipt(rig)["orphan_removed"] is False
+    )
+    assert last(rig)["details"]["page"] is True  # type: ignore[index]
+    assert tracked(rig) == []  # purged regardless
+
+
+def test_r5h1_without_a_configured_removal_the_container_remains_and_pages(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)  # no foundation_remove_job_argv
+    rig.commands.script[POST_RUN] = CommandResult(0, ORPHAN_ID)
+    assert refused(rig) == ("failed", "job_container_orphaned")
+    assert not any("remove-job" in " ".join(c) for c in rig.systemctl.calls)
+
+
+def test_r5h1_agent_restart_removes_a_leftover_container_by_label(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    stateful_ps(rig, cleared_by="rm -f", dispatch_only=False)
+    rig.cp.materials = None
+    assert rig.launcher.run_once().outcome == "idle"  # agent start cleans up
+    removals = [c for c in rig.systemctl.calls if c[1:3] == ("rm", "-f")]
+    assert [c[-1] for c in removals] == [ORPHAN_ID.decode().strip()]
+    rig.cp.materials = run_job_materials()
+    assert refused(rig) == ("completed", None)  # nothing blocks the next job
+
+
+def appears_on_the_second_listing(rig: Rig) -> None:
+    """A container shows up after agent start: the 2nd both-label listing finds it, and
+    it stays listed until a `docker rm -f` has run."""
+    original = rig.commands.run
+    seen = {"listings": 0}
+
+    def run(argv, *, timeout):  # type: ignore[no-untyped-def]
+        if len(argv) > 1 and argv[1] == "ps" and "label=dotmac.role_job=1" in argv:
+            seen["listings"] += 1
+            removed = any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)
+            if seen["listings"] >= 2 and not removed:
+                return CommandResult(0, ORPHAN_ID)
+        return original(argv, timeout=timeout)
+
+    rig.commands.run = run  # type: ignore[method-assign]
+
+
+def test_r5h1_a_container_found_before_a_lease_is_removed_then_the_cycle_is_refused_and_paged(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    appears_on_the_second_listing(rig)
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "job_container_orphaned")
+    assert any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)  # removed by label
+    assert last(rig)["details"] == {"page": True, "removed": True}  # an anomaly: paged
+    assert rig.cp.lease_log == [] and rig.bao.paths == []  # nothing started
+    rig.cp.materials = run_job_materials(dispatch_id="dispatch-2")
+    assert refused(rig) == ("completed", None)  # the next poll proceeds: none remains
+
+
+def test_r5h1_a_container_found_at_agent_start_is_removed_and_the_same_cycle_proceeds(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    stateful_ps(rig, cleared_by="rm -f", dispatch_only=False)
+    assert refused(rig) == ("completed", None)
+    assert any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)
+
+
+def test_r5h1_the_label_scoped_removal_only_ever_names_ids_from_the_label_listing(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(
+        0, b"; rm -rf /\n"
+    )
+    assert refused(rig) == ("refused", "job_container_orphaned")  # unreadable listing
+    assert not any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)  # nothing run
+
+
+# -- R5-H2: the full receipt fits Control's depth limit --------------------------
+def test_r5h2_a_full_foundation_receipt_is_not_dropped_by_the_v2_depth_rule(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent import observation_v2 as o2
+
+    rig = job_rig(tmp_path, target_api_version=2)
+    assert refused(rig) == ("completed", None)
+    statement = rig.cp.observations[-1]["statement"]
+    assert "details_dropped" not in statement["details"]
+    foundation = statement["details"]["foundation"]
+    assert foundation["inputs"] == [
+        {"flag": "--manifest", "sha256": "sha256:" + "7" * 64}
+    ]
+    assert foundation["container_removed"] is True and foundation[
+        "output_volume"
+    ].startswith("dotmac-job-out-")
+    for kept in ("job", "lease_released"):
+        assert kept in statement["details"]
+    assert (
+        o2.shaped_details(statement["details"]) == statement["details"]
+    )  # idempotent: nothing dropped
+
+
+def test_r5h2_the_old_nesting_would_have_been_dropped() -> None:
+    from dotmac_deploy_agent import observation_v2 as o2
+
+    inputs = [{"flag": "--m", "sha256": "sha256:" + "7" * 64}]
+    old = {
+        "job": {"foundation": {"inputs": inputs}}
+    }  # details > job > foundation > inputs > item
+    assert o2.shaped_details(old) == {"details_dropped": "shape"}
+    assert o2.shaped_details(
+        {"foundation": {"inputs": inputs}, "job": {"files": ["a"]}}
+    ) != {"details_dropped": "shape"}
+
+
+# -- R5-L1: Foundation's receipt names THIS run ------------------------------------
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"dispatch_id": "dispatch-0"},
+        {"job": "export"},
+        {"render_invocation": "b2" * 16},
+        {"schema": "dotmac.foundation.operator-job-receipt/2"},
+    ],
+)
+def test_r5l1_a_receipt_of_another_run_is_not_this_jobs_result(
+    tmp_path: Path, bad: dict[str, object]
+) -> None:
+    from tests.unit.deploy_agent_support import AUTO
+
+    rig = job_rig(tmp_path)
+    assert rig.runner.receipt is AUTO
+    original = rig.runner.run
+
+    def run(spec):  # type: ignore[no-untyped-def]
+        from tests.unit.deploy_agent_support import foundation_receipt
+
+        rig.runner.receipt = foundation_receipt(spec, **bad)
+        return original(spec)
+
+    rig.runner.run = run  # type: ignore[method-assign]
+    assert refused(rig) == ("failed", "job_receipt_invalid")
+    assert receipt(rig)["foundation_receipt"] == "mismatch"
+    assert last(rig)["details"]["foundation"]["job"] in ("import", "export")  # type: ignore[index]
+
+
+def test_r5l1_a_foundation_refusal_receipt_is_kept_but_is_not_a_success(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.runner.receipt = {
+        "schema": "dotmac.foundation.operator-job-receipt/1",
+        "outcome": "refused",
+        "reason": "job_context_invalid",
+    }
+    rig.runner.exit_code = 2
+    assert refused(rig) == ("failed", None)
+    assert last(rig)["details"]["foundation"]["reason"] == "job_context_invalid"  # type: ignore[index]
+
+
+# -- R5-M1 -------------------------------------------------------------------------
+def test_r5m1_sigterm_comes_at_the_deadline_and_sigkill_only_after_sixty_seconds(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.jobs import JOB_TEARDOWN_RESERVE, JOB_TERM_GRACE
+
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    spec = rig.runner.specs[0]
+    assert spec.job_bound_seconds == spec.job_deadline - int(
+        rig.epoch[0]
+    )  # the deadline itself
+    assert JOB_TERM_GRACE == 60 and JOB_TEARDOWN_RESERVE == 40  # the reserve stays 100
+
+
+def test_r5m1_the_real_runner_uses_the_sixty_second_job_grace(tmp_path: Path) -> None:
+    from dotmac_deploy_agent.runner import SubprocessRunner
+
+    runner = SubprocessRunner(("/bin/true",), 60)  # the default grace
+    assert runner._grace == 60.0
