@@ -188,6 +188,7 @@ def _create(db: Session, command: CreateSupplierPayment, key: str = "pay:create:
         idempotency_key=key,
         idempotency_expires_at=None,
         prepared_at=NOW,
+        separation_of_duties=True,
     )
 
 
@@ -201,6 +202,7 @@ def _approve(db, payment, *, by="user:approver", key="pay:approve:1", tenant=TEN
         idempotency_key=key,
         idempotency_expires_at=None,
         approved_at=NOW + timedelta(hours=1),
+        separation_of_duties=True,
     )
 
 
@@ -214,6 +216,7 @@ def _record(db, payment, *, by="user:recorder", ref="BANK-REF-1", key="pay:recor
         idempotency_key=key,
         idempotency_expires_at=None,
         recorded_at=NOW + timedelta(hours=2),
+        separation_of_duties=True,
     )
 
 
