@@ -14,7 +14,10 @@ It mirrors the production lease CLASS next to the rehearsal class:
 * renew grants `min(ttl, lease_max - held)`; signed refusals `lease_not_held`,
   `lease_expired`, `lease_max_reached` (expiry is checked before the cap);
 * `covers` is a 200 `{covers: bool}` and never a refusal;
-* a second release is a signed 200 replay `{released: true, replay: true}`.
+* a second release is a signed 200 replay `{released: true, replay: true}`;
+* releasing an EXPIRED lease is a signed 409 `lease_expired` and the host stays
+  `expired_unreleased`; covers/renew/release of a lease that a newer acquire
+  superseded are 409 `lease_superseded`.
 
 Bodies, standing values and error codes are Control's. The vectors in
 `target_api_v2.json` (`lease_body_vectors`, `lease_scenarios`,
@@ -87,6 +90,10 @@ class DeployLeaseDouble:
         #: The plan's `lease_max_seconds`; None means "one grant" (= its ttl).
         self.max_seconds = max_seconds
         self.row: _Row | None = None
+        #: Every lease ever granted, by id: a lease that is not the CURRENT one is
+        #: `lease_superseded` (a newer acquire took the host), an unknown id is
+        #: `lease_not_held`.
+        self.history: dict[str, _Row] = {}
         self.marker = False
         self.rehearsal_live = False  # the other class holds the shared row
         #: Control's replay scenario ids are zero-padded (`lease-0001`).
@@ -157,10 +164,17 @@ class DeployLeaseDouble:
             f"lease-{number}", run, ttl, total, self.clock.t, self.clock.t + ttl
         )
         self.row.renewable = self.renewable
+        self.history[self.row.lease_id] = self.row
         return {"lease_id": self.row.lease_id, "ttl_seconds": ttl}
+
+    def _superseded(self, payload: dict[str, object]) -> None:
+        row = self.history.get(str(payload.get("lease_id")))
+        if row is not None and row is not self.row:
+            raise LeaseRefused(409, "lease_superseded")
 
     def covers(self, payload: dict[str, object]) -> dict[str, object]:
         self.log.append(("lease/covers", dict(payload)))
+        self._superseded(payload)
         row = self.row
         held = (
             row is not None
@@ -172,6 +186,7 @@ class DeployLeaseDouble:
 
     def renew(self, payload: dict[str, object]) -> dict[str, object]:
         self.log.append(("lease/renew", dict(payload)))
+        self._superseded(payload)
         row = self.row
         if (
             row is None
@@ -190,6 +205,7 @@ class DeployLeaseDouble:
 
     def release(self, payload: dict[str, object]) -> dict[str, object]:
         self.log.append(("lease/release", dict(payload)))
+        self._superseded(payload)
         row = self.row
         if row is None or payload.get("lease_id") != row.lease_id:
             raise LeaseRefused(409, "lease_not_held")

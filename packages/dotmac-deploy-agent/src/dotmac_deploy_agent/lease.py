@@ -58,8 +58,15 @@ RUN_MARGIN: Final = 120
 MIN_RUN_SECONDS: Final = 60
 #: Signed renew refusals (Control `_v2`): the lease is gone or at its total cap.
 RENEW_REFUSALS: Final = frozenset(
-    {"lease_not_held", "lease_expired", "lease_max_reached", "lease_not_renewable"}
+    {
+        "lease_not_held",
+        "lease_expired",
+        "lease_max_reached",
+        "lease_not_renewable",
+        "lease_superseded",  # a newer lease took the host: ours is lost
+    }
 )
+SUPERSEDED: Final = "lease_superseded"
 #: How often the keeper thread looks at the clock; a renew is due every ttl/3.
 POLL_SECONDS: Final = 2.0
 
@@ -280,9 +287,14 @@ class LeaseClient:
         )
 
     def covers(self, lease: Lease, *, dispatch_id: str) -> bool:
-        reply = self._post(
-            "covers", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}
-        )
+        try:
+            reply = self._post(
+                "covers", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}
+            )
+        except Refusal as refusal:
+            if refusal.detail == SUPERSEDED:
+                return False  # a newer lease holds the host: this one covers nothing
+            raise
         return _answer(reply, "lease/covers")["covers"] is True
 
     def renew(self, lease: Lease, *, dispatch_id: str) -> Lease:

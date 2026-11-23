@@ -919,3 +919,70 @@ def test_a_run_job_lease_refuses_renewal_with_lease_not_renewable(
     clock.advance(150)  # past ttl/3 = 240 s from the grant
     keeper.tick()
     assert keeper.lease_lost == "lease_not_renewable"
+
+
+# -- Control dfe7133: lease_superseded, and a refused release is not success -------
+
+
+def superseded_pair(tmp_path: Path) -> tuple[Rig, DeployLeaseDouble, LeaseClock, Lease]:
+    rig, double, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    old = client.acquire(dispatch_id="run-1", ttl_seconds=600, max_seconds=1500)
+    clock.advance(700)  # run-1's lease expired unreleased...
+    double.marker = True  # ...Control issued the marker...
+    client.acquire(dispatch_id="run-2", ttl_seconds=600, max_seconds=1500)  # ...and
+    return rig, double, clock, old  # a newer acquire superseded it
+
+
+def test_a_superseded_lease_covers_nothing_and_its_keeper_records_it_lost(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock, old = superseded_pair(tmp_path)
+    client = rig.launcher.lease
+    assert client.covers(old, dispatch_id="run-1") is False
+    keeper = client.keeper(
+        Lease("lease-1", 600, clock.t + 100, clock.t - 500, 1500, 600),
+        dispatch_id="run-1",
+    )
+    clock.advance(1)
+    keeper.tick()
+    assert keeper.lease_lost == "lease_superseded"
+    with pytest.raises(Refusal) as caught:
+        client.release(old, host_mutated=False)
+    assert (caught.value.code, caught.value.detail) == (
+        "lease_refused",
+        "lease_superseded",
+    )
+
+
+def test_releasing_an_expired_lease_is_refused_and_the_host_stays_expired(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(tmp_path)
+    client = rig.launcher.lease
+    lease = client.acquire(dispatch_id="run-1", ttl_seconds=600, max_seconds=1500)
+    clock.advance(700)
+    with pytest.raises(Refusal) as caught:
+        client.release(lease, host_mutated=False)
+    assert caught.value.detail == "lease_expired"
+    assert double.standing() == "expired_unreleased"
+
+
+def test_a_launcher_release_refused_as_superseded_is_reported_not_success(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(tmp_path)
+    original = rig.launcher.runner.run
+
+    def supersede(spec):  # type: ignore[no-untyped-def]
+        # While the run ran, the lease expired and another run took the host.
+        clock.advance(1000)
+        double.marker = True
+        double.acquire({"dispatch_run": "other-run", "ttl_seconds": 600})
+        return original(spec)
+
+    rig.launcher.runner.run = supersede  # type: ignore[method-assign]
+    assert rig.launcher.run_once().outcome == "completed"  # the outcome stands...
+    details = rig.cp.observations[0]["details"]  # type: ignore[index]
+    assert details["lease_released"] is False  # ...but the release did not succeed
+    assert details["lease_release_refusal"] == "lease_superseded"
