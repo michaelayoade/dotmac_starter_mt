@@ -58,7 +58,7 @@ RUN_MARGIN: Final = 120
 MIN_RUN_SECONDS: Final = 60
 #: Signed renew refusals (Control `_v2`): the lease is gone or at its total cap.
 RENEW_REFUSALS: Final = frozenset(
-    {"lease_not_held", "lease_expired", "lease_max_reached"}
+    {"lease_not_held", "lease_expired", "lease_max_reached", "lease_not_renewable"}
 )
 #: How often the keeper thread looks at the clock; a renew is due every ttl/3.
 POLL_SECONDS: Final = 2.0

@@ -122,6 +122,7 @@ def test_lease_scenarios_replay_through_the_signed_wire(
         if step["call"] == "acquire":
             double.max_seconds = args.pop("lease_max_seconds")
             double.marker = args.pop("marker_present")
+            double.renewable = args.pop("renewable", True)
         route = f"lease/{step['call']}"
         method = "GET" if step["call"] == "standing" else "POST"
         payload = None if method == "GET" else args

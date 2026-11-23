@@ -70,6 +70,8 @@ class _Row:
     expires_at: float
     released: bool = False
     mutated: bool | None = None
+    #: A run_job lease is granted once and never renewed (`lease_not_renewable`).
+    renewable: bool = True
 
 
 def renew_grant(ttl: int, lease_max: int, held: float) -> int:
@@ -89,6 +91,8 @@ class DeployLeaseDouble:
         self.rehearsal_live = False  # the other class holds the shared row
         #: Control's replay scenario ids are zero-padded (`lease-0001`).
         self.padded_ids = False
+        #: Set by the plan (a serving plan renews; a run_job plan does not).
+        self.renewable = True
         self.counter = 0
         self.log: list[tuple[str, dict[str, object]]] = []
 
@@ -152,6 +156,7 @@ class DeployLeaseDouble:
         self.row = _Row(
             f"lease-{number}", run, ttl, total, self.clock.t, self.clock.t + ttl
         )
+        self.row.renewable = self.renewable
         return {"lease_id": self.row.lease_id, "ttl_seconds": ttl}
 
     def covers(self, payload: dict[str, object]) -> dict[str, object]:
@@ -175,6 +180,8 @@ class DeployLeaseDouble:
             or payload.get("dispatch_run") != row.run
         ):
             raise LeaseRefused(409, "lease_not_held")
+        if not row.renewable:
+            raise LeaseRefused(409, "lease_not_renewable")
         if self.clock.t >= row.expires_at:
             raise LeaseRefused(409, "lease_expired")
         grant = renew_grant(row.ttl, row.max_seconds, self.clock.t - row.acquired_at)

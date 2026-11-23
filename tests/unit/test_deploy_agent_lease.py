@@ -880,3 +880,24 @@ def test_a_run_job_lease_is_ttl_equal_max_and_at_most_3600(
         )
     assert caught.value.code == "lease_ttl_invalid"
     assert double.log == []
+
+
+def test_a_run_job_lease_refuses_renewal_with_lease_not_renewable(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(tmp_path)
+    double.renewable = False  # the plan is a run_job
+    client = rig.launcher.lease
+    lease = client.acquire(
+        dispatch_id="d", ttl_seconds=720, serving=False
+    )  # ttl = max, one grant
+    clock.advance(100)
+    with pytest.raises(Refusal) as caught:
+        client.renew(lease, dispatch_id="d")
+    assert caught.value.detail == "lease_not_renewable"
+    assert client.covers(lease, dispatch_id="d") is True  # the lease itself stands
+    # A keeper would record it as lost, but a run_job never starts one (RQ-1).
+    keeper = client.keeper(lease, dispatch_id="d")
+    clock.advance(150)  # past ttl/3 = 240 s from the grant
+    keeper.tick()
+    assert keeper.lease_lost == "lease_not_renewable"
