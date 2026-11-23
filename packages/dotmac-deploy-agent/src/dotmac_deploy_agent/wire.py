@@ -318,6 +318,7 @@ class PopSigner:
 _FORBIDDEN_PATH_CHARS: Final = frozenset("%?#\\ \t\r\n\x00")
 _ALL_ROUTES: Final = {
     **ROUTES,
+    **PENDING_V2_ROUTES,
     "resolve": "POST",
     "consume": "POST",
     "committed/<dispatch_id>": "GET",
