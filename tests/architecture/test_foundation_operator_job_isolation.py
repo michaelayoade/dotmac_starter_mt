@@ -1,10 +1,12 @@
 """T14: the operator-job entry point is additive; deploy bytes are unchanged.
 
 DESIGN S2 invariant I-1. The baseline JSON was taken by
-`foundation_operator_job_ast.fingerprint_tree` at the pre-change commit
-(`base_commit` inside it). It hashes the PARSED tree, so formatting cannot fake
-or hide a change. Sensitivity is proved on in-memory source, never on a plant
-committed to disk.
+`foundation_operator_job_ast.fingerprint_tree` over a `git archive` of the
+pre-change commit (`base_commit` inside it). It hashes the PARSED tree, so
+formatting cannot fake or hide a change. The guard is INVERTED: every existing
+module is whole-file hashed except `spec.py`, `engine/plan.py` and `cli.py`,
+which get structured checks, so a module outside any list cannot slip through.
+Sensitivity is proved on in-memory source, never on a plant committed to disk.
 """
 
 from __future__ import annotations
@@ -33,14 +35,31 @@ ALLOWED_NEW_SPEC_KEYS = {
 }
 
 
-def test_t14_whole_files_are_byte_identical_to_the_baseline() -> None:
+def test_t14_every_existing_module_is_byte_identical_except_the_three() -> None:
     current = ast_guard.fingerprint_tree(SRC)
-    assert BASELINE["whole_file"], "baseline is empty; this would prove nothing"
+    assert len(BASELINE["whole_file"]) > 50, "baseline is thin; this proves nothing"
+    assert set(BASELINE["whole_file"]) >= {
+        "engine/run.py",
+        "providers/compose_host.py",
+        "recovery.py",
+        "render/compose.py",
+        "execution_plan.py",
+        "authorization_v3.py",
+    }
     assert current["whole_file"] == BASELINE["whole_file"], (
-        "a guarded file changed: engine/run.py, providers/compose_host.py, "
-        "recovery*, render/*, execution_plan*, authorization*, bindings, "
-        "toolchain or errors. The operator path must stay additive."
+        "an existing module changed, or a module outside the allow-list was "
+        "added. Only spec.py, engine/plan.py and cli.py may change, and only "
+        "operator_job.py, operator_job_contract.py and "
+        "providers/compose_operator_job.py may be added."
     )
+
+
+def test_t14_the_new_modules_are_exactly_the_allowed_ones() -> None:
+    present = set(ast_guard.package_files(SRC))
+    assert ast_guard.NEW_MODULES <= present
+    assert present - set(BASELINE["whole_file"]) - set(
+        ast_guard.STRUCTURED_FILES
+    ) == set(ast_guard.NEW_MODULES)
 
 
 def test_t14_plan_py_differs_only_by_the_one_step_kind_member() -> None:
@@ -59,12 +78,24 @@ def test_t14_spec_py_existing_definitions_are_unchanged() -> None:
         if current["nodes"].get(key) != digest
     ]
     assert changed == []
-    added = set(current["nodes"]) - set(baseline["nodes"])
-    assert added == ALLOWED_NEW_SPEC_KEYS
+    assert set(current["nodes"]) - set(baseline["nodes"]) == ALLOWED_NEW_SPEC_KEYS
     assert current["compose_job"] == baseline["compose_job"], (
         "ComposeJob changed beyond the one optional `operator` field and its "
         "parse statements"
     )
+
+
+def test_t14_cli_py_only_build_parser_registrations_and_two_handlers() -> None:
+    current = ast_guard.fingerprint_tree(SRC)["cli_py"]
+    baseline = BASELINE["cli_py"]
+    assert current["nodes"] == baseline["nodes"], (
+        "a cli.py definition other than build_parser changed or was added "
+        "(deploy, rollback and recovery handlers must be untouched)"
+    )
+    assert current["build_parser"] == baseline["build_parser"]
+    source = (SRC / "cli.py").read_text(encoding="utf-8")
+    for name in ast_guard.CLI_NEW_FUNCTIONS:
+        assert f"def {name}(" in source
 
 
 # ── sensitivity, on in-memory source ────────────────────────────────────────
@@ -104,9 +135,8 @@ def _compose(*, operator: bool, tamper: bool = False) -> str:
     extra = "        operator = _parse_operator_job(code)\n" if operator else ""
     if tamper:
         extra += "        code = 2\n"
-    return _COMPOSE.format(
-        field=field, extra=extra, kw=", operator=operator" if operator else ""
-    )
+    kw = ", operator=operator" if operator else ""
+    return _COMPOSE.format(field=field, extra=extra, kw=kw)
 
 
 def test_the_guard_accepts_only_the_operator_additions_to_compose_job() -> None:
@@ -120,3 +150,50 @@ def test_the_guard_bites_a_changed_existing_spec_definition() -> None:
     one = ast_guard.spec_fingerprint("def f():\n    return 1\n")
     two = ast_guard.spec_fingerprint("def f():\n    return 2\n")
     assert one["nodes"] != two["nodes"]
+
+
+_CLI = (
+    "def cmd_deploy(args):\n    return 1\n"
+    "{extra_fn}"
+    "def build_parser():\n"
+    "    deploy = add('deploy')\n"
+    "{registration}"
+    "    return deploy\n"
+)
+
+
+def _cli(*, registration: bool = False, extra_fn: str = "", edit: bool = False) -> str:
+    reg = (
+        "    run_job = add('run-job')\n    run_job.add_argument('--execute')\n"
+        if registration
+        else ""
+    )
+    source = _CLI.format(extra_fn=extra_fn, registration=reg)
+    return source.replace("return 1", "return 2") if edit else source
+
+
+def test_the_guard_accepts_only_the_two_cli_additions() -> None:
+    base = ast_guard.cli_fingerprint(_cli())
+    added = ast_guard.cli_fingerprint(
+        _cli(registration=True, extra_fn="def cmd_run_job(args):\n    return 0\n")
+    )
+    assert added == base
+
+
+def test_the_guard_bites_a_changed_deploy_handler_in_cli() -> None:
+    base = ast_guard.cli_fingerprint(_cli())
+    assert ast_guard.cli_fingerprint(_cli(edit=True))["nodes"] != base["nodes"]
+
+
+def test_the_guard_bites_an_unlisted_new_cli_function() -> None:
+    base = ast_guard.cli_fingerprint(_cli())
+    sneaky = ast_guard.cli_fingerprint(
+        _cli(extra_fn="def cmd_deploy_fast(args):\n    return 0\n")
+    )
+    assert sneaky["nodes"] != base["nodes"]
+
+
+def test_the_guard_bites_an_unregistered_build_parser_edit() -> None:
+    base = ast_guard.cli_fingerprint(_cli())
+    edited = _cli().replace("return deploy", "deploy.x = 1\n    return deploy")
+    assert ast_guard.cli_fingerprint(edited)["build_parser"] != base["build_parser"]

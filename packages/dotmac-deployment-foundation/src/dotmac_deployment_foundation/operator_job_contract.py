@@ -35,10 +35,11 @@ RESOLVED_JOB_BINDING_NAMES: Final = "job_binding_names"
 RESOLVED_SECRETS_NAMESPACE: Final = "secrets_namespace"
 RESOLVED_RENDER_UNIT: Final = "render_unit"
 RESOLVED_PATH_MATERIALS: Final = "path_materials"
-#: The pinned import uid (P-SEC R6-3, an ERP product constant). Optional here:
-#: when present, the spec user uid must equal it.
+#: The pinned job uid (P-SEC R6-3, an ERP product constant). REQUIRED when the
+#: job has a role: the spec user must be exactly `uid:uid`.
 RESOLVED_JOB_UID: Final = "job_uid"
 #: The host account whose uid must equal the pinned uid (P-SEC rev7 (n)).
+#: REQUIRED when the job has a role.
 RESOLVED_JOB_USER_NAME: Final = "job_user"
 
 # ── PROVISIONAL: Control v2 ``dispatched_job`` ──────────────────────────────
@@ -83,8 +84,8 @@ PROVIDER_CONSUME_METHOD: Final = "consume_run_job"
 #: A consume refusal carrying either marker is a 409 already_consumed.
 CONSUME_CONFLICT_STATUS: Final = 409
 CONSUME_CONFLICT_CODE: Final = "already_consumed"
-#: Optional key of the mapping `consume_run_job` returns: the lease expiry
-#: (epoch seconds) learned at consume (P-SEC rev7.1 R7-2).
+#: MANDATORY key of the mapping `consume_run_job` returns: the lease expiry
+#: (epoch seconds) learned at consume (P-SEC rev7.1 R7-2). Absent refuses.
 CONSUME_LEASE_EXPIRES: Final = "lease_expires_at"
 
 # ── PROVISIONAL: P-SEC render unit naming ───────────────────────────────────
@@ -143,3 +144,7 @@ LABEL_JOB: Final = "dotmac.job"
 #: requires BOTH this and the dispatch id (P-SEC rev7).
 LABEL_ROLE_JOB: Final = "dotmac.role_job"
 RECEIPT_SCHEMA: Final = "dotmac.foundation.operator-job-receipt/1"
+
+#: Compose network labels checked before connect (review ruling 5).
+LABEL_COMPOSE_PROJECT: Final = "com.docker.compose.project"
+LABEL_COMPOSE_NETWORK: Final = "com.docker.compose.network"

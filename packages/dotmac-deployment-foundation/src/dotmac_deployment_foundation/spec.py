@@ -2430,7 +2430,8 @@ def _parse_operator_job(
         return None
     where = f"job {code!r} operator"
     commands_table = table.table("commands")
-    assert commands_table is not None
+    if commands_table is None:
+        raise SpecError("operator commands are required", where=where)
     parsed: list[tuple[str, tuple[str, ...]]] = []
     for key in commands_table.keys():
         if not _OPERATOR_COMMAND_NAME.match(key):

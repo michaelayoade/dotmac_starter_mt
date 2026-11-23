@@ -150,9 +150,11 @@ def test_t4_env_and_render_checks(what: str, reason: str) -> None:
         effects.params = b"IMPORT_BATCH=other\n"
     else:
         effects.params = b"IMPORT_BATCH=batch-1\nMIGRATION_DATABASE_URL=x\n"
-    receipt = _run(plan, effects)
+    authority = FakeAuthority()
+    receipt = _run(plan, effects, authority)
     assert receipt.outcome == "refused" and receipt.reason == reason
-    assert "create" not in effects.calls
+    # F-E: the cross-checks run BEFORE consume, so a bad invocation spends nothing
+    assert authority.consumed == [] and "create" not in effects.calls
 
 
 def test_render_unit_must_hash_to_the_material_set() -> None:
@@ -211,6 +213,12 @@ def _break(effects: FakeEffects, how: str) -> None:
         c["Config"]["Env"].append("MIGRATION_DATABASE_URL=x")
     elif how == "job_only_image_env":
         effects.image["Config"]["Env"].append("LEGACY_DATABASE_URL=x")
+    elif how == "capdrop":
+        c["HostConfig"]["CapDrop"] = []
+    elif how == "secopt_unconfined":
+        c["HostConfig"]["SecurityOpt"].append("seccomp=unconfined")
+    elif how == "secopt_missing":
+        c["HostConfig"]["SecurityOpt"] = []
     elif how == "privileged":
         c["HostConfig"]["Privileged"] = True
     elif how == "root_user":
@@ -240,6 +248,9 @@ def _break(effects: FakeEffects, how: str) -> None:
         "job_only_env",
         "job_only_image_env",
         "privileged",
+        "capdrop",
+        "secopt_unconfined",
+        "secopt_missing",
         "root_user",
         "cmd",
         "image",
@@ -612,7 +623,6 @@ def test_n_the_pinned_uid_host_account_and_out_dir_owner() -> None:
     plan = make_plan(resolved)
     assert plan.user == "10001:10001" and plan.job_uid == 10001
     good = FakeEffects(plan)
-    good.accounts = {"importer": 10001}
     assert _run(plan, good).outcome == "succeeded"
     assert "stat:/job/out" in good.calls
     wrong_host = FakeEffects(plan)
@@ -620,11 +630,11 @@ def test_n_the_pinned_uid_host_account_and_out_dir_owner() -> None:
     assert _run(plan, wrong_host, FakeAuthority()).reason == "job_uid_mismatch"
     for owner in [(0, 0, 0o700), (10001, 10001, 0o755), None]:
         effects = FakeEffects(plan)
-        effects.accounts = {"importer": 10001}
-        effects.out_dir = owner
+        effects.image_dir = owner
         receipt = _run(plan, effects, FakeAuthority())
         assert receipt.reason == "job_shape_refused"
-        assert effects.removed == [plan.container_name]
+        # refused from the IMAGE before any volume or container exists
+        assert "create" not in effects.calls and effects.removed == []
 
 
 def test_n_a_pinned_uid_needs_the_exact_uid_uid_spec_user() -> None:
@@ -700,3 +710,144 @@ def test_o_sigint_and_sighup_are_trapped_too() -> None:
         with effects.sigterm_trap():
             os.kill(os.getpid(), number)
             assert effects.terminate_requested()
+
+
+# F-A: the lease expiry from consume is MANDATORY (review, R7-2 / RQ-9 (s))
+@pytest.mark.parametrize("lease", [None, "soon", True, 1, "past"])
+def test_f_a_a_missing_or_unusable_lease_expiry_refuses_before_create(lease) -> None:
+    plan = make_plan()
+    effects = FakeEffects(plan)
+    authority = FakeAuthority()
+    authority.lease_expires_at = (
+        int(effects.now().timestamp()) - 5 if lease == "past" else lease
+    )
+    receipt = _run(plan, effects, authority)
+    assert receipt.reason == "job_deadline_invalid"
+    assert authority.consumed == [plan.dispatch_id]  # consumed, then refused
+    assert "create" not in effects.calls and "create_volume" not in effects.calls
+
+
+# F-B: a role job needs job_uid AND job_user; the /job/out check is unconditional
+@pytest.mark.parametrize(
+    "drop", [contract.RESOLVED_JOB_UID, contract.RESOLVED_JOB_USER_NAME]
+)
+def test_f_b_a_role_job_without_uid_or_user_never_plans(drop: str) -> None:
+    resolved = make_resolved()
+    del resolved[drop]
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        plan_operator_job(make_spec(), resolved)
+    assert excinfo.value.code == "job_context_invalid"
+
+
+def _roleless() -> dict:
+    resolved = make_resolved()
+    job = _job(resolved)
+    job[contract.JOB_ROLE] = ""
+    job[contract.JOB_MATERIALS] = ["IMPORT_BATCH"]
+    resolved[contract.RESOLVED_JOB_BINDING_NAMES] = ["MIGRATION_DATABASE_URL"]
+    for key in (
+        contract.RESOLVED_JOB_UID,
+        contract.RESOLVED_JOB_USER_NAME,
+        contract.RESOLVED_RENDER_UNIT,
+        contract.RESOLVED_SECRETS_NAMESPACE,
+    ):
+        resolved.pop(key)
+    return resolved
+
+
+def test_f_b_the_out_dir_check_runs_even_without_a_pinned_uid() -> None:
+    plan = make_plan(_roleless())
+    assert plan.job_uid is None
+    good = FakeEffects(plan)
+    assert _run(plan, good).outcome == "succeeded" and "stat:/job/out" in good.calls
+    bad = FakeEffects(plan)
+    bad.image_dir = (0, 0, 0o700)
+    assert _run(plan, bad, FakeAuthority()).reason == "job_shape_refused"
+
+
+# review ruling 1: a provider missing ANY run_job method is job_authority_absent
+@pytest.mark.parametrize(
+    "missing", [contract.PROVIDER_RESOLVE_METHOD, contract.PROVIDER_CONSUME_METHOD]
+)
+def test_ruling_1_a_provider_missing_a_method_is_refused(missing) -> None:
+    from types import SimpleNamespace
+
+    from dotmac_deployment_foundation.operator_job import _authority
+
+    class Partial:
+        pass
+
+    provider = Partial()
+    for name in (contract.PROVIDER_RESOLVE_METHOD, contract.PROVIDER_CONSUME_METHOD):
+        if name != missing:
+            setattr(provider, name, lambda **_: None)
+    bindings = SimpleNamespace(authorization_v3_provider=provider)
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        _authority(bindings)
+    assert excinfo.value.code == "job_authority_absent"
+    plan = make_plan()
+    effects = FakeEffects(plan)
+    receipt = run_operator_job(plan, effects, bindings, pair=PAIR, target="host-a")
+    assert receipt.reason == "job_authority_absent" and "create" not in effects.calls
+
+
+# review ruling 5: networks must be the compose project's own
+@pytest.mark.parametrize("labels", [None, {}, {"com.docker.compose.project": "other"}])
+def test_ruling_5_network_labels_must_match_the_compose_project(labels) -> None:
+    plan = make_plan()
+    effects = FakeEffects(plan)
+    effects.net_labels[plan.networks[0]] = labels
+    receipt = _run(plan, effects)
+    assert receipt.reason == "job_shape_refused" and "create" not in effects.calls
+
+
+def test_ruling_5_real_effects_read_labels_from_network_inspect() -> None:
+    def runner(argv, **_):
+        return CommandResult(0, '{"com.docker.compose.project":"p"}\n')
+
+    effects = ComposeOperatorJobEffects(
+        docker_bin="/usr/bin/docker", environ={}, runner=runner
+    )
+    assert effects.network_labels("p_back") == {"com.docker.compose.project": "p"}
+
+
+# F-F: no `assert` statements in production code
+def test_f_f_no_assert_in_the_operator_job_production_modules() -> None:
+    import ast
+    from pathlib import Path
+
+    import dotmac_deployment_foundation as facility
+
+    src = Path(facility.__file__).parent
+    for relative in (
+        "operator_job.py",
+        "providers/compose_operator_job.py",
+        "operator_job_contract.py",
+    ):
+        tree = ast.parse((src / relative).read_text(encoding="utf-8"))
+        assert not [n for n in ast.walk(tree) if isinstance(n, ast.Assert)], relative
+    spec_tree = ast.parse((src / "spec.py").read_text(encoding="utf-8"))
+    function = next(
+        n
+        for n in spec_tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "_parse_operator_job"
+    )
+    assert not [n for n in ast.walk(function) if isinstance(n, ast.Assert)]
+
+
+# F-G: remove-job requires --execute (and the signed pair for THIS dispatch)
+def test_f_g_remove_job_offers_execute_and_authorization_and_lists_without_it() -> None:
+    from dotmac_deployment_foundation.cli import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(["remove-job", "--dispatch-id", "disp-0001"])
+    assert args.execute is False and args.authorization == ""
+    args = parser.parse_args(
+        ["remove-job", "--dispatch-id", "d", "--execute", "--target", "t"]
+    )
+    assert args.execute is True
+
+    plan = make_plan()
+    effects = FakeEffects(plan)
+    assert effects.list_dispatch_containers("disp-0001") == ("abc",)
+    assert not any(c.startswith("remove") for c in effects.calls)

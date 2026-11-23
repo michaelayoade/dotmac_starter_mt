@@ -165,6 +165,18 @@ def verify_container_shape(
         raise _refuse("shared pid or ipc namespace")
     if host.get("Binds"):
         raise _refuse("legacy binds present")
+    if {str(c) for c in host.get("CapDrop") or []} != set(plan.cap_drop):
+        raise _refuse("capability drops differ from the spec")
+    options = [str(o) for o in host.get("SecurityOpt") or []]
+    allowed = (
+        {"no-new-privileges", "no-new-privileges:true", "no-new-privileges=true"}
+        if plan.no_new_privileges
+        else set()
+    )
+    if any(o not in allowed for o in options) or (
+        plan.no_new_privileges and not options
+    ):
+        raise _refuse("security options differ from the spec")
     if bool(host.get("ReadonlyRootfs")) != plan.read_only_root:
         raise _refuse("root filesystem mode differs from the spec")
     entrypoint = [e for e in (config.get("Entrypoint") or []) if e != ""]
@@ -458,11 +470,34 @@ class ComposeOperatorJobEffects:
         except KeyError:
             return None
 
-    def stat_dir(self, container: str, path: str) -> tuple[int, int, int] | None:
-        """Owner and mode of a directory in a CREATED container, via `docker cp`."""
+    def stat_image_dir(
+        self, image_ref: str, path: str, *, probe_name: str, dispatch_id: str
+    ) -> tuple[int, int, int] | None:
+        """Owner and mode of a directory in the IMAGE, via a throwaway container.
+
+        The probe has NO volume, so it shows the image's own `/job/out` (the
+        layer the volume is seeded from), never an unseeded volume root.
+        """
+        created = self._docker_run(
+            "create",
+            "--pull",
+            "never",
+            "--name",
+            probe_name,
+            "--entrypoint",
+            "",
+            "--label",
+            f"{contract.LABEL_DISPATCH_ID}={dispatch_id}",
+            "--label",
+            f"{contract.LABEL_ROLE_JOB}=1",
+            image_ref,
+            "/nonexistent-never-started",
+        )
+        if not created.ok:
+            return None
         try:
             done = subprocess.run(  # noqa: S603  # nosec B603 -- argv list, shell=False
-                [self._docker, "cp", f"{container}:{path}", "-"],
+                [self._docker, "cp", f"{probe_name}:{path}", "-"],
                 shell=False,
                 capture_output=True,
                 timeout=self._timeout,
@@ -475,9 +510,25 @@ class ComposeOperatorJobEffects:
                 member = archive.next()
         except (OSError, subprocess.SubprocessError, tarfile.TarError):
             return None
+        finally:
+            self._docker_run("rm", "-f", probe_name)
         if member is None or not member.isdir():
             return None
         return member.uid, member.gid, member.mode & 0o7777
+
+    def network_labels(self, name: str) -> Mapping[str, str] | None:
+        result = self._docker_run(
+            "network", "inspect", "--format", "{{json .Labels}}", name
+        )
+        if not result.ok:
+            return None
+        try:
+            labels = json.loads(result.stdout)
+        except ValueError:
+            return None
+        if not isinstance(labels, dict):
+            return None
+        return {str(k): str(v) for k, v in labels.items()}
 
     def _label_of(self, name: str) -> str | None:
         result = self._docker_run(
@@ -497,8 +548,8 @@ class ComposeOperatorJobEffects:
             return False
         return self._docker_run("rm", "-f", name).ok
 
-    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
-        """Label-scoped removal: BOTH labels must match. Never creates or starts."""
+    def list_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
+        """Containers carrying BOTH labels for this dispatch. Read-only."""
         listed = self._docker_run(
             "ps",
             "-a",
@@ -512,8 +563,12 @@ class ComposeOperatorJobEffects:
         )
         if not listed.ok:
             raise OperatorJobRefusal("job_remove_failed", "docker ps refused")
+        return tuple(listed.stdout.split())
+
+    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
+        """Label-scoped removal: BOTH labels must match. Never creates or starts."""
         removed: list[str] = []
-        for identifier in listed.stdout.split():
+        for identifier in self.list_dispatch_containers(dispatch_id):
             if self._docker_run("rm", "-f", identifier).ok:
                 removed.append(identifier)
         return tuple(removed)

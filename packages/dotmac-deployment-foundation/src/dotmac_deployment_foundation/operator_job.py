@@ -182,11 +182,17 @@ class OperatorJobEffects(Protocol):
 
     def host_uid(self, account: str) -> int | None: ...
 
-    def stat_dir(self, container: str, path: str) -> tuple[int, int, int] | None:
-        """(uid, gid, mode) of a directory inside a created container."""
+    def stat_image_dir(
+        self, image_ref: str, path: str, *, probe_name: str, dispatch_id: str
+    ) -> tuple[int, int, int] | None:
+        """(uid, gid, mode) of a directory in the IMAGE, via a throwaway container."""
         ...
 
+    def network_labels(self, name: str) -> Mapping[str, str] | None: ...
+
     def remove_container(self, name: str, *, dispatch_id: str) -> bool: ...
+
+    def list_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]: ...
 
     def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]: ...
 
@@ -247,6 +253,7 @@ class OperatorJobPlan:
     entrypoint: tuple[str, ...]
     job_uid: int | None = None
     job_user_name: str = ""
+    network_codes: tuple[str, ...] = ()
 
     @property
     def steps(self) -> tuple[OperatorJobStep, ...]:
@@ -344,9 +351,9 @@ def plan_operator_job(
         raise OperatorJobRefusal("job_context_invalid", "job name shape")
     job = _select_job(spec, name)
     operator = job.operator
-    assert operator is not None
-    prefix = operator.command_for(name)
-    assert prefix is not None
+    prefix = operator.command_for(name) if operator is not None else None
+    if operator is None or prefix is None:
+        raise OperatorJobRefusal("job_unknown", "the selected job has no command")
 
     argv = _str_list(dispatched, contract.JOB_ARGV, "job_argv_refused")
     if not argv or len(argv) > MAX_ARGV or argv[: len(prefix)] != prefix:
@@ -407,6 +414,13 @@ def plan_operator_job(
 
     _require_declared_shape(job)
     pinned_uid = resolved.get(contract.RESOLVED_JOB_UID)
+    job_user_name = resolved.get(contract.RESOLVED_JOB_USER_NAME, "")
+    if not isinstance(job_user_name, str):
+        raise OperatorJobRefusal("job_context_invalid", "job_user shape")
+    if role and (pinned_uid is None or not job_user_name):
+        raise OperatorJobRefusal(
+            "job_context_invalid", "a role job needs both job_uid and job_user"
+        )
     job_uid: int | None = None
     if pinned_uid is not None:
         if (
@@ -418,10 +432,10 @@ def plan_operator_job(
                 "job_uid_mismatch", "the spec user is not the pinned uid:uid"
             )
         job_uid = int(pinned_uid)
-    job_user_name = resolved.get(contract.RESOLVED_JOB_USER_NAME, "")
-    if not isinstance(job_user_name, str) or (job_user_name and job_uid is None):
+    if job_user_name and job_uid is None:
         raise OperatorJobRefusal("job_context_invalid", "job_user without job_uid")
-    networks = tuple(f"{spec.product}_{code}" for code in job.placement.networks)
+    network_codes = tuple(job.placement.networks)
+    networks = tuple(f"{spec.product}_{code}" for code in network_codes)
 
     namespace = ""
     secrets_dir = ""
@@ -475,6 +489,7 @@ def plan_operator_job(
         container_name=f"dotmac-job-{_sanitise(namespace or spec.product)}-{sid}",
         volume_name=f"dotmac-job-out-{sid}",
         networks=networks,
+        network_codes=network_codes,
         user=job.security.user,
         read_only_root=job.security.read_only_root,
         no_new_privileges=job.security.no_new_privileges,
@@ -616,6 +631,17 @@ class OperatorJobReceipt:
 # ── the run ─────────────────────────────────────────────────────────────────
 
 
+def _authority(bindings: Any) -> Any:
+    """The installed provider, only if it implements EVERY run_job method."""
+    provider = getattr(bindings, "authorization_v3_provider", None)
+    for method in (contract.PROVIDER_RESOLVE_METHOD, contract.PROVIDER_CONSUME_METHOD):
+        if provider is None or not callable(getattr(provider, method, None)):
+            raise OperatorJobRefusal(
+                "job_authority_absent", f"the installed bindings lack {method}"
+            )
+    return provider
+
+
 def _consume(
     plan: OperatorJobPlan,
     bindings: ExecutionBindings,
@@ -623,11 +649,7 @@ def _consume(
     target: str,
 ) -> int | None:
     """Consume once. Returns the lease expiry learned at consume, if any."""
-    provider = getattr(bindings, "authorization_v3_provider", None)
-    if provider is None or not isinstance(provider, OperatorJobAuthority):
-        raise OperatorJobRefusal(
-            "job_authority_absent", "the installed bindings cannot consume run_job"
-        )
+    provider = _authority(bindings)
     request = RunJobConsumptionRequest(
         dispatch_id=plan.dispatch_id,
         job=plan.name,
@@ -777,6 +799,37 @@ def remove_dispatch(effects: OperatorJobEffects, dispatch_id: str) -> tuple[str,
     return effects.remove_dispatch_containers(dispatch_id)
 
 
+def _check_networks(plan: OperatorJobPlan, effects: OperatorJobEffects) -> None:
+    """Each network must be the compose project's own (review ruling 5)."""
+    for code, name in zip(plan.network_codes, plan.networks, strict=True):
+        labels = effects.network_labels(name)
+        if (
+            labels is None
+            or labels.get(contract.LABEL_COMPOSE_PROJECT) != plan.product
+            or labels.get(contract.LABEL_COMPOSE_NETWORK) != code
+        ):
+            raise OperatorJobRefusal(
+                "job_shape_refused", f"network {code} is not the compose project's"
+            )
+
+
+def _check_out_dir_owner(plan: OperatorJobPlan, effects: OperatorJobEffects) -> None:
+    """The IMAGE's /job/out must be owned by the job uid:gid, mode 0700 (R6-3)."""
+    match = _USER.match(plan.user)
+    if match is None:
+        raise OperatorJobRefusal("job_shape_refused", "unreadable job user")
+    owner = effects.stat_image_dir(
+        plan.image_ref,
+        plan.outputs_target,
+        probe_name=f"{plan.container_name}-probe",
+        dispatch_id=plan.dispatch_id,
+    )
+    if owner != (int(match.group(1)), int(match.group(2)), 0o700):
+        raise OperatorJobRefusal(
+            "job_shape_refused", "the image's /job/out is not owned by the job user"
+        )
+
+
 def run_operator_job(
     plan: OperatorJobPlan,
     effects: OperatorJobEffects,
@@ -799,14 +852,21 @@ def run_operator_job(
     with effects.sigterm_trap():
         try:
             deadline = _agent_deadline(effects)
-            lease_expiry = _consume(plan, bindings, pair, target)
-            if lease_expiry is not None and deadline > lease_expiry:
-                raise OperatorJobRefusal(
-                    "job_deadline_invalid", "the deadline is later than the lease"
-                )
-            _check_terminated(effects)
+            # Pure or read-only checks first: a mis-invocation must not spend
+            # an approved dispatch (review F-E).
             env_file = _cross_check(plan, effects)
             invocation = _render_check(plan, effects)
+            lease_expiry = _consume(plan, bindings, pair, target)
+            if (
+                lease_expiry is None
+                or lease_expiry <= int(effects.now().timestamp())
+                or deadline > lease_expiry
+            ):
+                raise OperatorJobRefusal(
+                    "job_deadline_invalid",
+                    "no usable lease expiry at consume, or the deadline is later",
+                )
+            _check_terminated(effects)
             for mount in plan.input_mounts:
                 if effects.hash_input(mount.source) != _norm_digest(mount.sha256):
                     raise OperatorJobRefusal(
@@ -814,6 +874,8 @@ def run_operator_job(
                     )
             if not effects.image_present(plan.image_ref):
                 raise OperatorJobRefusal("job_image_absent", "image is not on the host")
+            _check_networks(plan, effects)
+            _check_out_dir_owner(plan, effects)
             if effects.volume_exists(plan.volume_name):
                 raise OperatorJobRefusal("job_output_exists", plan.volume_name)
             _check_terminated(effects)
@@ -831,12 +893,6 @@ def run_operator_job(
                 effects.inspect_container(plan.container_name),
                 effects.inspect_image(plan.image_ref),
             )
-            if plan.job_uid is not None and effects.stat_dir(
-                plan.container_name, plan.outputs_target
-            ) != (plan.job_uid, plan.job_uid, 0o700):
-                raise OperatorJobRefusal(
-                    "job_shape_refused", "/job/out is not owned by the job uid, 0700"
-                )
             _check_terminated(effects)
             waited = effects.start_and_wait(
                 plan.container_name,
@@ -911,11 +967,7 @@ def cmd_run_job(args: Any) -> int:
     try:
         target, path = _require_execution_arguments(args, contract.OPERATION_RUN_JOB)
         bindings = _load_bindings(args)
-        provider = getattr(bindings, "authorization_v3_provider", None)
-        if provider is None or not isinstance(provider, OperatorJobAuthority):
-            raise OperatorJobRefusal(
-                "job_authority_absent", "no run_job authority installed"
-            )
+        provider = _authority(bindings)
         from pathlib import Path
 
         document = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -958,11 +1010,14 @@ def cmd_run_job(args: Any) -> int:
 
 
 def cmd_remove_job(args: Any) -> int:
-    """``dotmac-deploy remove-job --dispatch-id ID``: label-scoped removal only.
+    """``dotmac-deploy remove-job --dispatch-id ID [--execute ...]``.
 
-    Removes containers carrying BOTH ``dotmac.dispatch_id=<id>`` and the job
-    marker. It never creates or starts a container, so it needs no grant.
+    Label-scoped: only containers carrying BOTH ``dotmac.dispatch_id=<id>`` and
+    the job marker. It never creates or starts a container. Without
+    ``--execute`` it lists the matches and removes nothing. With it, the signed
+    pair passed in ``--authorization`` must resolve to THIS dispatch id.
     """
+    from .cli import _load_bindings, _require_execution_arguments
     from .providers.compose_operator_job import ComposeOperatorJobEffects
     from .toolchain import DEFAULT_TOOLS, resolve_tool
 
@@ -973,19 +1028,41 @@ def cmd_remove_job(args: Any) -> int:
                 what="docker_bin",
             )
         )
-        removed = remove_dispatch(effects, args.dispatch_id)
-    except DeploymentFoundationError as exc:
+        if not _DISPATCH_ID.match(args.dispatch_id):
+            raise OperatorJobRefusal("job_context_invalid", "dispatch_id shape")
+        if not args.execute:
+            document: dict[str, Any] = {
+                "dispatch_id": args.dispatch_id,
+                "matches": sorted(effects.list_dispatch_containers(args.dispatch_id)),
+                "removed": [],
+            }
+        else:
+            target, path = _require_execution_arguments(
+                args, contract.OPERATION_RUN_JOB
+            )
+            provider = _authority(_load_bindings(args))
+            from pathlib import Path
+
+            pair = json.loads(Path(path).read_text(encoding="utf-8"))
+            resolved = getattr(provider, contract.PROVIDER_RESOLVE_METHOD)(
+                authorization_material=pair["authorization_material"],
+                dispatch_material=pair["dispatch_material"],
+                target=target,
+            )
+            if resolved.get(contract.RESOLVED_DISPATCH_ID) != args.dispatch_id:
+                raise OperatorJobRefusal(
+                    "job_context_invalid", "the signed pair is for another dispatch"
+                )
+            document = {
+                "dispatch_id": args.dispatch_id,
+                "matches": [],
+                "removed": sorted(remove_dispatch(effects, args.dispatch_id)),
+            }
+    except (DeploymentFoundationError, OSError, ValueError, KeyError, TypeError) as exc:
         code = exc.code if isinstance(exc, OperatorJobRefusal) else "job_refused"
         sys.stdout.write(_refusal_receipt(code) + "\n")
         return EXIT_REFUSED
-    sys.stdout.write(
-        json.dumps(
-            {"dispatch_id": args.dispatch_id, "removed": sorted(removed)},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n"
-    )
+    sys.stdout.write(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
     return EXIT_SUCCEEDED
 
 

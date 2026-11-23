@@ -94,6 +94,8 @@ def make_resolved(**overrides: Any) -> dict[str, Any]:
         contract.RESOLVED_SECRETS_NAMESPACE: "appns",
         contract.RESOLVED_RENDER_UNIT: unit,
         contract.RESOLVED_PATH_MATERIALS: {"JOB_INPUTS_ROOT": INPUTS_ROOT},
+        contract.RESOLVED_JOB_UID: "10001",
+        contract.RESOLVED_JOB_USER_NAME: "importer",
     }
     resolved.update(overrides)
     return resolved
@@ -150,6 +152,8 @@ def good_container(plan: OperatorJobPlan) -> dict[str, Any]:
             "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
             "AutoRemove": False,
             "Privileged": False,
+            "CapDrop": list(plan.cap_drop),
+            "SecurityOpt": ["no-new-privileges"],
             "CapAdd": None,
             "Devices": None,
             "PidMode": "",
@@ -185,7 +189,7 @@ class FakeAuthority:
     def __init__(self) -> None:
         self.consumed: list[str] = []
         self.requests: list[RunJobConsumptionRequest] = []
-        self.lease_expires_at: int | None = None
+        self.lease_expires_at: int | None = NOW_EPOCH + 7200
 
     def resolve_run_job(self, **_: Any) -> Mapping[str, Any]:
         return make_resolved()
@@ -237,8 +241,15 @@ class FakeEffects:
         self.removed: list[str] = []
         self.terminate = False
         self.removed_for: list[str] = []
-        self.accounts: dict[str, int] = {}
-        self.out_dir: tuple[int, int, int] | None = (10001, 10001, 0o700)
+        self.accounts: dict[str, int] = {"importer": 10001}
+        self.image_dir: tuple[int, int, int] | None = (10001, 10001, 0o700)
+        self.net_labels: dict[str, Mapping[str, str] | None] = {
+            name: {
+                contract.LABEL_COMPOSE_PROJECT: plan.product,
+                contract.LABEL_COMPOSE_NETWORK: code,
+            }
+            for name, code in zip(plan.networks, plan.network_codes, strict=True)
+        }
         self.now_value = datetime(2026, 11, 23, tzinfo=UTC)
 
     def environ(self) -> Mapping[str, str]:
@@ -303,9 +314,18 @@ class FakeEffects:
     def host_uid(self, account: str) -> int | None:
         return self.accounts.get(account)
 
-    def stat_dir(self, container: str, path: str) -> tuple[int, int, int] | None:
+    def stat_image_dir(
+        self, image_ref: str, path: str, *, probe_name: str, dispatch_id: str
+    ) -> tuple[int, int, int] | None:
         self.calls.append(f"stat:{path}")
-        return self.out_dir
+        return self.image_dir
+
+    def network_labels(self, name: str) -> Mapping[str, str] | None:
+        return self.net_labels.get(name)
+
+    def list_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
+        self.calls.append(f"list_dispatch:{dispatch_id}")
+        return ("abc",)
 
     def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
         self.calls.append(f"remove_dispatch:{dispatch_id}")

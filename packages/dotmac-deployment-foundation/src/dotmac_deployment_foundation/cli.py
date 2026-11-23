@@ -1545,6 +1545,13 @@ def build_parser() -> argparse.ArgumentParser:
         "remove the containers of ONE dispatch id (label-scoped; never creates)",
     )
     remove_job.add_argument("--dispatch-id", required=True)
+    remove_job.add_argument("--execute", action="store_true")
+    remove_job.add_argument("--target", default="")
+    remove_job.add_argument(
+        "--authorization",
+        default="",
+        help="the signed pair for THIS dispatch; REQUIRED with --execute",
+    )
     remove_job.add_argument("--docker-bin", dest="docker_bin", default="")
 
     policy = add(
