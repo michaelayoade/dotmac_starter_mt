@@ -49,6 +49,7 @@ def test_registry_declares_and_owns_actions() -> None:
         "identity.history_imported",
         "credential.password.assigned",
         "communication.dispatch.requeued",
+        "communication.dispatch.outcome_unknown",
         "role.create",
         "role.grant",
         "invoice.issue",
@@ -63,6 +64,7 @@ def test_empty_manifests_compose_the_kernel_action() -> None:
         "identity.history_imported",
         "credential.password.assigned",
         "communication.dispatch.requeued",
+        "communication.dispatch.outcome_unknown",
     }
     assert reg.owner("credential.password.assigned") == "kernel"
     reg.require("credential.password.assigned")
@@ -95,6 +97,7 @@ def test_kernel_declaration_is_an_actual_feature_manifest(
         "identity.history_imported",
         "credential.password.assigned",
         "communication.dispatch.requeued",
+        "communication.dispatch.outcome_unknown",
     )
     assert reg.actions() == set(manifest.audit_actions)
     assert reg.owner("identity.history_imported") == manifest.name
@@ -117,6 +120,7 @@ def test_composition_derives_ownership_and_reservation_from_the_manifest(
             "identity.history_imported",
             "credential.password.assigned",
             "communication.dispatch.requeued",
+            "communication.dispatch.outcome_unknown",
         )
         return declaration
 
@@ -135,6 +139,7 @@ def test_generator_manifests_compose_kernel_and_ordinary_owners() -> None:
         "identity.history_imported",
         "credential.password.assigned",
         "communication.dispatch.requeued",
+        "communication.dispatch.outcome_unknown",
         "academy.event",
     }
     assert reg.owner("identity.history_imported") == "kernel"

@@ -17,7 +17,7 @@ Usage:
   DATABASE_URL=postgresql+psycopg://app_user:...@host/db \
   python scripts/requeue_dead_dispatch.py --tenant-id <uuid> --dispatch-id <uuid> \
       --actor-id <operator> --source-application <code> --reason "gate lifted" \
-      [--apply]
+      [--accept-possible-duplicate] [--apply]
 """
 
 from __future__ import annotations
@@ -55,6 +55,13 @@ def main(argv: list[str] | None = None) -> int:
         "personal data in it",
     )
     parser.add_argument(
+        "--accept-possible-duplicate",
+        action="store_true",
+        help="REQUIRED to requeue a dispatch whose provider outcome was UNKNOWN "
+        "(the message may already have been delivered): you accept a possible "
+        "duplicate send. Recorded in the audit row",
+    )
+    parser.add_argument(
         "--apply", action="store_true", help="commit (default is a dry run)"
     )
     args = parser.parse_args(argv)
@@ -80,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
                 actor_id=args.actor_id,
                 source_application=args.source_application,
                 reason=args.reason,
+                acknowledge_possible_duplicate=args.accept_possible_duplicate,
             )
         except (DeliveryError, ValueError, KeyError) as exc:
             db.rollback()

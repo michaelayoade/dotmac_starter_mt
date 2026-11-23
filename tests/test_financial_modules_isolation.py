@@ -670,7 +670,9 @@ def test_payroll_settlement_reversal_on_postgres(
         )
         # Reverser equal to the recorder is refused; nothing changes.
         with pytest.raises(PayrollRuleViolation, match="different person"):
-            reverse(session, settlement, reversed_by_id=recorder)
+            reverse(
+                session, settlement, reversed_by_id=recorder, separation_of_duties=True
+            )
         assert net.status == "settled"
         # Internal recovery refused even with a forged settlement row.
         forged = PayrollLiabilitySettlement(

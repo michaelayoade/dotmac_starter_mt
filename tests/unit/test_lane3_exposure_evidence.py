@@ -124,6 +124,16 @@ def test_serialize_parse_round_trips_exactly() -> None:
     assert json.loads(data)["schema"] == evidence.EXPOSURE_CALLS_SCHEMA
 
 
+def test_each_record_observation_survives_the_round_trip() -> None:
+    records = _records()
+    parsed = evidence.parse_exposure_calls(evidence.serialize_exposure_calls(records))
+
+    assert any(record.observation is not None for record in records)
+    assert [record.observation for record in parsed] == [
+        record.observation for record in records
+    ]
+
+
 def test_digest_is_over_the_canonical_bytes() -> None:
     import hashlib
 

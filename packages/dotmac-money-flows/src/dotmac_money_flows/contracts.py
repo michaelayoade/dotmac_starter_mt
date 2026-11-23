@@ -232,10 +232,13 @@ class SettleRefused(Exception):
 
 
 class BalancePassFailed(Exception):
-    """A technical fault in the invoice-issued balance pass (GAP-3).
+    """A technical fault in a balance pass: GAP-3 or the GAP-L1 credit re-check.
 
-    Raised as ``BalancePassFailed(code)``: the caller rolls back and its event
-    delivery retries. It is never a business no-op and writes nothing.
+    Raised as ``BalancePassFailed(code)`` by ``apply_balance_on_invoice_issued``
+    (open documents unreadable, a document of another account, an unsplittable
+    statement window) and by ``on_account_credit_changed`` (an unreadable or
+    unsplittable statement). The caller rolls back and its event delivery
+    retries. It is never a business no-op and writes nothing.
     """
 
     @property
@@ -320,8 +323,17 @@ class RatedChargeKeyV1:
 class RatedChargeV1:
     """What the charge source says about one charge right now (a transient input).
 
-    ``total`` is the tax-inclusive amount. The contract type is not carried: it
-    is a Billing account term, read by F2 from Billing at the period start.
+    ``total`` is the tax-inclusive price of the FULL period, always. The contract
+    type and the period length are Billing account terms, read by F2 from Billing
+    at the period start.
+
+    ``period_starts_at`` and ``period_ends_at`` are both None for an ordinary
+    charge, whose period is ``[issue_at, end(issue_at))``. Both set means a
+    prorated charge: the enclosing service period it co-terminates with, for
+    example a mid-period upgrade. The amount due is then ``total`` x the days left
+    from ``issue_at`` to ``period_ends_at`` / the days in the enclosing period,
+    rounded half-up once (``FundedChargePolicyV1.proration`` must be
+    ``actual_calendar_days``). A late payment pays only the remaining days.
     """
 
     key: RatedChargeKeyV1
@@ -329,6 +341,8 @@ class RatedChargeV1:
     service_ref: str | None
     total: Money
     due_at: datetime
+    period_starts_at: datetime | None = None
+    period_ends_at: datetime | None = None
 
 
 class RatedChargeSource(Protocol):
@@ -338,10 +352,16 @@ class RatedChargeSource(Protocol):
       the charge no longer exists (withdrawn, superseded or terminated).
     * ``issue_command`` returns the complete Billing ``IssueRatedInvoiceV3``
       (with Tax evidence) for ``issue_at``. The identity is the key's, the
-      service period is ``[issue_at, issue_at + the period of the Billing terms
-      effective at issue_at)`` with a verified status, and ``reference_date`` and
-      ``due_at`` come from ``issue_at``. The source, not flows, schedules the
-      next charge at the end of the paid period: flows has no scheduler.
+      service period is ``[issue_at, end)`` with a verified status, where ``end``
+      is ``issue_at`` plus the period of the Billing terms effective at
+      ``issue_at`` (day or month units, counted from ``issue_at`` in the policy's
+      billing time zone and clamped to the month end), or the charge's
+      ``period_ends_at`` for a prorated charge. The command's ``timezone`` is the
+      policy's, ``collection_timing`` is ``advance``, and ``due_at`` is
+      ``issue_at``; ``reference_date`` comes from ``issue_at`` and the total is
+      the amount due at ``issue_at``. F2 refuses any other command. The source,
+      not flows, schedules the next charge at the end of the paid period: flows
+      has no scheduler.
     """
 
     def read(
@@ -365,10 +385,20 @@ class FundedChargePolicyV1:
     ``reevaluation_batch_cap`` bounds the pending charges examined per
     transaction; the rest continue by event. The value is a policy default the
     tenant overrides, not a decision made here.
+
+    ``proration`` is ``actual_calendar_days`` (default: a charge carrying an
+    enclosing period is prorated by actual calendar days) or ``none`` (F2 refuses
+    a partial period); any other value is refused. ``billing_timezone`` is the
+    IANA zone the periods are counted in (default ``UTC``) and must be a known
+    zone; the invoice command's ``timezone`` must equal it. Every F2 command
+    reads the policy through one check that raises ``ValueError`` for an unknown
+    value before anything is written, so the event is redelivered.
     """
 
     version: str
     reevaluation_batch_cap: int = 20
+    proration: str = "actual_calendar_days"
+    billing_timezone: str = "UTC"
 
 
 class FundedChargePolicyReader(Protocol):
@@ -437,6 +467,19 @@ class AccountTermsChangedV1:
 
 
 @dataclass(frozen=True, slots=True)
+class AccountCreditChangedV1:
+    """Spendable credit may have risen on an account: re-check its pending charges.
+
+    The account is the only claim; everything else is re-read from Billing, so a
+    mis-routed event only causes an early, harmless re-check. ``after`` is set
+    only on a continuation event.
+    """
+
+    billing_account_id: UUID
+    after: FundedChargeCursorV1 | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FundedChargeOutcomeV1:
     """What a call decided. References only."""
 
@@ -447,6 +490,19 @@ class FundedChargeOutcomeV1:
     billing_account_id: UUID
     document_id: UUID | None
     replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CreditRecheckOutcomeV1:
+    """What an account-credit re-check decided. References only.
+
+    ``reason_code`` names a quiet no-op (``no_pending_charges``, ``no_balance``,
+    ``nothing_fits``) and is None when at least one pending charge changed.
+    """
+
+    billing_account_id: UUID
+    changed: tuple[FundedChargeOutcomeV1, ...]
+    reason_code: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,6 +558,7 @@ class FundedChargeStepFailed(Exception):
 
 
 __all__ = [
+    "AccountCreditChangedV1",
     "AccountTermsChangedV1",
     "DEFAULT_ACCEPTED_SOURCES",
     "FUNDED_CHARGE_DEFINITION_VERSION",
@@ -511,6 +568,7 @@ __all__ = [
     "WITHHOLDING_SOURCE",
     "SETTLE_INSERT_STATES",
     "SETTLE_TRANSITIONS",
+    "CreditRecheckOutcomeV1",
     "DepositApplication",
     "FundedChargeCursorV1",
     "FundedChargeInstanceV1",

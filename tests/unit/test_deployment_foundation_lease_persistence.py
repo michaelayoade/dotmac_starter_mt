@@ -1123,6 +1123,329 @@ def test_the_host_admission_premise_rejects_every_plant() -> None:
         assert not _host_admission_premise(source + extra), extra
 
 
+_CP6_ALLOWED_IMPORTS = frozenset(
+    {
+        "__future__",
+        "base64",
+        "binascii",
+        "dataclasses",
+        "hashlib",
+        "json",
+        "re",
+        "uuid",
+        "collections",
+        "datetime",
+        "typing",
+        "lane3_host_source_admission",
+    }
+)
+_CP6_FORBIDDEN_NAMES = frozenset(
+    {
+        "open",
+        "os",
+        "posix",
+        "nt",
+        "io",
+        "shutil",
+        "subprocess",
+        "pathlib",
+        "Path",
+        "importlib",
+        "builtins",
+        "tempfile",
+        "socket",
+        "__import__",
+        "__builtins__",
+        "sys",
+        "codecs",
+        "getattr",
+        "setattr",
+        "vars",
+        "globals",
+        "eval",
+        "exec",
+        "compile",
+        "write_lease",
+        "write_store_record",
+        "write_store_record_once",
+        "dotmac_deployment_foundation",
+    }
+)
+_CP6_FORBIDDEN_ATTRIBUTES = (
+    frozenset(
+        {
+            "write",
+            "writelines",
+            "write_text",
+            "write_bytes",
+            "open",
+            "touch",
+            "mkdir",
+            "unlink",
+            "dump",
+            "import_module",
+            "__import__",
+            "__builtins__",
+            "__dict__",
+            "os",
+            "sys",
+            "modules",
+            "codecs",
+            "system",
+            "popen",
+            "Popen",
+            "write_lease",
+            "write_store_record",
+            "write_store_record_once",
+        }
+    )
+    | _LINK_ATTRIBUTES
+)
+
+
+def _cp6_export_premise(source: str) -> bool:
+    """Prove `lane3_cp6_export.py` only PARSES a CP-owned document; it writes none.
+
+    Strictly: every import is from a closed allow-list (no `os`, `pathlib`, `io`,
+    `shutil`, `subprocess`, `importlib`, nor any Foundation module); no name or
+    attribute is a write, open, link, rename, replace or dynamic-import route; no
+    lease-store writer is named; and the module's canonicalizers are exactly two
+    `json.dumps(..., sort_keys=...)` calls, one in `canonical_json` and one in
+    `_canonical`, with no `json.dump`.
+    """
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(
+                alias.name.split(".")[0] not in _CP6_ALLOWED_IMPORTS
+                for alias in node.names
+            ):
+                return False
+        if isinstance(node, ast.ImportFrom):
+            if node.level or (node.module or "").split(".")[0] not in (
+                _CP6_ALLOWED_IMPORTS
+            ):
+                return False
+        if isinstance(node, ast.Name) and node.id in _CP6_FORBIDDEN_NAMES:
+            return False
+        if isinstance(node, ast.arg) and node.arg in _CP6_FORBIDDEN_NAMES:
+            return False
+        # `re.compile` is legitimate, so attributes are judged against their own
+        # set, not the bare-name set.
+        if isinstance(node, ast.Attribute) and node.attr in _CP6_FORBIDDEN_ATTRIBUTES:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if any(
+                token in node.value
+                for token in (
+                    "write_lease",
+                    "write_store_record",
+                    "__builtins__",
+                    "__import__",
+                )
+            ):
+                return False
+    owners = {
+        fn.name
+        for fn in tree.body
+        if isinstance(fn, ast.FunctionDef)
+        and any(
+            isinstance(call, ast.Call)
+            and getattr(call.func, "attr", None) == "dumps"
+            and any(kw.arg == "sort_keys" for kw in call.keywords)
+            for call in ast.walk(fn)
+        )
+    }
+    dumps = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "dumps"
+    ]
+    return owners == {"canonical_json", "_canonical"} and len(dumps) == 2
+
+
+def test_the_cp6_export_premise_holds_and_it_is_no_publisher() -> None:
+    source = (SCRIPTS / "lane3_cp6_export.py").read_text(encoding="utf-8")
+    assert _cp6_export_premise(source)
+    assert "lane3_cp6_export.py" not in _publish_sites()
+
+
+def test_the_cp6_export_premise_rejects_every_plant() -> None:
+    source = (SCRIPTS / "lane3_cp6_export.py").read_text(encoding="utf-8")
+    assert _cp6_export_premise(source)
+    for extra in (
+        "\nimport os\n",
+        "\nfrom os import link\n",
+        "\nimport pathlib\n",
+        "\nfrom pathlib import Path\n",
+        "\nimport shutil\n",
+        "\nimport subprocess\n",
+        "\nimport importlib\n",
+        "\nimport tempfile\n",
+        "\nimport io\n",
+        "\nfrom dotmac_deployment_foundation import lease\n",
+        "\nfrom dotmac_deployment_foundation.lease import write_lease\n",
+        "\n_x = open('a', 'xb')\n",
+        "\n_x = open\n",
+        "\ndef _f(s):\n    s.write(b'x')\n",
+        "\ndef _f(p):\n    p.write_bytes(b'x')\n",
+        "\ndef _f(p):\n    p.write_text('x')\n",
+        "\ndef _f(p):\n    p.rename('x')\n",
+        "\ndef _f(p):\n    p.replace('x')\n",
+        "\ndef _f(p):\n    p.hardlink_to('x')\n",
+        "\ndef _f(p):\n    p.symlink_to('x')\n",
+        "\ndef _f(p):\n    p.unlink()\n",
+        "\ndef _f(d, s):\n    json.dump(d, s)\n",
+        "\n_x = __import__('os')\n",
+        "\n_x = getattr(json, 'dumps')\n",
+        "\n_x = eval('1')\n",
+        "\n_x = write_store_record_once\n",
+        "\n_x = 'write_lease'\n",
+        "\n_x = uuid.os.system('true')\n",
+        "\n_x = dataclasses.sys.modules['os']\n",
+        "\n_x = __builtins__['__import__']\n",
+        "\n_x = hashlib.codecs\n",
+        "\n_x = json.os.popen('true')\n",
+        "\n_x = '__import__'\n",
+        "\ndef _g(d):\n    return json.dumps(d, sort_keys=True)\n",
+        "\ndef _g(d):\n    return json.dumps(d)\n",
+    ):
+        assert not _cp6_export_premise(source + extra), extra
+    # a canonicalizer moved out of its named owner
+    assert not _cp6_export_premise(
+        source.replace("def canonical_json(", "def canonical_json_x(", 1)
+    )
+
+
+_NEGATIVE_PROOF_ALLOWED_IMPORTS = frozenset(
+    {
+        "__future__",
+        "base64",
+        "binascii",
+        "dataclasses",
+        "hashlib",
+        "json",
+        "re",
+        "collections",
+        "datetime",
+        "typing",
+        "lane3_bundle_verification",
+        "lane3_exposure_evidence",
+        "lane3_exposure_recording",
+        "lane3_provocation",
+        "dotmac_deployment_foundation",
+    }
+)
+
+
+def _negative_proof_premise(source: str) -> bool:
+    """Prove `lane3_negative_proof.py` builds and parses bytes; it writes none.
+
+    Strictly: every import is from a closed allow-list, and the only Foundation
+    import is `dotmac_deployment_foundation.exposure` (the public measurement
+    functions N6 re-derives with); no name or attribute is a write, open, link,
+    rename, replace or dynamic-import route; no lease-store writer is named; and
+    the module's one canonicalizer is exactly one `json.dumps(..., sort_keys=...)`
+    call, inside `_canonical`, with no `json.dump`.
+    """
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(
+                alias.name.split(".")[0] not in _NEGATIVE_PROOF_ALLOWED_IMPORTS
+                or alias.name.startswith("dotmac_deployment_foundation")
+                for alias in node.names
+            ):
+                return False
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level or module.split(".")[0] not in (
+                _NEGATIVE_PROOF_ALLOWED_IMPORTS
+            ):
+                return False
+            if module.startswith("dotmac_deployment_foundation") and (
+                module != "dotmac_deployment_foundation.exposure"
+            ):
+                return False
+            if module == "dotmac_deployment_foundation":
+                return False
+        if isinstance(node, ast.Name) and node.id in _CP6_FORBIDDEN_NAMES:
+            return False
+        if isinstance(node, ast.arg) and node.arg in _CP6_FORBIDDEN_NAMES:
+            return False
+        if isinstance(node, ast.Attribute) and node.attr in _CP6_FORBIDDEN_ATTRIBUTES:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if "write_lease" in node.value or "write_store_record" in node.value:
+                return False
+    owners = {
+        fn.name
+        for fn in tree.body
+        if isinstance(fn, ast.FunctionDef)
+        and any(
+            isinstance(call, ast.Call)
+            and getattr(call.func, "attr", None) == "dumps"
+            and any(kw.arg == "sort_keys" for kw in call.keywords)
+            for call in ast.walk(fn)
+        )
+    }
+    dumps = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "dumps"
+    ]
+    return owners == {"_canonical"} and len(dumps) == 1
+
+
+def test_the_negative_proof_premise_holds_and_it_is_no_publisher() -> None:
+    source = (SCRIPTS / "lane3_negative_proof.py").read_text(encoding="utf-8")
+    assert _negative_proof_premise(source)
+    assert "lane3_negative_proof.py" not in _publish_sites()
+
+
+def test_the_negative_proof_premise_rejects_every_plant() -> None:
+    source = (SCRIPTS / "lane3_negative_proof.py").read_text(encoding="utf-8")
+    assert _negative_proof_premise(source)
+    for extra in (
+        "\nimport os\n",
+        "\nfrom os import link\n",
+        "\nimport pathlib\n",
+        "\nfrom pathlib import Path\n",
+        "\nimport shutil\n",
+        "\nimport subprocess\n",
+        "\nimport importlib\n",
+        "\nimport tempfile\n",
+        "\nimport io\n",
+        "\nimport sys\n",
+        "\nfrom dotmac_deployment_foundation import lease\n",
+        "\nfrom dotmac_deployment_foundation.lease import write_lease\n",
+        "\nimport dotmac_deployment_foundation.lease\n",
+        "\n_x = open('a', 'xb')\n",
+        "\n_x = open\n",
+        "\ndef _f(s):\n    s.write(b'x')\n",
+        "\ndef _f(p):\n    p.write_bytes(b'x')\n",
+        "\ndef _f(p):\n    p.write_text('x')\n",
+        "\ndef _f(p):\n    p.rename('x')\n",
+        "\ndef _f(p):\n    p.replace('x')\n",
+        "\ndef _f(p):\n    p.hardlink_to('x')\n",
+        "\ndef _f(p):\n    p.symlink_to('x')\n",
+        "\ndef _f(p):\n    p.unlink()\n",
+        "\ndef _f(d, s):\n    json.dump(d, s)\n",
+        "\n_x = __import__('os')\n",
+        "\n_x = getattr(json, 'dumps')\n",
+        "\n_x = eval('1')\n",
+        "\n_x = write_store_record_once\n",
+        "\n_x = 'write_lease'\n",
+        "\ndef _g(d):\n    return json.dumps(d, sort_keys=True)\n",
+        "\ndef _g(d):\n    return json.dumps(d)\n",
+    ):
+        assert not _negative_proof_premise(source + extra), extra
+    # the canonicalizer moved out of its named owner
+    assert not _negative_proof_premise(
+        source.replace("def _canonical(", "def _canonical_x(", 1)
+    )
+
+
 def test_the_publish_sweep_would_see_a_second_writer(tmp_path: Path) -> None:
     """Sensitivity: the assertion above passes over a clean tree, so prove it
     can fail. Its value is entirely in the case that is not present."""

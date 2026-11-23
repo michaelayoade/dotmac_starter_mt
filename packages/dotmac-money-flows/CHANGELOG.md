@@ -34,6 +34,16 @@ Source only; not published, not composed into any assembly.
 - A database test applies the schema vocabulary rule to the live `mod_mflows`
   catalog.
 
+- GAP-L1: `on_account_credit_changed` pays a prepaid account's pending charges when
+  credit arrives without a deposit (opening lot, admitted held partition, reversed
+  refund or allocation), routed for every `billing.receivable.position.v2`. Dated
+  `max(due_at, newest credit line since due_at)`. New contracts
+  `AccountCreditChangedV1` / `CreditRecheckOutcomeV1`, event
+  `money_flows.funded_charge.credit_recheck.v1`, and
+  `record_funded_charge_attention(continue_credit_recheck=True)`. The account
+  statement read moves to the private `_credit_dating` module (read-only allowlist
+  entry); Settle is unchanged. No Billing change, no migration.
+
 ### Before release
 
 - Measure the oldest-due-first page walk of `list_open_receivable_documents`
@@ -145,3 +155,18 @@ Source only; not published, not composed into any assembly.
   reference carries the document's Billing `source_version`; faults raise the
   new `BalancePassFailed`. An overflowing statement window is split (newer half
   first) rather than failing.
+- GAP-5: F2 takes the invoice period from the Billing account terms. The period is
+  built from day or month units counted from its own start in the policy's billing
+  time zone, clamped to the month end (private `_service_period`); F2 also requires
+  `advance`, `due_at == issue_at` and the policy time zone. `FundedChargePolicyV1`
+  gains `proration` (`actual_calendar_days` default, or `none`) and
+  `billing_timezone` (default `UTC`); `RatedChargeV1` gains optional
+  `period_starts_at`/`period_ends_at` for a prorated charge (full price in `total`,
+  amount due by actual calendar days, half-up once). No day left is withdrawn as
+  `period_elapsed`. No migration, no Billing change; the flows stdlib allowlist adds
+  `zoneinfo`.
+- GAP-5 review: every F2 command reads the policy through one check that refuses
+  an unknown `proration` value or time zone (`ValueError`, nothing written);
+  `retry_funded_charge` without a funding settlement dates the charge at the newest
+  credit since `due_at`; the flows architecture rules ban `zoneinfo.reset_tzpath`,
+  `clear_cache` and `from_file`.

@@ -25,6 +25,7 @@ from dotmac_money_flows import (
     SettlePorts,
     apply_balance_on_invoice_issued,
 )
+from dotmac_money_flows import _credit_dating as dating
 from dotmac_money_flows import settle as flows
 
 NOW = datetime(2026, 11, 1, tzinfo=UTC)
@@ -126,7 +127,7 @@ class _World:
         monkeypatch.setattr(flows, "get_funding_availability", availability)
         monkeypatch.setattr(flows, "_walk_open_documents", listing)
         monkeypatch.setattr(flows, "get_effective_account_terms", terms)
-        monkeypatch.setattr(flows, "get_account_statement", statement)
+        monkeypatch.setattr(dating, "get_account_statement", statement)
         monkeypatch.setattr(flows, "apply_available_credit", draw)
         monkeypatch.setattr(flows, "enqueue_event", no_event)
 
@@ -412,7 +413,7 @@ def test_a_statement_failure_propagates_and_posts_nothing(monkeypatch):
     def boom(db, *, scope, request):
         raise BillingRuleViolation("statement_integrity", "bad ledger")
 
-    monkeypatch.setattr(flows, "get_account_statement", boom)
+    monkeypatch.setattr(dating, "get_account_statement", boom)
     with pytest.raises(BillingRuleViolation):
         world.run()
     assert world.paid == []
@@ -504,7 +505,7 @@ def test_another_billing_refusal_on_the_statement_is_not_split(monkeypatch):
         seen.append(request)
         raise BillingRuleViolation("invalid_window", "bad")
 
-    monkeypatch.setattr(flows, "get_account_statement", refuse)
+    monkeypatch.setattr(dating, "get_account_statement", refuse)
     with pytest.raises(BillingRuleViolation):
         world.run()
     assert len(seen) == 1

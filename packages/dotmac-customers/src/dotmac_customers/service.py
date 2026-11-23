@@ -74,7 +74,7 @@ def get_account(
 def create_account(
     db: Session, *, scope: TenantScope, command: CreateCustomerAccount
 ) -> CustomerAccount:
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     tenant_id = _tenant(scope)
     number = _required(command.account_number, "account number").upper()
@@ -123,7 +123,7 @@ def set_profile(
 def link_party_reference(
     db: Session, *, scope: TenantScope, command: LinkPartyReference
 ) -> CustomerPartyReference:
-    from dotmac_kernel.db import conflict_savepoint
+    from dotmac_kernel.transactions import conflict_savepoint
 
     tenant_id = _tenant(scope)
     get_account(db, scope=scope, account_id=command.account_id)
@@ -159,10 +159,40 @@ def transition_account(
     return account
 
 
+MAX_DISPLAY_NAME_LENGTH = 200
+
+
+def rename_account(
+    db: Session, *, scope: TenantScope, account_id: UUID, display_name: str
+) -> CustomerAccount:
+    """Change the display name; the owner stays the only writer.
+
+    Idempotent (the same name is a no-op), tenant-scoped, refused on a CLOSED
+    account. The account id and number are never touched; the caller records
+    the audit event in its own transaction.
+    """
+
+    name = _required(display_name, "display name")
+    if len(name) > MAX_DISPLAY_NAME_LENGTH:
+        raise ValueError(
+            f"display name must be at most {MAX_DISPLAY_NAME_LENGTH} characters"
+        )
+    account = cast(CustomerAccount, get_account(db, scope=scope, account_id=account_id))
+    if account.status == AccountStatus.CLOSED:
+        raise Conflict("closed customer account cannot be renamed")
+    if account.display_name == name:
+        return account
+    account.display_name = name
+    db.flush()
+    return account
+
+
 __all__ = [
+    "MAX_DISPLAY_NAME_LENGTH",
     "create_account",
     "get_account",
     "link_party_reference",
+    "rename_account",
     "set_profile",
     "transition_account",
 ]

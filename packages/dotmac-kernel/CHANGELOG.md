@@ -6,9 +6,71 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased (source marker 0.1.0a109+dev)
+## 0.1.0a110 — Release inventory
+
+This inventories source after the published and tagged `0.1.0a109` (source
+marker `0.1.0a109+dev`). It allocates no version and proves no publication;
+protected release authorization remains required.
+
+### Migrations
+
+Three new kernel migrations ship in this release, in order:
+
+- `0032_communication_dispatches` (file `20261118_0032_communication_dispatches.py`)
+- `0033_receipts_append_only` (file `20261119_0033_receipts_append_only.py`)
+- `0034_receipts_platform_append_only` (file
+  `20261119_0034_receipts_platform_append_only.py`; its Alembic revision id is
+  `0034_receipts_platform_ro`)
+
+### Operating caveat (K-8 relay worker)
+
+Do not run the K-8 relay worker (`DispatchRelayTransport`) on a tenant whose
+outbox carries event types other than `delivery.dispatch.v1` until M2 (a
+type-scoped claim or router) ships. `claim_batch` claims every event type, the
+transport raises `DeliveryTerminal` for any type other than
+`delivery.dispatch.v1`, and the worker dead-letters that event at once. Other
+packages' outbox events on such a tenant are therefore claimed and
+dead-lettered immediately, not left for their own relay.
+
+### Breaking
+
+- Delivery receipts in `communication_deliveries` are append-only for both
+  application roles. Migration `0033_receipts_append_only` revokes UPDATE and
+  DELETE from `app_user`; migration `0034_receipts_platform_append_only`
+  (revision `0034_receipts_platform_ro`) revokes UPDATE and DELETE from
+  `platform_api`. Any adopter that updates or deletes receipt rows fails after
+  upgrading. Tenant deletion still cascades through the foreign key.
 
 ### Added
+
+- Generic relay transport for `delivery.dispatch.v1` (ADR-0006 § 5g, K-8, S10).
+  New submodule `dotmac_kernel.delivery_relay`: `DispatchRelayTransport` loads
+  the dispatch (id-only payload, tenant session, fingerprint re-verified), runs
+  attachment resolvers lazily from an `AttachmentResolverRegistry` (keyed by
+  `AttachmentRef.kind`), calls `delivery_providers.send`, maps the outcome
+  (accepted -> `sent` and projection hooks; suppressed -> `suppressed`; deferred
+  -> K-4 reschedule; receipt `failed` -> retry with its receipt kept; rejected,
+  bounced, complaint -> dispatch `failed`; unknown -> terminal) and runs
+  `ProjectionHookRegistry` hooks after an accepted send. Both registries use the
+  install/active pattern (`install_attachment_resolvers`,
+  `install_projection_hooks`, `active_*`); a worker that never installed one is
+  refused, not treated as empty. Projection hooks must be idempotent (a hook
+  failure retries only the hooks, never the send). Additive; no migration.
+- `requeue_dead_dispatch(..., acknowledge_possible_duplicate=False)`: a dead dispatch whose provider outcome was unknown (newest audit row, or a `terminal:` dead outbox marker if the row was lost) is refused unless the operator passes the flag (CLI `--accept-possible-duplicate`); recorded in the requeue audit row.
+- Entry fixes for K-8. Exhausted attempts and the deferral bound now move the
+  DISPATCH to `dead` as well as the outbox row (`DeadLetterAware.dead_letter`,
+  run by the worker and committed before the row is settled; if it fails the
+  row is left claimed and reclaimed), so S8's requeue-dead works on it.
+  `DeliveryOutcomeUnknown` (an adapter could not tell whether the provider took
+  the message) and `DeliveryTerminal` (a transport verdict: dead-letter now, no
+  retry) are new in `dotmac_kernel.delivery`; the worker dead-letters on
+  `DeliveryTerminal` at once, uncharged. An unknown outcome is never retried
+  (a retry can double-send): the dispatch goes `dead` and one
+  `communication.dispatch.outcome_unknown` audit row (new Kernel audit action)
+  records it for the operator. New helpers: `delivery_dispatch.settle_dispatch`,
+  `relay.record_dead_letter`, `relay.failure_dead_letters`,
+  `relay.deferral_dead_letters`. `SmtpOutcomeUnknown` in `dotmac-delivery-smtp`
+  is now a `DeliveryOutcomeUnknown`.
 
 - `dotmac_kernel.consent.restore_transactional(db, tenant_id, *, channel, address)`
   (K-7): locks a suppression row (`FOR UPDATE`) and downgrades scope `all` ->
@@ -64,8 +126,8 @@ here.
   - K-6 migration `0033_receipts_append_only` revokes UPDATE and DELETE on
     `communication_deliveries` from `app_user`. No kernel path updates or
     deletes a receipt (`record_receipt` only inserts); tenant deletion still
-    cascades through the foreign key. `platform_api` keeps its 0020 grants.
-    No version is allocated.
+    cascades through the foreign key. `platform_api` is tightened separately
+    by migration `0034` (see the follow-up entry above).
 
 - Dispatch identity (ADR-0006 § 5g, K-3): kernel migration
   `0032_communication_dispatches` (additive; down drops the table only while it
@@ -87,7 +149,7 @@ here.
     `import_pending` are the D7 carry-forward primitives (history-only, never
     enqueued; pending content kept byte-for-byte with `legacy:` provenance).
     `load_dispatch` rebuilds the `OutboundMessage` and refuses a fingerprint
-    mismatch, a history-only row or a redacted row. No version is allocated.
+    mismatch, a history-only row or a redacted row.
 
 - Reserve `money_flows` / `mod_mflows` / `mf` / branch `money_flows` for the
   tenant-plane money-flows composition package before its release. This

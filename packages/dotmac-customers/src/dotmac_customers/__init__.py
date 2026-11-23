@@ -21,11 +21,12 @@ from dotmac_customers.service import (
     create_account,
     get_account,
     link_party_reference,
+    rename_account,
     set_profile,
     transition_account,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AccountStatus",
@@ -44,6 +45,7 @@ __all__ = [
     "get_account",
     "link_party_reference",
     "module",
+    "rename_account",
     "set_profile",
     "transition_account",
     "versions_dir",

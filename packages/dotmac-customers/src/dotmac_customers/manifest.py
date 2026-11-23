@@ -10,7 +10,7 @@ from dotmac_customers.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="customers",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="customers",
     migration_prefix="cu",

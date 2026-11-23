@@ -133,3 +133,15 @@ def test_root_migration_creates_one_forced_rls_plane() -> None:
         assert f"CREATE POLICY {table}_tenant_isolation" in source
         assert f"ON {qualified} TO app_user" in source
     assert "TO platform_api" not in source
+
+
+def test_conflict_savepoint_comes_from_the_engine_free_transactions_module() -> None:
+    """A strict-bound runtime refuses ``dotmac_kernel.db``; pin the import path."""
+    tree = ast.parse(Path(inspect.getfile(service)).read_text())
+    sources = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and any(alias.name == "conflict_savepoint" for alias in node.names)
+    }
+    assert sources == {"dotmac_kernel.transactions"}

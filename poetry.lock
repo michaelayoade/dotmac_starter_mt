@@ -1011,7 +1011,7 @@ url = "packages/dotmac-content"
 
 [[package]]
 name = "dotmac-customers"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant customer accounts, profiles, and party references"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1020,7 +1020,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a91"
+dotmac-kernel = ">=0.1.0a98"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1417,7 +1417,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a109+dev"
+version = "0.1.0a110"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1509,7 +1509,7 @@ develop = true
 
 [package.dependencies]
 dotmac-billing = ">=0.1.0a13"
-dotmac-kernel = ">=0.1.0a109"
+dotmac-kernel = ">=0.1.0a110"
 dotmac-payments = ">=0.1.0a4"
 dotmac-service-access-policy = ">=0.1.0a2"
 sqlalchemy = "^2.0"
@@ -1718,7 +1718,7 @@ url = "packages/dotmac-payments"
 
 [[package]]
 name = "dotmac-payroll"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Composable data-driven payroll-calculation and employee-liability owner"
 optional = false
 python-versions = ">=3.12,<3.14"

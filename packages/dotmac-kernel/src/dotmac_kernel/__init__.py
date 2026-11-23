@@ -365,7 +365,7 @@ from dotmac_kernel.web_surfaces import (
     surface_path,
 )
 
-__version__ = "0.1.0a109+dev"
+__version__ = "0.1.0a110"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -394,6 +394,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.delivery_dispatch",
         "dotmac_kernel.delivery_models",
         "dotmac_kernel.delivery_providers",
+        "dotmac_kernel.delivery_relay",
         "dotmac_kernel.delivery_requeue",
         "dotmac_kernel.deps",
         "dotmac_kernel.entitlements",
