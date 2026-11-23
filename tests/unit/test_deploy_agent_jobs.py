@@ -1652,10 +1652,53 @@ def test_r61_a_job_with_no_deadline_cannot_be_started() -> None:
         runner_environment(spec)
 
 
-POST_RUN = (
-    "--filter",
-    "label=dotmac.dispatch_id=dispatch-1",
-)  # only the after-run proof
+class FakeDocker:
+    """The Docker daemon as the agent sees it: `docker ps -a` for the two job labels and
+    `docker rm -f <ids>`. Records every removal; `block_rm` makes removal not take."""
+
+    def __init__(
+        self,
+        rig: Rig,
+        containers: dict[str, str] | None = None,
+        *,
+        block_rm: bool = False,
+    ) -> None:
+        self.containers = dict(containers or {})  # container id -> dispatch label
+        self.block_rm = block_rm
+        self.rm_calls: list[tuple[str, ...]] = []
+        self._ps = rig.commands.run
+        self._rm = rig.systemctl.run
+        rig.commands.run = self._read  # type: ignore[method-assign]
+        rig.systemctl.run = self._mutate  # type: ignore[method-assign]
+
+    def _read(self, argv, *, timeout):  # type: ignore[no-untyped-def]
+        if len(argv) > 1 and argv[1] == "ps":
+            wanted = [
+                a.split("=", 2)[2]
+                for a in argv
+                if a.startswith("label=dotmac.dispatch_id=")
+            ]
+            lines = [
+                f"{cid} {label}"
+                for cid, label in sorted(self.containers.items())
+                if not wanted or label == wanted[0]
+            ]
+            return CommandResult(
+                0, ("\n".join(lines) + "\n").encode() if lines else b""
+            )
+        return self._ps(argv, timeout=timeout)
+
+    def _mutate(self, argv, *, timeout):  # type: ignore[no-untyped-def]
+        if len(argv) > 2 and argv[1:3] == ("rm", "-f"):
+            self.rm_calls.append(tuple(argv))
+            if not self.block_rm:
+                for cid in argv[3:]:
+                    self.containers.pop(cid, None)
+            return CommandResult(0, b"")
+        return self._rm(argv, timeout=timeout)
+
+
+CID = "3f2a9c1b7d44"
 
 
 def test_r61_the_agent_proves_no_container_remains_before_purge_and_release(
@@ -1669,30 +1712,60 @@ def test_r61_the_agent_proves_no_container_remains_before_purge_and_release(
     assert len(purged) == 2  # before the mint and after the run, after a clean proof
 
 
-def test_rev7_a_surviving_container_still_gets_the_purge_and_only_holds_the_lease(
+def test_rev7_removal_blocked_holds_the_lease_pages_and_still_purges(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[POST_RUN] = CommandResult(0, b"3f2a9c1b7d44\n")
+    docker = FakeDocker(rig, block_rm=True)
+    rig.runner.effect = lambda spec: docker.containers.update({CID: spec.dispatch_id})
     result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("failed", "job_container_orphaned")
+    assert (result.outcome, result.reason) == ("failed", "orphan_job_container")
+    assert docker.rm_calls == [
+        ("/usr/bin/docker", "rm", "-f", CID)
+    ]  # tried: no shell, no -v
     assert "lease/release" not in [e for e, _ in rig.cp.lease_log]  # HELD
     assert tracked(rig) == []  # the accessor was destroyed regardless
     assert not (rig.config.role_dir("import") / "secret_id").exists()
-    purges = [c for c in rig.systemctl.calls if "secrets-purge" in " ".join(c)]
-    assert len(purges) == 2  # the purge unit ran after the run too
+    assert len([c for c in rig.systemctl.calls if "secrets-purge" in " ".join(c)]) == 2
     done = last(rig)
-    assert done["details"]["page"] is True  # type: ignore[index]
-    assert receipt(rig)["orphan_container"] is True
+    assert done["details"]["page"] is True and receipt(rig)["orphan_container"] is True  # type: ignore[index]
     assert "contained" not in json.dumps(done)  # never claims containment
+
+
+@pytest.mark.parametrize("timed_out", [False, True], ids=["exit", "sigkilled"])
+def test_rev7_an_orphan_after_the_run_is_removed_proved_gone_and_the_lease_released(
+    tmp_path: Path, timed_out: bool
+) -> None:
+    rig = job_rig(tmp_path)
+    docker = FakeDocker(rig)
+    rig.runner.timed_out = timed_out  # SIGKILL: Foundation's finally never ran
+    rig.runner.effect = lambda spec: docker.containers.update({CID: spec.dispatch_id})
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("failed", "orphan_job_container")
+    assert (
+        docker.rm_calls == [("/usr/bin/docker", "rm", "-f", CID)]
+        and docker.containers == {}
+    )
+    assert "lease/release" in [
+        e for e, _ in rig.cp.lease_log
+    ]  # nothing remains: released
+    assert (
+        last(rig)["details"]["page"] is True
+    )  # a container that was there still pages  # type: ignore[index]
+    assert receipt(rig)["orphan_removed"] is True and "orphan_container" not in receipt(
+        rig
+    )
+    assert tracked(rig) == []
 
 
 def test_r61_an_unreadable_container_listing_is_treated_as_an_orphan(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[POST_RUN] = CommandResult(1, b"")
-    assert refused(rig) == ("failed", "job_container_orphaned")
+    rig.commands.script[("--filter", "label=dotmac.dispatch_id=dispatch-1")] = (
+        CommandResult(1, b"")
+    )
+    assert refused(rig) == ("failed", "orphan_job_container")
 
 
 def test_r61_a_job_that_never_started_needs_no_container_proof(tmp_path: Path) -> None:
@@ -1735,17 +1808,17 @@ def test_rev7_the_preflight_lists_stopped_containers_carrying_both_job_labels(
 
 
 @pytest.mark.parametrize("kind", ["job", "serving"])
-def test_rev7_an_orphan_blocks_every_lease_job_or_serving(
+def test_rev7_another_dispatchs_container_blocks_every_lease_and_is_never_removed(
     tmp_path: Path, kind: str
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(
-        0, b"3f2a9c1b7d44\n"
-    )
+    docker = FakeDocker(rig, {CID: "dispatch-of-another-product"})
     if kind == "serving":
         rig.cp.materials = make_materials()
     result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("refused", "job_container_orphaned")
+    assert (result.outcome, result.reason) == ("refused", "orphan_job_container")
+    assert docker.rm_calls == [] and CID in docker.containers  # never touched
+    assert last(rig)["details"] == {"page": True, "removed": False, "foreign": True}  # type: ignore[comparison-overlap]
     assert rig.cp.lease_log == [] and rig.bao.paths == [] and rig.runner.specs == []
     assert rig.transfer.calls == []
 
@@ -1753,24 +1826,33 @@ def test_rev7_an_orphan_blocks_every_lease_job_or_serving(
 def test_rev7_an_unreadable_preflight_blocks_too(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(1, b"")
-    assert refused(rig) == ("refused", "job_container_orphaned")
+    assert refused(rig) == ("refused", "orphan_job_container")
 
 
-def test_rev7_agent_start_still_purges_and_the_orphan_blocks_the_next_lease(
+def test_rev7_agent_start_removes_its_own_orphan_and_still_purges(
     tmp_path: Path,
 ) -> None:
     from dotmac_deploy_agent.observation import mark_inflight
 
     rig = job_rig(tmp_path)
-    deliver(rig)  # an accessor and a secret_id from the run that was interrupted
+    docker = FakeDocker(rig, {CID: "dispatch-1"})
+    rig.launcher.executed.record(
+        "dispatch-1", (1, 1)
+    )  # this agent ran it before it crashed
+    deliver(rig)  # an accessor and a secret_id from that run
     mark_inflight(rig.config.state_dir, "dispatch-1")
-    rig.commands.script[("ps",)] = CommandResult(0, b"3f2a9c1b7d44\n")
     rig.cp.materials = None
     assert rig.launcher.run_once().outcome == "idle"
-    assert not (rig.config.role_dir("import") / "secret_id").exists()  # purged anyway
-    assert tracked(rig) == []
+    assert (
+        docker.rm_calls == [("/usr/bin/docker", "rm", "-f", CID)]
+        and docker.containers == {}
+    )
+    assert (
+        not (rig.config.role_dir("import") / "secret_id").exists()
+        and tracked(rig) == []
+    )
     rig.cp.materials = run_job_materials(dispatch_id="dispatch-2")
-    assert refused(rig) == ("refused", "job_container_orphaned")  # nothing new starts
+    assert refused(rig) == ("completed", None)  # nothing blocks the next job
 
 
 def test_rev7_the_deadline_always_binds_to_what_the_lease_leaves(
@@ -2399,138 +2481,101 @@ def test_the_instance_name_is_the_product_segment_and_two_instances_run_side_by_
     )
 
 
-# -- r5 R5-H1: remove the orphan, re-prove, hold only if one REMAINS ---------------
-REMOVE = ("/opt/dotmac/dotmac-deploy", "remove-job")
-ORPHAN_ID = b"3f2a9c1b7d44\n"
-
-
-def stateful_ps(rig: Rig, *, cleared_by: str, dispatch_only: bool) -> None:
-    """`docker ps -a` lists a container until `cleared_by` has run (rm -f / remove-job)."""
-    original = rig.commands.run
-
-    def run(argv, *, timeout):  # type: ignore[no-untyped-def]
-        if len(argv) > 1 and argv[1] == "ps":
-            gone = any(cleared_by in " ".join(c) for c in rig.systemctl.calls)
-            wanted = ("label=dotmac.dispatch_id=dispatch-1" in argv) == dispatch_only
-            if wanted and not gone:
-                return CommandResult(0, ORPHAN_ID)
-        return original(argv, timeout=timeout)
-
-    rig.commands.run = run  # type: ignore[method-assign]
-
-
-@pytest.mark.parametrize("timed_out", [False, True], ids=["exit", "sigkilled"])
-def test_r5h1_an_orphan_after_the_run_is_removed_by_foundation_then_released(
-    tmp_path: Path, timed_out: bool
-) -> None:
-    rig = job_rig(tmp_path, foundation_remove_job_argv=REMOVE)
-    rig.runner.timed_out = timed_out  # the SIGKILL case: Foundation's finally never ran
-    stateful_ps(rig, cleared_by="remove-job", dispatch_only=True)
-    result = rig.launcher.run_once()
-    expected = ("failed", "runner_timeout") if timed_out else ("completed", None)
-    assert (result.outcome, result.reason) == expected  # a routine run, not an anomaly
-    [call] = [c for c in rig.systemctl.calls if "remove-job" in c]
-    assert call == (
-        *REMOVE,
-        "--dispatch-id",
-        "dispatch-1",
-        "--execute",
-        "--target",
-        rig.config.target_ref,
-    )
-    assert "lease/release" in [e for e, _ in rig.cp.lease_log]  # released, not held
-    assert tracked(rig) == [] and receipt(rig)["orphan_removed"] is True
-    assert "page" not in last(rig)["details"] and "orphan_container" not in receipt(rig)  # type: ignore[operator]
-
-
-def test_r5h1_an_orphan_that_survives_removal_holds_the_lease_and_pages(
+# -- r5 ruling (b): the agent removes only its own orphans, by label ------------
+def test_r5b_a_container_found_before_a_lease_is_removed_then_the_cycle_is_refused_and_paged(
     tmp_path: Path,
 ) -> None:
-    rig = job_rig(tmp_path, foundation_remove_job_argv=REMOVE)
-    rig.commands.script[POST_RUN] = CommandResult(0, ORPHAN_ID)  # never goes away
+    rig = job_rig(tmp_path)
+    docker = FakeDocker(rig)
+    rig.launcher.executed.record("dispatch-0", (1, 1))  # this agent's own earlier run
+    original = rig.launcher._clear_orphans
+    calls = {"n": 0}
+
+    def appears_after_agent_start() -> tuple[bool, bool, bool]:
+        calls["n"] += 1
+        if calls["n"] == 2:  # the pre-lease preflight
+            docker.containers[CID] = "dispatch-0"
+        return original()
+
+    rig.launcher._clear_orphans = appears_after_agent_start  # type: ignore[method-assign]
     result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("failed", "job_container_orphaned")
-    assert any("remove-job" in c for c in rig.systemctl.calls)  # it was tried
-    assert "lease/release" not in [e for e, _ in rig.cp.lease_log]
+    assert (result.outcome, result.reason) == ("refused", "orphan_job_container")
     assert (
-        receipt(rig)["orphan_container"] is True
-        and receipt(rig)["orphan_removed"] is False
+        docker.rm_calls == [("/usr/bin/docker", "rm", "-f", CID)]
+        and docker.containers == {}
     )
-    assert last(rig)["details"]["page"] is True  # type: ignore[index]
-    assert tracked(rig) == []  # purged regardless
-
-
-def test_r5h1_without_a_configured_removal_the_container_remains_and_pages(
-    tmp_path: Path,
-) -> None:
-    rig = job_rig(tmp_path)  # no foundation_remove_job_argv
-    rig.commands.script[POST_RUN] = CommandResult(0, ORPHAN_ID)
-    assert refused(rig) == ("failed", "job_container_orphaned")
-    assert not any("remove-job" in " ".join(c) for c in rig.systemctl.calls)
-
-
-def test_r5h1_agent_restart_removes_a_leftover_container_by_label(
-    tmp_path: Path,
-) -> None:
-    rig = job_rig(tmp_path)
-    stateful_ps(rig, cleared_by="rm -f", dispatch_only=False)
-    rig.cp.materials = None
-    assert rig.launcher.run_once().outcome == "idle"  # agent start cleans up
-    removals = [c for c in rig.systemctl.calls if c[1:3] == ("rm", "-f")]
-    assert [c[-1] for c in removals] == [ORPHAN_ID.decode().strip()]
-    rig.cp.materials = run_job_materials()
-    assert refused(rig) == ("completed", None)  # nothing blocks the next job
-
-
-def appears_on_the_second_listing(rig: Rig) -> None:
-    """A container shows up after agent start: the 2nd both-label listing finds it, and
-    it stays listed until a `docker rm -f` has run."""
-    original = rig.commands.run
-    seen = {"listings": 0}
-
-    def run(argv, *, timeout):  # type: ignore[no-untyped-def]
-        if len(argv) > 1 and argv[1] == "ps" and "label=dotmac.role_job=1" in argv:
-            seen["listings"] += 1
-            removed = any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)
-            if seen["listings"] >= 2 and not removed:
-                return CommandResult(0, ORPHAN_ID)
-        return original(argv, timeout=timeout)
-
-    rig.commands.run = run  # type: ignore[method-assign]
-
-
-def test_r5h1_a_container_found_before_a_lease_is_removed_then_the_cycle_is_refused_and_paged(
-    tmp_path: Path,
-) -> None:
-    rig = job_rig(tmp_path)
-    appears_on_the_second_listing(rig)
-    result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("refused", "job_container_orphaned")
-    assert any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)  # removed by label
-    assert last(rig)["details"] == {"page": True, "removed": True}  # an anomaly: paged
+    assert last(rig)["details"] == {"page": True, "removed": True, "foreign": False}  # type: ignore[comparison-overlap]
     assert rig.cp.lease_log == [] and rig.bao.paths == []  # nothing started
     rig.cp.materials = run_job_materials(dispatch_id="dispatch-2")
-    assert refused(rig) == ("completed", None)  # the next poll proceeds: none remains
+    assert refused(rig) == ("completed", None)  # the next poll proceeds
 
 
-def test_r5h1_a_container_found_at_agent_start_is_removed_and_the_same_cycle_proceeds(
+def test_r5b_the_removal_command_takes_ids_from_the_listing_only_without_v(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
-    stateful_ps(rig, cleared_by="rm -f", dispatch_only=False)
-    assert refused(rig) == ("completed", None)
-    assert any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)
-
-
-def test_r5h1_the_label_scoped_removal_only_ever_names_ids_from_the_label_listing(
-    tmp_path: Path,
-) -> None:
-    rig = job_rig(tmp_path)
-    rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(
-        0, b"; rm -rf /\n"
+    docker = FakeDocker(
+        rig,
+        {CID: "dispatch-0", "aaaaaaaaaaaa": "dispatch-0", "bbbbbbbbbbbb": "dispatch-x"},
     )
-    assert refused(rig) == ("refused", "job_container_orphaned")  # unreadable listing
-    assert not any(c[1:3] == ("rm", "-f") for c in rig.systemctl.calls)  # nothing run
+    rig.launcher.executed.record("dispatch-0", (1, 1))
+    rig.cp.materials = None
+    rig.launcher.run_once()
+    [call] = docker.rm_calls
+    assert call[:3] == ("/usr/bin/docker", "rm", "-f") and sorted(call[3:]) == [
+        CID,
+        "aaaaaaaaaaaa",
+    ]
+    assert "-v" not in call and "--volumes" not in call
+    assert "bbbbbbbbbbbb" in docker.containers  # another dispatch's: left alone
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "; rm -rf /",
+        "3f2a 9c1b",
+        "ZZZZZZZZZZZZ dispatch-0",
+        "3f2a9c1b7d44",
+        "3f2a9c1b7d44 bad label",
+        "3f2a9c1b7d44 dispatch-0 extra",
+        "3f2a9c1b7d4 dispatch-0",
+        "$(id) dispatch-0",
+    ],
+)
+def test_r5b_a_malformed_id_or_label_is_refused_and_nothing_is_removed(
+    tmp_path: Path, line: str
+) -> None:
+    rig = job_rig(tmp_path)
+    docker = FakeDocker(rig)
+    rig.launcher.executed.record("dispatch-0", (1, 1))
+    docker._read = lambda argv, *, timeout: (  # type: ignore[method-assign,assignment]
+        CommandResult(0, line.encode() + b"\n")
+        if len(argv) > 1 and argv[1] == "ps"
+        else docker._ps(argv, timeout=timeout)
+    )
+    rig.commands.run = docker._read  # type: ignore[method-assign]
+    assert refused(rig) == ("refused", "orphan_job_container")
+    assert docker.rm_calls == [] and rig.cp.lease_log == []
+
+
+def test_r5b_removal_at_the_preflight_needs_the_role_job_lock(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    docker = FakeDocker(rig, {CID: "dispatch-0"})
+    rig.launcher.executed.record("dispatch-0", (1, 1))
+    held = rig.launcher._lock_role_job()
+    try:
+        assert refused(rig) == ("refused", "orphan_job_container")
+    finally:
+        os.close(held)
+    assert (
+        docker.rm_calls == [] and CID in docker.containers
+    )  # not removed without the lock
+    assert refused(rig) == (
+        "refused",
+        "orphan_job_container",
+    )  # free now: removed, still paged
+    assert docker.rm_calls == [("/usr/bin/docker", "rm", "-f", CID)]
 
 
 # -- R5-H2: the full receipt fits Control's depth limit --------------------------
