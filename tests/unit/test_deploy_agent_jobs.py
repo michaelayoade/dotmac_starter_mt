@@ -2130,3 +2130,90 @@ def test_fh_the_capture_file_lives_in_the_agents_own_run_directory(
     assert str(run).startswith(str(rig.config.runtime_root))  # its RuntimeDirectory
     assert not str(run).startswith(str(rig.config.secrets_root))  # never /run/dotmac
     assert list(run.iterdir()) == []  # the anonymous file leaves no name behind
+
+
+# -- the job identity file Foundation reads (kit) --------------------------------
+def identity_file(
+    tmp_path: Path, uid: str = "10040", user: str = "dotmac-erp-import"
+) -> Path:
+    template = (KIT / "enrolment/job-identity.toml.template").read_text()
+    path = tmp_path / "job-identity.toml"
+    path.write_text(template.replace("@JOB_UID@", uid).replace("@JOB_USER@", user))
+    path.chmod(0o644)
+    return path
+
+
+def run_identity(path: Path, **extra: str) -> tuple[int, str]:
+    import subprocess
+
+    done = subprocess.run(  # noqa: S603
+        ["/bin/sh", str(KIT / "enrolment/libexec/check-job-identity.sh")],
+        capture_output=True, text=True, check=False,
+        env={"PATH": "/usr/bin:/bin", "IDENTITY_FILE": str(path), "EXPECT_OWNER": str(os.geteuid()), "CHECK_USER": "0", **extra},
+    )  # fmt: skip
+    return done.returncode, done.stdout.strip()
+
+
+def test_the_job_identity_template_is_valid_toml_with_exactly_the_two_keys(
+    tmp_path: Path,
+) -> None:
+    import tomllib
+
+    document = tomllib.loads(identity_file(tmp_path).read_text())
+    assert document == {"job_uid": 10040, "job_user": "dotmac-erp-import"}
+
+
+def test_the_identity_readback_accepts_the_enrolled_file(tmp_path: Path) -> None:
+    assert run_identity(identity_file(tmp_path)) == (0, "dotmac-erp-import 10040")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"uid": "0"},  # root
+        {"uid": "999"},  # a system uid
+        {"user": "root"},
+        {"user": "Bad User"},
+        {"uid": "ten"},
+    ],
+)
+def test_the_identity_readback_refuses_root_system_and_malformed_identities(
+    tmp_path: Path, bad: dict[str, str]
+) -> None:
+    assert run_identity(identity_file(tmp_path, **bad))[0] != 0
+
+
+def test_the_identity_readback_refuses_a_wrong_mode_a_symlink_and_a_missing_file(
+    tmp_path: Path,
+) -> None:
+    path = identity_file(tmp_path)
+    path.chmod(0o666)
+    assert run_identity(path)[0] != 0  # group/other-writable
+    path.chmod(0o600)
+    assert run_identity(path)[0] != 0  # not 0644
+    link = tmp_path / "link.toml"
+    link.symlink_to(
+        identity_file(tmp_path / "x") if (tmp_path / "x").mkdir() is None else path
+    )
+    assert run_identity(link)[0] != 0
+    assert run_identity(tmp_path / "absent.toml")[0] != 0
+
+
+def test_the_identity_readback_refuses_a_file_owned_by_another_uid(
+    tmp_path: Path,
+) -> None:
+    assert (
+        run_identity(identity_file(tmp_path), EXPECT_OWNER=str(os.geteuid() + 1))[0]
+        != 0
+    )
+
+
+def test_the_job_identity_never_travels_in_dispatch_env_or_the_agent_code() -> None:
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
+    )
+    text = "".join(p.read_text() for p in src.glob("*.py"))
+    assert (
+        "job_uid" not in text and "JOB_UID" not in text and "job-identity" not in text
+    )

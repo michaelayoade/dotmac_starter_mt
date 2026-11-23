@@ -1,0 +1,7 @@
+# /etc/dotmac/deploy-agent/job-identity.toml  (mode 0644, root:root)
+# Written at enrolment, together with the creation of the job user (for the import
+# role: `dotmac-erp-import`, uid:gid 10040:10040, C-29, NOT in the docker group).
+# Foundation reads the job identity from THIS root-owned file: it never comes from a
+# dispatch, from the environment or from the plan (RULING-agent-contract R2).
+job_uid = @JOB_UID@
+job_user = "@JOB_USER@"
