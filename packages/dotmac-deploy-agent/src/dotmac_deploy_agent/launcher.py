@@ -335,6 +335,7 @@ class Launcher:
                 self.read_only,
                 dispatch_id=dispatch_id,
                 standing=standing,
+                expected_image=self._last_app_image(),
                 clock=self.clock,
             )
         except Refusal as refusal:

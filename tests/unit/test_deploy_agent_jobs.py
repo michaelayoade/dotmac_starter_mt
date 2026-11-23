@@ -86,7 +86,9 @@ def run_job_materials(
 ) -> dict[str, object]:
     kw.setdefault("statement", {"operation": "run_job"})
     kw.setdefault("images", present())
-    kw.setdefault("lease_ttl_seconds", 900)
+    # v2 job plan: lease ttl = max = timeout + 120 (the default job runs 600 s)
+    kw.setdefault("lease_ttl_seconds", 720)
+    kw.setdefault("lease_max_seconds", kw["lease_ttl_seconds"])
     kw.setdefault("jobs", [definition()])
     kw.setdefault("params", BASE_ROWS)
     return make_materials(dispatched_job=job or dispatched(), **kw)
@@ -610,10 +612,10 @@ def test_a_lease_longer_than_900_is_accepted_when_the_job_fits_inside_it(
 ) -> None:
     rig = job_rig(tmp_path)
     rig.cp.materials = run_job_materials(
-        dispatched(timeout_seconds=1800), lease_ttl_seconds=3000
+        dispatched(timeout_seconds=1800), lease_ttl_seconds=1920
     )
     assert refused(rig) == ("completed", None)
-    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 3000  # type: ignore[index]
+    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 1920  # type: ignore[index]
 
 
 def test_the_lease_fit_boundary_is_accepted(tmp_path: Path) -> None:
@@ -874,3 +876,25 @@ def test_target_api_version_is_validated(tmp_path: Path) -> None:
 
     with pytest.raises(Refusal):
         make_config(tmp_path, Keys(), target_api_version=3)
+
+
+def test_a_job_plan_whose_lease_max_differs_from_its_ttl_is_refused(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(lease_ttl_seconds=720, lease_max_seconds=900)
+    assert refused(rig) == ("refused", "lease_ttl_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == []
+
+
+def test_a_serving_plan_with_a_split_lease_is_accepted_and_one_over_900_is_not(
+    tmp_path: Path,
+) -> None:
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(lease_ttl_seconds=600, lease_max_seconds=3120)
+    assert rig.launcher.run_once().outcome == "completed"
+    rig.cp.materials = make_materials(
+        lease_ttl_seconds=901, lease_max_seconds=3120, dispatch_id="dispatch-2"
+    )
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")

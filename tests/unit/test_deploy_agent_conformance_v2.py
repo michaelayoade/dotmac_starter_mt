@@ -6,7 +6,7 @@ observation envelope (PoP-signed), domain separation, the observation kind rules
 the `deploy_binding` job/lease/image/naming shapes and the job params render. The
 lease route bodies and the renew ledger belong to the lease client (#1146) and are
 not replayed here; the server-side parse refusals (`refused_parse`) are Control's.
-PROVISIONAL: Control CI on 708e726f was not green when this was vendored.
+PROVISIONAL: the sha may change once more (the reconcile marker).
 """
 
 # ruff: noqa: E501
@@ -30,10 +30,10 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v2.json"
-#: Control a18 `contract/target_api_v2.json` (branch control-a18-20261122, 202991
-#: bytes). A new Control sha replaces this value and the vendored bytes together.
+#: Control a18 `contract/target_api_v2.json` (branch control-a18-20261122 at 5c6cbcb,
+#: 203082 bytes). A new Control sha replaces this value and the vendored bytes together.
 TARGET_API_V2_SHA256 = (
-    "2ffcccdc2e74054ef6ff1496671c951aceaecc70e41de17b75545c4768d4c2a4"
+    "6d3f0b1b536c8a9a2306cc72e2a3c6dea83d4d6604c3499f5c7f8a9eaf54d382"
 )
 
 
@@ -101,7 +101,9 @@ def test_every_ok_observation_is_reproduced_byte_for_byte_and_signature_for_sign
         )  # type: ignore[index]
 
 
-@pytest.mark.parametrize("internal", ["completed", "failed", "refused", "observed"])
+@pytest.mark.parametrize(
+    "internal", ["completed", "failed", "refused", "reconciled", "not_needed"]
+)
 def test_the_agents_own_record_converts_to_a_statement_the_vectors_accept(
     internal: str,
 ) -> None:

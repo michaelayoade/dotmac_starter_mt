@@ -201,3 +201,36 @@ def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
     rig.commands.script[("inspect",)] = CommandResult(1, b"")
     assert rig.launcher.run_once().outcome == "reconcile_reported"
     assert rig.cp.observations[0]["details"]["containers"] == []  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("running", "last_pin", "expected"),
+    [
+        (b"", None, "not_needed"),  # nothing of the stack runs
+        (
+            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
+            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
+            "reconciled",
+        ),
+        (
+            b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"f" * 64,
+            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
+            "failed",
+        ),
+        (
+            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
+            None,
+            "failed",
+        ),
+    ],
+)
+def test_reconcile_reports_control_s_outcome_words(
+    tmp_path: Path, running: bytes, last_pin: str | None, expected: str
+) -> None:
+    rig = ready(tmp_path)
+    rig.cp.standing = "EXPIRED_UNRELEASED"
+    rig.commands.script[("inspect",)] = CommandResult(0 if running else 1, running)
+    if last_pin:
+        (rig.config.state_dir / "last_app_image").write_text(last_pin)
+    assert rig.launcher.run_once().outcome == "reconcile_reported"
+    assert rig.cp.observations[0]["outcome"] == expected

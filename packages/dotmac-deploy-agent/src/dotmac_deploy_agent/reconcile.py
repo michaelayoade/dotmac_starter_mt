@@ -51,20 +51,43 @@ def observe_containers(
     return tuple(found)
 
 
+def _digest_of(reference: str) -> str | None:
+    _, _, digest = reference.partition("@")
+    return digest or None
+
+
+def reconcile_outcome(
+    containers: tuple[ObservedContainer, ...], expected_image: str | None
+) -> str:
+    """`not_needed`: nothing of the stack runs. `reconciled`: every running
+    container carries the digest of the image this agent last applied. Anything else
+    is `failed`: Control then routes to restore-and-fix-forward, never a marker."""
+    if not containers:
+        return "not_needed"
+    expected = _digest_of(expected_image) if expected_image else None
+    if expected is not None and all(
+        _digest_of(c.image_ref) == expected for c in containers
+    ):
+        return "reconciled"
+    return "failed"
+
+
 def reconcile_observation(
     config: AgentConfig,
     commands: Commands,
     *,
     dispatch_id: str,
     standing: str,
+    expected_image: str | None = None,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> dict[str, object]:
     containers = observe_containers(config, commands)
+    outcome = reconcile_outcome(containers, expected_image)
     return build_observation(
         kind="reconcile",
         dispatch_id=dispatch_id,
         target_ref=config.target_ref,
-        outcome="observed",
+        outcome=outcome,
         reason=None,
         version=config.version,
         details={

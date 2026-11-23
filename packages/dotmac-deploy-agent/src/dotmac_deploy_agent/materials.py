@@ -115,6 +115,8 @@ class Materials:
     legacy: LegacyPolicy | None
     images: tuple[ImageSpec, ...]
     lease_ttl_seconds: int
+    #: v2 split lease: the maximum the lease may be renewed to (None on v1 plans).
+    lease_max_seconds: int | None
     active_binding_names: tuple[str, ...]
     #: From the SIGNED plan binding (never the target ref): the descriptor's
     #: `secrets_namespace` and the namespace-env fixed on the target. Required
@@ -375,6 +377,9 @@ def parse_materials(
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
+    lease_max = binding.get("lease_max_seconds")
+    if lease_max is not None and (type(lease_max) is not int or lease_max < ttl):
+        raise Refusal("lease_ttl_invalid")
     jobs = plan_jobs(snapshot)  # definitions: nothing runs from them
     if verified.operation not in ("deploy", "rollback", "run_job"):
         raise Refusal("materials_invalid", "operation_unsupported")  # fail closed
@@ -388,7 +393,7 @@ def parse_materials(
             dispatched,
             enrolled_roles=config.job_roles,
             store_now=store_now,
-            lease_ttl_seconds=ttl,
+            lease_ttl_seconds=lease_max if lease_max is not None else ttl,
         )
         refuse_cp_scoped_params(cp_params, jobs)
     all_roles = job_roles(jobs) | (
@@ -428,6 +433,7 @@ def parse_materials(
         legacy=_parse_legacy(binding.get("legacy")),
         images=images,
         lease_ttl_seconds=ttl,
+        lease_max_seconds=lease_max,
         active_binding_names=tuple(
             _text(n, _NAME) for n in _list(binding.get("active_binding_names", []))
         ),

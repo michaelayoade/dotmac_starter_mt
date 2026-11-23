@@ -33,7 +33,14 @@ _OUTCOME: Final = {
     "refused": "refused",
     "integrity_violation": "failed",  # the reason keeps `integrity_violation`
 }
-_RECONCILE_OUTCOME: Final = {"observed": "reconciled", "refused": "failed"}
+#: A reconcile reports Control's own words (`reconciled`, `not_needed`, `failed`);
+#: Control issues the marker on `reconciled` or `not_needed`.
+_RECONCILE_OUTCOME: Final = {
+    "reconciled": "reconciled",
+    "not_needed": "not_needed",
+    "failed": "failed",
+    "refused": "failed",
+}
 #: Plan operation -> the one non-reconcile kind it may report.
 _KIND_FOR_OPERATION: Final = {
     "deploy": "deploy",
