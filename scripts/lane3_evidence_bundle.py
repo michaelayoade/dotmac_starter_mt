@@ -22,10 +22,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 EVIDENCE_BUNDLE_MANIFEST_SCHEMA = "lane3.evidence-bundle-manifest.v1"
+
+#: The v2 manifest (S8b). The caller chooses the version and it is never sniffed
+#: from the bytes: v1 readers refuse anything that is not exactly v1, v2 readers
+#: anything that is not exactly v2, and E9 requires v2 so a v1 bundle cannot be
+#: offered in its place (a downgrade).
+EVIDENCE_BUNDLE_MANIFEST_SCHEMA_V2 = "lane3.evidence-bundle-manifest.v2"
 
 #: The private member names a bundle may carry. Closed on purpose: a
 #: member this list does not name is not evidence a proof may join, and a
@@ -36,6 +42,14 @@ BUNDLE_MEMBERS: frozenset[str] = frozenset(
 
 #: The member the exposure proof join consumes.
 EXPOSURE_CALLS_MEMBER = "exposure-calls.json"
+
+#: The v2 member: the launcher's UNSIGNED negative-target compensation proof
+#: (`lane3_negative_proof`), authenticated by sitting inside the positive
+#: ciphertext that the positive receipt binds.
+NEGATIVE_COMPENSATION_MEMBER = "negative-compensation.json"
+
+#: The v2 closed member set: the v1 members and the proof, in archive order.
+BUNDLE_MEMBERS_V2: frozenset[str] = BUNDLE_MEMBERS | {NEGATIVE_COMPENSATION_MEMBER}
 
 
 class EvidenceBundleRefused(ValueError):
@@ -59,21 +73,23 @@ def _canonical(document: dict[str, Any]) -> bytes:
     )
 
 
-def build_manifest(members: Mapping[str, bytes]) -> bytes:
-    """The canonical manifest bytes for exactly these members.
+def _build(
+    members: Mapping[str, bytes], *, schema: str, allowed: frozenset[str]
+) -> bytes:
+    """The canonical manifest bytes for exactly these members, for one version.
 
     Every named member must be a member this module knows, and the set
     must be the WHOLE set: a manifest that quietly omits the exposure
     records is the failure this document exists to refuse, so a partial
     bundle is refused at build time rather than joined later.
     """
-    unknown = frozenset(members) - BUNDLE_MEMBERS
+    unknown = frozenset(members) - allowed
     if unknown:
         raise EvidenceBundleRefused(
             f"evidence bundle members {sorted(unknown)} are not members a "
-            f"bundle may carry: {sorted(BUNDLE_MEMBERS)}"
+            f"bundle may carry: {sorted(allowed)}"
         )
-    missing = BUNDLE_MEMBERS - frozenset(members)
+    missing = allowed - frozenset(members)
     if missing:
         raise EvidenceBundleRefused(
             f"evidence bundle is missing members {sorted(missing)}; a "
@@ -81,13 +97,29 @@ def build_manifest(members: Mapping[str, bytes]) -> bytes:
         )
     document = {
         "members": [_member_document(name, members[name]) for name in sorted(members)],
-        "schema": EVIDENCE_BUNDLE_MANIFEST_SCHEMA,
+        "schema": schema,
     }
     return _canonical(document)
 
 
-def parse_manifest(data: bytes) -> dict[str, tuple[str, int]]:
-    """Member name -> (digest, byte length), or a refusal.
+def build_manifest(members: Mapping[str, bytes]) -> bytes:
+    """The canonical v1 manifest bytes for exactly the v1 members."""
+    return _build(
+        members, schema=EVIDENCE_BUNDLE_MANIFEST_SCHEMA, allowed=BUNDLE_MEMBERS
+    )
+
+
+def build_manifest_v2(members: Mapping[str, bytes]) -> bytes:
+    """The canonical v2 manifest bytes: exactly the three v2 members, whole."""
+    return _build(
+        members, schema=EVIDENCE_BUNDLE_MANIFEST_SCHEMA_V2, allowed=BUNDLE_MEMBERS_V2
+    )
+
+
+def _parse(
+    data: bytes, *, schema: str, allowed: frozenset[str]
+) -> dict[str, tuple[str, int]]:
+    """Member name -> (digest, byte length), or a refusal, for one version.
 
     The parsed members are re-serialized through the same canonical form
     and compared byte for byte (digests and lengths are all the document
@@ -104,10 +136,10 @@ def parse_manifest(data: bytes) -> dict[str, tuple[str, int]]:
         raise EvidenceBundleRefused(
             "evidence bundle manifest keys do not close over members/schema"
         )
-    if document["schema"] != EVIDENCE_BUNDLE_MANIFEST_SCHEMA:
+    if document["schema"] != schema:
         raise EvidenceBundleRefused(
             f"evidence bundle manifest schema {document['schema']!r} is not "
-            f"{EVIDENCE_BUNDLE_MANIFEST_SCHEMA!r}"
+            f"{schema!r}"
         )
     raw_members = document["members"]
     if not isinstance(raw_members, list):
@@ -120,7 +152,7 @@ def parse_manifest(data: bytes) -> dict[str, tuple[str, int]]:
                 f"{where} keys do not close over bytes/digest/name"
             )
         name, digest, length = item["name"], item["digest"], item["bytes"]
-        if not isinstance(name, str) or name not in BUNDLE_MEMBERS:
+        if not isinstance(name, str) or name not in allowed:
             raise EvidenceBundleRefused(f"{where}.name {name!r} is not a bundle member")
         if (
             not isinstance(digest, str)
@@ -135,23 +167,35 @@ def parse_manifest(data: bytes) -> dict[str, tuple[str, int]]:
                 f"evidence bundle member {name!r} is listed twice"
             )
         members[name] = (digest, length)
-    if frozenset(members) != BUNDLE_MEMBERS:
+    if frozenset(members) != allowed:
         raise EvidenceBundleRefused(
             f"evidence bundle manifest members {sorted(members)} do not close "
-            f"over {sorted(BUNDLE_MEMBERS)}"
+            f"over {sorted(allowed)}"
         )
     rebuilt = {
         "members": [
             {"bytes": length, "digest": digest, "name": name}
             for name, (digest, length) in sorted(members.items())
         ],
-        "schema": EVIDENCE_BUNDLE_MANIFEST_SCHEMA,
+        "schema": schema,
     }
     if _canonical(rebuilt) != data:
         raise EvidenceBundleRefused(
             "evidence bundle manifest is not its canonical serialization"
         )
     return members
+
+
+def parse_manifest(data: bytes) -> dict[str, tuple[str, int]]:
+    """Member name -> (digest, byte length) of a v1 manifest, or a refusal."""
+    return _parse(data, schema=EVIDENCE_BUNDLE_MANIFEST_SCHEMA, allowed=BUNDLE_MEMBERS)
+
+
+def parse_manifest_v2(data: bytes) -> dict[str, tuple[str, int]]:
+    """The v2 equivalent; a v1 manifest is refused here, a v2 one there."""
+    return _parse(
+        data, schema=EVIDENCE_BUNDLE_MANIFEST_SCHEMA_V2, allowed=BUNDLE_MEMBERS_V2
+    )
 
 
 def require_member(manifest: bytes, name: str, payload: bytes) -> None:
@@ -165,22 +209,22 @@ def require_member(manifest: bytes, name: str, payload: bytes) -> None:
         )
 
 
-def require_plaintext_bundle(manifest: bytes, members: Mapping[str, bytes]) -> None:
-    """Require the complete plaintext set, with both digest and length joins.
-
-    This establishes plaintext consistency only. Acquisition, ciphertext
-    verification before decryption, and publication proof belong to the oracle.
-    Refusals deliberately contain no supplied names or parser payload.
-    """
+def _require_plaintext(
+    manifest: bytes,
+    members: Mapping[str, bytes],
+    *,
+    parse: Callable[[bytes], dict[str, tuple[str, int]]],
+    allowed: frozenset[str],
+) -> None:
     try:
         if not isinstance(manifest, bytes) or not isinstance(members, Mapping):
             raise EvidenceBundleRefused("plaintext bundle requires bytes and a mapping")
-        expected = parse_manifest(manifest)
-        if frozenset(members) != BUNDLE_MEMBERS:
+        expected = parse(manifest)
+        if frozenset(members) != allowed:
             raise EvidenceBundleRefused(
                 "plaintext bundle member set is incomplete or extended"
             )
-        for name in BUNDLE_MEMBERS:
+        for name in allowed:
             payload = members[name]
             digest, length = expected[name]
             if not isinstance(payload, bytes):
@@ -191,3 +235,20 @@ def require_plaintext_bundle(manifest: bytes, members: Mapping[str, bytes]) -> N
                 )
     except (ValueError, TypeError, KeyError):
         raise EvidenceBundleRefused("plaintext bundle consistency refused") from None
+
+
+def require_plaintext_bundle(manifest: bytes, members: Mapping[str, bytes]) -> None:
+    """Require the complete plaintext v1 set, with both digest and length joins.
+
+    This establishes plaintext consistency only. Acquisition, ciphertext
+    verification before decryption, and publication proof belong to the oracle.
+    Refusals deliberately contain no supplied names or parser payload.
+    """
+    _require_plaintext(manifest, members, parse=parse_manifest, allowed=BUNDLE_MEMBERS)
+
+
+def require_plaintext_bundle_v2(manifest: bytes, members: Mapping[str, bytes]) -> None:
+    """The same joins over exactly the three v2 members."""
+    _require_plaintext(
+        manifest, members, parse=parse_manifest_v2, allowed=BUNDLE_MEMBERS_V2
+    )
