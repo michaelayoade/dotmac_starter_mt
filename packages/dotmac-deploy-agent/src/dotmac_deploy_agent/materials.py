@@ -27,8 +27,8 @@ from .jobs import (
     JobDefinition,
     check_job_admissible,
     check_matches_definition,
+    check_plan_binding,
     job_roles,
-    plan_dispatched_job,
     plan_jobs,
     refuse_cp_scoped_params,
     refuse_job_role_serving,
@@ -376,7 +376,9 @@ def parse_materials(
         raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
     jobs = plan_jobs(snapshot)  # definitions: nothing runs from them
-    dispatched = plan_dispatched_job(binding, verified.operation)
+    if verified.operation not in ("deploy", "rollback", "run_job"):
+        raise Refusal("materials_invalid", "operation_unsupported")  # fail closed
+    dispatched = check_plan_binding(binding, verified.operation)
     cp_params = _parse_params(document["params"])
     if dispatched is not None:
         if roles:
@@ -414,10 +416,6 @@ def parse_materials(
         ):
             raise Refusal("secrets_naming_mismatch")
     images = _parse_images(binding.get("images"))
-    # A role job runs an image that is already on the host (R2-C1): nothing is
-    # transferred for it. A serving plan never says `present`.
-    if any((i.source == "present") != (dispatched is not None) for i in images):
-        raise Refusal("materials_invalid", "image_source_for_operation")
     return Materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,

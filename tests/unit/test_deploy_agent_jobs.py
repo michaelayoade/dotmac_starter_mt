@@ -12,6 +12,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from dotmac_deploy_agent import wire
 from dotmac_deploy_agent.canon import digest
 from dotmac_deploy_agent.commands import CommandResult
 from dotmac_deploy_agent.jobs import (
@@ -805,14 +806,67 @@ def test_target_api_v1_posts_the_observation_as_before(tmp_path: Path) -> None:
     assert rig.config.target_api_version == 1
 
 
-def test_target_api_v2_does_not_guess_an_envelope_and_keeps_the_observation_in_the_outbox(
+def test_target_api_v2_posts_a_pop_signed_envelope_for_a_job_refusal(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent import observation_v2 as o2
+
+    rig = job_rig(tmp_path, target_api_version=2)
+    rig.cp.materials = make_materials(
+        statement={"operation": "run_job"}
+    )  # no dispatched job: refused
+    assert rig.launcher.run_once().outcome == "refused"
+    envelope = rig.cp.observations[-1]
+    assert set(envelope) == {"signature", "statement"}
+    statement = envelope["statement"]
+    assert (
+        statement["kind"] == "job"
+        and statement["outcome"] == "refused"
+        and statement["key_id"] == rig.config.credential_id
+    )
+    assert (
+        statement["reason"] == "materials_invalid" and statement["schema"] == o2.SCHEMA
+    )
+    key = rig.keys.agent.public_key()
+    key.verify(
+        wire.decode_b64url(envelope["signature"]) or b"", o2.signed_bytes(statement)
+    )
+    assert rig.launcher.outbox.pending() == []  # acknowledged
+
+
+def test_target_api_v2_posts_a_completed_job_as_kind_job_succeeded(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path, target_api_version=2)
-    rig.cp.materials = make_materials(statement={"operation": "run_job"})  # a refusal
-    assert rig.launcher.run_once().outcome == "refused"
-    assert rig.cp.observations == []  # nothing posted in an unpublished format
-    assert len(rig.launcher.outbox.pending()) == 1  # sealed, retried later
+    assert refused(rig) == ("completed", None)
+    statement = rig.cp.observations[-1]["statement"]
+    assert (statement["kind"], statement["outcome"], statement["reason"]) == (
+        "job",
+        "succeeded",
+        "",
+    )
+    assert statement["details"]["job"]["name"] == "import"
+
+
+def test_a_record_that_cannot_become_a_statement_is_dead_lettered_not_blocking(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path, target_api_version=2)
+    rig.launcher.outbox.seal(
+        {
+            "schema": "x",
+            "kind": "other",
+            "dispatch_id": "d9",
+            "target_ref": rig.config.target_ref,
+            "outcome": "refused",
+            "reason": None,
+            "details": {},
+            "agent_version": "0",
+            "observed_at": "2027-01-06T12:00:00Z",
+        }
+    )
+    rig.launcher.flush_outbox()
+    assert rig.launcher.outbox.pending() == [] and rig.cp.observations == []
 
 
 def test_target_api_version_is_validated(tmp_path: Path) -> None:

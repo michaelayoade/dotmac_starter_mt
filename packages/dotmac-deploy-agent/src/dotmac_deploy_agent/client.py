@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, cast
 
-from . import wire
+from . import observation_v2, wire
 from .canon import canonical_json
 from .config import AgentConfig
 from .materials import check_shape
@@ -131,8 +131,12 @@ class TargetClient:
 
     def post_observation(self, observation: dict[str, object]) -> Reply:
         if self._config.target_api_version == 2:
-            # The PoP-signed observation envelope (kind deploy|reconcile|job) is
-            # defined by Control's target_api_v2.json, which has not landed. The wire
-            # format is not guessed: the observation stays in the outbox until it is.
-            raise Refusal("observation_envelope_unavailable")
+            # Control's PoP-signed envelope (target_api_v2.json). A record that
+            # cannot be expressed is a ValueError: the outbox dead-letters it.
+            statement = observation_v2.statement_from(
+                observation, key_id=self._signer.credential_id
+            )
+            return self.call(
+                "POST", "observations", observation_v2.seal(statement, self._signer)
+            )
         return self.call("POST", "observations", observation)

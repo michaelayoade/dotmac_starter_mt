@@ -19,4 +19,9 @@
   `params.env`), purge on every exit and at agent start, no seal/restore for job
   roles. The Foundation entry call is refused (`foundation_job_entry_unavailable`)
   until Michael approves that increment.
+- Vendors Control's `contract/target_api_v2.json` beside v1 (sha256
+  `2ffcccdc2e74054ef6ff1496671c951aceaecc70e41de17b75545c4768d4c2a4`, PROVISIONAL:
+  Control CI on 708e726f was not green). The PoP-signed agent observation envelope
+  (`target_api_version = 2`, default stays 1 until every v2 vector passes on CI), the
+  `deploy_binding` split-lease, job and image-source checks, and kind `job`.
 - Not published and not enrolled in any release lane.
