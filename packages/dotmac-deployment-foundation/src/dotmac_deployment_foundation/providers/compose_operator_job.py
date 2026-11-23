@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import grp
 import hashlib
+import io
 import json
 import os
 import pwd
 import signal
 import stat
 import subprocess  # nosec B404 -- argv lists, shell=False
+import tarfile
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -51,6 +53,10 @@ __all__ = [
 
 STOP_GRACE_SECONDS: Final = 60
 POLL_SECONDS: Final = 0.5
+#: `docker stop -t` on an interrupt: stop within 30 s, then kill (P-SEC rev7).
+INTERRUPT_STOP_SECONDS: Final = 20
+TRAPPED_SIGNALS: Final = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+MAX_DIR_TAR_BYTES: Final = 4 * 1024 * 1024
 MAX_PARAMS_ENV_BYTES: Final = 1024 * 1024
 _FORBIDDEN_MOUNT_CHARS = (",", '"', "'", "\n", "\r", "=")
 
@@ -83,6 +89,8 @@ def build_create_argv(
         f"{contract.LABEL_DISPATCH_ID}={plan.dispatch_id}",
         "--label",
         f"{contract.LABEL_JOB}={plan.name}",
+        "--label",
+        f"{contract.LABEL_ROLE_JOB}=1",
         "--user",
         plan.user,
         "--entrypoint",
@@ -395,27 +403,24 @@ class ComposeOperatorJobEffects:
     @contextmanager
     def sigterm_trap(self) -> Iterator[None]:
         self._terminated.clear()
-        previous = None
-        installed = False
+        previous: dict[int, Any] = {}
         if threading.current_thread() is threading.main_thread():
-            previous = signal.signal(
-                signal.SIGTERM, lambda _signum, _frame: self._terminated.set()
-            )
-            installed = True
+            for number in TRAPPED_SIGNALS:
+                previous[number] = signal.signal(
+                    number, lambda _signum, _frame: self._terminated.set()
+                )
         try:
             yield
         finally:
-            if installed and previous is not None:
-                signal.signal(signal.SIGTERM, previous)
+            for number, handler in previous.items():
+                if handler is not None:
+                    signal.signal(number, handler)
 
     def terminate_requested(self) -> bool:
         return self._terminated.is_set()
 
-    def _stop_and_kill(self, name: str) -> None:
-        self._runner(
-            [self._docker, "stop", "-t", str(STOP_GRACE_SECONDS), name],
-            timeout=STOP_GRACE_SECONDS + 30,
-        )
+    def _stop_and_kill(self, name: str, *, grace: int) -> None:
+        self._runner([self._docker, "stop", "-t", str(grace), name], timeout=grace + 30)
         self._runner([self._docker, "kill", name], timeout=self._timeout)
 
     def start_and_wait(self, name: str, *, timeout_seconds: int) -> WaitResult:
@@ -423,7 +428,7 @@ class ComposeOperatorJobEffects:
         deadline = self._monotonic() + timeout_seconds
         while True:
             if self._terminated.is_set():
-                reason = "terminated"
+                reason = "interrupted"
                 break
             remaining = deadline - self._monotonic()
             if remaining <= 0:
@@ -435,12 +440,80 @@ class ComposeOperatorJobEffects:
                 )
             except subprocess.TimeoutExpired:
                 continue
-        self._stop_and_kill(name)
+        self._stop_and_kill(
+            name,
+            grace=STOP_GRACE_SECONDS if reason == "timeout" else INTERRUPT_STOP_SECONDS,
+        )
         try:
             process.wait(timeout=30)
         except subprocess.TimeoutExpired:
             process.kill()
-        return WaitResult(None, reason == "timeout", terminated=reason == "terminated")
+        return WaitResult(
+            None, reason == "timeout", interrupted=reason == "interrupted"
+        )
 
-    def remove_container(self, name: str) -> bool:
+    def host_uid(self, account: str) -> int | None:
+        try:
+            return pwd.getpwnam(account).pw_uid
+        except KeyError:
+            return None
+
+    def stat_dir(self, container: str, path: str) -> tuple[int, int, int] | None:
+        """Owner and mode of a directory in a CREATED container, via `docker cp`."""
+        try:
+            done = subprocess.run(  # noqa: S603  # nosec B603 -- argv list, shell=False
+                [self._docker, "cp", f"{container}:{path}", "-"],
+                shell=False,
+                capture_output=True,
+                timeout=self._timeout,
+                stdin=subprocess.DEVNULL,
+                check=False,
+            )
+            if done.returncode != 0 or len(done.stdout) > MAX_DIR_TAR_BYTES:
+                return None
+            with tarfile.open(fileobj=io.BytesIO(done.stdout)) as archive:
+                member = archive.next()
+        except (OSError, subprocess.SubprocessError, tarfile.TarError):
+            return None
+        if member is None or not member.isdir():
+            return None
+        return member.uid, member.gid, member.mode & 0o7777
+
+    def _label_of(self, name: str) -> str | None:
+        result = self._docker_run(
+            "inspect",
+            "--format",
+            '{{index .Config.Labels "' + contract.LABEL_DISPATCH_ID + '"}}',
+            name,
+        )
+        return result.stdout.strip() if result.ok else None
+
+    def remove_container(self, name: str, *, dispatch_id: str) -> bool:
+        """Remove ONE container by exact name, only if it is this dispatch's."""
+        label = self._label_of(name)
+        if label is None:
+            return True  # nothing by that name; nothing to leave behind
+        if label != dispatch_id:
+            return False
         return self._docker_run("rm", "-f", name).ok
+
+    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
+        """Label-scoped removal: BOTH labels must match. Never creates or starts."""
+        listed = self._docker_run(
+            "ps",
+            "-a",
+            "--no-trunc",
+            "--filter",
+            f"label={contract.LABEL_DISPATCH_ID}={dispatch_id}",
+            "--filter",
+            f"label={contract.LABEL_ROLE_JOB}=1",
+            "--format",
+            "{{.ID}}",
+        )
+        if not listed.ok:
+            raise OperatorJobRefusal("job_remove_failed", "docker ps refused")
+        removed: list[str] = []
+        for identifier in listed.stdout.split():
+            if self._docker_run("rm", "-f", identifier).ok:
+                removed.append(identifier)
+        return tuple(removed)

@@ -666,6 +666,13 @@ def cmd_run_job(args: argparse.Namespace) -> int:
     return run(args)
 
 
+def cmd_remove_job(args: argparse.Namespace) -> int:
+    """Registration only: label-scoped removal lives in `operator_job.py`."""
+    from .operator_job import cmd_remove_job as remove
+
+    return remove(args)
+
+
 def _load_prestate(path: str) -> HostPrestateV1:
     """Read a HostPrestateV1 document from a file, refusing loudly.
 
@@ -1531,6 +1538,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_job.add_argument("--docker-bin", dest="docker_bin", default="")
     run_job.add_argument("--systemctl-bin", dest="systemctl_bin", default="")
+
+    remove_job = add(
+        "remove-job",
+        cmd_remove_job,
+        "remove the containers of ONE dispatch id (label-scoped; never creates)",
+    )
+    remove_job.add_argument("--dispatch-id", required=True)
+    remove_job.add_argument("--docker-bin", dest="docker_bin", default="")
 
     policy = add(
         "ingress-policy",

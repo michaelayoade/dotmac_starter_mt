@@ -38,6 +38,8 @@ RESOLVED_PATH_MATERIALS: Final = "path_materials"
 #: The pinned import uid (P-SEC R6-3, an ERP product constant). Optional here:
 #: when present, the spec user uid must equal it.
 RESOLVED_JOB_UID: Final = "job_uid"
+#: The host account whose uid must equal the pinned uid (P-SEC rev7 (n)).
+RESOLVED_JOB_USER_NAME: Final = "job_user"
 
 # ── PROVISIONAL: Control v2 ``dispatched_job`` ──────────────────────────────
 JOB_NAME: Final = "name"
@@ -81,6 +83,9 @@ PROVIDER_CONSUME_METHOD: Final = "consume_run_job"
 #: A consume refusal carrying either marker is a 409 already_consumed.
 CONSUME_CONFLICT_STATUS: Final = 409
 CONSUME_CONFLICT_CODE: Final = "already_consumed"
+#: Optional key of the mapping `consume_run_job` returns: the lease expiry
+#: (epoch seconds) learned at consume (P-SEC rev7.1 R7-2).
+CONSUME_LEASE_EXPIRES: Final = "lease_expires_at"
 
 # ── PROVISIONAL: P-SEC render unit naming ───────────────────────────────────
 RENDER_UNIT_TEMPLATE: Final = "openbao-agent@{ns}-{role}-{set_id}.service"
@@ -120,6 +125,8 @@ PROVISIONAL_KEYS: Final[tuple[str, ...]] = (
     "ENV_RENDER_INVOCATION",
     "ENV_DEADLINE",
     "RESOLVED_JOB_UID",
+    "RESOLVED_JOB_USER_NAME",
+    "CONSUME_LEASE_EXPIRES",
     "JOB_ONLY_NAMES",
     "PROVIDER_RESOLVE_METHOD",
     "PROVIDER_CONSUME_METHOD",
@@ -132,4 +139,7 @@ PROVISIONAL_KEYS: Final[tuple[str, ...]] = (
 # ── facility-owned (not provisional) ────────────────────────────────────────
 LABEL_DISPATCH_ID: Final = "dotmac.dispatch_id"
 LABEL_JOB: Final = "dotmac.job"
+#: Marks every operator-job container (value "1"); label-scoped removal
+#: requires BOTH this and the dispatch id (P-SEC rev7).
+LABEL_ROLE_JOB: Final = "dotmac.role_job"
 RECEIPT_SCHEMA: Final = "dotmac.foundation.operator-job-receipt/1"

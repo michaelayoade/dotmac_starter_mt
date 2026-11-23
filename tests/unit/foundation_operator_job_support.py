@@ -52,6 +52,7 @@ INPUT_SHA = "sha256:" + hashlib.sha256(INPUT_BYTES).hexdigest()
 INPUTS_ROOT = "/srv/example/job-work"
 INVOCATION = "a" * 32
 BOUND = ("MIGRATION_DATABASE_URL",)
+NOW_EPOCH = int(datetime(2026, 11, 23, tzinfo=UTC).timestamp())
 ARGV = ["python", "-m", "importer", "execute", "--manifest", "/job/in/manifest.json"]
 
 
@@ -112,6 +113,7 @@ def good_env(plan: OperatorJobPlan) -> dict[str, str]:
         contract.ENV_SECRETS_DIR: plan.secrets_dir,
         contract.ENV_SECRET_FILES: ",".join(plan.secret_files),
         contract.ENV_RENDER_INVOCATION: INVOCATION,
+        contract.ENV_DEADLINE: str(NOW_EPOCH + 3600),
     }
 
 
@@ -183,15 +185,21 @@ class FakeAuthority:
     def __init__(self) -> None:
         self.consumed: list[str] = []
         self.requests: list[RunJobConsumptionRequest] = []
+        self.lease_expires_at: int | None = None
 
     def resolve_run_job(self, **_: Any) -> Mapping[str, Any]:
         return make_resolved()
 
-    def consume_run_job(self, *, request: RunJobConsumptionRequest) -> None:
+    def consume_run_job(
+        self, *, request: RunJobConsumptionRequest
+    ) -> Mapping[str, Any] | None:
         self.requests.append(request)
         if request.dispatch_id in self.consumed:
             raise Conflict()
         self.consumed.append(request.dispatch_id)
+        if self.lease_expires_at is None:
+            return None
+        return {contract.CONSUME_LEASE_EXPIRES: self.lease_expires_at}
 
 
 class Conflict(Exception):
@@ -228,6 +236,9 @@ class FakeEffects:
         self.create_argv: list[list[str]] = []
         self.removed: list[str] = []
         self.terminate = False
+        self.removed_for: list[str] = []
+        self.accounts: dict[str, int] = {}
+        self.out_dir: tuple[int, int, int] | None = (10001, 10001, 0o700)
         self.now_value = datetime(2026, 11, 23, tzinfo=UTC)
 
     def environ(self) -> Mapping[str, str]:
@@ -283,10 +294,22 @@ class FakeEffects:
         self.calls.append(f"start:{timeout_seconds}")
         return self.wait
 
-    def remove_container(self, name: str) -> bool:
+    def remove_container(self, name: str, *, dispatch_id: str) -> bool:
         self.calls.append("remove")
         self.removed.append(name)
+        self.removed_for.append(dispatch_id)
         return True
+
+    def host_uid(self, account: str) -> int | None:
+        return self.accounts.get(account)
+
+    def stat_dir(self, container: str, path: str) -> tuple[int, int, int] | None:
+        self.calls.append(f"stat:{path}")
+        return self.out_dir
+
+    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
+        self.calls.append(f"remove_dispatch:{dispatch_id}")
+        return ()
 
     @contextmanager
     def sigterm_trap(self) -> Iterator[None]:

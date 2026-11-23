@@ -136,7 +136,7 @@ class OperatorJobAuthority(Protocol):
 class WaitResult:
     exit_code: int | None
     timed_out: bool
-    terminated: bool = False
+    interrupted: bool = False
 
 
 class OperatorJobEffects(Protocol):
@@ -175,12 +175,20 @@ class OperatorJobEffects(Protocol):
     def start_and_wait(self, name: str, *, timeout_seconds: int) -> WaitResult: ...
 
     def sigterm_trap(self) -> AbstractContextManager[None]:
-        """Trap SIGTERM for the run; the handler only records the request."""
+        """Trap SIGTERM, SIGINT and SIGHUP; the handler only records it."""
         ...
 
     def terminate_requested(self) -> bool: ...
 
-    def remove_container(self, name: str) -> bool: ...
+    def host_uid(self, account: str) -> int | None: ...
+
+    def stat_dir(self, container: str, path: str) -> tuple[int, int, int] | None:
+        """(uid, gid, mode) of a directory inside a created container."""
+        ...
+
+    def remove_container(self, name: str, *, dispatch_id: str) -> bool: ...
+
+    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]: ...
 
 
 # ── the plan (pure) ─────────────────────────────────────────────────────────
@@ -237,6 +245,8 @@ class OperatorJobPlan:
     cap_drop: tuple[str, ...]
     tmpfs: tuple[str, ...]
     entrypoint: tuple[str, ...]
+    job_uid: int | None = None
+    job_user_name: str = ""
 
     @property
     def steps(self) -> tuple[OperatorJobStep, ...]:
@@ -397,10 +407,20 @@ def plan_operator_job(
 
     _require_declared_shape(job)
     pinned_uid = resolved.get(contract.RESOLVED_JOB_UID)
-    if pinned_uid is not None and str(pinned_uid) != job.security.user.split(":")[0]:
-        raise OperatorJobRefusal(
-            "job_uid_mismatch", "the spec user is not the pinned import uid"
-        )
+    job_uid: int | None = None
+    if pinned_uid is not None:
+        if (
+            isinstance(pinned_uid, bool)
+            or not str(pinned_uid).isdigit()
+            or job.security.user != f"{pinned_uid}:{pinned_uid}"
+        ):
+            raise OperatorJobRefusal(
+                "job_uid_mismatch", "the spec user is not the pinned uid:uid"
+            )
+        job_uid = int(pinned_uid)
+    job_user_name = resolved.get(contract.RESOLVED_JOB_USER_NAME, "")
+    if not isinstance(job_user_name, str) or (job_user_name and job_uid is None):
+        raise OperatorJobRefusal("job_context_invalid", "job_user without job_uid")
     networks = tuple(f"{spec.product}_{code}" for code in job.placement.networks)
 
     namespace = ""
@@ -461,6 +481,8 @@ def plan_operator_job(
         cap_drop=job.security.cap_drop,
         tmpfs=job.security.tmpfs,
         entrypoint=job.entrypoint,
+        job_uid=job_uid,
+        job_user_name=job_user_name,
     )
 
 
@@ -566,7 +588,7 @@ class OperatorJobReceipt:
             return EXIT_SUCCEEDED
         if self.outcome == "failed":
             return EXIT_FAILED
-        if self.outcome in ("runner_timeout", "terminated"):
+        if self.outcome in ("runner_timeout", "interrupted"):
             return EXIT_TIMEOUT
         return EXIT_REFUSED
 
@@ -599,7 +621,8 @@ def _consume(
     bindings: ExecutionBindings,
     pair: OperatorJobPair,
     target: str,
-) -> None:
+) -> int | None:
+    """Consume once. Returns the lease expiry learned at consume, if any."""
     provider = getattr(bindings, "authorization_v3_provider", None)
     if provider is None or not isinstance(provider, OperatorJobAuthority):
         raise OperatorJobRefusal(
@@ -613,7 +636,7 @@ def _consume(
         dispatch_material_json=pair.dispatch_material_json,
     )
     try:
-        getattr(provider, contract.PROVIDER_CONSUME_METHOD)(request=request)
+        learned = getattr(provider, contract.PROVIDER_CONSUME_METHOD)(request=request)
     except OperatorJobRefusal:
         raise
     except Exception as exc:
@@ -628,6 +651,11 @@ def _consume(
         raise OperatorJobRefusal(
             "job_consume_refused", f"consume refused ({type(exc).__name__})"
         ) from exc
+    if isinstance(learned, Mapping):
+        expiry = learned.get(contract.CONSUME_LEASE_EXPIRES)
+        if isinstance(expiry, int) and not isinstance(expiry, bool):
+            return expiry
+    return None
 
 
 def _cross_check(plan: OperatorJobPlan, effects: OperatorJobEffects) -> str | None:
@@ -637,6 +665,10 @@ def _cross_check(plan: OperatorJobPlan, effects: OperatorJobEffects) -> str | No
     if user is None or int(user.group(1)) in uids or int(user.group(2)) in gids:
         raise OperatorJobRefusal(
             "job_uid_in_docker_group", "the job uid or gid can reach the docker socket"
+        )
+    if plan.job_user_name and effects.host_uid(plan.job_user_name) != plan.job_uid:
+        raise OperatorJobRefusal(
+            "job_uid_mismatch", "the host account uid is not the pinned uid"
         )
     env = effects.environ()
 
@@ -695,7 +727,7 @@ def _iso(effects: OperatorJobEffects) -> str:
 
 
 class _Terminated(Exception):
-    """SIGTERM was received; unwind to the cleanup and write the receipt."""
+    """A trapped signal was received; unwind to the cleanup and write the receipt."""
 
 
 def _check_terminated(effects: OperatorJobEffects) -> None:
@@ -703,17 +735,46 @@ def _check_terminated(effects: OperatorJobEffects) -> None:
         raise _Terminated
 
 
-def _effective_timeout(plan: OperatorJobPlan, effects: OperatorJobEffects) -> int:
-    """min(spec timeout, signed timeout_seconds, agent deadline). Already min'd."""
+#: Seconds the stop grace and the rm may take, and the least run time worth
+#: starting. A deadline with less than the sum of the three is `invalid`.
+STOP_GRACE_SECONDS: Final = 60
+RM_BUDGET_SECONDS: Final = 30
+MIN_RUN_SECONDS: Final = 30
+DEADLINE_HEADROOM_SECONDS: Final = STOP_GRACE_SECONDS + RM_BUDGET_SECONDS
+
+
+def _agent_deadline(effects: OperatorJobEffects) -> int:
+    """The agent's absolute deadline. Missing, malformed, past or short refuses."""
     raw = effects.environ().get(contract.ENV_DEADLINE, "")
-    if not raw:
-        return plan.timeout_seconds
     if not raw.isdigit():
-        raise OperatorJobRefusal("job_env_mismatch", "deadline is not epoch seconds")
-    remaining = int(raw) - int(effects.now().timestamp())
+        raise OperatorJobRefusal(
+            "job_deadline_invalid", "the agent deadline is missing or malformed"
+        )
+    deadline = int(raw)
+    if deadline - int(effects.now().timestamp()) < (
+        DEADLINE_HEADROOM_SECONDS + MIN_RUN_SECONDS
+    ):
+        raise OperatorJobRefusal(
+            "job_deadline_invalid", "the agent deadline is past or too short"
+        )
+    return deadline
+
+
+def _effective_timeout(
+    plan: OperatorJobPlan, deadline: int, effects: OperatorJobEffects
+) -> int:
+    """min(spec, signed timeout, deadline - stop grace - rm budget)."""
+    remaining = deadline - int(effects.now().timestamp()) - DEADLINE_HEADROOM_SECONDS
     if remaining <= 0:
-        raise OperatorJobRefusal("job_deadline_passed", "the agent deadline has passed")
+        raise OperatorJobRefusal("job_deadline_invalid", "no time left to run safely")
     return min(plan.timeout_seconds, remaining)
+
+
+def remove_dispatch(effects: OperatorJobEffects, dispatch_id: str) -> tuple[str, ...]:
+    """Label-scoped removal of ONE dispatch's containers. Never creates or starts."""
+    if not _DISPATCH_ID.match(dispatch_id):
+        raise OperatorJobRefusal("job_context_invalid", "dispatch_id shape")
+    return effects.remove_dispatch_containers(dispatch_id)
 
 
 def run_operator_job(
@@ -737,7 +798,12 @@ def run_operator_job(
     removed = True
     with effects.sigterm_trap():
         try:
-            _consume(plan, bindings, pair, target)
+            deadline = _agent_deadline(effects)
+            lease_expiry = _consume(plan, bindings, pair, target)
+            if lease_expiry is not None and deadline > lease_expiry:
+                raise OperatorJobRefusal(
+                    "job_deadline_invalid", "the deadline is later than the lease"
+                )
             _check_terminated(effects)
             env_file = _cross_check(plan, effects)
             invocation = _render_check(plan, effects)
@@ -765,13 +831,20 @@ def run_operator_job(
                 effects.inspect_container(plan.container_name),
                 effects.inspect_image(plan.image_ref),
             )
+            if plan.job_uid is not None and effects.stat_dir(
+                plan.container_name, plan.outputs_target
+            ) != (plan.job_uid, plan.job_uid, 0o700):
+                raise OperatorJobRefusal(
+                    "job_shape_refused", "/job/out is not owned by the job uid, 0700"
+                )
             _check_terminated(effects)
             waited = effects.start_and_wait(
-                plan.container_name, timeout_seconds=_effective_timeout(plan, effects)
+                plan.container_name,
+                timeout_seconds=_effective_timeout(plan, deadline, effects),
             )
             exit_code = waited.exit_code
-            if waited.terminated:
-                outcome, reason = "terminated", "terminated"
+            if waited.interrupted:
+                outcome, reason = "interrupted", "interrupted"
             elif waited.timed_out:
                 outcome, reason = "runner_timeout", "runner_timeout"
             elif exit_code == 0:
@@ -779,14 +852,19 @@ def run_operator_job(
             else:
                 outcome, reason = "failed", "job_exit_nonzero"
         except _Terminated:
-            outcome, reason = "terminated", "terminated"
+            outcome, reason = "interrupted", "interrupted"
         except OperatorJobRefusal as refusal:
             outcome, reason = "refused", refusal.code
         except (OSError, DeploymentFoundationError):
             outcome, reason = "refused", "job_effect_failed"
         finally:
             if create_attempted:
-                removed = effects.remove_container(plan.container_name) or not create_ok
+                removed = (
+                    effects.remove_container(
+                        plan.container_name, dispatch_id=plan.dispatch_id
+                    )
+                    or not create_ok
+                )
     return OperatorJobReceipt(
         dispatch_id=plan.dispatch_id,
         job=plan.name,
@@ -877,6 +955,38 @@ def cmd_run_job(args: Any) -> int:
     receipt = run_operator_job(plan, effects, bindings, pair=pair, target=target)
     sys.stdout.write(receipt.to_json() + "\n")
     return receipt.exit_status
+
+
+def cmd_remove_job(args: Any) -> int:
+    """``dotmac-deploy remove-job --dispatch-id ID``: label-scoped removal only.
+
+    Removes containers carrying BOTH ``dotmac.dispatch_id=<id>`` and the job
+    marker. It never creates or starts a container, so it needs no grant.
+    """
+    from .providers.compose_operator_job import ComposeOperatorJobEffects
+    from .toolchain import DEFAULT_TOOLS, resolve_tool
+
+    try:
+        effects = ComposeOperatorJobEffects(
+            docker_bin=resolve_tool(
+                getattr(args, "docker_bin", "") or DEFAULT_TOOLS["docker"],
+                what="docker_bin",
+            )
+        )
+        removed = remove_dispatch(effects, args.dispatch_id)
+    except DeploymentFoundationError as exc:
+        code = exc.code if isinstance(exc, OperatorJobRefusal) else "job_refused"
+        sys.stdout.write(_refusal_receipt(code) + "\n")
+        return EXIT_REFUSED
+    sys.stdout.write(
+        json.dumps(
+            {"dispatch_id": args.dispatch_id, "removed": sorted(removed)},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    return EXIT_SUCCEEDED
 
 
 def _preflight_steps() -> tuple[OperatorJobStep, ...]:

@@ -436,19 +436,19 @@ def test_root_users_and_security_exceptions_never_plan(security: _Sec) -> None:
 def test_sigterm_during_the_wait_removes_the_container_and_writes_a_receipt() -> None:
     plan = make_plan()
     effects = FakeEffects(plan)
-    effects.wait = WaitResult(None, False, terminated=True)
+    effects.wait = WaitResult(None, False, interrupted=True)
     receipt = _run(plan, effects)
-    assert receipt.outcome == "terminated" and receipt.exit_status == 3
+    assert receipt.outcome == "interrupted" and receipt.exit_status == 3
     assert receipt.container_removed and effects.removed == [plan.container_name]
-    assert json.loads(receipt.to_json())["outcome"] == "terminated"
+    assert json.loads(receipt.to_json())["outcome"] == "interrupted"
 
 
-def test_sigterm_before_create_creates_nothing_but_still_reports() -> None:
+def test_a_signal_before_create_creates_nothing_but_still_reports() -> None:
     plan = make_plan()
     effects = FakeEffects(plan)
     effects.terminate = True
     receipt = _run(plan, effects)
-    assert receipt.outcome == "terminated"
+    assert receipt.outcome == "interrupted"
     assert "create" not in effects.calls and effects.removed == []
 
 
@@ -478,29 +478,58 @@ def test_real_sigterm_is_trapped_then_stops_and_removes() -> None:
     with effects.sigterm_trap():
         result = effects.start_and_wait("c1", timeout_seconds=100)
         assert effects.terminate_requested()
-    assert result.terminated and not result.timed_out
-    assert commands[0][:5] == ["/usr/bin/docker", "stop", "-t", "60", "c1"]
+    assert result.interrupted and not result.timed_out
+    assert commands[0][:5] == ["/usr/bin/docker", "stop", "-t", "20", "c1"]
     assert commands[1] == ["/usr/bin/docker", "kill", "c1"]
     assert signal.getsignal(signal.SIGTERM) is not None
 
 
-def test_the_agent_deadline_caps_the_wait() -> None:
+def test_the_agent_deadline_caps_the_wait_before_the_stop_grace_and_rm() -> None:
     plan = make_plan()
     effects = FakeEffects(plan)
     now = int(effects.now().timestamp())
-    effects.env[contract.ENV_DEADLINE] = str(now + 90)
+    effects.env[contract.ENV_DEADLINE] = str(now + 300)
     _run(plan, effects)
-    assert "start:90" in effects.calls
+    # (p): stop is started 60 s grace + 30 s rm budget before the deadline
+    assert "start:210" in effects.calls
 
 
-def test_a_passed_deadline_stops_and_removes() -> None:
+@pytest.mark.parametrize("offset", [None, "", "soon", -5, 0, 60, 119])
+def test_q_a_missing_past_or_short_deadline_is_invalid_with_zero_consumes(
+    offset,
+) -> None:
     plan = make_plan()
     effects = FakeEffects(plan)
-    effects.env[contract.ENV_DEADLINE] = str(int(effects.now().timestamp()) - 1)
-    receipt = _run(plan, effects)
-    assert receipt.reason == "job_deadline_passed"
-    assert receipt.container_removed and effects.removed == [plan.container_name]
-    assert not any(call.startswith("start:") for call in effects.calls)
+    now = int(effects.now().timestamp())
+    if offset is None:
+        del effects.env[contract.ENV_DEADLINE]
+    elif isinstance(offset, str):
+        effects.env[contract.ENV_DEADLINE] = offset
+    else:
+        effects.env[contract.ENV_DEADLINE] = str(now + offset)
+    authority = FakeAuthority()
+    receipt = _run(plan, effects, authority)
+    assert receipt.reason == "job_deadline_invalid" and receipt.exit_status == 2
+    assert authority.consumed == [] and "create" not in effects.calls
+
+
+def test_s_a_deadline_later_than_the_lease_is_invalid_and_creates_nothing() -> None:
+    plan = make_plan()
+    effects = FakeEffects(plan)
+    now = int(effects.now().timestamp())
+    effects.env[contract.ENV_DEADLINE] = str(now + 1000)
+    authority = FakeAuthority()
+    authority.lease_expires_at = now + 900
+    receipt = _run(plan, effects, authority)
+    assert receipt.reason == "job_deadline_invalid"
+    assert "create" not in effects.calls and "create_volume" not in effects.calls
+    # a deadline at or before the lease is accepted
+    plan2 = make_plan(make_resolved(**{contract.RESOLVED_DISPATCH_ID: "d2"}))
+    ok = FakeEffects(plan2)
+    ok.env[contract.ENV_DEADLINE] = str(now + 900)
+    other = FakeAuthority()
+    other.lease_expires_at = now + 900
+    assert _run(plan2, ok, other).outcome == "succeeded"
 
 
 def test_deadline_passing_mid_run_is_a_timeout_stop_then_kill() -> None:
@@ -526,7 +555,7 @@ def test_deadline_passing_mid_run_is_a_timeout_stop_then_kill() -> None:
         monotonic=lambda: next(clock),
     )
     result = effects.start_and_wait("c1", timeout_seconds=100)
-    assert result.timed_out and not result.terminated
+    assert result.timed_out and not result.interrupted
     assert commands[0][1] == "stop" and commands[1][1] == "kill"
 
 
@@ -571,3 +600,103 @@ def test_output_dir_must_be_the_fixed_job_out() -> None:
     _job(resolved)[contract.JOB_OUTPUT_DIR] = "/elsewhere"
     with pytest.raises(OperatorJobRefusal):
         plan_operator_job(make_spec(), resolved)
+
+
+def test_n_the_pinned_uid_host_account_and_out_dir_owner() -> None:
+    resolved = make_resolved(
+        **{
+            contract.RESOLVED_JOB_UID: "10001",
+            contract.RESOLVED_JOB_USER_NAME: "importer",
+        }
+    )
+    plan = make_plan(resolved)
+    assert plan.user == "10001:10001" and plan.job_uid == 10001
+    good = FakeEffects(plan)
+    good.accounts = {"importer": 10001}
+    assert _run(plan, good).outcome == "succeeded"
+    assert "stat:/job/out" in good.calls
+    wrong_host = FakeEffects(plan)
+    wrong_host.accounts = {"importer": 10002}
+    assert _run(plan, wrong_host, FakeAuthority()).reason == "job_uid_mismatch"
+    for owner in [(0, 0, 0o700), (10001, 10001, 0o755), None]:
+        effects = FakeEffects(plan)
+        effects.accounts = {"importer": 10001}
+        effects.out_dir = owner
+        receipt = _run(plan, effects, FakeAuthority())
+        assert receipt.reason == "job_shape_refused"
+        assert effects.removed == [plan.container_name]
+
+
+def test_n_a_pinned_uid_needs_the_exact_uid_uid_spec_user() -> None:
+    resolved = make_resolved(**{contract.RESOLVED_JOB_UID: "10040"})
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        plan_operator_job(make_spec(), resolved)
+    assert excinfo.value.code == "job_uid_mismatch"
+
+
+def test_o_removal_is_scoped_to_this_dispatch_and_both_labels_are_set() -> None:
+    plan = make_plan()
+    effects = FakeEffects(plan)
+    _run(plan, effects)
+    assert effects.removed_for == [plan.dispatch_id]
+    argv = effects.create_argv[0]
+    assert "dotmac.dispatch_id=disp-0001" in argv and "dotmac.role_job=1" in argv
+
+
+def test_r_label_scoped_removal_never_creates_or_starts() -> None:
+    from dotmac_deployment_foundation.operator_job import remove_dispatch
+
+    effects = FakeEffects(make_plan())
+    assert remove_dispatch(effects, "disp-0001") == ()
+    assert effects.calls == ["remove_dispatch:disp-0001"]
+    with pytest.raises(OperatorJobRefusal):
+        remove_dispatch(effects, "bad id; rm")
+
+
+def test_r_real_removal_filters_on_both_labels_and_only_removes() -> None:
+    commands: list[list[str]] = []
+
+    def runner(argv, **_):
+        commands.append(list(argv))
+        if argv[1] == "ps":
+            return CommandResult(0, "abc123\ndef456\n")
+        return CommandResult(0)
+
+    effects = ComposeOperatorJobEffects(
+        docker_bin="/usr/bin/docker", environ={}, runner=runner
+    )
+    assert effects.remove_dispatch_containers("disp-0001") == ("abc123", "def456")
+    ps = commands[0]
+    assert (
+        "label=dotmac.dispatch_id=disp-0001" in ps and "label=dotmac.role_job=1" in ps
+    )
+    assert {c[1] for c in commands[1:]} == {"rm"}
+    assert not any(c[1] in ("create", "start", "run") for c in commands)
+
+
+def test_remove_container_refuses_another_dispatchs_container() -> None:
+    commands: list[list[str]] = []
+
+    def runner(argv, **_):
+        commands.append(list(argv))
+        return CommandResult(0, "someone-else\n")
+
+    effects = ComposeOperatorJobEffects(
+        docker_bin="/usr/bin/docker", environ={}, runner=runner
+    )
+    assert effects.remove_container("c1", dispatch_id="disp-0001") is False
+    assert all(c[1] != "rm" for c in commands)
+
+
+def test_o_sigint_and_sighup_are_trapped_too() -> None:
+    import signal
+
+    effects = ComposeOperatorJobEffects(
+        docker_bin="/usr/bin/docker",
+        environ={},
+        runner=lambda *a, **k: CommandResult(0),
+    )
+    for number in (signal.SIGINT, signal.SIGHUP):
+        with effects.sigterm_trap():
+            os.kill(os.getpid(), number)
+            assert effects.terminate_requested()

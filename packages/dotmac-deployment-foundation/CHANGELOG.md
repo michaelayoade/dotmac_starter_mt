@@ -13,8 +13,8 @@ modules `operator_job.py`, `operator_job_contract.py` and
 subcommand registration. The dispatch is resolved and consumed through the
 installed bindings before any container exists; a `409 already_consumed` is the
 refusal `job_already_consumed`. The container is created from the declared shape
-only, read back with `docker inspect` before start, stopped at the deadline or
-on SIGTERM, and always removed. Never root, never a secret value, no secrets
+only, read back with `docker inspect` before start, stopped at min(timeout, agent deadline - grace) or on SIGTERM/SIGINT/SIGHUP, and always
+removed; `remove-job --dispatch-id` removes one dispatch only. Never root, never a secret value, no secrets
 directory listing.
 
 The deploy, rollback, recovery, support-job, render and existing spec-parse
