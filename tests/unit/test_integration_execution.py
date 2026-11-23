@@ -399,10 +399,17 @@ def test_a_leased_delivery_cannot_be_claimed_twice(
     assert claim_delivery(db, delivery) is False
 
 
-def test_an_expired_lease_may_be_reclaimed(
-    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
+def test_an_expired_lease_is_never_reclaimed_it_becomes_ambiguous(
+    db: Session,
+    installation: ConnectorInstallation,
+    binding: CapabilityBinding,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A worker that died holding a lease must not strand the delivery."""
+    """A worker that died holding a lease may have invoked the provider: the
+    row goes to `reconciliation_required`, and no second claim is granted."""
+    import dotmac_integration.operations as operations
+
+    monkeypatch.setattr(operations, "record_operation", lambda *a, **k: None)
     delivery, _ = enqueue_delivery(
         db,
         installation_id=installation.id,
@@ -412,7 +419,11 @@ def test_an_expired_lease_may_be_reclaimed(
     )
     claim_delivery(db, delivery, policy=ExecutionPolicy(lease_seconds=60))
     later = datetime.now(UTC) + timedelta(seconds=120)
-    assert claim_delivery(db, delivery, now=later) is True
+    assert claim_delivery(db, delivery, now=later) is False
+    assert delivery.state == "reconciliation_required"
+    assert delivery.attempt_count == 1
+    assert delivery.leased_until is None
+    assert claim_delivery(db, delivery, now=later) is False
 
 
 def test_a_terminal_delivery_is_never_reclaimed(

@@ -73,6 +73,8 @@ __all__ = [
     "ReceiptVerificationOriginConflict",
     "receipt_verification_origin",
     "advance_checkpoint",
+    "LEASE_EXPIRED_ERROR_CODE",
+    "ambiguate_expired_delivery_leases",
     "claim_delivery",
     "claim_receipt",
     "enqueue_delivery",
@@ -598,6 +600,92 @@ def enqueue_delivery(
     return delivery, True
 
 
+#: `error_code` written when a DELIVERY attempt's lease expired while
+#: `in_flight`. The worker may have crashed AFTER the provider was invoked, so
+#: the outcome is unknown: the row goes to the ambiguous terminal state and is
+#: never auto-retried.
+LEASE_EXPIRED_ERROR_CODE = "lease_expired_outcome_unknown"
+
+
+def ambiguate_expired_delivery_leases(
+    db: Any,
+    *,
+    now: datetime,
+    delivery_id: Any | None = None,
+    via: str = "sweep",
+    actor_admin_id: UUID | None = None,
+) -> list[Any]:
+    """Move expired `in_flight` DELIVERY rows to `reconciliation_required`.
+
+    A delivery's connector call is NOT idempotent by contract: a crash after
+    the provider accepted the request leaves `in_flight` with a lease that
+    later expires, and treating that as "never ran" resends the effect. So the
+    only safe answer is the ambiguous terminal state; an operator may requeue
+    it, acknowledging a possible duplicate
+    (`operations.replay_delivery(..., acknowledge_possible_duplicate=True)`),
+    or reconcile it against provider evidence.
+
+    Rows are locked ``FOR UPDATE SKIP LOCKED`` first so concurrent sweepers and
+    claimers neither block nor double-handle a row, and the UPDATE repeats the
+    predicate so the database, not this process, decides. Returns the ids moved.
+    """
+    from sqlalchemy import select, update
+
+    expired = (
+        DeliveryAttempt.state == "in_flight",
+        DeliveryAttempt.leased_until.is_not(None),
+        DeliveryAttempt.leased_until < now,
+    )
+    query = select(DeliveryAttempt.id).where(*expired)
+    if delivery_id is not None:
+        query = query.where(DeliveryAttempt.id == delivery_id)
+    ids = list(
+        db.execute(query.order_by(DeliveryAttempt.id).with_for_update(skip_locked=True))
+        .scalars()
+        .all()
+    )
+    moved: list[Any] = []
+    for row_id in ids:
+        result = db.execute(
+            update(DeliveryAttempt)
+            .where(DeliveryAttempt.id == row_id, *expired)
+            .values(
+                state="reconciliation_required",
+                terminal_at=now,
+                leased_until=None,
+                next_attempt_at=None,
+                error_code=LEASE_EXPIRED_ERROR_CODE,
+                error_detail=(
+                    "lease expired while in flight; the provider outcome is "
+                    "unknown and the attempt is not retried automatically"
+                ),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            moved.append(row_id)
+            # The UPDATE bypasses the session; keep any loaded instance honest.
+            db.get(DeliveryAttempt, row_id, populate_existing=True)
+    if moved:
+        # ONE audit event for every path that makes this transition (the sweep
+        # and the claim), so the claim-path ambiguation is never silent.
+        from dotmac_integration import operations
+
+        operations.record_operation(
+            db,
+            action="leases.released",
+            entity_type="delivery_attempt",
+            actor_admin_id=actor_admin_id,
+            details={
+                "count": len(moved),
+                "delivery_ids": [str(i) for i in moved],
+                "state": "reconciliation_required",
+                "via": via,
+            },
+        )
+    return moved
+
+
 def claim_delivery(
     db: Any,
     delivery: DeliveryAttempt,
@@ -607,36 +695,57 @@ def claim_delivery(
 ) -> bool:
     """Lease a delivery for one attempt. False when another worker holds it.
 
-    A CONDITIONAL UPDATE, not an in-memory mutation. Two dispatchers reading the
-    same row, both seeing an expired lease and both assigning `state` in Python
-    would each believe they had the claim — the check and the write must be one
-    statement for the lease to mean anything.
+    Only `pending` and `retryable` rows are claimable. An `in_flight` row whose
+    lease expired is NOT re-claimed: the previous worker may have invoked the
+    provider before it died, so the row is moved to `reconciliation_required`
+    and this call returns False (never a second invoke).
 
-    `rowcount == 1` is the claim: the database decided, and the loser sees 0.
+    The row is locked ``FOR UPDATE SKIP LOCKED`` and its state re-verified
+    under that lock before the claim is written, and the UPDATE repeats the
+    predicate: the check and the write are one decision made by the database,
+    so two dispatchers reading the same row cannot both believe they won.
+    `rowcount == 1` is the claim; the loser sees 0.
     """
-    from sqlalchemy import or_, update
+    from sqlalchemy import or_, select, update
+
+    from dotmac_integration.retention import REDACTION_MARKER
 
     moment = now or datetime.now(UTC)
+    # An expired lease is an ambiguous outcome, handled BEFORE the claim so a
+    # stranded row can never be taken as if it were fresh work.
+    if ambiguate_expired_delivery_leases(
+        db, now=moment, delivery_id=delivery.id, via="claim"
+    ):
+        db.refresh(delivery)
+        return False
+
+    claimable = (
+        DeliveryAttempt.id == delivery.id,
+        DeliveryAttempt.state.in_(("pending", "retryable")),
+        DeliveryAttempt.leased_until.is_(None),
+        # A retention tombstone is not a payload. Redaction now covers the
+        # replayable terminal states, so a replay racing the purge could leave
+        # a `pending` tombstone; the DATABASE refuses to dispatch it here.
+        DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None),
+        # BACKOFF. Without this the public dispatch seam claims a delivery
+        # the engine deliberately scheduled for later, and a failing
+        # provider is hammered instead of backed off — the retry curve
+        # exists and nothing honours it.
+        or_(
+            DeliveryAttempt.next_attempt_at.is_(None),
+            DeliveryAttempt.next_attempt_at <= moment,
+        ),
+    )
+    # Lock, then re-verify the state under the lock. SKIP LOCKED: a row another
+    # transaction is already claiming is simply not ours.
+    locked = db.execute(
+        select(DeliveryAttempt.id).where(*claimable).with_for_update(skip_locked=True)
+    ).scalar_one_or_none()
+    if locked is None:
+        return False
     result = db.execute(
         update(DeliveryAttempt)
-        .where(
-            DeliveryAttempt.id == delivery.id,
-            DeliveryAttempt.state.not_in(
-                ("delivered", "dead_letter", "reconciliation_required")
-            ),
-            or_(
-                DeliveryAttempt.leased_until.is_(None),
-                DeliveryAttempt.leased_until < moment,
-            ),
-            # BACKOFF. Without this the public dispatch seam claims a delivery
-            # the engine deliberately scheduled for later, and a failing
-            # provider is hammered instead of backed off — the retry curve
-            # exists and nothing honours it.
-            or_(
-                DeliveryAttempt.next_attempt_at.is_(None),
-                DeliveryAttempt.next_attempt_at <= moment,
-            ),
-        )
+        .where(*claimable)
         .values(
             state="in_flight",
             attempt_count=DeliveryAttempt.attempt_count + 1,
@@ -672,6 +781,8 @@ def record_delivery_outcome(
     delivery.provider_reference = outcome.provider_reference
     delivery.provider_status_code = outcome.provider_status_code
 
+    if delivery.state in ("delivered", "dead_letter", "reconciliation_required"):
+        delivery.terminal_at = moment
     if delivery.state == "delivered":
         delivery.delivered_at = moment
         delivery.next_attempt_at = None

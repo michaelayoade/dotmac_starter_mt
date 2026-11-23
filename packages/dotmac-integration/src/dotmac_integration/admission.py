@@ -219,10 +219,10 @@ def admit_installation(
             .where(
                 DeliveryAttempt.installation_id == installation.id,
                 DeliveryAttempt.state == "in_flight",
-                # A LIVE lease only. An expired one is stranded work waiting for
-                # `operations.release_expired_leases`, and counting it as
-                # concurrency would let one dead worker throttle an installation
-                # until someone noticed.
+                # A LIVE lease only. An expired one is stranded work that
+                # `operations.release_expired_leases` moves to reconciliation,
+                # and counting it as concurrency would let one dead worker
+                # throttle an installation until someone noticed.
                 DeliveryAttempt.leased_until.is_not(None),
                 DeliveryAttempt.leased_until >= moment,
             )
