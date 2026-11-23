@@ -46,7 +46,7 @@ from .errors import DeploymentFoundationError
 if TYPE_CHECKING:
     from .engine.run import CommandResult
     from .execution_bindings import ExecutionBindings
-    from .spec import ComposeJob, OperatorJob, ProductDeploymentSpec
+    from .spec import ComposeJob, ProductDeploymentSpec
 
 __all__ = [
     "OperatorJobAuthority",
@@ -181,6 +181,10 @@ class OperatorJobEffects(Protocol):
     def terminate_requested(self) -> bool: ...
 
     def host_uid(self, account: str) -> int | None: ...
+
+    def read_job_identity(self) -> Mapping[str, Any] | None:
+        """The parsed root-owned enrolment file, or None when it is absent."""
+        ...
 
     def stat_image_dir(
         self, image_ref: str, path: str, *, probe_name: str, dispatch_id: str
@@ -331,9 +335,16 @@ def _select_job(spec: ProductDeploymentSpec, name: str) -> ComposeJob:
 
 
 def plan_operator_job(
-    spec: ProductDeploymentSpec, resolved: Mapping[str, Any]
+    spec: ProductDeploymentSpec,
+    resolved: Mapping[str, Any],
+    identity: Mapping[str, Any] | None = None,
 ) -> OperatorJobPlan:
-    """Pure. Every refusal here happens BEFORE the dispatch is consumed."""
+    """Pure. Every refusal here happens BEFORE the dispatch is consumed.
+
+    ``identity`` is the parsed ROOT-OWNED host enrolment file (job uid, job
+    user, inputs root). It never comes from the resolve context or the agent.
+    """
+    identity = identity or {}
     if resolved.get(contract.RESOLVED_OPERATION) != contract.OPERATION_RUN_JOB:
         raise OperatorJobRefusal(
             "job_operation_refused", "the resolved operation is not run_job"
@@ -413,19 +424,20 @@ def plan_operator_job(
         raise OperatorJobRefusal("job_image_refused", "image must be present by digest")
 
     _require_declared_shape(job)
-    pinned_uid = resolved.get(contract.RESOLVED_JOB_UID)
-    job_user_name = resolved.get(contract.RESOLVED_JOB_USER_NAME, "")
+    pinned_uid = identity.get(contract.IDENTITY_JOB_UID)
+    job_user_name = identity.get(contract.IDENTITY_JOB_USER, "")
     if not isinstance(job_user_name, str):
         raise OperatorJobRefusal("job_context_invalid", "job_user shape")
     if role and (pinned_uid is None or not job_user_name):
         raise OperatorJobRefusal(
-            "job_context_invalid", "a role job needs both job_uid and job_user"
+            "job_context_invalid",
+            "a role job needs job_uid and job_user from the host identity file",
         )
     job_uid: int | None = None
     if pinned_uid is not None:
         if (
             isinstance(pinned_uid, bool)
-            or not str(pinned_uid).isdigit()
+            or not isinstance(pinned_uid, int)
             or job.security.user != f"{pinned_uid}:{pinned_uid}"
         ):
             raise OperatorJobRefusal(
@@ -450,11 +462,6 @@ def plan_operator_job(
         render_unit = contract.RENDER_UNIT_TEMPLATE.format(
             ns=namespace, role=role, set_id=material_set_id(bound)
         )
-        if resolved.get(contract.RESOLVED_RENDER_UNIT) != render_unit:
-            raise OperatorJobRefusal(
-                "job_material_set_unknown",
-                "the plan's render unit does not hash to the material set",
-            )
 
     secret_mounts = tuple(
         SecretMount(
@@ -463,7 +470,7 @@ def plan_operator_job(
         )
         for m in bound
     )
-    input_mounts = _plan_inputs(resolved, dispatched, operator, name)
+    input_mounts = _plan_inputs(identity, dispatched, name)
 
     sid = _sanitise(dispatch_id)
     return OperatorJobPlan(
@@ -524,9 +531,8 @@ def _require_declared_shape(job: ComposeJob) -> None:
 
 
 def _plan_inputs(
-    resolved: Mapping[str, Any],
+    identity: Mapping[str, Any],
     dispatched: Mapping[str, Any],
-    operator: OperatorJob,
     name: str,
 ) -> tuple[InputMount, ...]:
     raw = dispatched.get(contract.JOB_INPUTS, [])
@@ -534,10 +540,7 @@ def _plan_inputs(
         raise OperatorJobRefusal("job_input_refused", "inputs must be a list")
     if not raw:
         return ()
-    roots = resolved.get(contract.RESOLVED_PATH_MATERIALS)
-    root = (
-        roots.get(operator.inputs_root_material) if isinstance(roots, Mapping) else None
-    )
+    root = identity.get(contract.IDENTITY_INPUTS_ROOT)
     if (
         not isinstance(root, str)
         or not root.startswith("/")
@@ -733,7 +736,13 @@ def _cross_check(plan: OperatorJobPlan, effects: OperatorJobEffects) -> str | No
 def _render_check(plan: OperatorJobPlan, effects: OperatorJobEffects) -> str:
     if not plan.role:
         return ""
-    invocation = effects.environ().get(contract.ENV_RENDER_INVOCATION, "")
+    env = effects.environ()
+    if env.get(contract.ENV_RENDER_UNIT, "") != plan.render_unit:
+        raise OperatorJobRefusal(
+            "job_material_set_unknown",
+            "the agent's render unit is not the one derived from the material set",
+        )
+    invocation = env.get(contract.ENV_RENDER_INVOCATION, "")
     shown = effects.systemctl_show(plan.render_unit)
     if shown.get("Result") != "success" or shown.get("ExecMainStatus") != "0":
         raise OperatorJobRefusal("job_render_failed", "render unit did not succeed")
@@ -981,7 +990,6 @@ def cmd_run_job(args: Any) -> int:
             dispatch_material=document["dispatch_material"],
             target=target,
         )
-        plan = plan_operator_job(spec, resolved)
         from .providers.compose_operator_job import ComposeOperatorJobEffects
         from .toolchain import DEFAULT_TOOLS, resolve_tool
 
@@ -992,6 +1000,7 @@ def cmd_run_job(args: Any) -> int:
             ),
             systemctl_bin=getattr(args, "systemctl_bin", "") or "/usr/bin/systemctl",
         )
+        plan = plan_operator_job(spec, resolved, effects.read_job_identity())
         pair = OperatorJobPair(
             authorization_material_json=canonical_json(
                 document["authorization_material"]

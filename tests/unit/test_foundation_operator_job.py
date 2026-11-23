@@ -23,6 +23,7 @@ from dotmac_deployment_foundation.providers.compose_operator_job import (
 )
 
 from tests.unit.foundation_operator_job_support import (
+    IDENTITY,
     INVOCATION,
     PAIR,
     FakeAuthority,
@@ -157,14 +158,17 @@ def test_t4_env_and_render_checks(what: str, reason: str) -> None:
     assert authority.consumed == [] and "create" not in effects.calls
 
 
-def test_render_unit_must_hash_to_the_material_set() -> None:
-    resolved = make_resolved()
-    resolved[contract.RESOLVED_RENDER_UNIT] = (
+def test_render_unit_is_derived_here_and_must_equal_the_agents() -> None:
+    plan = make_plan()
+    assert plan.render_unit == "openbao-agent@appns-import-c8cd75e18839.service"
+    effects = FakeEffects(plan)
+    effects.env[contract.ENV_RENDER_UNIT] = (
         "openbao-agent@appns-import-000000000000.service"
     )
-    with pytest.raises(OperatorJobRefusal) as excinfo:
-        plan_operator_job(make_spec(), resolved)
-    assert excinfo.value.code == "job_material_set_unknown"
+    authority = FakeAuthority()
+    receipt = _run(plan, effects, authority)
+    assert receipt.reason == "job_material_set_unknown"
+    assert authority.consumed == [] and "create" not in effects.calls
 
 
 # T5, T6, T7, T8
@@ -405,11 +409,9 @@ def test_the_job_uid_must_not_reach_the_docker_group(uids, gids) -> None:
 
 
 def test_pinned_import_uid_must_equal_the_spec_user() -> None:
-    resolved = make_resolved(**{contract.RESOLVED_JOB_UID: "10001"})
-    assert plan_operator_job(make_spec(), resolved).user == "10001:10001"
-    resolved = make_resolved(**{contract.RESOLVED_JOB_UID: "10002"})
+    assert make_plan().user == "10001:10001"
     with pytest.raises(OperatorJobRefusal) as excinfo:
-        plan_operator_job(make_spec(), resolved)
+        make_plan(identity={**IDENTITY, contract.IDENTITY_JOB_UID: 10002})
     assert excinfo.value.code == "job_uid_mismatch"
 
 
@@ -614,13 +616,7 @@ def test_output_dir_must_be_the_fixed_job_out() -> None:
 
 
 def test_n_the_pinned_uid_host_account_and_out_dir_owner() -> None:
-    resolved = make_resolved(
-        **{
-            contract.RESOLVED_JOB_UID: "10001",
-            contract.RESOLVED_JOB_USER_NAME: "importer",
-        }
-    )
-    plan = make_plan(resolved)
+    plan = make_plan()
     assert plan.user == "10001:10001" and plan.job_uid == 10001
     good = FakeEffects(plan)
     assert _run(plan, good).outcome == "succeeded"
@@ -638,9 +634,8 @@ def test_n_the_pinned_uid_host_account_and_out_dir_owner() -> None:
 
 
 def test_n_a_pinned_uid_needs_the_exact_uid_uid_spec_user() -> None:
-    resolved = make_resolved(**{contract.RESOLVED_JOB_UID: "10040"})
     with pytest.raises(OperatorJobRefusal) as excinfo:
-        plan_operator_job(make_spec(), resolved)
+        make_plan(identity={**IDENTITY, contract.IDENTITY_JOB_UID: 10040})
     assert excinfo.value.code == "job_uid_mismatch"
 
 
@@ -729,14 +724,15 @@ def test_f_a_a_missing_or_unusable_lease_expiry_refuses_before_create(lease) -> 
 
 # F-B: a role job needs job_uid AND job_user; the /job/out check is unconditional
 @pytest.mark.parametrize(
-    "drop", [contract.RESOLVED_JOB_UID, contract.RESOLVED_JOB_USER_NAME]
+    "drop", [contract.IDENTITY_JOB_UID, contract.IDENTITY_JOB_USER, "*"]
 )
 def test_f_b_a_role_job_without_uid_or_user_never_plans(drop: str) -> None:
-    resolved = make_resolved()
-    del resolved[drop]
+    identity = {} if drop == "*" else {k: v for k, v in IDENTITY.items() if k != drop}
     with pytest.raises(OperatorJobRefusal) as excinfo:
-        plan_operator_job(make_spec(), resolved)
+        make_plan(identity=identity)
     assert excinfo.value.code == "job_context_invalid"
+    with pytest.raises(OperatorJobRefusal):
+        plan_operator_job(make_spec(), make_resolved(), None)
 
 
 def _roleless() -> dict:
@@ -745,18 +741,17 @@ def _roleless() -> dict:
     job[contract.JOB_ROLE] = ""
     job[contract.JOB_MATERIALS] = ["IMPORT_BATCH"]
     resolved[contract.RESOLVED_JOB_BINDING_NAMES] = ["MIGRATION_DATABASE_URL"]
-    for key in (
-        contract.RESOLVED_JOB_UID,
-        contract.RESOLVED_JOB_USER_NAME,
-        contract.RESOLVED_RENDER_UNIT,
-        contract.RESOLVED_SECRETS_NAMESPACE,
-    ):
-        resolved.pop(key)
+    resolved.pop(contract.RESOLVED_SECRETS_NAMESPACE)
     return resolved
 
 
 def test_f_b_the_out_dir_check_runs_even_without_a_pinned_uid() -> None:
-    plan = make_plan(_roleless())
+    plan = make_plan(
+        _roleless(),
+        identity={
+            contract.IDENTITY_INPUTS_ROOT: IDENTITY[contract.IDENTITY_INPUTS_ROOT]
+        },
+    )
     assert plan.job_uid is None
     good = FakeEffects(plan)
     assert _run(plan, good).outcome == "succeeded" and "stat:/job/out" in good.calls
@@ -851,3 +846,75 @@ def test_f_g_remove_job_offers_execute_and_authorization_and_lists_without_it() 
     effects = FakeEffects(plan)
     assert effects.list_dispatch_containers("disp-0001") == ("abc",)
     assert not any(c.startswith("remove") for c in effects.calls)
+
+
+# CP does not supply uid/user/render unit/path materials: the root-owned file does
+def _identity_file(tmp_path, body: str, mode: int = 0o644):
+    path = tmp_path / "job-identity.toml"
+    path.write_text(body, encoding="utf-8")
+    os.chmod(path, mode)
+    return path
+
+
+def _id_effects(path, owner=None):
+    return ComposeOperatorJobEffects(
+        docker_bin="/usr/bin/docker",
+        environ={},
+        runner=lambda *a, **k: CommandResult(0),
+        identity_path=str(path),
+        identity_owner_uid=os.geteuid() if owner is None else owner,
+    )
+
+
+def test_identity_file_is_read_when_owned_and_not_group_or_world_writable(
+    tmp_path,
+) -> None:
+    path = _identity_file(
+        tmp_path, 'job_uid = 10040\njob_user = "importer"\ninputs_root = "/srv/x"\n'
+    )
+    assert _id_effects(path).read_job_identity() == {
+        "job_uid": 10040,
+        "job_user": "importer",
+        "inputs_root": "/srv/x",
+    }
+
+
+@pytest.mark.parametrize("mode", [0o664, 0o646, 0o666])
+def test_identity_file_writable_by_group_or_other_is_refused(tmp_path, mode) -> None:
+    path = _identity_file(tmp_path, "job_uid = 1\n", mode)
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        _id_effects(path).read_job_identity()
+    assert excinfo.value.code == "job_identity_invalid"
+
+
+def test_identity_file_with_the_wrong_owner_symlink_or_toml_is_refused(
+    tmp_path,
+) -> None:
+    path = _identity_file(tmp_path, "job_uid = 1\n")
+    with pytest.raises(OperatorJobRefusal):
+        _id_effects(path, owner=os.geteuid() + 1).read_job_identity()
+    link = tmp_path / "link.toml"
+    link.symlink_to(path)
+    with pytest.raises(OperatorJobRefusal):
+        _id_effects(link).read_job_identity()
+    with pytest.raises(OperatorJobRefusal):
+        _id_effects(_identity_file(tmp_path, "not = [toml")).read_job_identity()
+
+
+def test_an_absent_identity_file_is_none_and_the_default_path_is_the_constant() -> None:
+    assert _id_effects(tmp_path_missing()).read_job_identity() is None
+    assert contract.JOB_IDENTITY_PATH == "/etc/dotmac/deploy-agent/job-identity.toml"
+
+
+def tmp_path_missing() -> str:
+    return "/nonexistent-dir-for-test/job-identity.toml"
+
+
+def test_input_host_paths_come_from_the_identity_inputs_root_not_cp() -> None:
+    plan = make_plan()
+    assert plan.input_mounts[0].source == (
+        "/srv/example/job-work/import_execute/in/manifest.json"
+    )
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        make_plan(identity={k: v for k, v in IDENTITY.items() if k != "inputs_root"})
+    assert excinfo.value.code == "job_input_refused"

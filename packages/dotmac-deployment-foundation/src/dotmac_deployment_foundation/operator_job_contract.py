@@ -33,14 +33,6 @@ RESOLVED_DISPATCHED_JOB: Final = "dispatched_job"
 RESOLVED_IMAGE: Final = "image"
 RESOLVED_JOB_BINDING_NAMES: Final = "job_binding_names"
 RESOLVED_SECRETS_NAMESPACE: Final = "secrets_namespace"
-RESOLVED_RENDER_UNIT: Final = "render_unit"
-RESOLVED_PATH_MATERIALS: Final = "path_materials"
-#: The pinned job uid (P-SEC R6-3, an ERP product constant). REQUIRED when the
-#: job has a role: the spec user must be exactly `uid:uid`.
-RESOLVED_JOB_UID: Final = "job_uid"
-#: The host account whose uid must equal the pinned uid (P-SEC rev7 (n)).
-#: REQUIRED when the job has a role.
-RESOLVED_JOB_USER_NAME: Final = "job_user"
 
 # ── PROVISIONAL: Control v2 ``dispatched_job`` ──────────────────────────────
 JOB_NAME: Final = "name"
@@ -71,6 +63,9 @@ ENV_SECRET_FILES: Final = "DOTMAC_DEPLOY_JOB_SECRET_FILES"
 ENV_RENDER_INVOCATION: Final = "DOTMAC_DEPLOY_JOB_RENDER_INVOCATION"
 #: Absolute deadline, epoch seconds (P-SEC R6-1). Optional.
 ENV_DEADLINE: Final = "DOTMAC_DEPLOY_JOB_DEADLINE"
+#: The render unit name the agent started; must equal the one Foundation derives
+#: from secrets_namespace, role and materials. Required when a role is set.
+ENV_RENDER_UNIT: Final = "DOTMAC_DEPLOY_JOB_RENDER_UNIT"
 
 #: PROVISIONAL (agent #1143 JOB_ONLY_NAMES): never in the params env or the
 #: container environment, whatever the resolved context says.
@@ -88,6 +83,14 @@ CONSUME_CONFLICT_CODE: Final = "already_consumed"
 #: (epoch seconds) learned at consume (P-SEC rev7.1 R7-2). Absent refuses.
 CONSUME_LEASE_EXPIRES: Final = "lease_expires_at"
 
+# ── PROVISIONAL: the host-side, ROOT-OWNED enrolment file (never CP, never env) ─
+#: Holds the job uid/user (RULING-agent-contract R2: the uid is never a
+#: dispatch field) and the host root of the per-job input directories.
+JOB_IDENTITY_PATH: Final = "/etc/dotmac/deploy-agent/job-identity.toml"
+IDENTITY_JOB_UID: Final = "job_uid"
+IDENTITY_JOB_USER: Final = "job_user"
+IDENTITY_INPUTS_ROOT: Final = "inputs_root"
+
 # ── PROVISIONAL: P-SEC render unit naming ───────────────────────────────────
 RENDER_UNIT_TEMPLATE: Final = "openbao-agent@{ns}-{role}-{set_id}.service"
 SECRETS_DIR_TEMPLATE: Final = "/run/dotmac/{ns}/{role}/secrets"
@@ -100,8 +103,6 @@ PROVISIONAL_KEYS: Final[tuple[str, ...]] = (
     "RESOLVED_IMAGE",
     "RESOLVED_JOB_BINDING_NAMES",
     "RESOLVED_SECRETS_NAMESPACE",
-    "RESOLVED_RENDER_UNIT",
-    "RESOLVED_PATH_MATERIALS",
     "JOB_NAME",
     "JOB_ARGV",
     "JOB_ROLE",
@@ -125,8 +126,11 @@ PROVISIONAL_KEYS: Final[tuple[str, ...]] = (
     "ENV_SECRET_FILES",
     "ENV_RENDER_INVOCATION",
     "ENV_DEADLINE",
-    "RESOLVED_JOB_UID",
-    "RESOLVED_JOB_USER_NAME",
+    "ENV_RENDER_UNIT",
+    "JOB_IDENTITY_PATH",
+    "IDENTITY_JOB_UID",
+    "IDENTITY_JOB_USER",
+    "IDENTITY_INPUTS_ROOT",
     "CONSUME_LEASE_EXPIRES",
     "JOB_ONLY_NAMES",
     "PROVIDER_RESOLVE_METHOD",

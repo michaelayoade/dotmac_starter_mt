@@ -28,6 +28,7 @@ import subprocess  # nosec B404 -- argv lists, shell=False
 import tarfile
 import threading
 import time
+import tomllib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -57,6 +58,7 @@ POLL_SECONDS: Final = 0.5
 INTERRUPT_STOP_SECONDS: Final = 20
 TRAPPED_SIGNALS: Final = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 MAX_DIR_TAR_BYTES: Final = 4 * 1024 * 1024
+MAX_IDENTITY_BYTES: Final = 64 * 1024
 MAX_PARAMS_ENV_BYTES: Final = 1024 * 1024
 _FORBIDDEN_MOUNT_CHARS = (",", '"', "'", "\n", "\r", "=")
 
@@ -280,6 +282,8 @@ class ComposeOperatorJobEffects:
         environ: Mapping[str, str] | None = None,
         command_timeout_seconds: int = 120,
         monotonic: Callable[[], float] = time.monotonic,
+        identity_path: str = contract.JOB_IDENTITY_PATH,
+        identity_owner_uid: int = 0,
     ) -> None:
         self._docker = require_absolute_tool(docker_bin, what="docker_bin")
         self._systemctl = require_absolute_tool(systemctl_bin, what="systemctl_bin")
@@ -288,6 +292,8 @@ class ComposeOperatorJobEffects:
         self._environ = dict(os.environ if environ is None else environ)
         self._timeout = command_timeout_seconds
         self._monotonic = monotonic
+        self._identity_path = identity_path
+        self._identity_owner_uid = identity_owner_uid
         self._terminated = threading.Event()
 
     def _docker_run(self, *args: str) -> CommandResult:
@@ -463,6 +469,46 @@ class ComposeOperatorJobEffects:
         return WaitResult(
             None, reason == "timeout", interrupted=reason == "interrupted"
         )
+
+    def read_job_identity(self) -> Mapping[str, Any] | None:
+        """The root-owned enrolment file: never CP, never the agent's env.
+
+        Refused unless a regular, non-symlink file owned by root and not
+        writable by group or other. Absent returns None (a role job then
+        refuses at plan time).
+        """
+        try:
+            fd = os.open(
+                self._identity_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise OperatorJobRefusal(
+                "job_identity_invalid", "cannot open the job identity file"
+            ) from exc
+        try:
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != self._identity_owner_uid
+                or info.st_mode & 0o022
+                or info.st_size > MAX_IDENTITY_BYTES
+            ):
+                raise OperatorJobRefusal(
+                    "job_identity_invalid",
+                    "the job identity file must be a regular root-owned file, "
+                    "not group- or world-writable",
+                )
+            data = os.read(fd, MAX_IDENTITY_BYTES + 1)
+        finally:
+            os.close(fd)
+        try:
+            return tomllib.loads(data.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise OperatorJobRefusal(
+                "job_identity_invalid", "the job identity file is not valid TOML"
+            ) from exc
 
     def host_uid(self, account: str) -> int | None:
         try:

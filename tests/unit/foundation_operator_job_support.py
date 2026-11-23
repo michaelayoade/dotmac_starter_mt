@@ -17,7 +17,6 @@ from dotmac_deployment_foundation.operator_job import (
     OperatorJobPlan,
     RunJobConsumptionRequest,
     WaitResult,
-    material_set_id,
     plan_operator_job,
 )
 from dotmac_deployment_foundation.providers.compose_operator_job import (
@@ -53,6 +52,11 @@ INPUTS_ROOT = "/srv/example/job-work"
 INVOCATION = "a" * 32
 BOUND = ("MIGRATION_DATABASE_URL",)
 NOW_EPOCH = int(datetime(2026, 11, 23, tzinfo=UTC).timestamp())
+IDENTITY = {
+    contract.IDENTITY_JOB_UID: 10001,
+    contract.IDENTITY_JOB_USER: "importer",
+    contract.IDENTITY_INPUTS_ROOT: INPUTS_ROOT,
+}
 ARGV = ["python", "-m", "importer", "execute", "--manifest", "/job/in/manifest.json"]
 
 
@@ -61,9 +65,6 @@ def make_spec(job_toml: str = JOB_TOML) -> ProductDeploymentSpec:
 
 
 def make_resolved(**overrides: Any) -> dict[str, Any]:
-    unit = contract.RENDER_UNIT_TEMPLATE.format(
-        ns="appns", role="import", set_id=material_set_id(BOUND)
-    )
     resolved: dict[str, Any] = {
         contract.RESOLVED_OPERATION: contract.OPERATION_RUN_JOB,
         contract.RESOLVED_DISPATCH_ID: "disp-0001",
@@ -92,17 +93,16 @@ def make_resolved(**overrides: Any) -> dict[str, Any]:
             "MIGRATION_DATABASE_URL",
         ],
         contract.RESOLVED_SECRETS_NAMESPACE: "appns",
-        contract.RESOLVED_RENDER_UNIT: unit,
-        contract.RESOLVED_PATH_MATERIALS: {"JOB_INPUTS_ROOT": INPUTS_ROOT},
-        contract.RESOLVED_JOB_UID: "10001",
-        contract.RESOLVED_JOB_USER_NAME: "importer",
     }
     resolved.update(overrides)
     return resolved
 
 
-def make_plan(resolved: Mapping[str, Any] | None = None) -> OperatorJobPlan:
-    return plan_operator_job(make_spec(), resolved or make_resolved())
+def make_plan(
+    resolved: Mapping[str, Any] | None = None,
+    identity: Mapping[str, Any] | None = IDENTITY,
+) -> OperatorJobPlan:
+    return plan_operator_job(make_spec(), resolved or make_resolved(), identity)
 
 
 def good_env(plan: OperatorJobPlan) -> dict[str, str]:
@@ -116,6 +116,7 @@ def good_env(plan: OperatorJobPlan) -> dict[str, str]:
         contract.ENV_SECRET_FILES: ",".join(plan.secret_files),
         contract.ENV_RENDER_INVOCATION: INVOCATION,
         contract.ENV_DEADLINE: str(NOW_EPOCH + 3600),
+        contract.ENV_RENDER_UNIT: plan.render_unit,
     }
 
 
@@ -310,6 +311,9 @@ class FakeEffects:
         self.removed.append(name)
         self.removed_for.append(dispatch_id)
         return True
+
+    def read_job_identity(self) -> Mapping[str, Any] | None:
+        return dict(IDENTITY)
 
     def host_uid(self, account: str) -> int | None:
         return self.accounts.get(account)
