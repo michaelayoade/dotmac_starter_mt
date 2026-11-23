@@ -157,7 +157,14 @@ def _cli_args(w: World, path: pathlib.Path, **changes: str) -> list[str]:
         "--refresh-digest": hashlib.sha256(data).hexdigest(),
     }
     values.update(changes)
-    return ["check-admission", *[x for pair in values.items() for x in pair]]
+    argv = ["check-admission"]
+    for flag, value in values.items():
+        if flag == "--presentation-public-key":
+            # base64url may start with "-"; a separate token would parse as an option.
+            argv.append(f"{flag}={value}")
+        else:
+            argv.extend([flag, value])
+    return argv
 
 
 def test_cli_reports_claimed_provenance_and_no_key_material(
@@ -198,6 +205,33 @@ def test_cli_refuses_with_a_stable_code(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.strip() == code
+
+
+def _dash_led_presentation_key(world: World) -> None:  # noqa: F811
+    """Re-key the world with a presentation key whose base64url starts with '-'."""
+    for _ in range(10_000):
+        key = Ed25519PrivateKey.generate()
+        public = b64url(public_raw(key))
+        if public.startswith("-"):
+            break
+    else:
+        pytest.fail("no base64url public key starting with '-' was generated")
+    world.pres_key = key
+    world.pres_pub = public
+    world.resign_admission()
+
+
+def test_a_dash_led_presentation_key_gets_past_argument_parsing(
+    world: World,  # noqa: F811
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _dash_led_presentation_key(world)
+    assert world.pres_pub.startswith("-")
+    assert cli.main(_cli_args(world, tmp_path / "ha.json")) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out)["result"] == "ok"
 
 
 def test_cli_refuses_a_relative_path_and_a_symlink(
