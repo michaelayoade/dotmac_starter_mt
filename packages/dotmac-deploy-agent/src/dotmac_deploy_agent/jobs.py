@@ -420,7 +420,7 @@ def check_job_inputs(
                 raise Refusal("job_input_mismatch")
             hasher = hashlib.sha256()
             with os.fdopen(descriptor, "rb", closefd=False) as stream:
-                for chunk in iter(lambda stream=stream: stream.read(1 << 20), b""):
+                while chunk := stream.read(1 << 20):
                     hasher.update(chunk)
         finally:
             os.close(descriptor)

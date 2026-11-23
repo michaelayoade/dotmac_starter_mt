@@ -101,7 +101,7 @@ def test_every_ok_observation_is_reproduced_byte_for_byte_and_signature_for_sign
             == f"agent:{statement['kind']}:{statement['dispatch_id']}{suffix}"
         )
         public_key(ao["key"]).verify(
-            wire.decode_b64url(vector["signature_b64u"]) or b"",
+            wire.decode_b64url(vector["signature_b64u"], length=64) or b"",
             bytes.fromhex(vector["signed_bytes_hex"]),
         )  # type: ignore[index]
 
@@ -134,7 +134,7 @@ def test_a_statement_changed_after_signing_or_signed_under_another_key_id_does_n
     ao = load()["agent_observation"]
     for vector in ao["refused_verify"]:  # type: ignore[index]
         wire_doc = json.loads(vector["wire_utf8"])
-        signature = wire.decode_b64url(wire_doc["signature"]) or b""
+        signature = wire.decode_b64url(wire_doc["signature"], length=64) or b""
         if vector["name"] == "a statement changed after signing":
             with pytest.raises(InvalidSignature):
                 public_key(ao["key"]).verify(
@@ -188,7 +188,7 @@ def test_the_observation_and_request_byte_domains_never_parse_or_verify_as_each_
         wire.REQUEST_PURPOSE.encode()
     )
     wire_doc = json.loads(ds["observation_wire_utf8"])  # type: ignore[index]
-    signature = wire.decode_b64url(wire_doc["signature"]) or b""
+    signature = wire.decode_b64url(wire_doc["signature"], length=64) or b""
     key.verify(signature, observed)
     with pytest.raises(InvalidSignature):
         key.verify(signature, request)
@@ -235,7 +235,18 @@ def test_the_binding_examples_pass_the_agents_own_checks_and_the_job_render_is_r
 
 def test_every_refused_binding_is_refused_by_the_agent() -> None:
     refused = load()["binding"]["refused"]  # type: ignore[index]
-    assert len(refused) == 19
+    # every refused vector Control publishes, however many: never a pinned count
+    assert len(refused) >= 27
+    assert {"job_inputs", "job_shape", "lease_split", "naming_required"} <= {
+        item["code"] for item in refused
+    }
     for item in refused:
         with pytest.raises(Refusal):
             check_plan_binding(item["snapshot"]["deploy_binding"], item["operation"])
+
+
+def test_details_depth_counts_containers_not_scalars_like_control() -> None:
+    nested = {"a": [{"b": ["leaf"]}]}  # dict(1) > list(2) > dict(3) > list(4) > scalar
+    assert o2.shaped_details(nested) == nested
+    too_deep = {"a": [{"b": [["x"]]}]}  # a list at depth 5
+    assert o2.shaped_details(too_deep) == {"details_dropped": "shape"}

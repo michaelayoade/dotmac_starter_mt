@@ -835,9 +835,12 @@ def test_the_job_environment_names_for_foundation() -> None:
             "d", "erp/staging/h", "erp", "sha256:" + "a" * 64, Path("/p"), None,
             job_name="import", job_params_env=Path("/j"), job_secrets_dir=Path("/s"),
             job_argv_digest="sha256:" + "b" * 64, job_secret_files=("a", "b"),
+            job_deadline=1_800_000_000, job_render_invocation="a1" * 16,
         )
     )  # fmt: skip
     assert {k for k in env if k.startswith("DOTMAC_DEPLOY_JOB")} == {
+        "DOTMAC_DEPLOY_JOB_DEADLINE",
+        "DOTMAC_DEPLOY_JOB_RENDER_INVOCATION",
         "DOTMAC_DEPLOY_JOB",
         "DOTMAC_DEPLOY_JOB_PARAMS_ENV",
         "DOTMAC_DEPLOY_JOB_SECRETS_DIR",
@@ -895,7 +898,8 @@ def test_target_api_v2_posts_a_pop_signed_envelope_for_a_job_refusal(
     )
     key = rig.keys.agent.public_key()
     key.verify(
-        wire.decode_b64url(envelope["signature"]) or b"", o2.signed_bytes(statement)
+        wire.decode_b64url(envelope["signature"], length=64) or b"",
+        o2.signed_bytes(statement),
     )
     assert rig.launcher.outbox.pending() == []  # acknowledged
 
@@ -1372,9 +1376,11 @@ def test_n5_the_systemd_steps_carry_timeouts_that_leave_room_for_openbao() -> No
     from dotmac_deploy_agent import job_delivery as jd
     from dotmac_deploy_agent.jobs import LEASE_MARGIN
 
-    assert (
-        jd.SYSTEMD_BUDGET_SECONDS
-        == jd.RENDER_START_TIMEOUT + jd.SHOW_TIMEOUT + 2 * jd.PURGE_START_TIMEOUT
+    assert jd.SYSTEMD_BUDGET_SECONDS == (
+        jd.LOADED_TIMEOUT
+        + jd.RENDER_START_TIMEOUT
+        + jd.SHOW_TIMEOUT
+        + 2 * jd.PURGE_START_TIMEOUT
     )
     assert jd.SYSTEMD_BUDGET_SECONDS <= LEASE_MARGIN - 40  # about eight OpenBao calls
 
@@ -1552,7 +1558,7 @@ def test_a_purge_instance_without_its_dropin_fails_closed() -> None:
     live = [
         ln.strip() for ln in base.splitlines() if ln.strip() and not ln.startswith("#")
     ]
-    assert [ln for ln in live if ln.startswith("ExecStart")] == [
+    assert [ln for ln in live if ln.startswith("ExecStart=")] == [
         "ExecStart=/usr/bin/false"
     ]
     assert "User=dotmac-secrets-unenrolled" in live  # a user that does not exist
@@ -1693,7 +1699,10 @@ def test_r61_an_unreadable_container_listing_is_treated_as_an_orphan(
 def test_r61_a_job_that_never_started_needs_no_container_proof(tmp_path: Path) -> None:
     rig = job_rig(tmp_path, job_roles=())
     assert refused(rig) == ("refused", "job_role_refused")
-    assert ps_filter(rig) == []
+    # the agent-start preflight lists containers; no dispatch's own proof is asked for
+    assert [
+        c for c in ps_filter(rig) if "label=dotmac.dispatch_id=dispatch-1" in c
+    ] == []
 
 
 def preflight_calls(rig: Rig) -> list[tuple[str, ...]]:
@@ -1711,7 +1720,16 @@ def test_rev7_the_preflight_lists_stopped_containers_carrying_both_job_labels(
 
     rig = job_rig(tmp_path)
     assert refused(rig) == ("completed", None)
-    [call] = preflight_calls(rig)
+    calls = preflight_calls(rig)
+    assert len(calls) == 2  # at agent start, and again before the lease
+    for call in calls:
+        assert "-a" in call  # stopped ones included
+        assert call.count("--filter") == 2
+        assert (
+            f"label={JOB_DISPATCH_LABEL}" in call
+            and f"label={JOB_MARKER_LABEL}" in call
+        )
+    call = calls[-1]
     assert "-a" in call  # stopped ones included
     assert call.count("--filter") == 2
     assert f"label={JOB_DISPATCH_LABEL}" in call and f"label={JOB_MARKER_LABEL}" in call
@@ -2126,6 +2144,7 @@ def test_fh_the_capture_file_lives_in_the_agents_own_run_directory(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)  # the run directory exists once it ran
     run = rig.config.deploy_run_dir
     assert str(run).startswith(str(rig.config.runtime_root))  # its RuntimeDirectory
     assert not str(run).startswith(str(rig.config.secrets_root))  # never /run/dotmac
