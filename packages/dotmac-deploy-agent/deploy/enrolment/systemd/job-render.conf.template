@@ -1,4 +1,6 @@
-# /etc/systemd/system/openbao-agent@@SECRETS_NAMESPACE@-@ROLE@.service.d/job-render.conf
+# /etc/systemd/system/openbao-agent@@SECRETS_NAMESPACE@-@ROLE@-@S12@.service.d/job-render.conf
+# PER MATERIAL SET (S12 = first 12 hex of sha256 of the compact JSON of the sorted
+# lower-case names; see s12-vectors.json). Job instances are never enabled.
 # JOB ROLES ONLY: render once and exit. The authored HCL sets exit_after_auth and
 # no meta/render file. The agent reads Result=success and ExecMainStatus=0 from
 # `systemctl show` as the render-and-login signal.
@@ -9,6 +11,8 @@ Description=Render job secrets materials=@DECLARED_CSV@
 
 [Service]
 Type=oneshot
+# The render refuses to run unless secrets/ is empty (the purge unit emptied it).
+ExecStartPre=/bin/sh -c 'test -z "$(ls -A /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets)"'
 Restart=no
 RemainAfterExit=no
 # The file set is checked INSIDE the unit, as the container uid (User= comes from
