@@ -457,6 +457,7 @@ class FakeBaoTransport:
         self.fail_lookup = False
         self.lookup_path: str | None = None
         self.fail_destroy = False
+        self.deny_mint: str | None = None  # a substring of the mint path to 403
         self.revoked = False
 
     def request(
@@ -476,6 +477,8 @@ class FakeBaoTransport:
         if path.endswith("/secret-id") and "/role/" in path:
             assert headers["X-Vault-Token"] == self.TOKEN
             assert headers["X-Vault-Wrap-TTL"]
+            if self.deny_mint and self.deny_mint in path:
+                return Response(403, {}, b"{}")
             assert set(payload) <= {"metadata", "ttl", "num_uses"}
             self.counter += 1
             wrap = f"wrap-{self.counter}"

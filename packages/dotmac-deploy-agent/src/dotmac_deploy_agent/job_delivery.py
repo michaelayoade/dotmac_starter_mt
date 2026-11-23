@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import stat
+from pathlib import Path
 from typing import Final
 
 from .commands import Commands
@@ -50,18 +51,26 @@ def deliver_job_secret_id(
     if state.retire:
         # A previous run's accessor is still live: one job at a time, never stack.
         raise Refusal("secret_delivery_failed")
-    wrapping = session.mint_wrapped(
-        secrets_namespace=ns,
-        secrets_environment=env,
-        role=role,
-        single_use=True,
-        ttl_seconds=0,  # unused: a job mint sends metadata only
-        wrap_ttl_seconds=config.wrap_ttl_seconds,
-        dispatch_id=dispatch_id,
-        job=True,
-    )
-    session.require_creation_path(wrapping, mint_path(ns, env, role))
-    secret_id, accessor = session.unwrap(wrapping)
+    try:
+        wrapping = session.mint_wrapped(
+            secrets_namespace=ns,
+            secrets_environment=env,
+            role=role,
+            single_use=True,
+            ttl_seconds=0,  # unused: a job mint sends metadata only
+            wrap_ttl_seconds=config.wrap_ttl_seconds,
+            dispatch_id=dispatch_id,
+            job=True,
+        )
+        session.require_creation_path(wrapping, mint_path(ns, env, role))
+        secret_id, accessor = session.unwrap(wrapping)
+    except Refusal as refusal:
+        if refusal.code == "secret_delivery_failed":
+            # A refusal (403 or otherwise) of a JOB mint is never a delivery-identity
+            # fault: it fails this job only. The serving roles, their files and
+            # their accessors are untouched, and nothing is purged because of it.
+            raise Refusal("job_mint_refused") from None
+        raise  # the wrapping alarms keep their own codes
     if accessor is None:
         raise Refusal("secret_delivery_failed")  # untrackable: never write it
     state.retire.append(accessor)
@@ -78,17 +87,22 @@ def purge_job_role(
     session: OpenBaoSession | None,
     rendered: tuple[str, ...] = (),
 ) -> int:
-    """Remove the `secret_id` and the named rendered files, then destroy every
-    tracked accessor (a no-op once consumed, a kill if not). Files go even when
-    OpenBao is down; an accessor that cannot be destroyed stays tracked."""
+    """Remove every file in the job role's directory (the `secret_id`, the named
+    rendered files and anything else rendered there), then destroy every tracked
+    accessor (a no-op once consumed, a kill if not). Files go even when OpenBao is
+    down; an accessor that cannot be destroyed stays tracked."""
     role_dir = config.role_dir(role)
-    for name in (SECRET_ID_FILE, *rendered):
+    for name in rendered:
         if not _FILENAME.fullmatch(name):
             raise Refusal("runtime_dir_unsafe")  # never a path
-        try:
-            remove_file(role_dir / name)
-        except OSError:
-            raise Refusal("runtime_dir_unsafe") from None  # not ours to remove
+    try:
+        for entry in os.scandir(role_dir):
+            if not entry.is_dir(follow_symlinks=False):
+                remove_file(Path(entry.path))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        raise Refusal("runtime_dir_unsafe") from None  # not ours to remove
     state = store.load(role)
     if session is None:
         return len(state.retire)
@@ -117,6 +131,21 @@ def render_job_credentials(
         raise Refusal("job_files_invalid")
     uid = config.job_secrets_uid if config.job_secrets_uid is not None else os.geteuid()
     role_dir = config.role_dir(role)
+    declared = {material.lower() for material in names}
+    removed: list[str] = []
+    try:
+        for entry in os.scandir(role_dir):
+            # M2: the authored config renders every path its role reads. Only the
+            # dispatched job's declared materials may be mounted: remove the rest
+            # (an owner-only job never sees the LEGACY file).
+            # The secret_id is spent by the one login, so it goes too.
+            if entry.name not in declared:
+                if entry.is_dir(follow_symlinks=False):
+                    raise Refusal("job_files_invalid")
+                remove_file(Path(entry.path))
+                removed.append(entry.name)
+    except OSError:
+        raise Refusal("job_files_invalid") from None
     verified: list[str] = []
     for material in names:
         name = material.lower()
@@ -133,4 +162,6 @@ def render_job_credentials(
         ):
             raise Refusal("job_files_invalid")
         verified.append(name)
+    if removed:
+        LOG.info("job role dir narrowed role=%s removed=%d", role, len(removed))
     return tuple(verified)

@@ -89,9 +89,10 @@ def plan_jobs(snapshot: Mapping[str, object]) -> tuple[JobSpec, ...]:
 
 
 RUN_JOB: Final = "run_job"
-MAX_JOB_TIMEOUT: Final = 780  # 900 s lease cap minus the 120 s margin
 LEASE_MARGIN: Final = 120
-MAX_JOB_LEASE: Final = 900
+#: The plan's lease is capped by Control (per-target setting, at most 3600 s) and
+#: the agent re-checks that cap at parse; a job must fit INSIDE the plan's lease.
+MAX_JOB_TIMEOUT: Final = 3600 - LEASE_MARGIN
 _DISPATCHED_KEYS: Final = _JOB_KEYS | {"argv", "timeout_seconds", "window"}
 
 
@@ -164,7 +165,7 @@ def check_job_admissible(
             raise Refusal("job_role_refused")
         if job.closes_at is None or store_now >= job.closes_at:
             raise Refusal("job_window_closed")
-    if not job.timeout_seconds + LEASE_MARGIN <= lease_ttl_seconds <= MAX_JOB_LEASE:
+    if job.timeout_seconds + LEASE_MARGIN > lease_ttl_seconds:
         raise Refusal("lease_ttl_invalid")  # never extended: the plan must fit
 
 

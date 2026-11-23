@@ -500,13 +500,13 @@ def test_a_second_role_job_on_the_host_is_refused_while_the_lock_is_held(
             },
             "job_window_closed",
         ),
-        ({"job": dispatched(timeout_seconds=781)}, "materials_invalid"),
+        ({"job": dispatched(timeout_seconds=3481)}, "materials_invalid"),
         (
             {"job": dispatched(timeout_seconds=600), "lease_ttl_seconds": 719},
             "lease_ttl_invalid",
         ),
         (
-            {"job": dispatched(timeout_seconds=600), "lease_ttl_seconds": 901},
+            {"job": dispatched(timeout_seconds=1800), "lease_ttl_seconds": 1919},
             "lease_ttl_invalid",
         ),
         ({"job": dispatched(role=None, single_use=None)}, "materials_invalid"),
@@ -636,3 +636,65 @@ def test_job_roles_config_is_validated(tmp_path: Path) -> None:
         with pytest.raises(Refusal):
             make_config(tmp_path, Keys(), job_roles=bad)
     assert make_config(tmp_path, Keys()).job_roles == ()  # empty by default
+
+
+def test_a_lease_longer_than_900_is_accepted_when_the_job_fits_inside_it(
+    tmp_path: Path,
+) -> None:
+    rig = run_job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(timeout_seconds=1800), lease_ttl_seconds=3000
+    )
+    assert refused(rig) == ("completed", None)
+    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 3000  # type: ignore[index]
+
+
+def test_only_the_declared_materials_are_left_for_the_job_to_mount(
+    tmp_path: Path,
+) -> None:
+    """An owner-only job declares MIGRATION only: the LEGACY file the role's
+    authored config also rendered is removed before the job starts."""
+    rig = run_job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(materials=["MIGRATION_DATABASE_URL"])
+    )
+    seen: dict[str, list[str]] = {}
+
+    def effect(spec) -> None:  # type: ignore[no-untyped-def]
+        seen["files"] = sorted(p.name for p in spec.job_secrets_dir.iterdir())
+
+    rig.runner.effect = effect
+    assert refused(rig) == ("completed", None)
+    assert seen["files"] == ["migration_database_url"]
+    assert receipt(rig)["files"] == ["migration_database_url"]
+
+
+def test_a_refused_job_mint_fails_that_job_only_and_touches_no_serving_role(
+    tmp_path: Path,
+) -> None:
+    from tests.unit.test_deploy_agent_delivery import WEB, secret_id_file, state
+
+    rig = make_rig(tmp_path, job_roles=("import",))
+    prepare_role(rig, "web")
+    prepare_role(rig, "import")
+    rig.cp.materials = make_materials(roles=WEB)
+    assert rig.launcher.run_once().outcome == "completed"  # a delivered serving role
+    served_file = secret_id_file(rig, "web").read_bytes()
+    served_state = state(rig, "web")
+    rig.bao.requests.clear()
+    rig.bao.deny_mint = "erp-staging-import"  # OpenBao 403s the JOB mint
+    rig.cp.materials = make_materials(
+        dispatched_job=dispatched(),
+        params=[*BASE_ROWS, GATE_ROW],
+        statement={"operation": "run_job"},
+        dispatch_id="dispatch-2",
+    )
+    for name in ("legacy_database_url", "migration_database_url"):
+        (rig.config.role_dir("import") / name).write_text("x")
+        (rig.config.role_dir("import") / name).chmod(0o400)
+    assert refused(rig) == ("refused", "job_mint_refused")  # not a delivery fault
+    assert len(rig.runner.specs) == 1  # only the serving run ever started
+    assert secret_id_file(rig, "web").read_bytes() == served_file
+    assert state(rig, "web") == served_state
+    assert not any("-web" in r[1] for r in rig.bao.requests)  # nothing of web touched
+    assert list(rig.config.role_dir("import").iterdir()) == []  # job files purged
