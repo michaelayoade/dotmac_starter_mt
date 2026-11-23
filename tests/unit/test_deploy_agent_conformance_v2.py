@@ -30,10 +30,10 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v2.json"
-#: Control a18 `contract/target_api_v2.json` (branch control-a18-20261122 at 5c6cbcb,
-#: 203082 bytes). A new Control sha replaces this value and the vendored bytes together.
+#: Control a18 `contract/target_api_v2.json` (branch control-a18-20261122 at be74634,
+#: 223166 bytes). A new Control sha replaces this value and the vendored bytes together.
 TARGET_API_V2_SHA256 = (
-    "6d3f0b1b536c8a9a2306cc72e2a3c6dea83d4d6604c3499f5c7f8a9eaf54d382"
+    "0fe9c6be1b49af5fb4b9267bce51dfaccc016e83b1c5dd8b2332916f698d834d"
 )
 
 

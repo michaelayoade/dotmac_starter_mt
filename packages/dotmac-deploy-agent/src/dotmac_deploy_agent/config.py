@@ -129,6 +129,8 @@ class AgentConfig:
     #: `dispatched_job.role` that is not listed is refused. Empty by default, so
     #: every role job is refused until enrolment names one.
     job_roles: tuple[str, ...] = ()
+    #: Host root of job inputs and outputs (`<root>/<job>/in|out`); root-owned config.
+    job_work_root: Path | None = None
     #: The target-API generation the agent speaks. 1 (default) posts today's
     #: unsigned `dotmac.deploy_observation/1`. 2 is the PoP-signed observation
     #: envelope of Control's `target_api_v2.json` (vendored beside v1). The default
@@ -278,6 +280,8 @@ class AgentConfig:
             set(self.job_roles)
         ) != len(self.job_roles):
             raise Refusal("config_invalid")
+        if self.job_work_root is not None and not self.job_work_root.is_absolute():
+            raise Refusal("config_invalid")
         if self.target_api_version not in (1, 2):
             raise Refusal("config_invalid")
         if not 30 <= self.poll_seconds <= 60:
@@ -319,7 +323,7 @@ class AgentConfig:
             "runtime_secret_id_ttl_seconds", "migrate_secret_id_ttl_seconds",
             "wrap_ttl_seconds", "secrets_namespace", "secrets_environment",
             "secrets_root", "dispatch_max_age_seconds", "settle_seconds", "job_roles",
-            "target_api_version",
+            "target_api_version", "job_work_root",
         }  # fmt: skip
         if not set(values) <= known:
             raise Refusal("config_invalid")
@@ -378,6 +382,8 @@ class AgentConfig:
             if type(version) is not int:
                 raise Refusal("config_invalid")
             extra["target_api_version"] = version
+        if "job_work_root" in values:
+            extra["job_work_root"] = Path(text("job_work_root"))
         if "job_roles" in values:
             extra["job_roles"] = texts("job_roles")
         return cls(

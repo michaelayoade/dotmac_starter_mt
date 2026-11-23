@@ -47,9 +47,12 @@ _DISPATCHED_KEYS: Final = frozenset(
 )  # fmt: skip
 #: Added by Control's next v2 (P-SEC rev5 RQ-2, RQ-3). Optional until the vendored
 #: contract carries them; once it does, the agent requires them.
-_DISPATCHED_OPTIONAL: Final = frozenset({"input_digests", "apply_class"})
+_DISPATCHED_OPTIONAL: Final = frozenset({"inputs", "apply_class"})
 #: The closed list of apply-mode argv tokens (RQ-3). A token not here is not apply.
 APPLY_ARGV_TOKENS: Final = frozenset({"--apply"})
+_JOB_IN: Final = re.compile(r"/job/in/[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_JOB_OUT: Final = re.compile(r"/job/out/[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_FLAG: Final = re.compile(r"--[a-z][a-z0-9-]*")
 _SHA256: Final = re.compile(r"sha256:[0-9a-f]{64}")
 
 
@@ -61,6 +64,23 @@ class JobDefinition:
     role: str | None
     materials: tuple[str, ...]
     params: tuple[str, ...]
+    #: Flags of this job's closed arg list that Control marks `apply_mode` (RQ-3).
+    apply_flags: tuple[str, ...] = ()
+
+
+def _apply_flags(row: Mapping[str, object]) -> tuple[str, ...]:
+    args = row.get("args", [])
+    if not isinstance(args, list):
+        raise Refusal("materials_invalid")
+    flags = [
+        a["flag"]
+        for a in args
+        if isinstance(a, dict)
+        and a.get("apply_mode") is True
+        and isinstance(a.get("flag"), str)
+        and _FLAG.fullmatch(a["flag"])
+    ]
+    return tuple(sorted(flags))
 
 
 def _names(value: object) -> tuple[str, ...]:
@@ -98,6 +118,7 @@ def plan_jobs(snapshot: Mapping[str, object]) -> tuple[JobDefinition, ...]:
                 role,
                 _names(row.get("materials", [])),
                 _names(row.get("params", [])),
+                _apply_flags(row),
             )
         )
     if len({j.name for j in jobs}) != len(jobs):
@@ -120,8 +141,9 @@ class DispatchedJob:
     timeout_seconds: int
     window_id: str | None
     closes_at: datetime | None
-    #: `(absolute path, sha256:<hex>)` of every input file, from the signed plan.
-    input_digests: tuple[tuple[str, str], ...] = ()
+    #: `(flag, in-container path, sha256:<hex>)` of every input, sorted by flag, from
+    #: the signed plan (`dispatched_job.inputs`). Outputs carry no digest.
+    inputs: tuple[tuple[str, str, str], ...] = ()
     #: Control's apply-class for this dispatch (None until the contract carries it).
     apply_class: bool | None = None
 
@@ -172,21 +194,39 @@ def plan_dispatched_job(
         or not 1 <= timeout <= MAX_JOB_TIMEOUT
     ):
         raise Refusal("materials_invalid", "dispatched_job_invalid")
-    inputs = raw.get("input_digests", {})
+    rows = raw.get("inputs", [])
     apply_class = raw.get("apply_class")
-    if (
-        not isinstance(inputs, dict)
-        or not all(
-            isinstance(k, str)
-            and k.startswith("/")
-            and "\x00" not in k
-            and isinstance(v, str)
-            and _SHA256.fullmatch(v)
-            for k, v in inputs.items()
-        )
-        or not (apply_class is None or type(apply_class) is bool)
+    if not isinstance(rows, list) or not (
+        apply_class is None or type(apply_class) is bool
     ):
         raise Refusal("materials_invalid", "dispatched_job_invalid")
+    inputs: list[tuple[str, str, str]] = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"flag", "path", "sha256"}
+            or not isinstance(row["flag"], str)
+            or not _FLAG.fullmatch(row["flag"])
+            or not isinstance(row["path"], str)
+            or not _JOB_IN.fullmatch(row["path"])  # inputs only under /job/in, no ..
+            or not isinstance(row["sha256"], str)
+            or not _SHA256.fullmatch(
+                row["sha256"]
+            )  # an input WITHOUT a digest: refused
+        ):
+            raise Refusal("materials_invalid", "dispatched_job_invalid")
+        inputs.append((row["flag"], row["path"], row["sha256"]))
+    flags = [f for f, _, _ in inputs]
+    if flags != sorted(set(flags)):
+        raise Refusal("materials_invalid", "dispatched_job_invalid")  # sorted, unique
+    in_paths = {p for _, p, _ in inputs}
+    for token in argv:
+        if token.startswith("/job/"):
+            ok_in = token in in_paths
+            ok_out = _JOB_OUT.fullmatch(token) is not None
+            # an input path must be declared WITH a digest; an output carries none
+            if not (ok_in or ok_out) or (ok_out and token in in_paths):
+                raise Refusal("materials_invalid", "dispatched_job_invalid")
     window_id, closes_at = None, None
     if window is not None:
         if (
@@ -210,7 +250,7 @@ def plan_dispatched_job(
         timeout,
         window_id,
         closes_at,
-        tuple(sorted(inputs.items())),
+        tuple(inputs),
         apply_class,
     )
 
@@ -293,37 +333,50 @@ def check_matches_definition(
     raise Refusal("materials_invalid", "dispatched_job_undefined")
 
 
-def derive_apply_class(job: DispatchedJob) -> bool:
+def derive_apply_class(job: DispatchedJob, apply_flags: Sequence[str] = ()) -> bool:
     """RQ-3: apply-class from the SIGNED plan alone: any scoped gate `"1"`, or an
-    apply-mode argv token from the closed list. Never from the job name or a label."""
+    apply-mode argv token. The tokens are the plan job definition's closed arg list
+    flags marked `apply_mode`, plus the fixed `--apply`. Never from the job name or a
+    label."""
+    tokens = APPLY_ARGV_TOKENS | frozenset(apply_flags)
     return any(value == "1" for _, value in job.env) or any(
-        token in APPLY_ARGV_TOKENS for token in job.argv
+        token in tokens for token in job.argv
     )
 
 
-def check_apply_class(job: DispatchedJob) -> None:
+def check_apply_class(job: DispatchedJob, apply_flags: Sequence[str] = ()) -> None:
     """Refuse a plan whose stated class disagrees with the agent's derivation."""
-    if job.apply_class is not None and job.apply_class != derive_apply_class(job):
+    if job.apply_class is not None and job.apply_class != derive_apply_class(
+        job, apply_flags
+    ):
         raise Refusal("job_apply_class_mismatch")
 
 
 def check_job_paths(secrets_root: Path, job: DispatchedJob) -> None:
-    """RQ-2: the output (or any) path never sits under the secrets root
-    (`/run/dotmac`): job work and secrets do not share a tree."""
+    """RQ-2: no argv path sits under the secrets root (`/run/dotmac`): job work and
+    secrets do not share a tree."""
     root = str(secrets_root).rstrip("/")
-    candidates = [*job.argv, *(path for path, _ in job.input_digests)]
-    for token in candidates:
+    for token in job.argv:
         if token.startswith("/") and (token == root or token.startswith(root + "/")):
             raise Refusal("job_input_mismatch", "path_under_secrets_root")
 
 
-def check_job_inputs(secrets_root: Path, job: DispatchedJob) -> None:
-    """RQ-2: before Foundation runs, every input file's sha256 equals the signed
-    `input_digests`. A symlink, a non-regular file or a missing file is a mismatch."""
+def check_job_inputs(
+    secrets_root: Path, job: DispatchedJob, work_root: Path | None
+) -> None:
+    """RQ-2: before Foundation runs, every input's sha256 equals the signed one. An
+    input `/job/in/<name>` lives on the host at `<work_root>/<job>/in/<name>` (the
+    root-owned `job_work_root`). A symlink, a non-regular file or a missing file is a
+    mismatch; no work root with inputs to check is a refusal."""
     check_job_paths(secrets_root, job)
-    for path, expected in job.input_digests:
+    if not job.inputs:
+        return
+    if work_root is None:
+        raise Refusal("job_input_mismatch", "no_work_root")
+    for _, path, expected in job.inputs:
+        host = work_root / job.name / "in" / path.rsplit("/", 1)[1]
         try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            descriptor = os.open(host, os.O_RDONLY | os.O_NOFOLLOW)
         except OSError:
             raise Refusal("job_input_mismatch") from None
         try:

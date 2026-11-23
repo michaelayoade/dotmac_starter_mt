@@ -44,6 +44,16 @@ GATE_ROW = {
 ENV_DIGEST = digest(b"ERP_IMPORT_APPROVED=true\n")
 CLOSES = "2027-01-06T13:00:00Z"  # the rig's store_now is 12:00:00Z
 FILES = ("legacy_database_url", "migration_database_url")
+BOTH = ("LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL")
+OWNER = ("MIGRATION_DATABASE_URL",)
+INVOCATION = "a1" * 16
+RENDER_OK = f"Result=success\nExecMainStatus=0\nInvocationID={INVOCATION}\n".encode()
+
+
+def stem_of(rig: Rig, materials: tuple[str, ...]) -> str:
+    from dotmac_deploy_agent.openbao_config import job_unit_stem
+
+    return job_unit_stem(rig.config, "import", materials)
 
 
 def definition(**kw: object) -> dict[str, object]:
@@ -109,12 +119,9 @@ def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
     config.setdefault("job_roles", ("import",))
     rig = make_rig(tmp_path, **config)
     prepare_role(rig, "import")
-    for name, files in (
-        ("erp-import.hcl", FILES),  # owner + legacy
-        ("erp-import-owner.hcl", ("migration_database_url",)),  # owner only
-    ):
-        path = rig.config.openbao_config_dir / name
-        path.write_text(authored(*files))
+    for materials in (BOTH, OWNER):  # one authored config per material set
+        path = rig.config.openbao_config_dir / f"{stem_of(rig, materials)}.hcl"
+        path.write_text(authored(*(m.lower() for m in materials)))
         path.chmod(0o644)
     secrets = rig.config.role_dir("import") / "secrets"
     secrets.mkdir(mode=0o700)
@@ -124,9 +131,8 @@ def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
             (secrets / name).write_text("rendered")
             (secrets / name).chmod(0o400)
     rig.systemctl.script = {
-        ("--property=Result,ExecMainStatus",): CommandResult(
-            0, b"Result=success\nExecMainStatus=0\n"
-        ),
+        ("--property=Result,ExecMainStatus,InvocationID",): CommandResult(0, RENDER_OK),
+        ("--property=LoadState",): CommandResult(0, b"LoadState=loaded\n"),
         **rig.systemctl.script,
     }
     rig.commands.script[("image", "inspect")] = CommandResult(
@@ -739,8 +745,10 @@ def test_a_refused_job_mint_fails_that_job_only_and_touches_no_serving_role(
 @pytest.mark.parametrize(
     "show",
     [
-        b"Result=exit-code\nExecMainStatus=0\n",
-        b"Result=success\nExecMainStatus=1\n",
+        b"Result=exit-code\nExecMainStatus=0\nInvocationID=" + b"a1" * 16 + b"\n",
+        b"Result=success\nExecMainStatus=1\nInvocationID=" + b"a1" * 16 + b"\n",
+        b"Result=success\nExecMainStatus=0\n",  # no InvocationID
+        b"Result=success\nExecMainStatus=0\nInvocationID=short\n",
         b"",
     ],
 )
@@ -749,7 +757,7 @@ def test_the_render_unit_must_report_success_and_status_zero(
 ) -> None:
     rig = job_rig(tmp_path)
     rig.systemctl.script = {
-        ("--property=Result,ExecMainStatus",): CommandResult(0, show),
+        ("--property=Result,ExecMainStatus,InvocationID",): CommandResult(0, show),
         **rig.systemctl.script,
     }
     assert refused(rig) == ("refused", "job_files_invalid")
@@ -759,7 +767,7 @@ def test_the_render_unit_must_report_success_and_status_zero(
 def test_a_render_unit_that_fails_to_start_stops_the_job(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     rig.systemctl.script = {
-        ("openbao-agent@erp-import.service",): CommandResult(1, b""),
+        ("start", f"openbao-agent@{stem_of(rig, BOTH)}.service"): CommandResult(1, b""),
         **rig.systemctl.script,
     }
     assert refused(rig) == ("refused", "job_files_invalid")
@@ -964,44 +972,126 @@ def test_rq1_a_job_the_foundation_bound_cannot_cover_is_refused_before_anything(
     assert rig.bao.paths == [] and rig.cp.lease_log == []
 
 
-def input_file(tmp_path: Path, content: bytes = b"manifest") -> tuple[Path, str]:
+def work_rig(tmp_path: Path, content: bytes = b"manifest") -> tuple[Rig, str]:
+    """A rig whose `job_work_root` holds the job's input at `<root>/import/in/`."""
     import hashlib
 
-    path = tmp_path / "work-manifest.json"
-    path.write_bytes(content)
-    return path, "sha256:" + hashlib.sha256(content).hexdigest()
+    root = tmp_path / "work"
+    inputs = root / "import" / "in"
+    inputs.mkdir(parents=True)
+    (inputs / "manifest.json").write_bytes(content)
+    rig = job_rig(tmp_path, job_work_root=root)
+    return rig, "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+def one_input(digest_: str, **kw: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "flag": "--manifest",
+        "path": "/job/in/manifest.json",
+        "sha256": digest_,
+    }
+    row.update(kw)
+    return row
 
 
 def test_rq2_an_input_whose_sha256_matches_the_plan_is_accepted(tmp_path: Path) -> None:
-    rig = job_rig(tmp_path)
-    path, digest_ = input_file(tmp_path)
-    rig.cp.materials = run_job_materials(dispatched(input_digests={str(path): digest_}))
+    rig, digest_ = work_rig(tmp_path)
+    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
     assert refused(rig) == ("completed", None)
 
 
 def test_rq2_an_input_digest_mismatch_is_refused_before_any_lease_or_mint(
     tmp_path: Path,
 ) -> None:
-    rig = job_rig(tmp_path)
-    path, _ = input_file(tmp_path)
+    rig, _ = work_rig(tmp_path)
     rig.cp.materials = run_job_materials(
-        dispatched(input_digests={str(path): "sha256:" + "0" * 64})
+        dispatched(inputs=[one_input("sha256:" + "0" * 64)])
     )
     assert refused(rig) == ("refused", "job_input_mismatch")
     assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.runner.specs == []
 
 
 def test_rq2_a_missing_or_symlinked_input_is_a_mismatch(tmp_path: Path) -> None:
+    rig, digest_ = work_rig(tmp_path)
+    inputs = tmp_path / "work" / "import" / "in"
+    (inputs / "manifest.json").unlink()
+    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    assert refused(rig) == ("refused", "job_input_mismatch")  # missing
+    real = tmp_path / "real.json"
+    real.write_bytes(b"manifest")
+    (inputs / "manifest.json").symlink_to(real)
+    rig.cp.materials = run_job_materials(
+        dispatched(inputs=[one_input(digest_)]), dispatch_id="dispatch-2"
+    )
+    assert refused(rig) == ("refused", "job_input_mismatch")  # a symlink
+
+
+def test_rq2_inputs_without_a_work_root_are_refused(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)  # no job_work_root configured
+    rig.cp.materials = run_job_materials(
+        dispatched(inputs=[one_input("sha256:" + "0" * 64)])
+    )
+    assert refused(rig) == ("refused", "job_input_mismatch")
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        [{"flag": "--manifest", "path": "/job/in/manifest.json"}],  # no sha256
+        [one_input("sha256:" + "0" * 64, path="/job/out/manifest.json")],  # not /job/in
+        [one_input("sha256:" + "0" * 64, path="/job/in/../etc/passwd")],  # ..
+        [one_input("sha256:" + "0" * 64, path="/var/lib/x/manifest.json")],
+        [one_input("sha256:" + "0" * 64, flag="manifest")],  # not a flag
+        [one_input("sha256:ABC")],  # not canonical
+        [
+            one_input("sha256:" + "0" * 64),
+            one_input("sha256:" + "1" * 64),
+        ],  # duplicate flag
+        [
+            one_input("sha256:" + "0" * 64, flag="--z", path="/job/in/z"),
+            one_input("sha256:" + "0" * 64, flag="--a", path="/job/in/a"),
+        ],  # not sorted by flag
+        [one_input("sha256:" + "0" * 64, extra="x")],  # a stray key
+    ],
+)
+def test_rq2_a_malformed_inputs_list_is_refused_at_parse(
+    tmp_path: Path, inputs: list[dict[str, object]]
+) -> None:
     rig = job_rig(tmp_path)
-    path, digest_ = input_file(tmp_path)
-    link = tmp_path / "link.json"
-    link.symlink_to(path)
-    for target in (str(tmp_path / "absent.json"), str(link)):
-        rig.cp.materials = run_job_materials(
-            dispatched(input_digests={target: digest_}),
-            dispatch_id=f"dispatch-{len(target)}",
-        )
-        assert refused(rig) == ("refused", "job_input_mismatch")
+    rig.cp.materials = run_job_materials(dispatched(inputs=inputs))
+    assert refused(rig) == ("refused", "materials_invalid")
+    assert rig.bao.paths == []
+
+
+def test_rq2_an_input_path_in_argv_must_be_declared_with_a_digest_and_an_output_has_none(
+    tmp_path: Path,
+) -> None:
+    rig, digest_ = work_rig(tmp_path)
+    base = ["python", "-m", "erp_v2.importer", "execute"]
+    undeclared = [*base, "--manifest", "/job/in/manifest.json"]  # an input with no sha
+    rig.cp.materials = run_job_materials(dispatched(argv=undeclared))
+    assert refused(rig) == ("refused", "materials_invalid")
+    declared_output = [*base, "--receipt", "/job/out/receipt.json"]  # an output: no sha
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=declared_output), dispatch_id="dispatch-2"
+    )
+    assert refused(rig) == ("completed", None)
+    both = [
+        *base,
+        "--manifest",
+        "/job/in/manifest.json",
+        "--receipt",
+        "/job/out/r.json",
+    ]
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=both, inputs=[one_input(digest_)]), dispatch_id="dispatch-3"
+    )
+    assert refused(rig) == ("completed", None)
+    sha_on_output = one_input(digest_, flag="--receipt", path="/job/out/r.json")
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=both, inputs=[sha_on_output]), dispatch_id="dispatch-4"
+    )
+    assert refused(rig) == ("refused", "materials_invalid")  # an output with a sha
 
 
 def test_rq2_a_path_under_the_secrets_root_is_refused(tmp_path: Path) -> None:
@@ -1083,15 +1173,15 @@ def test_rq4_an_owner_only_job_renders_exactly_the_owner_file(tmp_path: Path) ->
         jobs=[definition(materials=["MIGRATION_DATABASE_URL"])],
     )
     assert refused(rig) == ("completed", None)
-    assert started(rig, "openbao-agent@erp-import-owner.service")
-    assert not started(rig, "openbao-agent@erp-import.service")
+    assert started(rig, f"openbao-agent@{stem_of(rig, OWNER)}.service")
+    assert not started(rig, f"openbao-agent@{stem_of(rig, BOTH)}.service")
     assert receipt(rig)["files"] == ["migration_database_url"]
 
 
 def test_rq4_an_owner_plus_legacy_job_uses_the_two_file_config(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     assert refused(rig) == ("completed", None)
-    assert started(rig, "openbao-agent@erp-import.service")
+    assert started(rig, f"openbao-agent@{stem_of(rig, BOTH)}.service")
     assert receipt(rig)["files"] == list(FILES)
 
 
@@ -1109,7 +1199,7 @@ def test_rq4_a_materials_set_that_matches_no_config_is_refused_with_nothing_mint
 
 def test_rq4_a_config_that_renders_a_meta_file_is_refused(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
-    path = rig.config.openbao_config_dir / "erp-import.hcl"
+    path = rig.config.openbao_config_dir / f"{stem_of(rig, BOTH)}.hcl"
     path.write_text(authored(*FILES, "meta/render"))
     path.chmod(0o644)
     assert refused(rig) == ("refused", "openbao_config_invalid")
@@ -1194,3 +1284,76 @@ def test_n4_a_missing_image_is_refused_job_image_absent() -> None:
     """Pointer: `test_a_missing_image_refuses_before_any_lease_mint_or_file` (c7789470)."""
     names = {n for n in globals() if n.startswith("test_")}
     assert "test_a_missing_image_refuses_before_any_lease_mint_or_file" in names
+
+
+# -- Foundation a2: render unit per material set, InvocationID ----------------
+def test_the_job_unit_naming_is_one_constant_over_the_sorted_lowercase_set(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    from dotmac_deploy_agent.openbao_config import JOB_UNIT_NAMING, material_set_id
+
+    rig = job_rig(tmp_path)
+    expected = hashlib.sha256(
+        b'["legacy_database_url","migration_database_url"]'
+    ).hexdigest()[:12]
+    assert material_set_id(BOTH) == material_set_id(tuple(reversed(BOTH))) == expected
+    assert stem_of(rig, BOTH) == f"erp-import-{expected}" and JOB_UNIT_NAMING.endswith(
+        "<S12>"
+    )
+    assert material_set_id(OWNER) != material_set_id(BOTH)
+
+
+def test_the_render_invocation_id_is_recorded_and_handed_to_foundation(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.runner import runner_environment
+
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    spec = rig.runner.specs[0]
+    assert spec.job_render_invocation == INVOCATION
+    assert runner_environment(spec)["DOTMAC_DEPLOY_JOB_RENDER_INVOCATION"] == INVOCATION
+    assert receipt(rig)["render_invocation"] == INVOCATION
+    assert spec.job_secret_files == tuple(sorted(spec.job_secret_files)) == FILES
+
+
+def test_a_set_with_no_loaded_unit_is_refused_before_anything_is_minted(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.systemctl.script = {
+        ("--property=LoadState",): CommandResult(0, b"LoadState=not-found\n"),
+        **rig.systemctl.script,
+    }
+    assert refused(rig) == ("refused", "job_files_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.runner.specs == []
+
+
+def test_the_agent_creates_no_host_output_directory(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    assert not any("workdir" in " ".join(c) for c in rig.systemctl.calls)
+    assert sorted(p.name for p in rig.config.secrets_root.iterdir()) == ["erp"]
+
+
+def test_rq3_apply_mode_flags_come_from_the_plans_closed_arg_list(
+    tmp_path: Path,
+) -> None:
+    """A flag the definition marks `apply_mode` is apply-class even with gates 0."""
+    flagged = definition(
+        args=[{"flag": "--commit", "type": "bool", "apply_mode": True}]
+    )
+    argv = ["python", "-m", "erp_v2.importer", "execute", "--commit"]
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=argv, apply_class=False), jobs=[flagged]
+    )
+    assert refused(rig) == ("refused", "job_apply_class_mismatch")
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=argv, apply_class=True),
+        jobs=[flagged],
+        dispatch_id="dispatch-2",
+    )
+    assert refused(rig) == ("completed", None)

@@ -24,7 +24,7 @@ MAX_ENVELOPE_BYTES: Final = 65_536
 KIND_OUTCOMES: Final = {
     "deploy": ("succeeded", "failed", "refused"),
     "job": ("succeeded", "failed", "refused"),
-    "reconcile": ("reconciled", "failed", "not_needed"),
+    "reconcile": ("reconciled", "failed"),
 }
 #: The agent's internal outcome words -> Control's, per kind.
 _OUTCOME: Final = {

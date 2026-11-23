@@ -133,9 +133,35 @@ def purge_job_role(
 RENDER_START_TIMEOUT: Final = 30.0
 SHOW_TIMEOUT: Final = 5.0
 PURGE_START_TIMEOUT: Final = 20.0  # runs twice: before the mint and after the job
+LOADED_TIMEOUT: Final = 5.0
 SYSTEMD_BUDGET_SECONDS: Final = (
-    RENDER_START_TIMEOUT + SHOW_TIMEOUT + 2 * PURGE_START_TIMEOUT
+    LOADED_TIMEOUT + RENDER_START_TIMEOUT + SHOW_TIMEOUT + 2 * PURGE_START_TIMEOUT
 )
+_INVOCATION: Final = re.compile(r"[0-9a-f]{32}")
+
+
+def render_unit(config: AgentConfig, role: str, config_stem: str | None) -> str:
+    return (
+        f"openbao-agent@{config_stem}.service"
+        if config_stem
+        else unit_name(config.secrets_namespace, role)
+    )
+
+
+def require_render_unit(
+    config: AgentConfig, commands: Commands, role: str, config_stem: str | None
+) -> None:
+    """Before anything is minted: the render unit for this material set exists."""
+    shown = _systemctl(
+        config,
+        commands,
+        "show",
+        "--property=LoadState",
+        render_unit(config, role, config_stem),
+        timeout=LOADED_TIMEOUT,
+    )
+    if (shown or b"").decode("utf-8", "replace").strip() != "LoadState=loaded":
+        raise Refusal("job_files_invalid", "no_unit_for_set")
 
 
 def render_job_credentials(
@@ -144,19 +170,16 @@ def render_job_credentials(
     role: str,
     names: tuple[str, ...],
     config_stem: str | None = None,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], str]:
     """Render once. The agent never looks inside `secrets/` (0700, container uid).
 
     Starts the static one-shot `openbao-agent@<stem>` (it logs in with the one
     secret_id, renders and exits). The unit's own `ExecStartPost`, run as the
-    container uid, checks each declared file (regular, 0400, owned, non-empty) and
-    that NO undeclared file exists, and fails the unit otherwise. The agent reads
-    only the unit's `Result` and `ExecMainStatus`. Returns the declared names."""
-    unit = (
-        f"openbao-agent@{config_stem}.service"
-        if config_stem
-        else unit_name(config.secrets_namespace, role)
-    )
+    container uid, checks each declared file and that NO undeclared file exists, and
+    fails the unit otherwise. The agent reads only `Result`, `ExecMainStatus` and
+    `InvocationID`: the id (32 hex) proves to Foundation that the result is from THIS
+    dispatch's render. Returns `(sorted declared file names, InvocationID)`."""
+    unit = render_unit(config, role, config_stem)
     if (
         _systemctl(config, commands, "start", unit, timeout=RENDER_START_TIMEOUT)
         is None
@@ -166,7 +189,7 @@ def render_job_credentials(
         config,
         commands,
         "show",
-        "--property=Result,ExecMainStatus",
+        "--property=Result,ExecMainStatus,InvocationID",
         unit,
         timeout=SHOW_TIMEOUT,
     )
@@ -175,12 +198,17 @@ def render_job_credentials(
         for line in (shown or b"").decode("utf-8", "replace").splitlines()
         if "=" in line
     )
-    if fields.get("Result") != "success" or fields.get("ExecMainStatus") != "0":
+    invocation = fields.get("InvocationID", "")
+    if (
+        fields.get("Result") != "success"
+        or fields.get("ExecMainStatus") != "0"
+        or not _INVOCATION.fullmatch(invocation)
+    ):
         raise Refusal("job_files_invalid", "render_not_successful")
-    declared = tuple(material.lower() for material in names)
+    declared = tuple(sorted(material.lower() for material in names))
     if not all(_FILENAME.fullmatch(name) for name in declared):
         raise Refusal("job_files_invalid")
-    return declared
+    return declared, invocation
 
 
 def check_images_present(
