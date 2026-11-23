@@ -37,6 +37,9 @@ class RunSpec:
     job_params_env: Path | None = None
     job_secrets_dir: Path | None = None
     job_argv_digest: str | None = None
+    #: Upper bound on this run, set from what is left of the host lease (WP3B).
+    #: The runner uses the smaller of this and its configured timeout.
+    timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,12 @@ class SubprocessRunner:
         except OSError:
             raise Refusal("runner_start_failed") from None
         try:
-            return RunResult(process.wait(timeout=self._timeout), False)
+            limit = (
+                self._timeout
+                if spec.timeout_seconds is None
+                else min(self._timeout, spec.timeout_seconds)
+            )
+            return RunResult(process.wait(timeout=limit), False)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGTERM)
             try:

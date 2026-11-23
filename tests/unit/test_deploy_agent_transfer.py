@@ -432,3 +432,30 @@ def test_binaries_and_the_policy_must_be_root_owned_and_not_group_or_world_writa
     with pytest.raises(Refusal) as owner:
         other.transfer_all((s.image,), ttl_seconds=900)
     assert owner.value.code == "transfer_binary_unpinned"
+
+
+def test_an_index_without_a_media_type_is_still_copied_with_all(tmp_path: Path) -> None:
+    raw = json.dumps({"schemaVersion": 2, "manifests": []}).encode()
+    index_digest = "sha256:" + sha256_hex(raw)
+    s = setup(tmp_path, raw=raw)
+    reference = f"127.0.0.1:5000/org/app@{index_digest}"
+    archive = s.config.inbox_dir / f"app-{index_digest.removeprefix('sha256:')}.oci.tar"
+    archive.write_bytes(b"archive")
+    s.commands.script[("image", "inspect")] = CommandResult(
+        0, f'"{IMAGE_ID}" ["{reference}"]\n'.encode()
+    )
+    image = replace(s.image, release_digest=index_digest, planned_digest=index_digest)
+    s.transfer.transfer_all((image,), ttl_seconds=900)
+    copy = next(c for c in s.commands.calls if "copy" in c)
+    assert "--all" in copy  # without it the index digest would be lost on copy
+
+
+def test_an_image_id_that_is_not_a_sha256_is_refused(tmp_path: Path) -> None:
+    s = setup(tmp_path)
+    s.commands.script[("image", "inspect")] = CommandResult(
+        0, f'"not-an-id" ["{REFERENCE}"]\n'.encode()
+    )
+    with pytest.raises(Refusal) as caught:
+        s.transfer.transfer_all((s.image,), ttl_seconds=900)
+    assert caught.value.code == "transfer_digest_mismatch"
+    assert not s.archive.exists() and s.launcher.handle.poll() is not None

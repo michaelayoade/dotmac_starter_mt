@@ -9,6 +9,8 @@ itself, or routes the target to restore-and-fix-forward.
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,12 +20,18 @@ from .config import AgentConfig
 from .observation import build_observation
 from .refusal import Refusal
 
+_REPO_DIGEST = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,255}@sha256:[0-9a-f]{64}")
+MAX_REPO_DIGESTS = 16
+
 
 @dataclass(frozen=True)
 class ObservedContainer:
     name: str
     image_ref: str
     image_id: str
+    #: `RepoDigests` of the image the container runs: what Control compares with
+    #: the last committed or planned release digest. Names and digests only.
+    repo_digests: tuple[str, ...] = ()
 
 
 def observe_containers(
@@ -47,8 +55,40 @@ def observe_containers(
         parts = result.stdout.decode("utf-8", errors="replace").split()
         if len(parts) != 2:
             raise Refusal("reconcile_unavailable")
-        found.append(ObservedContainer(name, parts[0], parts[1]))
+        found.append(
+            ObservedContainer(
+                name, parts[0], parts[1], _repo_digests(config, commands, parts[1])
+            )
+        )
     return tuple(found)
+
+
+def _repo_digests(
+    config: AgentConfig, commands: Commands, image_id: str
+) -> tuple[str, ...]:
+    result = commands.run(
+        (
+            str(config.docker_path),
+            "image",
+            "inspect",
+            "--format",
+            "{{json .RepoDigests}}",
+            image_id,
+        ),
+        timeout=30.0,
+    )
+    if result.exit_code != 0:
+        return ()  # an image with no record is itself an observation
+    try:
+        parsed = json.loads(result.stdout.decode("utf-8", errors="replace"))
+    except ValueError:
+        raise Refusal("reconcile_unavailable") from None
+    if parsed is None:
+        return ()
+    if not isinstance(parsed, list):
+        raise Refusal("reconcile_unavailable")
+    digests = [d for d in parsed if isinstance(d, str) and _REPO_DIGEST.fullmatch(d)]
+    return tuple(sorted(digests)[:MAX_REPO_DIGESTS])
 
 
 def reconcile_observation(
@@ -71,7 +111,12 @@ def reconcile_observation(
             "standing": standing,
             "configured": list(config.reconcile_containers),
             "containers": [
-                {"name": c.name, "image_ref": c.image_ref, "image_id": c.image_id}
+                {
+                    "name": c.name,
+                    "image_ref": c.image_ref,
+                    "image_id": c.image_id,
+                    "repo_digests": list(c.repo_digests),
+                }
                 for c in containers
             ],
         },

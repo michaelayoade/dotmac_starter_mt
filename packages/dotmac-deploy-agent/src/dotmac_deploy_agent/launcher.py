@@ -373,6 +373,11 @@ class Launcher:
                 materials.images, ttl_seconds=lease.ttl_seconds
             )
             details["transfer"] = [t.as_details() for t in transferred]
+            # Transfer spends lease time. A lease with no room left for the run is
+            # refused here, before any file or secret_id is spent on it.
+            self.lease.run_budget(
+                lease, configured_seconds=self.config.foundation_timeout_seconds
+            )
             params_file = write_params_env(deploy_run_dir, planned)
 
             legacy_file: Path | None = None
@@ -410,6 +415,11 @@ class Launcher:
 
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
                 raise Refusal("lease_unavailable")
+            # The run must end inside the lease: no renew exists, so it is clipped.
+            run_budget = self.lease.run_budget(
+                lease, configured_seconds=self.config.foundation_timeout_seconds
+            )
+            details["run_budget_seconds"] = run_budget
             credentials_dir = self._prepare_run_credentials()
             mark_inflight(self.config.state_dir, materials.dispatch_id)
             ran = True
@@ -425,6 +435,7 @@ class Launcher:
                     credentials_directory=str(credentials_dir),
                     legacy_env=legacy_file,
                     lease_id=lease.lease_id,
+                    timeout_seconds=run_budget,
                 )
             )
             details["runner"] = {
@@ -451,7 +462,9 @@ class Launcher:
             remove_single_use_files(self.config, materials.roles)
             shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
             if lease is not None:
-                details["lease_released"] = self._release(lease, host_mutated=ran)
+                details["lease_released"] = self._release(
+                    lease, host_mutated=ran, details=details
+                )
             if ran:
                 clear_inflight(self.config.state_dir)
         self._report(self._observation(materials.dispatch_id, outcome, reason, details))
@@ -617,11 +630,20 @@ class Launcher:
         finally:
             session.revoke()
 
-    def _release(self, lease: Lease, *, host_mutated: bool) -> bool:
-        """Best effort: a lease that is not released simply expires."""
+    def _release(
+        self,
+        lease: Lease,
+        *,
+        host_mutated: bool,
+        details: dict[str, object] | None = None,
+    ) -> bool:
+        """Best effort: a lease that is not released simply expires, and Control
+        then asks for a reconcile before the next acquire (EXPIRED_UNRELEASED)."""
         try:
             self.lease.release(lease, host_mutated=host_mutated)
-        except Refusal:
+        except Refusal as refusal:
+            if details is not None and refusal.detail is not None:
+                details["lease_release_refusal"] = refusal.detail
             return False
         return True
 
