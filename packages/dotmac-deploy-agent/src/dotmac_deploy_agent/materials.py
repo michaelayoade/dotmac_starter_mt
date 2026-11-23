@@ -199,7 +199,10 @@ def check_shape(document: Mapping[str, object]) -> None:
     parts = target_ref.split("/")
     if len(parts) != 3 or not all(_SEGMENT.fullmatch(p) for p in parts):
         raise Refusal("materials_invalid")
-    parse_stamp(cast("str", document["store_now"]))
+    try:
+        parse_stamp(cast("str", document["store_now"]))
+    except Refusal:
+        raise Refusal("materials_invalid") from None
     pending = document["pending"]
     if type(pending) is not bool:
         raise Refusal("materials_invalid")

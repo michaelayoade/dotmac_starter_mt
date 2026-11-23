@@ -284,9 +284,9 @@ def test_interrupted_run_is_reported_on_next_start(tmp_path: Path) -> None:
 def test_observation_is_kept_in_outbox_until_cp_acknowledges(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     rig.cp.materials = make_materials()
-    rig.cp.status_5xx = True  # CP unreachable: nothing is lost, it is retried
+    rig.cp.raw_status["observations"] = 503  # CP unreachable: retried, never lost
     rig.launcher.run_once()
-    rig.cp.status_5xx = False
+    del rig.cp.raw_status["observations"]
     assert len(rig.launcher.outbox.pending()) == 1
     rig.cp.materials = None
     rig.launcher.run_once()
@@ -315,7 +315,9 @@ def _new_image_materials():  # type: ignore[no-untyped-def]
     digest = "sha256:" + "c" * 64
     image = dict(base_images()[0], release_digest=digest, planned_digest=digest)
     app_image = f"127.0.0.1:5000/org/app@{digest}"
-    return app_image, make_materials(app_image=app_image, images=[image])
+    return app_image, make_materials(
+        app_image=app_image, images=[image], dispatch_id="dispatch-2"
+    )
 
 
 def test_the_agents_own_last_pin_is_the_only_second_rendering(tmp_path: Path) -> None:
