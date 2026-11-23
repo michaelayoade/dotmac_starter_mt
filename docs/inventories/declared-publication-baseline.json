@@ -134,17 +134,7 @@
     },
     "dotmac-integration": {
       "declared": "0.1.0a22",
-      "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a22 carries the DELIVERY crash-safety, terminal-state retention and DELIVERY network-target fixes; published 0.1.0a21 (tag dotmac-integration-v0.1.0a21) remains immutable. This gap is NOT to be repaired by editing the version down. Remove this row in the a22 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a22 from the exact merged revision and records its verification; allocation is not publication.",
-      "state": "declared-unpublished"
-    },
-    "dotmac-money-flows": {
-      "declared": "0.1.0a1",
-      "reason": "RELEASE-ALLOWLISTED, NOT YET RELEASED. Tenant-plane money-flows composition (manifest, mf_0001 settle_instances and mf_0002 funded_charge_instances lineage in mod_mflows). The kernel migration-namespace allocation is published in dotmac-kernel 0.1.0a110 (recorded in #1136) and the package pins >=0.1.0a110; it composes Billing, Payments and Service Access Policy through their top-level exports at the released versions it pins. It is now in the release-module allowlist, but no version has ever been published or tagged and this row authorizes no tag or adoption. Remove this row only with the oracle-backed record of an authorized exact 0.1.0a1 publication via release-module.yml from protected main, never by editing the declared version down.",
-      "state": "never-published"
-    },
-    "dotmac-payroll": {
-      "declared": "0.1.0a7",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a6 is published and tagged and its migration bytes remain unchanged. 0.1.0a7 makes separation of duties on payroll runs an optional per-tenant policy (D-9, Michael's no-compulsory-two-person ruling) through a keyword-only separation_of_duties parameter (default false, never compulsory) on approve_payroll_run, finalize_payroll_run and reverse_liability_settlement. It adds no migration, no column and no database check. Publication happens only through the release lane after review and Michael's separate release go; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
+      "reason": "TODO: state why this version has no verified publication",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
