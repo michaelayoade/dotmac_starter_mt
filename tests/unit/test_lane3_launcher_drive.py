@@ -25,6 +25,7 @@ SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import lane3_launcher as launcher  # noqa: E402
+import lane3_launcher_negative as launcher_negative  # noqa: E402
 import lane3_session_channel as channel_module  # noqa: E402
 from dotmac_deployment_foundation.rehearsal import ExecutionRunBindingV1  # noqa: E402
 from lane3_exposure_evidence import serialize_exposure_calls  # noqa: E402
@@ -69,6 +70,7 @@ def _plan(**overrides: Any) -> launcher.SessionPlan:
         "window_seconds": 5,
         "evidence_seconds": 5,
         "proceed_seconds": 5,
+        "role": "positive",
     }
     values.update(overrides)
     return launcher.SessionPlan(**values)
@@ -134,6 +136,7 @@ def _inputs(tmp_path: pathlib.Path, **overrides: Any) -> launcher.DriveInputs:
         "evidence_output": tmp_path / "bundle.age",
         "ready_seconds": 5.0,
         "terminal_seconds": 5.0,
+        "pair": launcher_negative.PositivePair(None),
         "measurers": _measurers(),
     }
     if "execution_context" in overrides and "staged" not in overrides:

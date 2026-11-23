@@ -1,7 +1,8 @@
 # dotmac-integration
 
-Source candidate: **0.1.0a21 is unpublished**. Published a20 remains the
-installation baseline. Dispatch-snapshot source preparation does not establish
+Source candidate: **0.1.0a22 is an unpublished allocation** (DELIVERY
+crash-safety, terminal-state retention and DELIVERY network targets). Published
+a21 (tag `dotmac-integration-v0.1.0a21`) remains the installation baseline. Dispatch-snapshot source preparation does not establish
 production credential custody, an accepting authority or consumer adoption.
 
 The external connector control plane (ADR-0024): installations, immutable
@@ -167,7 +168,7 @@ write, not this package's to assume.
 | See what is stuck | `operations.health_report(db)` |
 | See how the queue is behaving | `operations.dispatch_metrics(db)` |
 | Requeue a dead letter | `operations.replay_delivery(db, delivery, reason=…)` |
-| Recover a dead worker's rows | `operations.release_expired_leases(db)` |
+| Settle a dead worker's rows (to `reconciliation_required`, never retried) | `operations.release_expired_leases(db)` |
 
 Three properties worth knowing before using any of them:
 

@@ -20,8 +20,9 @@ question a green dashboard usually fails to ask:
 ============================ =============================================
 signal                       why it matters
 ============================ =============================================
-``in_flight_expired``        a worker died holding a lease; nothing will
-                             retry it until the lease is reclaimed
+``in_flight_expired``        a worker died holding a lease; the next sweep
+                             or claim moves it to ``reconciliation_required``
+                             (its provider outcome is unknown; never retried)
 ``retryable_overdue``        due in the past and still not attempted — the
                              dispatcher is not keeping up, or not running
 ``dead_letter``              gave up; needs a human
@@ -483,12 +484,42 @@ def replay_delivery(
     *,
     actor_admin_id: UUID | None = None,
     reason: str,
+    acknowledge_possible_duplicate: bool = False,
 ) -> DeliveryAttempt:
     """Return a stuck delivery to the queue, with its budget reset.
 
     `reason` is required. A repair with no stated reason is indistinguishable
     from a mistake when someone reads the trail six months later.
+
+    A `reconciliation_required` row may have already reached the provider; it
+    is requeued only when the operator passes
+    ``acknowledge_possible_duplicate=True``, which the audit record preserves.
     """
+    # Lock the FULL row first, then decide everything from the locked values. A
+    # concurrent claim (state -> in_flight) or retention purge (payload ->
+    # tombstone) cannot slip between the checks below and the write: replaying a
+    # live in_flight row would overwrite a lease and send the message twice.
+    # Pending edits are flushed first so the refresh does not discard them.
+    from dotmac_integration.retention import is_delivery_redacted
+
+    db.flush()
+    db.refresh(delivery, with_for_update=True)
+    if is_delivery_redacted(delivery):
+        raise NotRepairable(
+            "delivery payload was redacted by retention; a tombstone is not a "
+            "payload and must not be sent"
+        )
+    if delivery.state == "reconciliation_required" and not (
+        acknowledge_possible_duplicate
+    ):
+        # EVERY ambiguous row, whatever its `error_code`: that field is
+        # overwritten by an inconclusive reconcile, so it cannot carry the gate.
+        raise NotRepairable(
+            "this delivery's outcome is unknown, so it may already have reached "
+            "the provider. Requeue it only with "
+            "acknowledge_possible_duplicate=True, or reconcile it against "
+            "provider evidence"
+        )
     if delivery.state not in _REPLAYABLE_DELIVERY_STATES:
         raise NotRepairable(
             f"delivery is {delivery.state!r}; only "
@@ -498,6 +529,7 @@ def replay_delivery(
     previous_state, previous_attempts = delivery.state, delivery.attempt_count
 
     delivery.state = "pending"
+    delivery.terminal_at = None  # live work again; the retention clock restarts
     # Reset, unlike the source. Leaving the count at the cap makes the replay a
     # no-op that looks like an action: the very next outcome dead-letters it.
     delivery.attempt_count = 0
@@ -517,6 +549,7 @@ def replay_delivery(
             "previous_state": previous_state,
             # The evidence the reset would otherwise destroy.
             "previous_attempt_count": previous_attempts,
+            "acknowledged_possible_duplicate": acknowledge_possible_duplicate,
         },
     )
     return delivery
@@ -562,42 +595,24 @@ def replay_receipt(
 def release_expired_leases(
     db: Any, *, now: datetime | None = None, actor_admin_id: UUID | None = None
 ) -> int:
-    """Return deliveries whose worker died to the queue. Returns the count.
+    """Settle deliveries whose worker died. Returns the count.
+
+    The outcome of such an attempt is UNKNOWN: the worker may have died after
+    the provider accepted the request. A DELIVERY connector call is not
+    idempotent by contract, so these rows go to `reconciliation_required` and
+    are NEVER returned to the retry queue automatically (they were previously
+    made `retryable`, which resent the effect after a crash). An operator may
+    reconcile them against provider evidence or requeue explicitly with
+    `replay_delivery(..., acknowledge_possible_duplicate=True)`.
 
     Idempotent and safe to run on a timer: it only touches rows whose lease has
-    already expired, so running it twice changes nothing the first run did not.
-    Unlike a replay it does NOT reset `attempt_count` — the attempt genuinely
-    happened, and pretending otherwise would let a permanently failing delivery
-    retry forever.
+    already expired, locks them `FOR UPDATE SKIP LOCKED`, and does not reset
+    `attempt_count` — the attempt genuinely happened.
     """
-    from sqlalchemy import select
+    from dotmac_integration.execution import ambiguate_expired_delivery_leases
 
     moment = now or datetime.now(UTC)
-    stranded = list(
-        db.execute(
-            select(DeliveryAttempt).where(
-                DeliveryAttempt.state == "in_flight",
-                DeliveryAttempt.leased_until.is_not(None),
-                DeliveryAttempt.leased_until < moment,
-            )
-        )
-        .scalars()
-        .all()
+    moved = ambiguate_expired_delivery_leases(
+        db, now=moment, via="sweep", actor_admin_id=actor_admin_id
     )
-    for delivery in stranded:
-        delivery.state = "retryable"
-        delivery.leased_until = None
-        delivery.next_attempt_at = moment
-
-    if stranded:
-        record_operation(
-            db,
-            action="leases.released",
-            entity_type="delivery_attempt",
-            actor_admin_id=actor_admin_id,
-            details={
-                "count": len(stranded),
-                "delivery_ids": [str(d.id) for d in stranded],
-            },
-        )
-    return len(stranded)
+    return len(moved)

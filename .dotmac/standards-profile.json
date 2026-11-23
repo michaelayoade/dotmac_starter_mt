@@ -249,7 +249,7 @@
   },
   "external_connector_surface": {
     "baselines": {
-      "outbound_transport": 1,
+      "outbound_transport": 0,
       "webhook_surface": 0,
       "provider_credential": 0,
       "connector_task": 0,
@@ -262,12 +262,6 @@
         "symbol": "test_the_catalogue_poll_follows_the_cursor_and_types_every_row",
         "category": "outbound_transport",
         "fingerprint": "73d8d950aca5d1de24c6b270bf8bf9bc871d4579e9ce1debdfb6041e8b6e243d"
-      },
-      {
-        "path": "tests/unit/test_delivery_smtp.py",
-        "symbol": "test_data_reply_uses_the_long_timeout",
-        "category": "outbound_transport",
-        "fingerprint": "001e1aa17b28dfbfb62659328cf58af83ea1bf95cdadd065dcc8b89c3731dafa"
       }
     ]
   },

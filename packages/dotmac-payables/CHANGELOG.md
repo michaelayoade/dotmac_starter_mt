@@ -1,5 +1,51 @@
 # Changelog — dotmac-payables
 
+## 0.1.0a7 — unreleased
+
+Publication happens only through the release lane after review and Michael's separate
+release go. No assembly adopts this candidate by this change. Billing is untouched.
+
+D-9 (Michael, 2026-11-17/18: two-person approval is never compulsory; separation of
+duties is an optional per-tenant policy, default off).
+
+- `separation_of_duties: bool = False` (keyword-only) on `create_supplier_payment`,
+  `approve_supplier_payment`, `record_supplier_payment` and
+  `reverse_supplier_payment`. The default is OFF per Michael's no-compulsory-two-person
+  ruling: a caller that does not name it gets no separation, so one operator can run
+  the flow. A caller that wants two-person approval passes `True`; an assembly passes
+  its tenant policy explicitly. The `separation_enforced` column default stays `true`
+  so existing rows remain strict; new rows take whatever the service passes.
+- `create_supplier_payment` stamps the policy in force on the row
+  (`supplier_payments.separation_enforced`, NOT NULL, default true). Approve, record
+  and reverse enforce the separation when `row.separation_enforced or
+  separation_of_duties` (the stricter value wins). The flag is part of each command's
+  idempotency fingerprint; a replay of `create_supplier_payment` for an existing
+  number under a different policy is a `Conflict`.
+- Migration `pa_0007_separation_policy`: adds the column, rewrites
+  `ck_supplier_payments_sod` as `NOT separation_enforced OR (<a6 predicate>)`, and adds
+  the `supplier_payments_guard_policy` UPDATE trigger that refuses any change of the
+  stamp. Downgrade refuses while any row has `separation_enforced = false`.
+- WIDENING, stated plainly: the owner's separation-of-duties rule and the
+  database CHECK `ck_supplier_payments_sod` are relaxed PER ROW when that row's stamp
+  is false. Rows stamped true (every pre-a7 row, and every row prepared with an
+  explicit `True`) are enforced exactly as in a6, in the service and in the database.
+- Forbidden and not done: no synthetic distinct actor strings; the audit trail names
+  the one real actor.
+- DISCLOSURE (explicit widening under section 8b): with the tenant policy ON, the
+  database backstop is only as strong as the INSERT stamp. The database cannot see the
+  tenant policy, so any `app_user`-level writer (or a buggy assembly path) can insert a
+  DRAFT stamped `separation_enforced = false` and take it through single-handed. The
+  a6 unconditional CHECK prevented that. The assembly (ERP) is responsible for passing
+  the policy explicitly, reading back `separation_enforced` after create and refusing a
+  mismatch; that control is not built here.
+- `separation_of_duties` must be a real `bool`: any other value (None, 0, "") raises
+  `TypeError` before anything is written, so a falsy non-bool can never relax a row.
+- The flag joins an idempotency fingerprint only when it is `False`, so enforced
+  (`True`) calls keep their a6 fingerprint bytes, replays and the reversal event's
+  fingerprint.
+- `pa_0007` downgrade takes `LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE` before it
+  checks for relaxed rows.
+
 ## 0.1.0a6 — unreleased
 
 Publication is authorized by Michael (register v1516, D-9 and the a6 VAT-release and

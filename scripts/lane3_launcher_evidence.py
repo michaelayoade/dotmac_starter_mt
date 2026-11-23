@@ -33,6 +33,7 @@ from typing import Any, Final
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import lane3_evidence_finalization as evidence_finalization
+import lane3_negative_proof as negative_proof
 import lane3_receipt_v2 as receipt_v2
 from dotmac_deployment_foundation.errors import SpecError
 from dotmac_deployment_foundation.rehearsal import (
@@ -72,10 +73,15 @@ def finalize(
     *,
     probe_bytes: bytes,
     exposure_calls_b64: object,
+    negative_compensation: bytes | None,
     encryption: evidence_finalization.EncryptionContext,
     output: pathlib.Path,
 ) -> bytes:
-    """Encrypt the launcher's probe bytes with the target's exposure calls.
+    """Encrypt the launcher's probe bytes with the target's exposure calls and the
+    negative-target compensation proof (the v2 bundle, S8b). `None` is refused.
+
+    Size: the proof member is capped at 16 MiB as a whole and carries the exposure
+    calls as base64, so the effective cap on the raw calls is about 12 MiB.
 
     Returns the ciphertext exactly as written to `output`. `output` is
     create-only: `finalize_evidence` refuses an existing name.
@@ -87,9 +93,14 @@ def finalize(
         parse_exposure_calls(calls)
     except ExposureEvidenceRefused:
         raise EvidenceHandBackRefused("exposure-calls-not-canonical") from None
-    return evidence_finalization.finalize_evidence(
+    try:
+        negative_proof.parse_proof(negative_compensation)
+    except negative_proof.ProofRefused:
+        raise EvidenceHandBackRefused("negative-compensation-invalid") from None
+    return evidence_finalization.finalize_evidence_v2(
         probe_evidence=probe_bytes,
         exposure_calls=calls,
+        negative_compensation=negative_compensation,
         context=encryption,
         output=output,
     )

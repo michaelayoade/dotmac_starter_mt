@@ -418,6 +418,8 @@
         "ALLOWED_HEADERS",
         "AttachmentRef",
         "DeliveryProvider",
+        "EMAIL_SEND_CAPABILITY_ID",
+        "EMAIL_SEND_COMMAND_SCHEMA",
         "FEATURE_ATTACHMENTS",
         "FEATURE_HTML",
         "MAX_PART_BYTES",
