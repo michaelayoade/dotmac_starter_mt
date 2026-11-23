@@ -249,8 +249,14 @@ def make_materials(**overrides: object) -> dict[str, object]:
     plan snapshot it binds, and the few CP-supplied fields (ruling R1)."""
     params = overrides.pop("params", None) or base_params()
     app_image = str(overrides.pop("app_image", APP_IMAGE))
+    jobs = overrides.pop("jobs", None)
+    dispatched = overrides.pop("dispatched_job", None)
+    scoped = {n for j in (jobs or []) for n in j["params"]}  # type: ignore[index, union-attr]
+    if dispatched is not None:
+        scoped |= set(dispatched["params"])  # type: ignore[index]
+    serving = [r for r in params if r["name"] not in scoped]  # type: ignore[attr-defined]
     try:
-        digest = render_digest(canonical_render(to_params(params), app_image))  # type: ignore[arg-type]
+        digest = render_digest(canonical_render(to_params(serving), app_image))  # type: ignore[arg-type]
     except Refusal:
         digest = "sha256:" + "0" * 64  # a refused render has no honest digest
     binding: dict[str, object] = {
@@ -267,6 +273,10 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "secrets_environment": overrides.pop("secrets_environment", "staging"),
         "roles": overrides.pop("roles", []),
     }
+    if jobs is not None:
+        binding["jobs"] = jobs
+    if dispatched is not None:
+        binding["dispatched_job"] = dispatched
     target = str(overrides.pop("target_ref", TARGET))
     product, environment, _host = target.split("/")
     snapshot: dict[str, object] = {
@@ -499,6 +509,8 @@ class FakeBaoTransport:
 
 
 class FakeRunner:
+    job_entry_available = True  # the real runner says False until Foundation ships it
+
     def __init__(
         self,
         exit_code: int = 0,

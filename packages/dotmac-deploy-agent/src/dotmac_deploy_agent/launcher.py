@@ -7,6 +7,7 @@ started and is reported as a refused observation.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -32,10 +33,16 @@ from .files import (
     require_private_dir,
     write_private,
 )
+from .job_delivery import (
+    deliver_job_secret_id,
+    purge_job_role,
+    render_job_credentials,
+)
+from .jobs import job_env
 from .journal import AccessorStore, ExecutedDispatches
 from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient
 from .legacy import prepare_legacy, remove_legacy_copy
-from .materials import Materials, parse_materials
+from .materials import Materials, RoleSpec, parse_materials
 from .observation import (
     Outbox,
     build_observation,
@@ -63,8 +70,10 @@ from .runner import Runner, RunResult, RunSpec
 from .systemd_creds import read_credential
 from .transfer import Transfer
 from .transport import Transport
+from .wire import utc_stamp
 
 LOG = logging.getLogger("dotmac.deploy_agent")
+JOB_PARAMS_FILE = "job-params.env"
 
 
 @dataclass(frozen=True)
@@ -107,6 +116,9 @@ class Launcher:
         self.outbox = Outbox(config.state_dir)
         self.executed = ExecutedDispatches(config.state_dir)
         self.accessors = AccessorStore(config.state_dir)
+        #: Job-role accessors (A7): tracked from unwrap, kept apart from the
+        #: serving roles' lifecycle so settlement never touches them.
+        self.job_accessors = AccessorStore(config.state_dir, "job-accessors")
 
     # -- housekeeping ------------------------------------------------------
     def _prepare_dirs(self) -> None:
@@ -122,6 +134,35 @@ class Launcher:
         # and a kill mid-run leaves the per-run credentials directory.
         shutil.rmtree(self.config.registry_dir, ignore_errors=True)
         shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+        self.purge_stale_jobs()
+
+    def purge_stale_jobs(self) -> None:
+        """A7, at agent start: a crash mid-job leaves a `secret_id` file and maybe
+        a live accessor. Files go first; accessors are destroyed when OpenBao is
+        reachable and stay tracked (retried next cycle) when it is not."""
+        for role in self.job_accessors.roles():
+            try:
+                self.purge_job_role(role)
+            except Refusal as refusal:
+                LOG.warning("stale job purge deferred role=%s code=%s", role, refusal)
+
+    def purge_job_role(self, role: str, rendered: tuple[str, ...] = ()) -> int:
+        """A7, on job exit (any code) and on the container's `die` event: remove the
+        `secret_id` and the named rendered files, destroy every tracked accessor.
+        Returns how many accessors are still tracked (0 = clean)."""
+        session: OpenBaoSession | None = None
+        try:
+            if self.job_accessors.load(role).retire:
+                try:
+                    session = self._bao_session()
+                except Refusal:
+                    session = None  # unreachable: files still go, accessors wait
+            return purge_job_role(
+                self.config, self.job_accessors, role, session, rendered
+            )
+        finally:
+            if session is not None:
+                session.revoke()
 
     def _run_credentials_dir(self) -> Path:
         return self.config.run_dir / "credentials"
@@ -263,6 +304,8 @@ class Launcher:
             return CycleResult("refused", refusal.code, materials.dispatch_id)
         if standing == EXPIRED_UNRELEASED:
             return self._reconcile(materials.dispatch_id, standing)
+        if materials.dispatched_job is not None:
+            return self._execute_job(materials)
         return self._execute(materials, reply)
 
     def _reconcile(self, dispatch_id: str, standing: str) -> CycleResult:
@@ -413,6 +456,166 @@ class Launcher:
                 clear_inflight(self.config.state_dir)
         self._report(self._observation(materials.dispatch_id, outcome, reason, details))
         return CycleResult(outcome, reason, materials.dispatch_id)
+
+    def _lock_role_job(self) -> int:
+        """One role job per host: a non-blocking lock held for the whole run. (The
+        host lease is the cross-kind fence against a serving deploy.)"""
+        descriptor = os.open(
+            self.config.state_dir / "role-job.lock",
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(descriptor)
+            raise Refusal("lease_refused", "role_job_running") from None
+        return descriptor
+
+    def _execute_job(self, materials: Materials) -> CycleResult:
+        """A signed `run_job` dispatch: one named job, its role minted for this
+        run only, purged on every exit path, then the receipt. Everything the
+        plan binds was checked at parse (operation, window, role fence, lease fit)."""
+        job = materials.dispatched_job
+        if job is None:
+            raise Refusal("materials_invalid")
+        spec = job.spec
+        scoped = materials.scoped_params.get(spec.name, ())
+        scoped_materials = {p.material for p in scoped if p.material}
+        credential_names = tuple(m for m in spec.materials if m not in scoped_materials)
+        details: dict[str, object] = {"params_env_digest": materials.params_env_digest}
+        receipt: dict[str, object] = {
+            "name": spec.name,
+            "role": spec.role,
+            "materials": list(spec.materials),
+            "window_id": job.window_id,
+            "started_at": utc_stamp(self.clock()),
+        }
+        details["job"] = receipt
+        ran, outcome, reason = False, "completed", None
+        deploy_run_dir = self.config.deploy_run_dir
+        job_params = deploy_run_dir / JOB_PARAMS_FILE
+        lease: Lease | None = None
+        lock: int | None = None
+        try:
+            lock = self._lock_role_job()
+            self.executed.refuse_replay(materials.dispatch_id)
+            order = (materials.execution_sequence, materials.attempt_no)
+            self.executed.refuse_superseded(order)
+            refuse_preexisting_overrides(self.config.deploy_dir)
+            planned = canonical_render(materials.params, materials.app_image)
+            if render_digest(planned) != materials.params_env_digest:
+                raise Refusal("params_digest_mismatch")
+            job_lines = job_env(spec, scoped)  # per-job digest; never params.env
+            require_private_dir(deploy_run_dir)
+            if not getattr(self.runner, "job_entry_available", False):
+                # Before any lease, mint or file: nothing is spent on a job that
+                # Foundation cannot run yet.
+                raise Refusal("foundation_job_entry_unavailable")
+
+            lease = self.lease.acquire(
+                dispatch_id=materials.dispatch_id,
+                ttl_seconds=materials.lease_ttl_seconds,
+            )
+            details["lease"] = {
+                "lease_id": lease.lease_id,
+                "ttl_seconds": lease.ttl_seconds,
+            }
+            transferred = self.transfer.transfer_all(
+                materials.images, ttl_seconds=lease.ttl_seconds
+            )
+            details["transfer"] = [t.as_details() for t in transferred]
+            params_file = write_params_env(deploy_run_dir, planned)
+            write_private(job_params, job_lines, 0o400)
+
+            self.executed.record(materials.dispatch_id, order)  # before the mint
+            secrets_dir: Path = (
+                self.config.role_dir(spec.role) if spec.role else deploy_run_dir
+            )
+            if spec.role is not None:
+                receipt["accessor_prefix"] = self._mint_job_role(materials, spec.role)
+                receipt["files"] = list(
+                    render_job_credentials(
+                        self.config, self.commands, spec.role, credential_names
+                    )
+                )
+            if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
+                raise Refusal("lease_unavailable")
+            credentials_dir = self._prepare_run_credentials()
+            mark_inflight(self.config.state_dir, materials.dispatch_id)
+            ran = True
+            result = self.runner.run(
+                RunSpec(
+                    dispatch_id=materials.dispatch_id,
+                    target_ref=materials.target_ref,
+                    product=self.config.product,
+                    plan_digest=materials.plan_digest,
+                    params_env=params_file,
+                    agent_config=self.config.config_path,
+                    bindings_env=self.config.bindings_env,
+                    credentials_directory=str(credentials_dir),
+                    lease_id=lease.lease_id,
+                    job_name=spec.name,
+                    job_params_env=job_params,
+                    job_secrets_dir=secrets_dir,
+                    job_argv_digest=job.argv_digest,
+                )
+            )
+            receipt["exit_code"] = result.exit_code
+            details["runner"] = {
+                "exit_code": result.exit_code,
+                "timed_out": result.timed_out,
+            }
+            if result.timed_out:
+                outcome, reason = "failed", "runner_timeout"
+            elif result.exit_code != 0:
+                outcome = "failed"
+        except Refusal as refusal:
+            outcome = "failed" if ran else "refused"
+            reason = refusal.code
+            if refusal.detail is not None:
+                details["refusal_detail"] = refusal.detail
+        finally:
+            # Purge first (files, then the accessor), whatever happened above; the
+            # receipt is written only after.
+            if spec.role is not None:
+                names = tuple(m.lower() for m in credential_names)
+                try:
+                    receipt["accessors_still_tracked"] = self.purge_job_role(
+                        spec.role, names
+                    )
+                except Refusal as refusal:
+                    receipt["purge_failed"] = refusal.code
+            remove_runtime_files(deploy_run_dir, (PARAMS_FILE, JOB_PARAMS_FILE))
+            shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+            if lease is not None:
+                details["lease_released"] = self._release(lease, host_mutated=ran)
+            if ran:
+                clear_inflight(self.config.state_dir)
+            if lock is not None:
+                os.close(lock)
+            receipt["finished_at"] = utc_stamp(self.clock())
+        self._report(self._observation(materials.dispatch_id, outcome, reason, details))
+        return CycleResult(outcome, reason, materials.dispatch_id)
+
+    def _mint_job_role(self, materials: Materials, role: str) -> str:
+        check_authored_configs(
+            self.config,
+            self.config.secrets_namespace,
+            (RoleSpec(role, True),),
+            required_uid=self.root_uid,
+        )
+        session = self._bao_session()
+        try:
+            return deliver_job_secret_id(
+                session,
+                self.config,
+                role,
+                self.job_accessors,
+                dispatch_id=materials.dispatch_id,
+            )
+        finally:
+            session.revoke()
 
     def _release(self, lease: Lease, *, host_mutated: bool) -> bool:
         """Best effort: a lease that is not released simply expires."""

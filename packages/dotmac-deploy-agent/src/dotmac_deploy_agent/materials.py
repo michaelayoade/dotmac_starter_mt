@@ -15,13 +15,23 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Final, cast
 
 from .canon import DIGEST
 from .config import AgentConfig
 from .dispatch import PinnedIdentity, plan_digest_of, verify_dispatch
+from .jobs import (
+    DispatchedJob,
+    JobSpec,
+    check_job_admissible,
+    plan_dispatched_job,
+    plan_jobs,
+    refuse_job_role_serving,
+    require_naming,
+    split_params,
+)
 from .params import Param
 from .refusal import Refusal
 from .wire import parse_stamp
@@ -112,6 +122,13 @@ class Materials:
     #: From the signed statement: the ordering the replay journal enforces.
     execution_sequence: int = 0
     attempt_no: int = 0
+    #: `deploy_binding.jobs` and each job's SCOPED params (A9). `params` above is
+    #: the serving set only: a scoped param never reaches `params.env`.
+    jobs: tuple[JobSpec, ...] = ()
+    scoped_params: dict[str, tuple[Param, ...]] = field(default_factory=dict)
+    #: The one job a `run_job` plan runs (its spec is also the last of `jobs`).
+    operation: str = "deploy"
+    dispatched_job: DispatchedJob | None = None
 
 
 def _list(value: object) -> list[object]:
@@ -357,6 +374,22 @@ def parse_materials(
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
+    jobs = plan_jobs(snapshot)
+    dispatched = plan_dispatched_job(binding, verified.operation)
+    if dispatched is not None:
+        if roles:
+            raise Refusal("materials_invalid", "run_job_mints_no_serving_role")
+        check_job_admissible(
+            dispatched,
+            enrolled_roles=config.job_roles,
+            store_now=store_now,
+            lease_ttl_seconds=ttl,
+        )
+        jobs = (*jobs, dispatched.spec)  # its params are scoped like any job's
+    refuse_job_role_serving([r.role for r in roles], jobs)
+    serving_params, scoped_params = split_params(
+        _parse_params(document["params"]), jobs
+    )
     secrets_namespace = binding.get("secrets_namespace")
     secrets_environment = binding.get("secrets_environment")
     for value in (secrets_namespace, secrets_environment):
@@ -366,9 +399,9 @@ def parse_materials(
             isinstance(value, str) and _SEGMENT.fullmatch(value)
         ):
             raise Refusal("materials_invalid", "bad_secrets_name")
-    if roles:
-        # Roles mean secret_ids: the naming is then required, and it must be the
-        # one pinned in the root-owned config (the plan stays the source).
+    if require_naming(roles, jobs):
+        # Roles (serving OR job) mean secret_ids: the naming is then required
+        # and must be the one pinned in the root-owned config.
         if secrets_namespace is None or secrets_environment is None:
             raise Refusal("materials_invalid", "bad_secrets_name")
         if (secrets_namespace, secrets_environment) != (
@@ -380,7 +413,7 @@ def parse_materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,
         target_ref=config.target_ref,
-        params=_parse_params(document["params"]),
+        params=serving_params,
         app_image=cast("str", document["app_image"]),
         primary_service=cast("str", binding["primary_service"]),
         params_env_digest=_digest(binding.get("params_env_digest")),
@@ -395,4 +428,8 @@ def parse_materials(
         secrets_environment=secrets_environment,  # type: ignore[arg-type]
         execution_sequence=verified.execution_sequence,
         attempt_no=verified.attempt_no,
+        jobs=jobs,
+        scoped_params=scoped_params,
+        operation=verified.operation,
+        dispatched_job=dispatched,
     )

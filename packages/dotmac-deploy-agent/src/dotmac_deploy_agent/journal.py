@@ -114,8 +114,8 @@ class RoleAccessors:
 
 
 class AccessorStore:
-    def __init__(self, state_dir: Path) -> None:
-        self._dir = state_dir / "accessors"
+    def __init__(self, state_dir: Path, name: str = "accessors") -> None:
+        self._dir = state_dir / name
         ensure_private_dir(self._dir)
 
     def path(self, role: str) -> Path:

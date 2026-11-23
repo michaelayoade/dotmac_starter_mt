@@ -159,14 +159,20 @@ class OpenBaoSession:
         ttl_seconds: int,
         wrap_ttl_seconds: int,
         dispatch_id: str,
+        job: bool = False,
     ) -> str:
-        """The wrapping token for a freshly minted `secret_id` (not the id itself)."""
+        """The wrapping token for a freshly minted `secret_id` (not the id itself).
+
+        A JOB role's body is `metadata` only (A5): its delivery stanza allows no
+        `ttl` or `num_uses`, so the AppRole's own 15 min / 1 use always applies.
+        """
         body: dict[str, object] = {
             "metadata": json.dumps({"dispatch_id": dispatch_id}, sort_keys=True),
-            "ttl": f"{ttl_seconds}s",
         }
-        if single_use:
-            body["num_uses"] = 1
+        if not job:
+            body["ttl"] = f"{ttl_seconds}s"
+            if single_use:
+                body["num_uses"] = 1
         document = self._call(
             "POST",
             mint_path(secrets_namespace, secrets_environment, role),

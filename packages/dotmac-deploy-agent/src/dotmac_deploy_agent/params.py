@@ -121,6 +121,19 @@ def check_value(value: str, kind: str = "string") -> None:
 
 
 def canonical_render(params: Sequence[Param], app_image: str) -> bytes:
+    lines = _material_lines(params)
+    check_alterable(app_image)  # the planned image is Control's; never secret-checked
+    lines[APP_IMAGE] = app_image
+    return "".join(f"{name}={lines[name]}\n" for name in sorted(lines)).encode("utf-8")
+
+
+def job_env_render(params: Sequence[Param]) -> bytes:
+    """One job's scoped params: `MATERIAL=value` lines, sorted, no `APP_IMAGE`."""
+    lines = _material_lines(params)
+    return "".join(f"{name}={lines[name]}\n" for name in sorted(lines)).encode("utf-8")
+
+
+def _material_lines(params: Sequence[Param]) -> dict[str, str]:
     lines: dict[str, str] = {}
     for param in params:
         if param.type == "secret":
@@ -136,9 +149,7 @@ def canonical_render(params: Sequence[Param], app_image: str) -> bytes:
             raise Refusal("params_secret_shaped")
         check_value(param.value, param.type)
         lines[param.material] = param.value
-    check_alterable(app_image)  # the planned image is Control's; never secret-checked
-    lines[APP_IMAGE] = app_image
-    return "".join(f"{name}={lines[name]}\n" for name in sorted(lines)).encode("utf-8")
+    return lines
 
 
 def render_digest(render: bytes) -> str:

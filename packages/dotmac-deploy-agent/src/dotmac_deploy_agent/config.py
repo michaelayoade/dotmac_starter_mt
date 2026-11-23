@@ -125,6 +125,12 @@ class AgentConfig:
     wrap_ttl_seconds: int = 120
     dispatch_max_age_seconds: int = 6 * 3600
     settle_seconds: int = 600
+    #: Host fence for role jobs (root-owned config, enrolment op): a signed
+    #: `dispatched_job.role` that is not listed is refused. Empty by default, so
+    #: every role job is refused until enrolment names one.
+    job_roles: tuple[str, ...] = ()
+    #: uid the rendered job files must belong to (None: the agent's own uid).
+    job_secrets_uid: int | None = None
     poll_seconds: int = 45
     foundation_timeout_seconds: int = 2700
     config_path: Path | None = None
@@ -265,6 +271,12 @@ class AgentConfig:
             raise Refusal("config_invalid")
         if not 60 <= self.settle_seconds <= 86400:
             raise Refusal("config_invalid")
+        if not all(_SEG_RE.fullmatch(r) for r in self.job_roles) or len(
+            set(self.job_roles)
+        ) != len(self.job_roles):
+            raise Refusal("config_invalid")
+        if self.job_secrets_uid is not None and not 1 <= self.job_secrets_uid < 2**31:
+            raise Refusal("config_invalid")  # never root
         if not 30 <= self.poll_seconds <= 60:
             raise Refusal("config_invalid")
         if not 1 <= self.foundation_timeout_seconds <= 7200:
@@ -303,7 +315,8 @@ class AgentConfig:
             "docker_path", "systemctl_path", "bindings_env",
             "runtime_secret_id_ttl_seconds", "migrate_secret_id_ttl_seconds",
             "wrap_ttl_seconds", "secrets_namespace", "secrets_environment",
-            "secrets_root", "dispatch_max_age_seconds", "settle_seconds",
+            "secrets_root", "dispatch_max_age_seconds", "settle_seconds", "job_roles",
+            "job_secrets_uid",
         }  # fmt: skip
         if not set(values) <= known:
             raise Refusal("config_invalid")
@@ -357,6 +370,13 @@ class AgentConfig:
                 if type(number) is not int:
                     raise Refusal("config_invalid")
                 extra[name] = number
+        if "job_roles" in values:
+            extra["job_roles"] = texts("job_roles")
+        if "job_secrets_uid" in values:
+            uid = values["job_secrets_uid"]
+            if type(uid) is not int:
+                raise Refusal("config_invalid")
+            extra["job_secrets_uid"] = uid
         return cls(
             cp_url=text("cp_url"),
             target_ref=text("target_ref"),

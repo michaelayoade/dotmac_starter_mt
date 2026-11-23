@@ -31,6 +31,12 @@ class RunSpec:
     credentials_directory: str | None = None
     legacy_env: Path | None = None
     lease_id: str | None = None
+    #: A signed role job (`run_job`): the four variables Foundation's operator-job
+    #: entry reads. All four or none.
+    job_name: str | None = None
+    job_params_env: Path | None = None
+    job_secrets_dir: Path | None = None
+    job_argv_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,10 +72,27 @@ def runner_environment(spec: RunSpec) -> dict[str, str]:
         env["DOTMAC_DEPLOY_LEGACY_ENV"] = str(spec.legacy_env)
     if spec.lease_id is not None:
         env["DOTMAC_DEPLOY_LEASE_ID"] = spec.lease_id
+    if spec.job_name is not None:
+        if (
+            spec.job_params_env is None
+            or spec.job_secrets_dir is None
+            or spec.job_argv_digest is None
+        ):
+            raise Refusal("runner_start_failed")
+        env["DOTMAC_DEPLOY_JOB"] = spec.job_name
+        env["DOTMAC_DEPLOY_JOB_PARAMS_ENV"] = str(spec.job_params_env)
+        env["DOTMAC_DEPLOY_JOB_SECRETS_DIR"] = str(spec.job_secrets_dir)
+        env["DOTMAC_DEPLOY_JOB_ARGV_DIGEST"] = spec.job_argv_digest
     return env
 
 
 class SubprocessRunner:
+    #: Foundation's operator-job entry does not exist yet (it waits on Michael's
+    #: approval of the increment). The launcher checks this BEFORE any lease, mint
+    #: or file, and `run` refuses a job spec too: no Foundation entry point that
+    #: is not there is ever called.
+    job_entry_available = False
+
     def __init__(self, argv: tuple[str, ...], timeout_seconds: int) -> None:
         if not argv or not os.path.isabs(argv[0]):
             raise Refusal("config_invalid")
@@ -77,6 +100,8 @@ class SubprocessRunner:
         self._timeout = timeout_seconds
 
     def run(self, spec: RunSpec) -> RunResult:
+        if spec.job_name is not None:
+            raise Refusal("foundation_job_entry_unavailable")
         try:
             process = subprocess.Popen(  # nosec B603  # noqa: S603
                 list(self._argv),

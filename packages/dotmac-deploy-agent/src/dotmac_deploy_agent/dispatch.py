@@ -103,6 +103,7 @@ class VerifiedDispatch:
     plan_digest: str
     execution_sequence: int
     attempt_no: int
+    operation: str = "deploy"
 
 
 def fingerprint_of(public_key: bytes) -> str:
@@ -247,4 +248,7 @@ def verify_dispatch(
     sequence, attempt = statement["execution_sequence"], statement["attempt_no"]
     if any(type(n) is not int or n < 1 for n in (sequence, attempt)):
         raise Refusal("dispatch_envelope_invalid")
-    return VerifiedDispatch(dispatch_id, plan_digest, sequence, attempt)
+    operation = statement["operation"]
+    if not isinstance(operation, str) or not operation:
+        raise Refusal("dispatch_envelope_invalid")
+    return VerifiedDispatch(dispatch_id, plan_digest, sequence, attempt, operation)
