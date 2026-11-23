@@ -47,14 +47,11 @@ MAX_JOB_TIMEOUT: Final = 3600 - LEASE_MARGIN
 _DISPATCHED_KEYS: Final = frozenset(
     {
         "name", "role", "single_use", "materials", "params", "params_env_digest",
-        "argv", "timeout_seconds", "window",
+        "argv", "timeout_seconds", "window", "inputs", "output_dir", "apply_class",
     }
 )  # fmt: skip
-#: Added by Control's next v2 (P-SEC rev5 RQ-2, RQ-3). Optional until the vendored
-#: contract carries them; once it does, the agent requires them.
-_DISPATCHED_OPTIONAL: Final = frozenset({"inputs", "apply_class"})
-#: The closed list of apply-mode argv tokens (RQ-3). A token not here is not apply.
-APPLY_ARGV_TOKENS: Final = frozenset({"--apply"})
+#: Every `run_job` plan carries these (Control v2 at 2370860); none is optional.
+OUTPUT_DIR: Final = "/job/out"
 _JOB_IN: Final = re.compile(r"/job/in/[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _JOB_OUT: Final = re.compile(r"/job/out/[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _FLAG: Final = re.compile(r"--[a-z][a-z0-9-]*")
@@ -69,23 +66,30 @@ class JobDefinition:
     role: str | None
     materials: tuple[str, ...]
     params: tuple[str, ...]
-    #: Flags of this job's closed arg list that Control marks `apply_mode` (RQ-3).
-    apply_flags: tuple[str, ...] = ()
+    #: RQ-3: what makes a dispatch apply-class, from the plan's closed arg list:
+    #: the command itself applies, or an `apply_mode` bool flag is present, or an
+    #: enum flag takes one of its `apply_choices`.
+    apply_command: bool = False
+    apply_args: tuple[tuple[str, bool, tuple[str, ...]], ...] = ()
 
 
-def _apply_flags(row: Mapping[str, object]) -> tuple[str, ...]:
+def _apply_args(
+    row: Mapping[str, object],
+) -> tuple[tuple[str, bool, tuple[str, ...]], ...]:
     args = row.get("args", [])
     if not isinstance(args, list):
         raise Refusal("materials_invalid")
-    flags = [
-        a["flag"]
-        for a in args
-        if isinstance(a, dict)
-        and a.get("apply_mode") is True
-        and isinstance(a.get("flag"), str)
-        and _FLAG.fullmatch(a["flag"])
-    ]
-    return tuple(sorted(flags))
+    found: list[tuple[str, bool, tuple[str, ...]]] = []
+    for a in args:
+        if not isinstance(a, dict) or not isinstance(a.get("flag"), str):
+            continue  # other keys are Control's; only these three matter here
+        choices = a.get("apply_choices", [])
+        if not _FLAG.fullmatch(a["flag"]) or not (
+            isinstance(choices, list) and all(isinstance(c, str) for c in choices)
+        ):
+            raise Refusal("materials_invalid")
+        found.append((a["flag"], a.get("apply_mode") is True, tuple(choices)))
+    return tuple(sorted(found))
 
 
 def _names(value: object) -> tuple[str, ...]:
@@ -123,7 +127,8 @@ def plan_jobs(snapshot: Mapping[str, object]) -> tuple[JobDefinition, ...]:
                 role,
                 _names(row.get("materials", [])),
                 _names(row.get("params", [])),
-                _apply_flags(row),
+                row.get("apply_command") is True,
+                _apply_args(row),
             )
         )
     if len({j.name for j in jobs}) != len(jobs):
@@ -169,8 +174,7 @@ def plan_dispatched_job(
         return None
     if (
         not isinstance(raw, dict)
-        or not _DISPATCHED_KEYS <= set(raw)
-        or not set(raw) <= _DISPATCHED_KEYS | _DISPATCHED_OPTIONAL
+        or set(raw) != _DISPATCHED_KEYS  # exactly: a stray or missing key is refused
     ):
         raise Refusal("materials_invalid", "dispatched_job_missing")
     role, single_use = raw["role"], raw["single_use"]
@@ -199,10 +203,12 @@ def plan_dispatched_job(
         or not 1 <= timeout <= MAX_JOB_TIMEOUT
     ):
         raise Refusal("materials_invalid", "dispatched_job_invalid")
-    rows = raw.get("inputs", [])
-    apply_class = raw.get("apply_class")
-    if not isinstance(rows, list) or not (
-        apply_class is None or type(apply_class) is bool
+    rows = raw["inputs"]
+    apply_class = raw["apply_class"]
+    if (
+        not isinstance(rows, list)
+        or type(apply_class) is not bool
+        or raw["output_dir"] != OUTPUT_DIR
     ):
         raise Refusal("materials_invalid", "dispatched_job_invalid")
     inputs: list[tuple[str, str, str]] = []
@@ -225,6 +231,11 @@ def plan_dispatched_job(
     if flags != sorted(set(flags)):
         raise Refusal("materials_invalid", "dispatched_job_invalid")  # sorted, unique
     in_paths = {p for _, p, _ in inputs}
+    for flag, path, _ in inputs:  # an input flag is followed by its path in argv
+        if not any(
+            argv[i] == flag and argv[i + 1] == path for i in range(len(argv) - 1)
+        ):
+            raise Refusal("materials_invalid", "dispatched_job_invalid")
     for token in argv:
         if token.startswith("/job/"):
             ok_in = token in in_paths
@@ -338,22 +349,34 @@ def check_matches_definition(
     raise Refusal("materials_invalid", "dispatched_job_undefined")
 
 
-def derive_apply_class(job: DispatchedJob, apply_flags: Sequence[str] = ()) -> bool:
-    """RQ-3: apply-class from the SIGNED plan alone: any scoped gate `"1"`, or an
-    apply-mode argv token. The tokens are the plan job definition's closed arg list
-    flags marked `apply_mode`, plus the fixed `--apply`. Never from the job name or a
-    label."""
-    tokens = APPLY_ARGV_TOKENS | frozenset(apply_flags)
-    return any(value == "1" for _, value in job.env) or any(
-        token in tokens for token in job.argv
-    )
+def derive_apply_class(
+    job: DispatchedJob, definition: JobDefinition | None = None
+) -> bool:
+    """RQ-3: apply-class from the SIGNED plan alone, the way Control derives it: any
+    scoped gate `"1"`, or the job's command applies, or an `apply_mode` flag is in
+    argv, or an `apply_choices` value follows its flag. Never from a name or label."""
+    if any(value == "1" for _, value in job.env):
+        return True
+    if definition is None:
+        return False
+    if definition.apply_command:
+        return True
+    for flag, apply_mode, choices in definition.apply_args:
+        for index, token in enumerate(job.argv):
+            if token != flag:
+                continue
+            if apply_mode:
+                return True
+            if choices and index + 1 < len(job.argv) and job.argv[index + 1] in choices:
+                return True
+    return False
 
 
-def check_apply_class(job: DispatchedJob, apply_flags: Sequence[str] = ()) -> None:
-    """Refuse a plan whose stated class disagrees with the agent's derivation."""
-    if job.apply_class is not None and job.apply_class != derive_apply_class(
-        job, apply_flags
-    ):
+def check_apply_class(
+    job: DispatchedJob, definition: JobDefinition | None = None
+) -> None:
+    """Refuse a plan whose stated class (required) disagrees with the derivation."""
+    if job.apply_class != derive_apply_class(job, definition):
         raise Refusal("job_apply_class_mismatch")
 
 

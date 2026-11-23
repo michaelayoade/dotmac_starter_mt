@@ -30,10 +30,10 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v2.json"
-#: Control a18 `contract/target_api_v2.json` (branch control-a18-20261122 at be74634,
-#: 223166 bytes). A new Control sha replaces this value and the vendored bytes together.
+#: Control a18 `contract/target_api_v2.json` (branch control-a18-20261122 at 2370860,
+#: 294836 bytes). A new Control sha replaces this value and the vendored bytes together.
 TARGET_API_V2_SHA256 = (
-    "0fe9c6be1b49af5fb4b9267bce51dfaccc016e83b1c5dd8b2332916f698d834d"
+    "95756ba1d9a1e4c12cafef82ba4fb7e343c29c677772087bec2dd3bbc5374988"
 )
 
 
@@ -91,9 +91,14 @@ def test_every_ok_observation_is_reproduced_byte_for_byte_and_signature_for_sign
         envelope = o2.seal(statement, signer)
         assert envelope["signature"] == vector["signature_b64u"]
         assert canonical_json(envelope).decode() == vector["wire_utf8"]
+        # a reconcile's report id also carries observed_at: every observation of an
+        # expired dispatch is its own report
+        suffix = (
+            f":{statement['observed_at']}" if statement["kind"] == "reconcile" else ""
+        )
         assert (
             vector["report_id"]
-            == f"agent:{statement['kind']}:{statement['dispatch_id']}"
+            == f"agent:{statement['kind']}:{statement['dispatch_id']}{suffix}"
         )
         public_key(ao["key"]).verify(
             wire.decode_b64url(vector["signature_b64u"]) or b"",

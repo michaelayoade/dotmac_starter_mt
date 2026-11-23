@@ -578,9 +578,7 @@ class Launcher:
                 raise Refusal("params_digest_mismatch")
             job_lines = job_env(job)  # signed values vs the signed digest
             definition = next((d for d in materials.jobs if d.name == job.name), None)
-            check_apply_class(  # RQ-3: re-derived from the signed plan
-                job, definition.apply_flags if definition is not None else ()
-            )
+            check_apply_class(job, definition)  # RQ-3: re-derived, required
             check_job_inputs(  # RQ-2: input sha256s
                 self.config.secrets_root, job, self.config.job_work_root
             )

@@ -89,6 +89,9 @@ def dispatched(**kw: object) -> dict[str, object]:
         "argv": ["python", "-m", "erp_v2.importer", "execute"],
         "timeout_seconds": 600,
         "window": {"window_id": "w1", "closes_at": CLOSES},
+        "inputs": [],
+        "output_dir": "/job/out",
+        "apply_class": False,
     }
     row.update(kw)
     return row
@@ -1003,6 +1006,18 @@ def work_rig(tmp_path: Path, content: bytes = b"manifest") -> tuple[Rig, str]:
     return rig, "sha256:" + hashlib.sha256(content).hexdigest()
 
 
+BASE_ARGV = ["python", "-m", "erp_v2.importer", "execute"]
+
+
+def with_input(digest_: str, **kw: object) -> dict[str, object]:
+    """`dispatched()` overrides: one input, its flag and path present in argv."""
+    entry = one_input(digest_, **kw)
+    return {
+        "inputs": [entry],
+        "argv": [*BASE_ARGV, str(entry["flag"]), str(entry["path"])],
+    }
+
+
 def one_input(digest_: str, **kw: object) -> dict[str, object]:
     row: dict[str, object] = {
         "flag": "--manifest",
@@ -1015,7 +1030,7 @@ def one_input(digest_: str, **kw: object) -> dict[str, object]:
 
 def test_rq2_an_input_whose_sha256_matches_the_plan_is_accepted(tmp_path: Path) -> None:
     rig, digest_ = work_rig(tmp_path)
-    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    rig.cp.materials = run_job_materials(dispatched(**with_input(digest_)))
     assert refused(rig) == ("completed", None)
 
 
@@ -1023,9 +1038,7 @@ def test_rq2_an_input_digest_mismatch_is_refused_before_any_lease_or_mint(
     tmp_path: Path,
 ) -> None:
     rig, _ = work_rig(tmp_path)
-    rig.cp.materials = run_job_materials(
-        dispatched(inputs=[one_input("sha256:" + "0" * 64)])
-    )
+    rig.cp.materials = run_job_materials(dispatched(**with_input("sha256:" + "0" * 64)))
     assert refused(rig) == ("refused", "job_input_mismatch")
     assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.runner.specs == []
 
@@ -1034,22 +1047,20 @@ def test_rq2_a_missing_or_symlinked_input_is_a_mismatch(tmp_path: Path) -> None:
     rig, digest_ = work_rig(tmp_path)
     inputs = tmp_path / "work" / "import" / "in"
     (inputs / "manifest.json").unlink()
-    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    rig.cp.materials = run_job_materials(dispatched(**with_input(digest_)))
     assert refused(rig) == ("refused", "job_input_mismatch")  # missing
     real = tmp_path / "real.json"
     real.write_bytes(b"manifest")
     (inputs / "manifest.json").symlink_to(real)
     rig.cp.materials = run_job_materials(
-        dispatched(inputs=[one_input(digest_)]), dispatch_id="dispatch-2"
+        dispatched(**with_input(digest_)), dispatch_id="dispatch-2"
     )
     assert refused(rig) == ("refused", "job_input_mismatch")  # a symlink
 
 
 def test_rq2_inputs_without_a_work_root_are_refused(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)  # no job_work_root configured
-    rig.cp.materials = run_job_materials(
-        dispatched(inputs=[one_input("sha256:" + "0" * 64)])
-    )
+    rig.cp.materials = run_job_materials(dispatched(**with_input("sha256:" + "0" * 64)))
     assert refused(rig) == ("refused", "job_input_mismatch")
 
 
@@ -1169,7 +1180,10 @@ def test_rq3_apply_class_is_rederived_from_the_signed_plan(
     tmp_path: Path, extra: dict[str, object], declared: bool, expected: str | None
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(dispatched(apply_class=declared, **extra))
+    flagged = definition(args=[{"flag": "--apply", "type": "bool", "apply_mode": True}])
+    rig.cp.materials = run_job_materials(
+        dispatched(apply_class=declared, **extra), jobs=[flagged]
+    )
     result = refused(rig)
     if expected is None:
         assert result == ("completed", None)
@@ -1178,11 +1192,76 @@ def test_rq3_apply_class_is_rederived_from_the_signed_plan(
         assert rig.bao.paths == []
 
 
-def test_rq3_a_plan_without_a_stated_class_is_not_refused_until_the_contract_carries_it(
-    tmp_path: Path,
+@pytest.mark.parametrize("missing", ["apply_class", "inputs", "output_dir"])
+def test_the_v2_dispatched_job_keys_are_required(tmp_path: Path, missing: str) -> None:
+    rig = job_rig(tmp_path)
+    job = dispatched()
+    del job[missing]
+    rig.cp.materials = run_job_materials(job)
+    assert refused(rig) == ("refused", "materials_invalid")
+    assert rig.bao.paths == []
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"apply_class": "yes"},
+        {"apply_class": 1},
+        {"output_dir": "/var/out"},
+        {"output_dir": "/job/in"},
+    ],
+)
+def test_a_non_bool_apply_class_or_a_foreign_output_dir_is_refused(
+    tmp_path: Path, bad: dict[str, object]
 ) -> None:
     rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(dispatched(**bad))
+    assert refused(rig) == ("refused", "materials_invalid")
+
+
+def test_rq3_apply_choices_and_an_applying_command_make_a_plan_apply_class(
+    tmp_path: Path,
+) -> None:
+    choice = definition(
+        args=[
+            {
+                "flag": "--mode",
+                "type": "enum",
+                "choices": ["plan", "apply"],
+                "apply_choices": ["apply"],
+            }
+        ]
+    )
+    plan = ["python", "-m", "erp_v2.importer", "execute", "--mode", "plan"]
+    apply = [*plan[:-1], "apply"]
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=plan, apply_class=False), jobs=[choice]
+    )
+    assert refused(rig) == ("completed", None)  # the plan choice is not apply
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=apply, apply_class=False),
+        jobs=[choice],
+        dispatch_id="dispatch-2",
+    )
+    assert refused(rig) == (
+        "refused",
+        "job_apply_class_mismatch",
+    )  # the apply choice is
+    rig.cp.materials = run_job_materials(
+        dispatched(argv=apply, apply_class=True),
+        jobs=[choice],
+        dispatch_id="dispatch-3",
+    )
     assert refused(rig) == ("completed", None)
+    command = definition(apply_command=True)
+    rig.cp.materials = run_job_materials(
+        dispatched(apply_class=False), jobs=[command], dispatch_id="dispatch-4"
+    )
+    assert refused(rig) == (
+        "refused",
+        "job_apply_class_mismatch",
+    )  # the command applies
 
 
 def test_rq4_an_owner_only_job_renders_exactly_the_owner_file(tmp_path: Path) -> None:
@@ -1434,7 +1513,7 @@ def test_staged_inputs_need_only_acl_read_not_world_readable(tmp_path: Path) -> 
     staged = tmp_path / "work" / "import" / "in" / "manifest.json"
     staged.chmod(0o440)
     assert staged.stat().st_mode & 0o007 == 0  # not world-readable
-    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    rig.cp.materials = run_job_materials(dispatched(**with_input(digest_)))
     assert refused(rig) == ("completed", None)
 
 
