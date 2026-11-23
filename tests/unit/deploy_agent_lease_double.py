@@ -92,6 +92,10 @@ class DeployLeaseDouble:
         #: A same-run acquire returns what is LEFT of the lease (the architect's r4
         #: reading) instead of its first ttl (what Control's v2 scenario shows today).
         self.replay_returns_remaining = False
+        #: #1143's reconcile reads `dispatch_run` from the standing of an expired
+        #: lease. Control's v2 standing body does not carry it (open question), so
+        #: the contract replay turns this off.
+        self.names_expired_dispatch = True
         self.counter = 0
         self.log: list[tuple[str, dict[str, object]]] = []
 
@@ -108,10 +112,22 @@ class DeployLeaseDouble:
             return "expired_unreleased"
         return "free"
 
+    def _standing_body(self, _payload: dict[str, object]) -> dict[str, object]:
+        body: dict[str, object] = {"standing": self.standing()}
+        if (
+            self.names_expired_dispatch
+            and self.standing() == "expired_unreleased"
+            and self.row is not None
+        ):
+            # CP names the expired lease's dispatch (used by the reconcile); not in
+            # Control's v2 standing body yet.
+            body["dispatch_run"] = self.row.run
+        return body
+
     # -- endpoints ---------------------------------------------------------
     def handlers(self) -> dict[str, Callable[[dict[str, object]], dict[str, object]]]:
         return {
-            "lease/standing": lambda _p: {"standing": self.standing()},
+            "lease/standing": self._standing_body,
             "lease/acquire": self.acquire,
             "lease/covers": self.covers,
             "lease/renew": self.renew,

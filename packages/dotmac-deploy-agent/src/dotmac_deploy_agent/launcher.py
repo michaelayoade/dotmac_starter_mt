@@ -69,6 +69,7 @@ from .params import (
 )
 from .reconcile import reconcile_observation
 from .refusal import Refusal
+from .report_state import SeenStore
 from .runner import Runner, RunResult, RunSpec
 from .systemd_creds import read_credential
 from .transfer import Transfer
@@ -122,6 +123,9 @@ class Launcher:
         #: Job-role accessors (A7): tracked from unwrap, kept apart from the
         #: serving roles' lifecycle so settlement never touches them.
         self.job_accessors = AccessorStore(config.state_dir, "job-accessors")
+        self._refusals_reported = SeenStore(config.state_dir, "refusals_reported")
+        self._reconcile_posted = SeenStore(config.state_dir, "reconcile_posted")
+        self._interrupted: str | None = None
 
     # -- housekeeping ------------------------------------------------------
     def _prepare_dirs(self) -> None:
@@ -188,6 +192,18 @@ class Launcher:
             self.outbox.acknowledge(path)
 
     def _report(self, observation: dict[str, object]) -> None:
+        if (
+            observation.get("outcome") == "refused"
+            and observation.get("kind") != "reconcile"
+        ):
+            # One refused observation per (dispatch, reason), not one per poll.
+            key, reason = (
+                str(observation["dispatch_id"]),
+                str(observation.get("reason")),
+            )
+            if self._refusals_reported.seen(key, reason):
+                return
+            self._refusals_reported.remember(key, reason)
         self.outbox.seal(observation)
         self.flush_outbox()
 
@@ -208,6 +224,7 @@ class Launcher:
 
     def _recover_interrupted(self) -> None:
         dispatch_id = read_inflight(self.config.state_dir)
+        self._interrupted = dispatch_id
         if dispatch_id is None:
             return
         self._report(
@@ -328,28 +345,44 @@ class Launcher:
             # it (`reconcile_marker_required` stops the run). If the observation
             # cannot be made, nothing proceeds.
             reconciled = self._reconcile(materials.dispatch_id, standing)
-            if reconciled.outcome != "reconcile_reported":
+            if reconciled.outcome not in ("reconcile_reported", "reconcile_waiting"):
                 return reconciled
         if materials.dispatched_job is not None:
             return self._execute_job(materials)
         return self._execute(materials, reply)
 
-    def _reconcile(self, dispatch_id: str, standing: str) -> CycleResult:
-        """Read-only: report what is running and stop. Control issues the marker."""
+    def _expired_dispatch(self) -> str:
+        """The dispatch whose lease expired, from CP's lease row (`dispatch_run` in
+        the standing response): never the pending dispatch. A local inflight record,
+        when present, must agree."""
+        reply = self.client.call("GET", "lease/standing", None)
+        run = reply.document.get("dispatch_run")
+        if not isinstance(run, str) or safe_id(run) != run:
+            raise Refusal("reconcile_unavailable")
+        if self._interrupted is not None and self._interrupted != run:
+            raise Refusal("reconcile_unavailable")
+        return run
+
+    def _reconcile(self, pending_dispatch_id: str, standing: str) -> CycleResult:
+        """Read-only: report the facts about the EXPIRED dispatch and stop. Control
+        decides the marker. Posted once per (expired dispatch, observed digest)."""
+        _ = standing
         try:
-            observation = reconcile_observation(
-                self.config,
-                self.read_only,
-                dispatch_id=dispatch_id,
-                standing=standing,
-                expected_image=self._last_app_image(),
-                clock=self.clock,
-            )
+            expired = self._expired_dispatch()
         except Refusal as refusal:
-            self._report(self._observation(dispatch_id, "refused", refusal.code, {}))
-            return CycleResult("refused", refusal.code, dispatch_id)
+            self._report(
+                self._observation(pending_dispatch_id, "refused", refusal.code, {})
+            )
+            return CycleResult("refused", refusal.code, pending_dispatch_id)
+        observation, observed = reconcile_observation(
+            self.config, self.read_only, expired_dispatch_id=expired, clock=self.clock
+        )
+        marker = observed or f"failed:{observation.get('reason')}"
+        if self._reconcile_posted.seen(expired, marker):
+            return CycleResult("reconcile_waiting", None, pending_dispatch_id)
         self._report(observation)
-        return CycleResult("reconcile_reported", None, dispatch_id)
+        self._reconcile_posted.remember(expired, marker, replace=True)
+        return CycleResult("reconcile_reported", None, pending_dispatch_id)
 
     def _observation(
         self,

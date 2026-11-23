@@ -112,6 +112,7 @@ def test_lease_scenarios_replay_through_the_signed_wire(
     clock = LeaseClock()
     double = DeployLeaseDouble(clock)
     double.marker_always_required = True  # the scenarios always name a marker
+    double.names_expired_dispatch = False  # v2's standing body is {standing} only
     install(rig, double, clock)
     client = rig.launcher.client
     base = clock.t

@@ -215,7 +215,18 @@ class LeaseClient:
             reply = self._client.call("GET", "lease/standing", None)
         except Refusal as refusal:
             raise self._refuse_as_lease(refusal) from None
-        return str(_answer(reply, "lease/standing")["standing"])
+        # CP names the expired lease's dispatch (`dispatch_run`) next to an
+        # `expired_unreleased` standing; the reconcile reads it from its own call.
+        # It is not in Control's v2 standing body yet (open question), so it is
+        # tolerated here for that one standing and for no other key.
+        document = dict(reply.document)
+        if document.get("standing") == EXPIRED_UNRELEASED:
+            document.pop("dispatch_run", None)
+        return str(
+            _answer(Reply(reply.status, document, reply.store_now), "lease/standing")[
+                "standing"
+            ]
+        )
 
     def acquire(
         self, *, dispatch_id: str, ttl_seconds: int, max_seconds: int | None = None

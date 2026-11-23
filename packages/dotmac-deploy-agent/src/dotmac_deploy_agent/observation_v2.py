@@ -33,11 +33,11 @@ _OUTCOME: Final = {
     "refused": "refused",
     "integrity_violation": "failed",  # the reason keeps `integrity_violation`
 }
-#: A reconcile reports Control's own words (`reconciled`, `not_needed`, `failed`);
-#: Control issues the marker on `reconciled` or `not_needed`.
+#: A reconcile reports facts only: `reconciled` means the observation is complete,
+#: `failed` that it could not be made. The agent never sends `not_needed`; Control's
+#: pure `reconcile_marker` decides.
 _RECONCILE_OUTCOME: Final = {
     "reconciled": "reconciled",
-    "not_needed": "not_needed",
     "failed": "failed",
     "refused": "failed",
 }
@@ -104,6 +104,9 @@ def statement_from(
         or not isinstance(details, dict)
     ):
         raise ValueError("shape")
+    shaped = shaped_details(details)
+    if kind == "reconcile" and "details_dropped" in shaped:
+        mapped = "failed"  # evidence that did not fit is never `reconciled`
     return {
         "schema": SCHEMA,
         "kind": kind,
@@ -112,7 +115,7 @@ def statement_from(
         "key_id": key_id,
         "outcome": mapped,
         "reason": reason,
-        "details": shaped_details(details),
+        "details": shaped,
         "observed_at": observation["observed_at"],
     }
 

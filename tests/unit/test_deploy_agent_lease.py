@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from dotmac_deploy_agent.commands import CommandResult, ReadOnlyCommands
 from dotmac_deploy_agent.lease import Lease, LeaseClient
+from dotmac_deploy_agent.observation import mark_inflight
 from dotmac_deploy_agent.refusal import Refusal
 from dotmac_deploy_agent.runner import RunSpec, SubprocessRunner
 
@@ -24,6 +25,8 @@ from tests.unit.deploy_agent_support import (
     make_materials,
     make_rig,
 )
+
+REPO_DIGEST = "127.0.0.1:5000/org/app@sha256:" + "a" * 64
 
 
 def ready(tmp_path: Path) -> Rig:
@@ -140,6 +143,28 @@ def test_standing_refusal_stops_the_cycle(tmp_path: Path) -> None:
     assert rig.runner.specs == []
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("/usr/bin/docker", "rm", "-f", "erp-app"),
+        ("/usr/bin/docker", "pull", "x"),
+        ("/usr/bin/docker", "image", "rm", "x"),
+        ("/usr/bin/docker", "compose", "up"),
+        ("/usr/bin/docker",),
+        ("/bin/sh", "-c", "true"),
+    ],
+)
+def test_read_only_commands_refuse_everything_that_mutates(
+    argv: tuple[str, ...],
+) -> None:
+    inner = FakeCommands()
+    guarded = ReadOnlyCommands(inner)
+    with pytest.raises(Refusal) as caught:
+        guarded.run(argv, timeout=1.0)
+    assert caught.value.code == "reconcile_unavailable"
+    assert inner.calls == []
+
+
 def expired_host(double: DeployLeaseDouble, clock: LeaseClock) -> None:
     """A previous run's lease ran out unreleased: standing `expired_unreleased`."""
     double.acquire({"dispatch_run": "old-run", "ttl_seconds": 120})
@@ -147,16 +172,20 @@ def expired_host(double: DeployLeaseDouble, clock: LeaseClock) -> None:
     assert double.standing() == "expired_unreleased"
 
 
-def test_reconcile_observation_read_only(tmp_path: Path) -> None:
+def expired_rig(tmp_path: Path) -> tuple[Rig, DeployLeaseDouble, LeaseClock]:
     rig, double, clock = with_double(tmp_path)
     expired_host(double, clock)
     rig.commands.script[("image", "inspect")] = CommandResult(
-        0, b'["127.0.0.1:5000/org/app@sha256:' + b"a" * 64 + b'", "not a digest"]\n'
+        0, b'["' + REPO_DIGEST.encode() + b'"]'
     )
     rig.commands.script[("inspect",)] = CommandResult(
-        0,
-        b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64 + b"\n",
+        0, b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64
     )
+    return rig, double, clock
+
+
+def test_reconcile_observation_read_only(tmp_path: Path) -> None:
+    rig, _, _ = expired_rig(tmp_path)
     result = rig.launcher.run_once()
     # The v2 standing has no "reconciled" value: the agent observes, then the
     # acquire proves the marker. Without it: signed 409, and nothing else happens.
@@ -171,17 +200,20 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
     assert rig.commands.calls
     for argv in rig.commands.calls:
         assert argv[1] in {"inspect", "ps"} or argv[1:3] == ("image", "inspect")
-    assert reconcile["kind"] == "reconcile"
-    details = reconcile["details"]
-    assert details["standing"] == "expired_unreleased"  # type: ignore[index]
-    assert details["containers"] == [  # type: ignore[index]
-        {
-            "name": "erp-app",
-            "image_ref": "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
-            "image_id": "sha256:" + "f" * 64,
-            "repo_digests": ["127.0.0.1:5000/org/app@sha256:" + "a" * 64],
-        }
-    ]
+    assert reconcile["kind"] == "reconcile" and reconcile["outcome"] == "reconciled"
+    assert reconcile["dispatch_id"] == "old-run"  # the EXPIRED dispatch, not pending
+    assert reconcile["details"] == {
+        "expired_dispatch_id": "old-run",
+        "configured": ["erp-app"],
+        "containers": [
+            {
+                "name": "erp-app",
+                "image_ref": REPO_DIGEST,
+                "image_id": "sha256:" + "f" * 64,
+                "repo_digests": [REPO_DIGEST],
+            }
+        ],
+    }
 
 
 def test_read_only_commands_pass_inspection() -> None:
@@ -197,12 +229,80 @@ def test_read_only_commands_pass_inspection() -> None:
 
 
 def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
-    rig, double, clock = with_double(tmp_path)
-    expired_host(double, clock)
+    rig, _, _ = expired_rig(tmp_path)
     rig.commands.script[("inspect",)] = CommandResult(1, b"")
     rig.launcher.run_once()
-    assert rig.cp.observations[0]["kind"] == "reconcile"
-    assert rig.cp.observations[0]["details"]["containers"] == []  # type: ignore[index]
+    [observation, _] = rig.cp.observations
+    assert observation["details"]["containers"] == []  # type: ignore[index]
+    # The agent reports facts: never `not_needed`, never a verdict on the host.
+    assert observation["outcome"] == "reconciled"
+
+
+def test_an_image_that_cannot_be_read_makes_the_observation_failed(
+    tmp_path: Path,
+) -> None:
+    rig, _, _ = expired_rig(tmp_path)
+    rig.commands.script[("image", "inspect")] = CommandResult(1, b"")
+    rig.launcher.run_once()
+    observation = rig.cp.observations[0]
+    assert (observation["outcome"], observation["reason"]) == (
+        "failed",
+        "reconcile_unavailable",
+    )
+
+
+def test_a_standing_that_does_not_name_the_expired_dispatch_refuses(
+    tmp_path: Path,
+) -> None:
+    rig, double, _ = expired_rig(tmp_path)
+    double.names_expired_dispatch = False  # an old Control that does not name it
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = rig.cp.observations
+    assert (observation["dispatch_id"], observation["reason"]) == (
+        "dispatch-1",
+        "reconcile_unavailable",
+    )
+    assert [n for n, _ in double.log if n == "lease/acquire"] == [
+        "lease/acquire"
+    ]  # only expired_host's
+
+
+def test_a_local_inflight_record_that_disagrees_with_the_expired_dispatch_refuses(
+    tmp_path: Path,
+) -> None:
+    rig, _, _ = expired_rig(tmp_path)
+    mark_inflight(rig.config.state_dir, "dispatch-3")
+    assert rig.launcher.run_once().outcome == "refused"
+    assert rig.transfer.calls == []
+
+
+def test_reconcile_is_posted_once_per_expired_dispatch_and_observed_digest(
+    tmp_path: Path,
+) -> None:
+    rig, double, _ = expired_rig(tmp_path)
+    assert rig.launcher.run_once().reason == "lease_refused"
+    for _ in range(3):  # every later poll sees the same facts, and the same refusal
+        assert rig.launcher.run_once().reason == "lease_refused"
+    kinds = [o["kind"] for o in rig.cp.observations]
+    assert kinds.count("reconcile") == 1
+    rig.commands.script[("inspect",)] = CommandResult(
+        0, b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"e" * 64
+    )
+    rig.launcher.run_once()  # the digest changed: posted afresh
+    assert [o["kind"] for o in rig.cp.observations].count("reconcile") == 2
+    assert (
+        double.standing() == "expired_unreleased"
+    )  # never changes on the agent's word
+
+
+def test_a_refusal_is_reported_once_per_dispatch_and_reason_not_once_per_poll(
+    tmp_path: Path,
+) -> None:
+    rig = ready(tmp_path)
+    rig.cp.overrides["lease/standing"] = (403, {"error": "credential_revoked"})
+    for _ in range(4):
+        assert rig.launcher.run_once().outcome == "refused"
+    assert len(rig.cp.observations) == 1
 
 
 # -- WP3B: the lease client against the stateful s2.6.2 double -------------------
@@ -304,10 +404,10 @@ def test_d_lease_expired_before_the_run_then_reconcile_heals(tmp_path: Path) -> 
     # Control matches the observed release with the expected one: marker, no staff.
     assert double.reconcile(rig.cp.observations[0], expected=IMAGE_DIGEST)
     rig.cp.observations.clear()
-    # The standing stays `expired_unreleased` until acquire succeeds: observe again,
-    # then the acquire goes through and the deploy completes.
+    # The standing stays `expired_unreleased` until acquire succeeds. The same facts
+    # are not posted twice; the acquire now goes through and the deploy completes.
     assert rig.launcher.run_once().outcome == "completed"
-    assert [o["kind"] for o in rig.cp.observations] == ["reconcile", "deploy"]
+    assert [o["kind"] for o in rig.cp.observations] == ["deploy"]
     assert double.standing() == "free"
 
 
@@ -438,20 +538,6 @@ def test_the_runner_never_outlasts_the_lease_budget() -> None:
     )
     result = runner.run(spec)
     assert result.timed_out is True  # killed at the lease budget, not at 600 s
-
-
-def test_reconcile_keeps_only_well_formed_repo_digests(tmp_path: Path) -> None:
-    rig = ready(tmp_path)
-    rig.cp.standing = "expired_unreleased"
-    rig.commands.script[("image", "inspect")] = CommandResult(
-        0, b'["x", "bad@sha256:zz", "r.example/a@sha256:' + b"c" * 64 + b'"]\n'
-    )
-    rig.commands.script[("inspect",)] = CommandResult(
-        0, b"r.example/a:tag sha256:" + b"f" * 64
-    )
-    rig.launcher.run_once()
-    [container] = rig.cp.observations[0]["details"]["containers"]  # type: ignore[index]
-    assert container["repo_digests"] == ["r.example/a@sha256:" + "c" * 64]
 
 
 # -- ruling 4: renewal (S5) and signed replay on a second release (S6) -------------
@@ -693,37 +779,3 @@ def test_an_invalid_lease_max_seconds_is_refused(tmp_path: Path, bad: object) ->
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")
     assert "lease/acquire" not in [n for n, _ in rig.cp.lease_log]
-
-
-@pytest.mark.parametrize(
-    ("running", "last_pin", "expected"),
-    [
-        (b"", None, "not_needed"),  # nothing of the stack runs
-        (
-            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
-            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
-            "reconciled",
-        ),
-        (
-            b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"f" * 64,
-            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
-            "failed",
-        ),
-        (
-            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
-            None,
-            "failed",
-        ),
-    ],
-)
-def test_reconcile_reports_control_s_outcome_words(
-    tmp_path: Path, running: bytes, last_pin: str | None, expected: str
-) -> None:
-    rig, double, clock = with_double(tmp_path)
-    expired_host(double, clock)
-    rig.commands.script[("inspect",)] = CommandResult(0 if running else 1, running)
-    if last_pin:
-        (rig.config.state_dir / "last_app_image").write_text(last_pin)
-    rig.launcher.run_once()
-    assert rig.cp.observations[0]["kind"] == "reconcile"
-    assert rig.cp.observations[0]["outcome"] == expected

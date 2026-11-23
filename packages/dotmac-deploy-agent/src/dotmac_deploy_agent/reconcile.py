@@ -10,18 +10,15 @@ itself, or routes the target to restore-and-fix-forward.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from .canon import canonical_json, digest
 from .commands import Commands
 from .config import AgentConfig
 from .observation import build_observation
 from .refusal import Refusal
-
-_REPO_DIGEST = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,255}@sha256:[0-9a-f]{64}")
-MAX_REPO_DIGESTS = 16
 
 
 @dataclass(frozen=True)
@@ -29,15 +26,15 @@ class ObservedContainer:
     name: str
     image_ref: str
     image_id: str
-    #: `RepoDigests` of the image the container runs: what Control compares with
-    #: the last committed or planned release digest. Names and digests only.
-    repo_digests: tuple[str, ...] = ()
+    repo_digests: tuple[str, ...]
 
 
 def observe_containers(
     config: AgentConfig, commands: Commands
 ) -> tuple[ObservedContainer, ...]:
-    """`docker inspect` on the configured containers. Names, image refs and IDs only."""
+    """`docker inspect` on the configured containers, then `docker image inspect`
+    for each image's repo digests. Names, image refs, IDs and digests only. Any
+    command that cannot be read refuses (the observation is then `failed`)."""
     found: list[ObservedContainer] = []
     for name in config.reconcile_containers:
         result = commands.run(
@@ -77,71 +74,64 @@ def _repo_digests(
         ),
         timeout=30.0,
     )
-    if result.exit_code != 0:
-        return ()  # an image with no record is itself an observation
     try:
-        parsed = json.loads(result.stdout.decode("utf-8", errors="replace"))
+        listed = json.loads(result.stdout) if result.exit_code == 0 else None
     except ValueError:
-        raise Refusal("reconcile_unavailable") from None
-    if parsed is None:
-        return ()
-    if not isinstance(parsed, list):
+        listed = None
+    if not isinstance(listed, list) or not all(isinstance(d, str) for d in listed):
         raise Refusal("reconcile_unavailable")
-    digests = [d for d in parsed if isinstance(d, str) and _REPO_DIGEST.fullmatch(d)]
-    return tuple(sorted(digests)[:MAX_REPO_DIGESTS])
+    return tuple(sorted(listed))
 
 
-def _digest_of(reference: str) -> str | None:
-    _, _, digest = reference.partition("@")
-    return digest or None
-
-
-def reconcile_outcome(
-    containers: tuple[ObservedContainer, ...], expected_image: str | None
-) -> str:
-    """`not_needed`: nothing of the stack runs. `reconciled`: every running
-    container carries the digest of the image this agent last applied. Anything else
-    is `failed`: Control then routes to restore-and-fix-forward, never a marker."""
-    if not containers:
-        return "not_needed"
-    expected = _digest_of(expected_image) if expected_image else None
-    if expected is not None and all(
-        _digest_of(c.image_ref) == expected for c in containers
-    ):
-        return "reconciled"
-    return "failed"
+def observed_digest(containers: tuple[ObservedContainer, ...]) -> str:
+    """sha256 of the canonical observed-container set: the de-duplication key."""
+    return digest(
+        canonical_json([c.__dict__ for c in sorted(containers, key=lambda c: c.name)])
+    )
 
 
 def reconcile_observation(
     config: AgentConfig,
     commands: Commands,
     *,
-    dispatch_id: str,
-    standing: str,
-    expected_image: str | None = None,
+    expired_dispatch_id: str,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-) -> dict[str, object]:
-    containers = observe_containers(config, commands)
-    outcome = reconcile_outcome(containers, expected_image)
-    return build_observation(
-        kind="reconcile",
-        dispatch_id=dispatch_id,
-        target_ref=config.target_ref,
-        outcome=outcome,
-        reason=None,
-        version=config.version,
-        details={
-            "standing": standing,
-            "configured": list(config.reconcile_containers),
-            "containers": [
-                {
-                    "name": c.name,
-                    "image_ref": c.image_ref,
-                    "image_id": c.image_id,
-                    "repo_digests": list(c.repo_digests),
-                }
-                for c in containers
-            ],
-        },
-        now=clock(),
+) -> tuple[dict[str, object], str | None]:
+    """The facts only, for the EXPIRED dispatch: `reconciled` means the observation
+    is complete, `failed` that it could not be made. The agent never decides that
+    the host is fine and never sends `not_needed`: Control's pure `reconcile_marker`
+    decides. Returns `(observation, observed_digest)`; the digest is None on
+    failure."""
+    containers: tuple[ObservedContainer, ...] = ()
+    outcome, reason, observed = "reconciled", None, None
+    try:
+        containers = observe_containers(config, commands)
+        observed = observed_digest(containers)
+    except Refusal as refusal:
+        outcome, reason = "failed", refusal.code
+    details: dict[str, object] = {
+        "expired_dispatch_id": expired_dispatch_id,
+        "configured": list(config.reconcile_containers),
+        "containers": [
+            {
+                "name": c.name,
+                "image_ref": c.image_ref,
+                "image_id": c.image_id,
+                "repo_digests": list(c.repo_digests),
+            }
+            for c in containers
+        ],
+    }
+    return (
+        build_observation(
+            kind="reconcile",
+            dispatch_id=expired_dispatch_id,
+            target_ref=config.target_ref,
+            outcome=outcome,
+            reason=reason,
+            version=config.version,
+            details=details,
+            now=clock(),
+        ),
+        observed,
     )
