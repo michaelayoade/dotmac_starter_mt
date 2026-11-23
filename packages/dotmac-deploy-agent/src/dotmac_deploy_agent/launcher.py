@@ -159,7 +159,12 @@ class Launcher:
         """A7, at agent start: a crash mid-job leaves a `secret_id` file and maybe
         a live accessor. Files go first; accessors are destroyed when OpenBao is
         reachable and stay tracked (retried next cycle) when it is not."""
-        found, remains, foreign, _removed = self._clear_orphans()
+        cleared = self._clear_orphans()
+        if cleared is None:
+            # The role-job lock is busy: a role job may be running. Nothing is
+            # removed and nothing is an anomaly; the preflight refuses the lease.
+            LOG.info("role-job lock busy at agent start: orphan check deferred")
+        found, remains, foreign, _removed = cleared or (False, False, False, False)
         if found:
             # P-SEC rev7: files and accessors are STILL purged (a surviving
             # container is no reason to leave DSNs on tmpfs). This agent's own orphan
@@ -368,7 +373,22 @@ class Launcher:
             stopped = self._reconcile(materials.dispatch_id, standing)
             if stopped is not None:
                 return stopped
-        found, remains, foreign, removed = self._clear_orphans()
+        cleared = self._clear_orphans()
+        if cleared is None:
+            # A busy role-job lock means a job is legitimately running (r6 R6-M1):
+            # refuse the lease, no page, nothing removed (never an orphan finding).
+            busy = Refusal("lease_refused", "role_job_running")
+            self._report(
+                self._observation(
+                    materials.dispatch_id,
+                    "refused",
+                    busy.code,
+                    _detail(busy),
+                    kind=kind_for_operation(materials.operation),
+                )
+            )
+            return CycleResult("refused", busy.code, materials.dispatch_id)
+        found, remains, foreign, removed = cleared
         if found or foreign:
             # Before ANY lease, job or serving: this agent's own labelled container
             # (stopped ones included) is removed by label and re-proved, another
@@ -840,14 +860,15 @@ class Launcher:
         foreign = any(not self._is_mine(label) for _, label in listing)
         return True, remains, foreign, bool(mine) and not remains
 
-    def _clear_orphans(self) -> tuple[bool, bool, bool, bool]:
+    def _clear_orphans(self) -> tuple[bool, bool, bool, bool] | None:
         """Agent start and before every lease: remove this agent's own orphans, and ONLY
-        while holding the role-job lock (a busy lock means a role job may be running:
-        fail closed, remove nothing)."""
+        while holding the role-job lock. Returns None (the distinct BUSY state) when the
+        lock is held: a role job may be running, so nothing is removed and nothing is
+        reported as an orphan."""
         try:
             descriptor = self._lock_role_job()
         except Refusal:
-            return True, True, False, False
+            return None
         try:
             return self._remove_owned_containers()
         finally:

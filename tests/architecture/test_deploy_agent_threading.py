@@ -16,7 +16,16 @@ BANNED = {"threading", "_thread"}
 
 
 def names_threading(source: str) -> bool:
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    # `from importlib import import_module [as alias]` binds a bare dynamic importer.
+    importers = {"__import__"} | {
+        a.asname or a.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and n.module == "importlib"
+        for a in n.names
+        if a.name in {"import_module", "__import__"}
+    }
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import) and any(
             a.name.split(".")[0] in BANNED for a in node.names
         ):
@@ -28,7 +37,7 @@ def names_threading(source: str) -> bool:
             return True
         if isinstance(node, ast.Call):
             callee = node.func
-            dynamic = (isinstance(callee, ast.Name) and callee.id == "__import__") or (
+            dynamic = (isinstance(callee, ast.Name) and callee.id in importers) or (
                 isinstance(callee, ast.Attribute) and callee.attr == "import_module"
             )
             if (

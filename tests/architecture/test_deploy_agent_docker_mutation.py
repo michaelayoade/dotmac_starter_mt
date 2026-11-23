@@ -6,6 +6,7 @@ never passes `-v`. (`docker pull` of a transferred image stays in `transfer.py`;
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 SRC = (
@@ -34,7 +35,12 @@ def docker_verbs() -> list[tuple[str, str, str]]:
                     continue
                 first = ast.unparse(node.elts[0])
                 second = node.elts[1]
-                if "docker_path" in first and isinstance(second, ast.Constant):
+                # an argv starts with `<config>.docker_path` (str() of it, or bare);
+                # other tuples that merely mention a `*_path` name are not argv
+                if (
+                    re.fullmatch(r"(?:str\()?(?:\w+\.)*docker_path\)?", first)
+                    and isinstance(second, ast.Constant)
+                ):
                     found.append((path.name, function.name, str(second.value)))
     return found
 
@@ -48,6 +54,14 @@ def test_the_only_mutating_container_command_is_rm_in_one_function() -> None:
     assert mutating == [("launcher.py", "_remove_owned_containers")]
 
 
+def _is_docstring(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
+
 def test_rm_takes_ids_only_from_the_label_listing_and_never_a_volume_flag() -> None:
     source = (SRC / "launcher.py").read_text()
     tree = ast.parse(source)
@@ -56,11 +70,20 @@ def test_rm_takes_ids_only_from_the_label_listing_and_never_a_volume_flag() -> N
         if isinstance(n, ast.FunctionDef) and n.name == "_remove_owned_containers"
     )  # fmt: skip
     text = ast.unparse(function)
+    # the docstring is prose, not the argv: the `-v` checks run on code only
+    body = [n for n in function.body if not _is_docstring(n)]
+    code = ast.unparse(ast.Module(body=body, type_ignores=[]))
     assert "self._labelled(" in text  # the ids come from the listing ...
     assert "mine = [cid for cid, label in listing" in text  # ... and from it alone
     assert "self._is_mine(" in text  # only this agent's own dispatches
-    assert "'-v'" not in text and "'--volumes'" not in text and "shell" not in text
-    constants = {n.value for n in ast.walk(function) if isinstance(n, ast.Constant)}
+    assert "'-v'" not in code and "'--volumes'" not in code and "shell" not in code
+    constants = {
+        n.value
+        for stmt in function.body
+        if not _is_docstring(stmt)
+        for n in ast.walk(stmt)
+        if isinstance(n, ast.Constant)
+    }
     assert {"rm", "-f"} <= constants and not {
         "-v",
         "--volumes",

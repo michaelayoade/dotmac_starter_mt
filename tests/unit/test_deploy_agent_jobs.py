@@ -2268,7 +2268,7 @@ def run_identity(path: Path, **extra: str) -> tuple[int, str]:
     done = subprocess.run(  # noqa: S603
         ["/bin/sh", str(KIT / "enrolment/libexec/check-job-identity.sh")],
         capture_output=True, text=True, check=False,
-        env={"PATH": "/usr/bin:/bin", "IDENTITY_FILE": str(path), "EXPECT_OWNER": str(os.geteuid()), "EXPECT_GROUP": group_of(path), "CHECK_USER": "0", **extra},
+        env={"PATH": "/usr/bin:/bin", "IDENTITY_FILE": str(path), "EXPECT_OWNER": str(os.geteuid()), "EXPECT_GROUP": group_of(path if path.exists() else path.parent), "CHECK_USER": "0", **extra},
     )  # fmt: skip
     return done.returncode, done.stdout.strip()
 
@@ -2374,7 +2374,7 @@ def run_config_check(path: Path, **extra: str) -> int:
     return subprocess.run(  # noqa: S603
         ["/bin/sh", str(KIT / "enrolment/libexec/check-agent-config.sh"), str(path)],
         check=False, capture_output=True,
-        env={"PATH": "/usr/bin:/bin", "EXPECT_OWNER": str(os.geteuid()), "EXPECT_GROUP": group_of(path), **extra},
+        env={"PATH": "/usr/bin:/bin", "EXPECT_OWNER": str(os.geteuid()), "EXPECT_GROUP": group_of(path if path.exists() else path.parent), **extra},
     ).returncode  # fmt: skip
 
 
@@ -2565,17 +2565,48 @@ def test_r5b_removal_at_the_preflight_needs_the_role_job_lock(tmp_path: Path) ->
     rig.launcher.executed.record("dispatch-0", (1, 1))
     held = rig.launcher._lock_role_job()
     try:
-        assert refused(rig) == ("refused", "orphan_job_container")
+        # busy lock: a role job may be running, so this is a lease refusal (R6-M1)
+        assert refused(rig) == ("refused", "lease_refused")
     finally:
         os.close(held)
     assert (
         docker.rm_calls == [] and CID in docker.containers
     )  # not removed without the lock
-    assert refused(rig) == (
-        "refused",
-        "orphan_job_container",
-    )  # free now: removed, still paged
+    # The lock is free now. The agent-start clean-up of every cycle would remove the
+    # container before the preflight ever saw it, so (as in the test above) it appears
+    # only after that call: the PREFLIGHT removes it, still paged.
+    docker.containers.clear()
+    original = rig.launcher._clear_orphans
+    calls = {"n": 0}
+
+    def appears_after_agent_start() -> tuple[bool, bool, bool, bool] | None:
+        calls["n"] += 1
+        if calls["n"] == 2:  # the pre-lease preflight
+            docker.containers[CID] = "dispatch-0"
+        return original()
+
+    rig.launcher._clear_orphans = appears_after_agent_start  # type: ignore[method-assign]
+    assert refused(rig) == ("refused", "orphan_job_container")
     assert docker.rm_calls == [("/usr/bin/docker", "rm", "-f", CID)]
+
+
+def test_r6m1_a_busy_role_job_lock_is_a_lease_refusal_with_no_page_and_no_rm(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    docker = FakeDocker(rig, {CID: "dispatch-0"})
+    rig.launcher.executed.record("dispatch-0", (1, 1))
+    held = rig.launcher._lock_role_job()
+    try:
+        for _ in range(2):  # every poll during a long job: same answer, never a page
+            assert refused(rig) == ("refused", "lease_refused")
+            details = last(rig)["details"]
+            assert details == {"refusal_detail": "role_job_running"}
+            assert "page" not in details  # type: ignore[operator]
+    finally:
+        os.close(held)
+    assert docker.rm_calls == [] and CID in docker.containers
+    assert rig.cp.lease_log == [] and rig.bao.paths == []  # nothing started
 
 
 # -- R5-H2: the full receipt fits Control's depth limit --------------------------
