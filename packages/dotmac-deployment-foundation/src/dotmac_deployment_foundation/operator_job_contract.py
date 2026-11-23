@@ -47,6 +47,8 @@ JOB_MATERIALS: Final = "materials"
 JOB_PARAMS_ENV_DIGEST: Final = "params_env_digest"
 JOB_INPUTS: Final = "inputs"
 JOB_TIMEOUT_SECONDS: Final = "timeout_seconds"
+JOB_OUTPUT_DIR: Final = "output_dir"
+JOB_APPLY_CLASS: Final = "apply_class"
 INPUT_FLAG: Final = "flag"
 INPUT_PATH: Final = "path"
 INPUT_SHA256: Final = "sha256"
@@ -101,6 +103,8 @@ PROVISIONAL_KEYS: Final[tuple[str, ...]] = (
     "JOB_PARAMS_ENV_DIGEST",
     "JOB_INPUTS",
     "JOB_TIMEOUT_SECONDS",
+    "JOB_OUTPUT_DIR",
+    "JOB_APPLY_CLASS",
     "INPUT_FLAG",
     "INPUT_PATH",
     "INPUT_SHA256",

@@ -562,3 +562,12 @@ def test_the_receipt_carries_names_digests_and_ids_only() -> None:
         }
     ]
     assert "batch-1" not in json.dumps(document)
+
+
+def test_output_dir_must_be_the_fixed_job_out() -> None:
+    resolved = make_resolved()
+    _job(resolved)[contract.JOB_OUTPUT_DIR] = "/job/out"
+    assert plan_operator_job(make_spec(), resolved).outputs_target == "/job/out"
+    _job(resolved)[contract.JOB_OUTPUT_DIR] = "/elsewhere"
+    with pytest.raises(OperatorJobRefusal):
+        plan_operator_job(make_spec(), resolved)

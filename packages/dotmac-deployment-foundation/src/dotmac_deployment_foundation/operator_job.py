@@ -367,6 +367,11 @@ def plan_operator_job(
     if secret_files and not role:
         raise OperatorJobRefusal("job_context_invalid", "secrets without a role")
 
+    output_dir = dispatched.get(contract.JOB_OUTPUT_DIR)
+    if output_dir is not None and output_dir != operator.outputs_target:
+        raise OperatorJobRefusal(
+            "job_context_invalid", "output_dir is not the declared outputs target"
+        )
     params_digest = dispatched.get(contract.JOB_PARAMS_ENV_DIGEST, "")
     if not isinstance(params_digest, str):
         raise OperatorJobRefusal("job_context_invalid", "params_env_digest")
