@@ -1435,6 +1435,40 @@
           "sha256": "a4545b6a9fece09794d5a6dc0f35878f525d432192fb5eaa199a1f0cebd7a644"
         }
       ]
+    },
+    {
+      "distribution": "dotmac-money-flows",
+      "version": "0.1.0a1",
+      "tag": "dotmac-money-flows-v0.1.0a1",
+      "tag_object": "a6b0cb30ad7aa4b055458d4f0fbc55fde034269c",
+      "peeled_commit": "2cac7c246b9a36580b9cd22360eb2d74ff8e0829",
+      "status": "released",
+      "pinnable": true,
+      "sha256": {
+        "dotmac_money_flows-0.1.0a1-py3-none-any.whl": "4d52d6bb759f3c13312999313086b8d8f12bcaf464b2b4181a4527a9976562db"
+      },
+      "verification_run_id": "45028381782",
+      "source_run_id": "45028381782",
+      "release_authority_digest": "sha256:ff299674325271d6b1110a21f5b0c56f14442289bc2b2d9a3ba058c1e06a71aa",
+      "adopting_run_id": null,
+      "smoke_dependency_wheels": [
+        {
+          "filename": "dotmac_billing-0.1.0a13-py3-none-any.whl",
+          "sha256": "8633eac71b141074d16cf3637e020b9624c910855f0d81474438a6ad648ec8b9"
+        },
+        {
+          "filename": "dotmac_kernel-0.1.0a110-py3-none-any.whl",
+          "sha256": "a4545b6a9fece09794d5a6dc0f35878f525d432192fb5eaa199a1f0cebd7a644"
+        },
+        {
+          "filename": "dotmac_payments-0.1.0a4-py3-none-any.whl",
+          "sha256": "40acbcd78c0588b2159ce400c119f30d47d459314ad09df5fcb32d32ca3601b9"
+        },
+        {
+          "filename": "dotmac_service_access_policy-0.1.0a2-py3-none-any.whl",
+          "sha256": "e500034480ba113a0329a1deee860d48c2bf0e7145c6cbc1f438f224a813c692"
+        }
+      ]
     }
   ]
 }
