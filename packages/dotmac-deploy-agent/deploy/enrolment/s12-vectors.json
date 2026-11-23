@@ -1,0 +1,12 @@
+{
+  "rule": "S12 = first 12 hex of sha256 over the COMPACT JSON (separators , and :, sorted keys, ASCII) of the sorted lower-case material names. The render unit stem is <secrets_namespace>-<role>-<S12>.",
+  "vectors": [
+    {"materials": ["LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"], "json": "[\"legacy_database_url\",\"migration_database_url\"]", "s12": "0dcc661ea25f"},
+    {"materials": ["MIGRATION_DATABASE_URL", "LEGACY_DATABASE_URL"], "json": "[\"legacy_database_url\",\"migration_database_url\"]", "s12": "0dcc661ea25f"},
+    {"materials": ["MIGRATION_DATABASE_URL"], "json": "[\"migration_database_url\"]", "s12": "c8cd75e18839"},
+    {"materials": [], "json": "[]", "s12": "4f53cda18c2b"}
+  ],
+  "not_produced": [
+    {"materials": ["LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"], "form": "spaced separators", "s12": "a50fd593917c"}
+  ]
+}

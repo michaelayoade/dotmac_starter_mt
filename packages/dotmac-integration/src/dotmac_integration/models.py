@@ -762,6 +762,15 @@ class DeliveryAttempt(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    #: When the attempt BECAME terminal (delivered, dead_letter or
+    #: reconciliation_required), set in the same UPDATE as the state change and
+    #: cleared when an operator re-arms the row. It is the retention clock:
+    #: payload age is measured from here, not from `created_at`, so a row that
+    #: waited or ran long before failing keeps its full repair window. NULL
+    #: means live work, or a row written before ig_0019.
+    terminal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class PollingCheckpoint(Base):

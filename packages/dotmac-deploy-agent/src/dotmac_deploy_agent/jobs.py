@@ -37,6 +37,11 @@ _NAME: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}")
 _MATERIAL: Final = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
 RUN_JOB: Final = "run_job"
 LEASE_MARGIN: Final = 120
+#: R6-1: after Foundation's own deadline it needs time to stop and remove the job
+#: container and write its receipt; only then does the agent send SIGTERM, and it
+#: waits `JOB_TERM_GRACE` more before any SIGKILL. Both fit inside the lease margin.
+JOB_STOP_MARGIN: Final = 45
+JOB_TERM_GRACE: Final = 15
 #: Outer bound only; the real bound is the signed lease fit (timeout + margin).
 MAX_JOB_TIMEOUT: Final = 3600 - LEASE_MARGIN
 _DISPATCHED_KEYS: Final = frozenset(

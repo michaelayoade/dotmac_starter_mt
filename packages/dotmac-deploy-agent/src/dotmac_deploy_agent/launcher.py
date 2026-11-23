@@ -41,7 +41,12 @@ from .job_delivery import (
     render_job_credentials,
     require_render_unit,
 )
-from .jobs import check_apply_class, check_job_inputs, job_env
+from .jobs import (
+    JOB_STOP_MARGIN,
+    check_apply_class,
+    check_job_inputs,
+    job_env,
+)
 from .journal import AccessorStore, ExecutedDispatches
 from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient, LeaseKeeper
 from .legacy import prepare_legacy, remove_legacy_copy
@@ -148,6 +153,12 @@ class Launcher:
         """A7, at agent start: a crash mid-job leaves a `secret_id` file and maybe
         a live accessor. Files go first; accessors are destroyed when OpenBao is
         reachable and stay tracked (retried next cycle) when it is not."""
+        interrupted = read_inflight(self.config.state_dir)
+        if interrupted is not None and self._job_container_present(interrupted):
+            # The interrupted run may have left its job container running: purging
+            # now would delete the secrets from under it. Hold and let it page.
+            LOG.error("stale job purge held: a container of the interrupted dispatch")
+            return
         for role in self.job_accessors.roles():
             try:
                 self.purge_job_role(role)
@@ -607,7 +618,9 @@ class Launcher:
                     self.config, job.role, job.materials, required_uid=self.root_uid
                 )
                 # ... and a loaded render unit exists for this material set.
-                require_render_unit(self.config, self.commands, job.role, config_stem)
+                require_render_unit(
+                    self.config, self.commands, job.role, config_stem, job.materials
+                )
             require_private_dir(deploy_run_dir)
             if not getattr(self.runner, "job_entry_available", False):
                 # Before any lease, mint or file: nothing is spent on a job that
@@ -650,6 +663,10 @@ class Launcher:
             credentials_dir = self._prepare_run_credentials()
             mark_inflight(self.config.state_dir, materials.dispatch_id)
             ran = True
+            # R6-1: Foundation gets an ABSOLUTE deadline; the agent's own bound is
+            # that deadline plus the time Foundation needs to stop and remove the
+            # container, so Foundation's `finally` always runs first.
+            deadline = int(self.epoch()) + job.timeout_seconds
             result = self.runner.run(
                 RunSpec(
                     dispatch_id=materials.dispatch_id,
@@ -661,6 +678,8 @@ class Launcher:
                     bindings_env=self.config.bindings_env,
                     credentials_directory=str(credentials_dir),
                     lease_id=lease.lease_id,
+                    job_deadline=deadline,
+                    job_bound_seconds=job.timeout_seconds + JOB_STOP_MARGIN,
                     job_name=job.name,
                     job_params_env=job_params,
                     job_secrets_dir=secrets_dir,
@@ -684,17 +703,28 @@ class Launcher:
             if refusal.detail is not None:
                 details["refusal_detail"] = refusal.detail
         finally:
-            # Purge first (the agent's secret_id, the purge unit, the accessor),
-            # whatever happened above; the receipt is written only after.
-            if job.role is not None:
+            # R6-1: BEFORE any purge or release, prove no container labelled with
+            # this dispatch remains. If one does (or it cannot be proven), HOLD the
+            # lease, purge nothing, and page: a job container can outlive its
+            # runner and still hold both DSNs.
+            orphaned = ran and self._job_container_present(materials.dispatch_id)
+            if orphaned:
+                outcome, reason = "failed", "job_container_orphaned"
+                receipt["orphaned"] = True
+                details["page"] = True
+            elif job.role is not None:
+                # Purge first (the agent's secret_id, the purge unit, the accessor),
+                # whatever happened above; the receipt is written only after.
                 try:
                     receipt["accessors_still_tracked"] = self.purge_job_role(job.role)
                 except Refusal as refusal:
                     receipt["purge_failed"] = refusal.code
             remove_runtime_files(deploy_run_dir, (PARAMS_FILE, JOB_PARAMS_FILE))
             shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
-            if lease is not None:
+            if lease is not None and not orphaned:
                 details["lease_released"] = self._release(lease, host_mutated=ran)
+            elif orphaned:
+                details["lease_held"] = True  # never released: it expires unreleased
             if ran:
                 clear_inflight(self.config.state_dir)
             if lock is not None:
@@ -707,6 +737,27 @@ class Launcher:
             )
         )
         return CycleResult(outcome, reason, materials.dispatch_id)
+
+    def _job_container_present(self, dispatch_id: str) -> bool:
+        """True unless it is PROVEN that no container labelled with this dispatch
+        remains (read-only `docker ps -a --filter label=...`). An unreadable answer
+        counts as present: fail closed."""
+        try:
+            result = self.read_only.run(
+                (
+                    str(self.config.docker_path),
+                    "ps",
+                    "-a",
+                    "--filter",
+                    f"label=dotmac.dispatch_id={dispatch_id}",
+                    "--format",
+                    "{{.ID}}",
+                ),
+                timeout=15.0,
+            )
+        except Refusal:
+            return True
+        return result.exit_code != 0 or bool(result.stdout.strip())
 
     def _mint_job_role(self, materials: Materials, role: str) -> str:
         # The authored config was checked by `job_config_stem` before anything.

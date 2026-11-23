@@ -9,11 +9,13 @@ which authored bytes the role will run with.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import stat
 from pathlib import Path
 
-from .canon import canonical_json, digest
+from .canon import digest
 from .config import AgentConfig
 from .files import read_regular
 from .materials import RoleSpec
@@ -113,7 +115,11 @@ JOB_UNIT_NAMING = "<secrets_namespace>-<role>-<S12>"
 
 def material_set_id(materials: tuple[str, ...]) -> str:
     """S12: the first 12 hex of sha256(canonical_json(sorted lower-case names))."""
-    return digest(canonical_json(sorted(m.lower() for m in materials)))[7:19]
+    # COMPACT canonical JSON, pinned here on purpose: spaced separators would give a
+    # different id (a50fd593917c for the two-name set) and the units would not match.
+    names = sorted(m.lower() for m in materials)
+    text = json.dumps(names, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(text.encode("ascii")).hexdigest()[:12]
 
 
 def job_unit_stem(config: AgentConfig, role: str, materials: tuple[str, ...]) -> str:

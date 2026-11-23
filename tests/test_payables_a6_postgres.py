@@ -220,6 +220,7 @@ def _approved_payment(
             idempotency_key=f"pg:pc:{n}",
             idempotency_expires_at=None,
             prepared_at=NOW,
+            separation_of_duties=True,
         )
         payment_id = payment.id
         approve_supplier_payment(

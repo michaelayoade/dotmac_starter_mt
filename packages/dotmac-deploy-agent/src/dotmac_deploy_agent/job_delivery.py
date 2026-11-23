@@ -80,7 +80,7 @@ def deliver_job_secret_id(
 
 
 def purge_unit_name(secrets_namespace: str, role: str) -> str:
-    return f"dotmac-job-purge@{secrets_namespace}-{role}.service"
+    return f"dotmac-secrets-purge@{secrets_namespace}-{role}.service"
 
 
 def purge_job_role(
@@ -94,7 +94,7 @@ def purge_job_role(
 
     The agent removes only its OWN `secret_id`. The rendered files sit in
     `secrets/`, which the agent never lists, reads or deletes in: the static
-    `dotmac-job-purge@<ns>-<role>` unit removes them as the container uid (started
+    `dotmac-secrets-purge@<ns>-<role>` unit removes them as the container uid (started
     through the enrolled polkit rule). Then every tracked accessor is destroyed (a
     no-op once consumed, a kill if not). Each step runs even if the one before
     failed; an accessor that cannot be destroyed stays tracked. Raises after the
@@ -148,20 +148,44 @@ def render_unit(config: AgentConfig, role: str, config_stem: str | None) -> str:
     )
 
 
+#: Each job render unit's `Description=` ends with this key and its material names,
+#: sorted, lower-case and comma-separated. The agent cross-checks it, so two material
+#: sets that map to one unit (an S12 collision) are refused rather than mixed.
+DESCRIPTION_KEY: Final = "materials="
+
+
 def require_render_unit(
-    config: AgentConfig, commands: Commands, role: str, config_stem: str | None
+    config: AgentConfig,
+    commands: Commands,
+    role: str,
+    config_stem: str | None,
+    materials: tuple[str, ...] = (),
 ) -> None:
-    """Before anything is minted: the render unit for this material set exists."""
+    """Before anything is minted: the render unit for this material set exists, and
+    its `Description` lists exactly this set."""
     shown = _systemctl(
         config,
         commands,
         "show",
-        "--property=LoadState",
+        "--property=LoadState,Description",
         render_unit(config, role, config_stem),
         timeout=LOADED_TIMEOUT,
     )
-    if (shown or b"").decode("utf-8", "replace").strip() != "LoadState=loaded":
+    fields = dict(
+        line.split("=", 1)
+        for line in (shown or b"").decode("utf-8", "replace").splitlines()
+        if "=" in line
+    )
+    if fields.get("LoadState") != "loaded":
         raise Refusal("job_files_invalid", "no_unit_for_set")
+    description = fields.get("Description", "")
+    listed = (
+        description.rpartition(DESCRIPTION_KEY)[2]
+        if DESCRIPTION_KEY in description
+        else None
+    )
+    if listed is None or listed.split(",") != sorted(m.lower() for m in materials):
+        raise Refusal("job_files_invalid", "unit_set_collision")
 
 
 def render_job_credentials(

@@ -14,7 +14,11 @@ from collections.abc import Mapping
 from dotmac_deployment_foundation.execution_plan_v3 import FoundationExecutionPlanV3
 from dotmac_deployment_foundation.policy import build_firewall_plan
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
-from lane3_evidence_bundle import EXPOSURE_CALLS_MEMBER, require_plaintext_bundle
+from lane3_evidence_bundle import (
+    EXPOSURE_CALLS_MEMBER,
+    require_plaintext_bundle,
+    require_plaintext_bundle_v2,
+)
 from lane3_exposure_evidence import parse_exposure_calls, require_exposure_join
 from lane3_exposure_recording import ExposureCallRecord
 from lane3_plan_v3 import exposure_reconciliations_for_spec
@@ -24,18 +28,18 @@ class BundleVerificationRefused(ValueError):
     """Plaintext evidence cannot establish the bounded consistency claim."""
 
 
-def require_plaintext_exposure_bundle(
-    manifest: bytes,
-    members: Mapping[str, bytes],
+def require_exposure_records(
+    calls: bytes,
     *,
     execution_plan: FoundationExecutionPlanV3,
     descriptor: ProductDeploymentSpec,
 ) -> tuple[ExposureCallRecord, ...]:
-    """Join plaintext crossings to a concrete V3 and trusted exact descriptor.
+    """Join recorded crossings to a concrete V3 and trusted exact descriptor.
 
-    The caller owns both trusted inputs; accepting a dictionary here would
-    let private evidence choose its own authority. An empty reconciliation
-    set cannot establish even this limited completeness claim.
+    The one owner of the record-level check, shared by the v1 bundle join, the
+    v2 bundle join and the negative target's compensation re-derivation
+    (`lane3_negative_proof`), so there is a single answer to "do these records
+    match the descriptor's rules". It refuses with a private-free message.
     """
     try:
         if type(execution_plan) is not FoundationExecutionPlanV3:
@@ -62,8 +66,7 @@ def require_plaintext_exposure_bundle(
             )
             for item in reconciliations
         }
-        require_plaintext_bundle(manifest, members)
-        records = parse_exposure_calls(members[EXPOSURE_CALLS_MEMBER])
+        records = parse_exposure_calls(calls)
         require_exposure_join(records, execution_plan.exposure_reconciliations)
         for record in records:
             # Compose belongs to the Executor's deployment effects, never its
@@ -80,6 +83,53 @@ def require_plaintext_exposure_bundle(
         return records
     except Exception:
         # Existing owners' diagnostics may quote private rules or JSON keys.
+        raise BundleVerificationRefused(
+            "plaintext exposure consistency refused"
+        ) from None
+
+
+def require_plaintext_exposure_bundle(
+    manifest: bytes,
+    members: Mapping[str, bytes],
+    *,
+    execution_plan: FoundationExecutionPlanV3,
+    descriptor: ProductDeploymentSpec,
+) -> tuple[ExposureCallRecord, ...]:
+    """Join a v1 bundle's plaintext crossings to a V3 plan and the descriptor.
+
+    The caller owns both trusted inputs; accepting a dictionary here would
+    let private evidence choose its own authority. An empty reconciliation
+    set cannot establish even this limited completeness claim.
+    """
+    try:
+        require_plaintext_bundle(manifest, members)
+        return require_exposure_records(
+            members[EXPOSURE_CALLS_MEMBER],
+            execution_plan=execution_plan,
+            descriptor=descriptor,
+        )
+    except Exception:
+        raise BundleVerificationRefused(
+            "plaintext exposure consistency refused"
+        ) from None
+
+
+def require_plaintext_exposure_bundle_v2(
+    manifest: bytes,
+    members: Mapping[str, bytes],
+    *,
+    execution_plan: FoundationExecutionPlanV3,
+    descriptor: ProductDeploymentSpec,
+) -> tuple[ExposureCallRecord, ...]:
+    """The same join over a v2 bundle (the proof member is joined elsewhere)."""
+    try:
+        require_plaintext_bundle_v2(manifest, members)
+        return require_exposure_records(
+            members[EXPOSURE_CALLS_MEMBER],
+            execution_plan=execution_plan,
+            descriptor=descriptor,
+        )
+    except Exception:
         raise BundleVerificationRefused(
             "plaintext exposure consistency refused"
         ) from None

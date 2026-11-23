@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Protocol
 
+from .jobs import JOB_TERM_GRACE
 from .refusal import Refusal
 
 ENV_PATH: Final = "/usr/local/bin:/usr/bin:/bin"
@@ -45,6 +46,11 @@ class RunSpec:
     #: The render unit's InvocationID (32 hex): Foundation re-reads the unit and
     #: requires it to match, proving the result is from THIS dispatch. Role jobs only.
     job_render_invocation: str | None = None
+    #: R6-1: the ABSOLUTE deadline (epoch seconds) Foundation stops the job at,
+    #: `start + timeout_seconds`, and the agent's own kill bound in seconds from the
+    #: start: the deadline plus a margin that covers Foundation's stop, rm and receipt.
+    job_deadline: int | None = None
+    job_bound_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,9 @@ def runner_environment(spec: RunSpec) -> dict[str, str]:
         env["DOTMAC_DEPLOY_JOB_SECRET_FILES"] = ",".join(spec.job_secret_files)
         if spec.job_render_invocation is not None:
             env["DOTMAC_DEPLOY_JOB_RENDER_INVOCATION"] = spec.job_render_invocation
+        if spec.job_deadline is None:
+            raise Refusal("runner_start_failed")  # a job always has a deadline
+        env["DOTMAC_DEPLOY_JOB_DEADLINE"] = str(spec.job_deadline)
     return env
 
 
@@ -104,14 +113,24 @@ class SubprocessRunner:
     #: is not there is ever called.
     job_entry_available = False
 
-    def __init__(self, argv: tuple[str, ...], timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        argv: tuple[str, ...],
+        timeout_seconds: int,
+        *,
+        term_grace_seconds: float = 60.0,
+        job_entry_available: bool = False,
+    ) -> None:
         if not argv or not os.path.isabs(argv[0]):
             raise Refusal("config_invalid")
         self._argv = argv
         self._timeout = timeout_seconds
+        #: How long SIGTERM is given to end the process group before any SIGKILL.
+        self._grace = term_grace_seconds
+        self.job_entry_available = job_entry_available
 
     def run(self, spec: RunSpec) -> RunResult:
-        if spec.job_name is not None:
+        if spec.job_name is not None and not self.job_entry_available:
             raise Refusal("foundation_job_entry_unavailable")
         try:
             process = subprocess.Popen(  # nosec B603  # noqa: S603
@@ -126,17 +145,26 @@ class SubprocessRunner:
             )
         except OSError:
             raise Refusal("runner_start_failed") from None
+        bound = spec.job_bound_seconds if spec.job_bound_seconds else self._timeout
+        grace = (
+            min(self._grace, JOB_TERM_GRACE)
+            if spec.job_name is not None
+            else self._grace
+        )
         try:
             limit = (
-                self._timeout
+                bound
                 if spec.timeout_seconds is None
-                else min(self._timeout, spec.timeout_seconds)
+                else min(bound, spec.timeout_seconds)
             )
             return RunResult(process.wait(timeout=limit), False)
         except subprocess.TimeoutExpired:
+            # SIGTERM only first: Foundation stops and removes its job container and
+            # writes its receipt. SIGKILL skips that `finally`, so it comes only
+            # after the grace, as a last resort.
             os.killpg(process.pid, signal.SIGTERM)
             try:
-                process.wait(timeout=60)
+                process.wait(timeout=grace)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()

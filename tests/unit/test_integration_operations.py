@@ -390,7 +390,8 @@ def test_releasing_leases_does_not_reset_the_attempt_budget(
     released = release_expired_leases(db, now=later)
 
     assert released == 1
-    assert delivery.state == "retryable"
+    assert delivery.state == "reconciliation_required"
+    assert delivery.next_attempt_at is None
     assert delivery.attempt_count == 1
     assert delivery.leased_until is None
 

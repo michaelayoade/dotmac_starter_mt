@@ -1,7 +1,7 @@
 # JOB ROLES ONLY (e.g. import). Identical in effect to dotmac-role.conf.template:
 # `secrets/` stays 0700 <container uid>. The agent never stats, lists, reads or
 # deletes in it: render verification runs inside the render unit as the container
-# uid (job-verify.sh via ExecStartPost) and the purge unit removes the files.
+# uid (verify-job-render via ExecStartPost) and the purge unit removes the files.
 d /run/dotmac 0711 root root -
 d /run/dotmac/@SECRETS_NAMESPACE@ 0711 dotmac-deploy dotmac-deploy -
 d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@ 0711 dotmac-deploy dotmac-deploy -

@@ -1,6 +1,68 @@
 # Changelog — dotmac-integration
 
-## 0.1.0a21 — unpublished integrated source
+## 0.1.0a22 — unpublished allocation
+
+Three DELIVERY fixes plus a retention clock; one additive migration (`ig_0019_delivery_terminal_at`), no SPI change. Allocated as the successor of
+published a21 (tag `dotmac-integration-v0.1.0a21`); publication remains a separate gate.
+
+- **BEHAVIOUR CHANGE: no resend after a crash.** An `in_flight` DELIVERY row
+  whose lease expired is now moved to `reconciliation_required`
+  (`error_code="lease_expired_outcome_unknown"`) by both
+  `operations.release_expired_leases` and `execution.claim_delivery`, instead of
+  `retryable` / re-claimed. It is never retried automatically; an operator may
+  reconcile it against provider evidence or requeue it with
+  `operations.replay_delivery(..., acknowledge_possible_duplicate=True)`
+  (recorded in the audit trail). `claim_delivery` now claims only `pending` /
+  `retryable` rows, under `SELECT ... FOR UPDATE SKIP LOCKED` with the state
+  re-verified by the conditional UPDATE. `replay_delivery` also refuses a
+  retention-redacted row (it locks the row first). PROVISION's own lease engine
+  is unchanged. **Tightening:** EVERY `reconciliation_required` row now needs
+  `acknowledge_possible_duplicate=True` to be replayed, whatever its
+  `error_code` (an inconclusive reconcile overwrites the code; connector-reported
+  ambiguity was previously ungated). The claim refuses any row carrying a
+  retention tombstone, and a NOT_LANDED reconcile re-checks "not redacted" in
+  its UPDATE, so a replay or reconcile racing the purge can never leave a
+  dispatchable tombstone. The claim-path ambiguation is audited with the same
+  `leases.released` event as the sweep (`details.via` is `claim` or `sweep`).
+  Connectors without idempotency handling (for example
+  `dotmac-connector-whatsapp`) are the beneficiaries: a worker crash after the
+  provider call no longer sends the message twice, but such rows now need an
+  operator decision instead of retrying by themselves.
+- **Retention covers every terminal state.**
+  `retention.purge_expired_delivery_payloads` / `redact_delivery` now redact
+  `delivered`, `dead_letter` and `reconciliation_required` payloads (and
+  `result_json`) after the payload retention period; digest, idempotency key,
+  state, error and provider evidence are kept. `pending`, `retryable` and
+  `in_flight` are live work and are never redacted. A redacted dead letter can
+  no longer be replayed (a tombstone is not a payload).
+- **Retention runs from terminal time (`ig_0019_delivery_terminal_at`).** Adds the
+  nullable `delivery_attempts.terminal_at` (additive; no default, constraint or
+  index), set in the same UPDATE as every transition into `delivered`,
+  `dead_letter` or `reconciliation_required` (settle, `record_delivery_outcome`,
+  lease ambiguation by sweep and by claim, a LANDED reconcile) and cleared when a
+  row is re-armed (operator replay, NOT_LANDED reconcile). Payload retention now
+  measures age from `terminal_at`, so a row that waited or ran long before
+  failing keeps its full repair window. A terminal row with NULL `terminal_at`
+  (written by a runtime that predates the column) is refused as
+  `terminal_time_unknown`, never guessed. **Backfill chosen:** `delivered` rows
+  take `delivered_at` (fallback `created_at`); `dead_letter` and
+  `reconciliation_required` rows have no recorded terminal time (the table has no
+  `updated_at`), so they take the migration time, starting their repair window
+  at upgrade; the sweep never redacted those states before this release, so
+  nothing is shortened. Live rows stay NULL. Downgrade drops the column.
+  Decisions D-1 (every crashed DELIVERY waits for an operator) and D-3
+  (every `reconciliation_required` replay needs `acknowledge_possible_duplicate`)
+  were ruled 2026-11-22.
+- **DELIVERY handlers receive bound network targets.** `dispatch.prepare` now
+  injects the revision's `network_targets_json` under `_network_targets`,
+  overwriting any same-named config entry, exactly as the PROVISION path does;
+  a malformed stored value raises `DispatchUnavailable` before the claim.
+  `spi.require_network_target` therefore works for DELIVERY connectors.
+- Review follow-ups covered by tests: a handler that reported success but whose
+  result recording raised before the DB write leaves `in_flight`; on expiry it is
+  ambiguous and never re-claimed (no second invoke).
+
+## 0.1.0a21 — released 2026-11-01
 
 Adds immutable dispatch snapshots and original receipt/credential-context retry
 checks from PR #883. The additive `ig_0018_dispatch_snapshot` follows released

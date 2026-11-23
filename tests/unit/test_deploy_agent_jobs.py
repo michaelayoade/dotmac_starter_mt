@@ -50,6 +50,13 @@ INVOCATION = "a1" * 16
 RENDER_OK = f"Result=success\nExecMainStatus=0\nInvocationID={INVOCATION}\n".encode()
 
 
+def loaded(materials: tuple[str, ...]) -> bytes:
+    names = ",".join(sorted(m.lower() for m in materials))
+    return (
+        f"LoadState=loaded\nDescription=Render job secrets materials={names}\n".encode()
+    )
+
+
 def stem_of(rig: Rig, materials: tuple[str, ...]) -> str:
     from dotmac_deploy_agent.openbao_config import job_unit_stem
 
@@ -132,7 +139,13 @@ def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
             (secrets / name).chmod(0o400)
     rig.systemctl.script = {
         ("--property=Result,ExecMainStatus,InvocationID",): CommandResult(0, RENDER_OK),
-        ("--property=LoadState",): CommandResult(0, b"LoadState=loaded\n"),
+        **{
+            (
+                "--property=LoadState,Description",
+                f"openbao-agent@{stem_of(rig, m)}.service",
+            ): CommandResult(0, loaded(m))
+            for m in (BOTH, OWNER)
+        },
         **rig.systemctl.script,
     }
     rig.commands.script[("image", "inspect")] = CommandResult(
@@ -288,7 +301,7 @@ def test_purge_removes_the_agents_secret_id_starts_the_purge_unit_and_destroys_t
     deliver(rig)
     assert rig.launcher.purge_job_role("import") == 0
     assert not (rig.config.role_dir("import") / "secret_id").exists()
-    assert started(rig, "dotmac-job-purge@erp-import.service")
+    assert started(rig, "dotmac-secrets-purge@erp-import.service")
     assert tracked(rig) == []
     assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
     # the renders are the purge unit's to remove (as the container uid), never the agent's
@@ -309,7 +322,7 @@ def test_a_failed_purge_unit_still_destroys_the_accessor_then_reports(
     rig = job_rig(tmp_path)
     deliver(rig)
     rig.systemctl.script = {
-        ("dotmac-job-purge@erp-import.service",): CommandResult(1, b""),
+        ("dotmac-secrets-purge@erp-import.service",): CommandResult(1, b""),
         **rig.systemctl.script,
     }
     with pytest.raises(Refusal) as failed:
@@ -327,7 +340,7 @@ def test_agent_start_purges_a_stale_job_secret_and_accessor(tmp_path: Path) -> N
         not (rig.config.role_dir("import") / "secret_id").exists()
         and tracked(rig) == []
     )
-    assert started(rig, "dotmac-job-purge@erp-import.service")
+    assert started(rig, "dotmac-secrets-purge@erp-import.service")
 
 
 def test_agent_start_with_openbao_unreachable_keeps_tracking_and_does_not_crash(
@@ -381,13 +394,17 @@ def test_the_job_kit_keeps_secrets_0700_and_verifies_inside_the_render_unit() ->
     tmpfiles = (KIT / "enrolment/tmpfiles.d/dotmac-job-role.conf.template").read_text()
     assert "/@ROLE@/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in tmpfiles
     assert "0710" not in tmpfiles and "W pending" not in tmpfiles  # no widening (N2)
-    purge = (KIT / "enrolment/systemd/dotmac-job-purge@.service").read_text()
+    purge = (KIT / "enrolment/systemd/dotmac-secrets-purge@.service").read_text()
     assert (
         "[Install]" not in purge and "WantedBy" not in purge and "Type=oneshot" in purge
     )
-    assert "-mindepth 1 -maxdepth 1 -type f -delete" in purge
+    assert "ExecStart=/usr/bin/false" in purge  # an unenrolled role purges nothing
+    dropin = (KIT / "enrolment/systemd/secrets-purge.conf.template").read_text()
+    assert "-maxdepth 1 ! -type d -delete" in dropin
+    assert "User=@OWNER_USER@" in dropin  # the owning uid (F26)
+    assert not (KIT / "enrolment/systemd/dotmac-job-purge@.service").exists()
     render = (KIT / "enrolment/systemd/job-render.conf.template").read_text()
-    assert "ExecStartPost=/usr/local/libexec/dotmac/job-verify " in render
+    assert "ExecStartPost=/usr/local/libexec/dotmac/verify-job-render " in render
     assert "Type=oneshot" in render
     polkit = (
         KIT / "enrolment/polkit/50-dotmac-deploy-agent.rules.template"
@@ -401,7 +418,7 @@ def test_the_job_kit_keeps_secrets_0700_and_verifies_inside_the_render_unit() ->
 def run_verify(directory: Path, *names: str) -> int:
     import subprocess
 
-    script = KIT / "enrolment/libexec/job-verify.sh"
+    script = KIT / "enrolment/libexec/verify-job-render.sh"
     return subprocess.run(  # noqa: S603
         ["/bin/sh", str(script), str(directory), *names],
         check=False,
@@ -580,7 +597,7 @@ def test_files_and_accessor_are_purged_after_a_failing_run_and_before_the_receip
         and tracked(rig) == []
     )
     assert (
-        started(rig, "dotmac-job-purge@erp-import.service")
+        started(rig, "dotmac-secrets-purge@erp-import.service")
         and receipt(rig)["exit_code"] == 3
     )
     assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
@@ -590,7 +607,9 @@ def test_a_timed_out_job_is_purged_too(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     rig.runner.timed_out = True
     assert refused(rig) == ("failed", "runner_timeout")
-    assert tracked(rig) == [] and started(rig, "dotmac-job-purge@erp-import.service")
+    assert tracked(rig) == [] and started(
+        rig, "dotmac-secrets-purge@erp-import.service"
+    )
 
 
 def test_a_crash_inside_the_run_is_purged(tmp_path: Path) -> None:
@@ -1324,7 +1343,9 @@ def test_a_set_with_no_loaded_unit_is_refused_before_anything_is_minted(
 ) -> None:
     rig = job_rig(tmp_path)
     rig.systemctl.script = {
-        ("--property=LoadState",): CommandResult(0, b"LoadState=not-found\n"),
+        ("--property=LoadState,Description",): CommandResult(
+            0, b"LoadState=not-found\n"
+        ),
         **rig.systemctl.script,
     }
     assert refused(rig) == ("refused", "job_files_invalid")
@@ -1357,3 +1378,465 @@ def test_rq3_apply_mode_flags_come_from_the_plans_closed_arg_list(
         dispatch_id="dispatch-2",
     )
     assert refused(rig) == ("completed", None)
+
+
+# -- P-SEC rev6 ----------------------------------------------------------------
+def test_s12_shared_vectors() -> None:
+    """The one S12 vector P-SEC, Control and Foundation also test against."""
+    from dotmac_deploy_agent.openbao_config import material_set_id
+
+    assert (
+        material_set_id(("LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"))
+        == "0dcc661ea25f"
+    )
+    assert (
+        material_set_id(("MIGRATION_DATABASE_URL", "LEGACY_DATABASE_URL"))
+        == "0dcc661ea25f"
+    )
+    assert material_set_id(("MIGRATION_DATABASE_URL",)) == "c8cd75e18839"
+    assert material_set_id(()) == "4f53cda18c2b"
+
+
+def test_a_unit_whose_description_lists_another_set_is_a_collision_and_is_refused(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    key = (
+        "--property=LoadState,Description",
+        f"openbao-agent@{stem_of(rig, BOTH)}.service",
+    )
+    rig.systemctl.script = {
+        key: CommandResult(0, loaded(OWNER)),
+        **rig.systemctl.script,
+    }
+    assert refused(rig) == ("refused", "job_files_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == []
+
+
+def test_a_unit_description_without_the_materials_key_is_refused(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    key = (
+        "--property=LoadState,Description",
+        f"openbao-agent@{stem_of(rig, BOTH)}.service",
+    )
+    rig.systemctl.script = {
+        key: CommandResult(0, b"LoadState=loaded\nDescription=Render\n"),
+        **rig.systemctl.script,
+    }
+    assert refused(rig) == ("refused", "job_files_invalid")
+
+
+def test_staged_inputs_need_only_acl_read_not_world_readable(tmp_path: Path) -> None:
+    """Staged inputs are 0440 with read ACLs; the agent hashes with plain read."""
+    rig, digest_ = work_rig(tmp_path)
+    staged = tmp_path / "work" / "import" / "in" / "manifest.json"
+    staged.chmod(0o440)
+    assert staged.stat().st_mode & 0o007 == 0  # not world-readable
+    rig.cp.materials = run_job_materials(dispatched(inputs=[one_input(digest_)]))
+    assert refused(rig) == ("completed", None)
+
+
+def test_the_polkit_start_list_is_exact_names_only_no_wildcard() -> None:
+    polkit = (
+        KIT / "enrolment/polkit/50-dotmac-deploy-agent.rules.template"
+    ).read_text()
+    code = "\n".join(
+        ln for ln in polkit.splitlines() if not ln.lstrip().startswith("//")
+    )
+    assert "@ENROLLED_JOB_UNITS@" in code
+    for wild in (
+        "*",
+        "startsWith",
+        'indexOf(action.lookup("unit")) === 0',
+        "match(",
+        "RegExp",
+    ):
+        assert wild not in code, wild
+    assert code.count('enrolledJobs.indexOf(action.lookup("unit")) !== -1') == 1
+
+
+def test_the_agent_s12_is_compact_json_and_never_the_spaced_form() -> None:
+    import hashlib
+
+    from dotmac_deploy_agent.openbao_config import material_set_id
+
+    names = ["legacy_database_url", "migration_database_url"]
+    spaced = hashlib.sha256(json.dumps(names).encode()).hexdigest()[
+        :12
+    ]  # ", " separators
+    assert spaced == "a50fd593917c"
+    produced = material_set_id(("LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"))
+    assert produced == "0dcc661ea25f" and produced != spaced
+
+
+def test_a_purge_instance_without_its_dropin_fails_closed() -> None:
+    base = (KIT / "enrolment/systemd/dotmac-secrets-purge@.service").read_text()
+    live = [
+        ln.strip() for ln in base.splitlines() if ln.strip() and not ln.startswith("#")
+    ]
+    assert [ln for ln in live if ln.startswith("ExecStart")] == [
+        "ExecStart=/usr/bin/false"
+    ]
+    assert "User=dotmac-secrets-unenrolled" in live  # a user that does not exist
+    assert not any(
+        "find" in ln or "-delete" in ln or "ReadWritePaths" in ln for ln in live
+    )
+
+
+def purge_argv(secrets: Path) -> list[str]:
+    dropin = (KIT / "enrolment/systemd/secrets-purge.conf.template").read_text()
+    line = next(
+        ln for ln in dropin.splitlines() if ln.startswith("ExecStart=/usr/bin/find")
+    )
+    path = "/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets"
+    return [
+        "find",
+        *line.removeprefix("ExecStart=/usr/bin/find ")
+        .replace(path, str(secrets))
+        .split(),
+    ]
+
+
+def test_the_purge_find_does_not_follow_symlinks_or_leave_the_filesystem() -> None:
+    argv = purge_argv(Path("/x"))
+    assert (
+        argv[1] == "-P" and "-xdev" in argv and argv[argv.index("-maxdepth") + 1] == "1"
+    )
+    assert (
+        argv[-4:] == ["!", "-type", "d", "-delete"]
+        and "-L" not in argv
+        and "-H" not in argv
+    )
+
+
+def test_the_purge_find_removes_a_link_as_a_link_and_leaves_its_target(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_text("precious")
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "a_url").write_text("x")
+    (secrets / "link").symlink_to(outside)  # a link to a DIRECTORY outside
+    (secrets / "flink").symlink_to(outside / "keep")  # a link to a file outside
+    (secrets / "sub").mkdir()
+    (secrets / "sub" / "inner").write_text("y")
+    subprocess.run(purge_argv(secrets), check=True)  # noqa: S603
+    assert sorted(p.name for p in secrets.iterdir()) == ["sub"]  # files and links gone
+    assert (outside / "keep").read_text() == "precious"  # nothing followed
+    assert (secrets / "sub" / "inner").exists()  # no recursion
+
+
+# -- R6-1: no orphaned job container --------------------------------------------
+def ps_filter(rig: Rig) -> list[tuple[str, ...]]:
+    return [c for c in rig.commands.calls if len(c) > 1 and c[1] == "ps"]
+
+
+def test_r61_foundation_gets_an_absolute_deadline_and_the_agent_bound_is_later(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.jobs import JOB_STOP_MARGIN
+    from dotmac_deploy_agent.runner import runner_environment
+
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    spec = rig.runner.specs[0]
+    assert spec.job_deadline == int(rig.epoch[0]) + 600  # start + timeout_seconds
+    assert (
+        spec.job_bound_seconds == 600 + JOB_STOP_MARGIN > 600
+    )  # Foundation stops first
+    env = runner_environment(spec)
+    assert env["DOTMAC_DEPLOY_JOB_DEADLINE"] == str(spec.job_deadline)
+
+
+def test_r61_the_margin_and_grace_fit_inside_the_lease_margin() -> None:
+    from dotmac_deploy_agent.jobs import JOB_STOP_MARGIN, JOB_TERM_GRACE, LEASE_MARGIN
+
+    assert 0 < JOB_STOP_MARGIN and 0 < JOB_TERM_GRACE
+    assert JOB_STOP_MARGIN + JOB_TERM_GRACE < LEASE_MARGIN
+
+
+def test_r61_a_job_with_no_deadline_cannot_be_started() -> None:
+    from dotmac_deploy_agent.runner import RunSpec, runner_environment
+
+    spec = RunSpec("d", "erp/staging/h", "erp", "sha256:" + "a" * 64, Path("/p"), None,
+        job_name="import", job_params_env=Path("/j"), job_secrets_dir=Path("/s"),
+        job_argv_digest="sha256:" + "b" * 64)  # fmt: skip
+    with pytest.raises(Refusal):
+        runner_environment(spec)
+
+
+def test_r61_the_agent_proves_no_container_remains_before_purge_and_release(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    [call] = ps_filter(rig)
+    assert "label=dotmac.dispatch_id=dispatch-1" in call and "-a" in call
+    order = [c[-1] for c in rig.systemctl.calls if "start" in c]
+    assert any(
+        "secrets-purge" in u for u in order
+    )  # the purge ran, after a clean proof
+
+
+def test_r61_a_remaining_container_holds_the_lease_purges_nothing_and_pages(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("ps",)] = CommandResult(0, b"3f2a9c1b7d44\n")
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("failed", "job_container_orphaned")
+    assert "lease/release" not in [
+        e for e, _ in rig.cp.lease_log
+    ]  # held, never released
+    assert tracked(rig) != []  # the accessor was NOT destroyed
+    purges = [c for c in rig.systemctl.calls if "secrets-purge" in " ".join(c)]
+    assert len(purges) == 1  # only the one BEFORE the mint; none after the run
+    assert (secrets_dir(rig) / "migration_database_url").exists()  # renders untouched
+    done = last(rig)
+    assert done["details"]["page"] is True and receipt(rig)["orphaned"] is True  # type: ignore[index]
+
+
+def test_r61_an_unreadable_container_listing_is_treated_as_an_orphan(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("ps",)] = CommandResult(1, b"")
+    assert refused(rig) == ("failed", "job_container_orphaned")
+
+
+def test_r61_a_job_that_never_started_needs_no_container_proof(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path, job_roles=())
+    assert refused(rig) == ("refused", "job_role_refused")
+    assert ps_filter(rig) == []
+
+
+def test_r61_agent_start_does_not_purge_under_a_possibly_running_container(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.observation import mark_inflight
+
+    rig = job_rig(tmp_path)
+    deliver(rig)  # an accessor and a secret_id from the run that was interrupted
+    mark_inflight(rig.config.state_dir, "dispatch-1")
+    rig.commands.script[("ps",)] = CommandResult(0, b"abc123\n")
+    rig.cp.materials = None
+    assert rig.launcher.run_once().outcome == "idle"
+    assert (rig.config.role_dir("import") / "secret_id").exists() and tracked(rig) != []
+
+
+def run_real(tmp_path: Path, script: str, *, bound: int = 1, grace: float = 1.0):  # type: ignore[no-untyped-def]
+    import time
+
+    from dotmac_deploy_agent.runner import RunSpec, SubprocessRunner
+
+    runner = SubprocessRunner(
+        ("/bin/sh", "-c", script),
+        60,
+        term_grace_seconds=grace,
+        job_entry_available=True,
+    )
+    spec = RunSpec("d", "erp/staging/h", "erp", "sha256:" + "a" * 64, tmp_path / "p", None,
+        job_name="import", job_params_env=tmp_path / "j", job_secrets_dir=tmp_path / "s",
+        job_argv_digest="sha256:" + "b" * 64, job_deadline=1, job_bound_seconds=bound)  # fmt: skip
+    started = time.monotonic()
+    result = runner.run(spec)
+    return result, time.monotonic() - started
+
+
+def test_r61_the_timeout_sends_sigterm_first_and_foundation_gets_to_clean_up(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "cleaned"
+    script = f"trap 'echo done > {marker}; exit 0' TERM; /bin/sleep 30 & wait"
+    result, elapsed = run_real(tmp_path, script, bound=1, grace=5.0)
+    assert result.timed_out and result.exit_code is None
+    assert marker.read_text().strip() == "done"  # its finally ran: SIGTERM, not SIGKILL
+    assert elapsed < 4.5  # it ended on SIGTERM, well before the grace elapsed
+
+
+def test_r61_sigkill_comes_only_after_the_grace_for_a_process_that_ignores_sigterm(
+    tmp_path: Path,
+) -> None:
+    script = "trap '' TERM; while :; do /bin/sleep 1; done"
+    result, elapsed = run_real(tmp_path, script, bound=1, grace=2.0)
+    assert result.timed_out
+    assert 2.5 <= elapsed < 8  # bound + the full grace elapsed before SIGKILL
+
+
+def test_r61_a_job_runner_without_the_foundation_entry_still_refuses(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.runner import RunSpec, SubprocessRunner
+
+    runner = SubprocessRunner(("/bin/true",), 60)
+    spec = RunSpec("d", "erp/staging/h", "erp", "sha256:" + "a" * 64, tmp_path / "p", None,
+        job_name="import", job_params_env=tmp_path / "j", job_secrets_dir=tmp_path / "s",
+        job_argv_digest="sha256:" + "b" * 64, job_deadline=1)  # fmt: skip
+    with pytest.raises(Refusal) as refused_run:
+        runner.run(spec)
+    assert refused_run.value.code == "foundation_job_entry_unavailable"
+
+
+# -- R6-2: template identity and path ---------------------------------------------
+def test_r62_the_purge_base_refuses_without_its_dropin_and_refuses_root() -> None:
+    base = (KIT / "enrolment/systemd/dotmac-secrets-purge@.service").read_text()
+    live = [ln for ln in base.splitlines() if ln.strip() and not ln.startswith("#")]
+    text = "\n".join(live)
+    assert (
+        "AssertPathExists=/etc/systemd/system/dotmac-secrets-purge@%i.service.d/secrets-purge.conf"
+        in text
+    )
+    assert "ExecStartPre=/bin/sh -c 'test \"$(id -u)\" -ne 0'" in text
+    assert "ExecStart=/usr/bin/false" in text
+    assert "PrivateNetwork=yes" in text and "RestrictAddressFamilies=AF_UNIX" in text
+    # nothing in the base derives a user, a path or a config from the instance name
+    for ln in live:
+        if "%i" in ln:
+            assert ln.startswith(("Description=", "AssertPathExists="))
+
+
+def test_r62_user_directory_and_command_come_only_from_the_dropin() -> None:
+    dropin = (KIT / "enrolment/systemd/secrets-purge.conf.template").read_text()
+    live = [ln for ln in dropin.splitlines() if ln.strip() and not ln.startswith("#")]
+    assert "User=@OWNER_USER@" in live and "ExecStart=" in live  # the reset line
+    assert not any("%i" in ln for ln in live)  # never parsed from the instance name
+    find = next(ln for ln in live if ln.startswith("ExecStart=/usr/bin/find"))
+    assert find.startswith(
+        "ExecStart=/usr/bin/find -P /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets -xdev "
+    )
+
+
+def test_r62_the_agent_names_purge_units_from_the_enrolled_namespace_and_role_only(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.job_delivery import purge_unit_name
+
+    rig = job_rig(tmp_path)
+    assert (
+        purge_unit_name(rig.config.secrets_namespace, "import")
+        == "dotmac-secrets-purge@erp-import.service"
+    )
+    rig.config = (
+        rig.config
+    )  # the dispatch path refuses a role the root config did not enrol
+    other = (
+        job_rig(tmp_path / "o", job_roles=("export",))
+        if (tmp_path / "o").mkdir() is None
+        else None
+    )
+    assert other is not None
+    assert refused(other) == ("refused", "job_role_refused")
+    assert not any("secrets-purge" in " ".join(c) for c in other.systemctl.calls)
+
+
+def test_r62_the_render_dropin_lives_at_a_per_set_path_and_refuses_a_dirty_secrets_dir() -> (
+    None
+):
+    render = (KIT / "enrolment/systemd/job-render.conf.template").read_text()
+    assert (
+        "openbao-agent@@SECRETS_NAMESPACE@-@ROLE@-@S12@.service.d/job-render.conf"
+        in render
+    )
+    assert (
+        "ExecStartPre=/bin/sh -c 'test -z \"$(ls -A /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets)\"'"
+        in render
+    )
+    assert "never enabled" in render
+
+
+# -- shared S12 vectors, and the enrolment read-back ---------------------------
+VECTORS = KIT / "enrolment/s12-vectors.json"
+
+
+def test_the_shared_s12_vector_file_is_what_the_agent_computes() -> None:
+    from dotmac_deploy_agent.openbao_config import material_set_id
+
+    document = json.loads(VECTORS.read_text())
+    for vector in document["vectors"]:
+        assert material_set_id(tuple(vector["materials"])) == vector["s12"]
+        import hashlib
+
+        assert hashlib.sha256(vector["json"].encode()).hexdigest()[:12] == vector["s12"]
+    for refused_form in document["not_produced"]:
+        assert material_set_id(tuple(refused_form["materials"])) != refused_form["s12"]
+    assert document["not_produced"][0]["s12"] == "a50fd593917c"
+
+
+def fake_systemctl(path: Path) -> Path:
+    path.write_text(
+        "#!/bin/sh\ncase $1 in is-enabled) echo disabled; exit 1;; cat) exit 1;; esac\nexit 0\n"
+    )
+    path.chmod(0o755)
+    return path
+
+
+def enrol(tmp_path: Path, stem: str, *, role: str = "import") -> Path:
+    unit_dir = tmp_path / "units"
+    for rel, name in (
+        (f"openbao-agent@{stem}.service.d", "job-render.conf"),
+        (f"dotmac-secrets-purge@erp-{role}.service.d", "secrets-purge.conf"),
+    ):
+        (unit_dir / rel).mkdir(parents=True, exist_ok=True)
+        (unit_dir / rel / name).write_text("[Service]\n")
+    return unit_dir
+
+
+def run_check(
+    tmp_path: Path, unit_dir: Path, *names: str, env_extra: dict[str, str] | None = None
+) -> tuple[int, str]:
+    import shutil
+    import subprocess
+
+    if shutil.which("sha256sum") is None:
+        pytest.skip("GNU coreutils sha256sum is required")
+    script = KIT / "enrolment/libexec/check-job-enrolment.sh"
+    done = subprocess.run(  # noqa: S603
+        ["/bin/sh", str(script), "erp", "import", *names],
+        capture_output=True, text=True, check=False,
+        env={"PATH": "/usr/bin:/bin", "SYSTEMCTL": str(fake_systemctl(tmp_path / "systemctl")), "UNIT_DIR": str(unit_dir), **(env_extra or {})},
+    )  # fmt: skip
+    return done.returncode, done.stdout.strip()
+
+
+def test_the_enrolment_readback_accepts_a_correctly_enrolled_set(
+    tmp_path: Path,
+) -> None:
+    unit_dir = enrol(tmp_path, "erp-import-0dcc661ea25f")
+    code, out = run_check(
+        tmp_path, unit_dir, "MIGRATION_DATABASE_URL", "LEGACY_DATABASE_URL"
+    )
+    assert (code, out) == (0, "erp-import-0dcc661ea25f")
+
+
+def test_the_enrolment_readback_refuses_a_missing_dropin_and_an_enabled_instance(
+    tmp_path: Path,
+) -> None:
+    unit_dir = enrol(tmp_path, "erp-import-c8cd75e18839")
+    code, _ = run_check(
+        tmp_path, unit_dir, "LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"
+    )
+    assert code != 0  # the per-set drop-in for THIS set is not installed
+    unit_dir = (
+        enrol(tmp_path / "e", "erp-import-c8cd75e18839")
+        if (tmp_path / "e").mkdir() is None
+        else unit_dir
+    )
+    enabled = tmp_path / "systemctl"
+    enabled.write_text(
+        "#!/bin/sh\ncase $1 in is-enabled) echo enabled; exit 0;; cat) exit 1;; esac\nexit 0\n"
+    )
+    enabled.chmod(0o755)
+    import subprocess
+
+    done = subprocess.run(  # noqa: S603
+        ["/bin/sh", str(KIT / "enrolment/libexec/check-job-enrolment.sh"), "erp", "import", "MIGRATION_DATABASE_URL"],
+        capture_output=True, text=True, check=False,
+        env={"PATH": "/usr/bin:/bin", "SYSTEMCTL": str(enabled), "UNIT_DIR": str(unit_dir)},
+    )  # fmt: skip
+    assert done.returncode != 0  # job instances are never enabled

@@ -149,7 +149,6 @@ dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = tru
 dotmac-delivery-resend = { path = "packages/dotmac-delivery-resend", develop = true }
 # SMTP transport for the kernel delivery-provider seam. Stdlib only; built and
 # proven here, never published, no assembly composes it.
-dotmac-delivery-smtp = { path = "packages/dotmac-delivery-smtp", develop = true }
 dotmac-billing = { path = "packages/dotmac-billing", develop = true }
 dotmac-collections = { path = "packages/dotmac-collections", develop = true }
 # Tenant-plane money-flow composition (instance state only). Built and proven
@@ -279,6 +278,7 @@ dotmac-connector-linkedin = { path = "packages/dotmac-connector-linkedin", devel
 dotmac-connector-mono = { path = "packages/dotmac-connector-mono", develop = true }
 dotmac-connector-remita = { path = "packages/dotmac-connector-remita", develop = true }
 dotmac-connector-nira = { path = "packages/dotmac-connector-nira", develop = true }
+dotmac-connector-smtp = { path = "packages/dotmac-connector-smtp", develop = true }
 dotmac-connector-sub-accounting = { path = "packages/dotmac-connector-sub-accounting", develop = true }
 dotmac-connector-traccar = { path = "packages/dotmac-connector-traccar", develop = true }
 dotmac-app-sync = { path = "packages/dotmac-app-sync", develop = true }
@@ -366,7 +366,6 @@ module = [
     "dotmac_billing.*",
     "dotmac_collections.*",
     "dotmac_money_flows.*",
-    "dotmac_delivery_smtp.*",
     "dotmac_subscriptions.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -520,6 +519,7 @@ root_packages = [
     "dotmac_connector_meta_social",
     "dotmac_connector_paystack",
     "dotmac_connector_nira",
+    "dotmac_connector_smtp",
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
@@ -556,7 +556,6 @@ root_packages = [
     "dotmac_learning",
     "dotmac_learning_bank_rules",
     "dotmac_money_flows",
-    "dotmac_delivery_smtp",
 ]
 
 [[tool.importlinter.contracts]]
@@ -733,7 +732,6 @@ source_modules = [
     "dotmac_fulfillment",
     "dotmac_learning",
     "dotmac_money_flows",
-    "dotmac_delivery_smtp",
 ]
 forbidden_modules = ["app"]
 
@@ -957,6 +955,7 @@ source_modules = [
     "dotmac_connector_meta_social",
     "dotmac_connector_paystack",
     "dotmac_connector_nira",
+    "dotmac_connector_smtp",
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
@@ -992,7 +991,6 @@ source_modules = [
     "dotmac_fulfillment",
     "dotmac_learning",
     "dotmac_learning_bank_rules",
-    "dotmac_delivery_smtp",
 ]
 forbidden_modules = ["dotmac_money_flows"]
 
@@ -1009,6 +1007,7 @@ source_modules = [
     "dotmac_connector_whatsapp",
     "dotmac_connector_paystack",
     "dotmac_connector_nira",
+    "dotmac_connector_smtp",
 ]
 forbidden_modules = [
     "app",
@@ -1094,7 +1093,6 @@ forbidden_modules = [
     "dotmac_learning",
     "dotmac_learning_bank_rules",
     "dotmac_money_flows",
-    "dotmac_delivery_smtp",
 ]
 
 [[tool.importlinter.contracts]]

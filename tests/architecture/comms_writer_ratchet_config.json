@@ -27,11 +27,11 @@
       "premise": "dotmac-delivery-resend is a delivery adapter: the one place its provider SDK may be used (ADR-0006 5f). An adapter owns a transport, never a queue or message copy"
     },
     {
-      "glob": "packages/dotmac-delivery-smtp/src/**",
+      "glob": "packages/dotmac-connector-smtp/src/**",
       "kinds": [
         "direct_smtp"
       ],
-      "premise": "dotmac-delivery-smtp is a delivery adapter: the one place smtplib may be used (ADR-0006 5f). An adapter owns a transport, never a queue or message copy"
+      "premise": "dotmac-connector-smtp is the SMTP transport connector for the companion Integrator: the one place smtplib may be used (ADR-0006 5f; Governance ADR 0011 recorded transfer from the retired dotmac-delivery-smtp, approved by Michael). A connector owns a transport, never a queue or message copy"
     }
   ],
   "exclude": [
