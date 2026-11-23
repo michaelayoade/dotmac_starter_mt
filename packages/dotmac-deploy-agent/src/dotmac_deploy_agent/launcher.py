@@ -41,7 +41,11 @@ from .job_delivery import (
     require_render_unit,
 )
 from .jobs import (
+    JOB_DISPATCH_LABEL,
+    JOB_MARKER_LABEL,
     JOB_STOP_MARGIN,
+    JOB_TEARDOWN_RESERVE,
+    JOB_TERM_GRACE,
     check_apply_class,
     check_job_inputs,
     job_env,
@@ -152,12 +156,11 @@ class Launcher:
         """A7, at agent start: a crash mid-job leaves a `secret_id` file and maybe
         a live accessor. Files go first; accessors are destroyed when OpenBao is
         reachable and stay tracked (retried next cycle) when it is not."""
-        interrupted = read_inflight(self.config.state_dir)
-        if interrupted is not None and self._job_container_present(interrupted):
-            # The interrupted run may have left its job container running: purging
-            # now would delete the secrets from under it. Hold and let it page.
-            LOG.error("stale job purge held: a container of the interrupted dispatch")
-            return
+        if self._orphan_preflight():
+            # P-SEC rev7: files and accessors are STILL purged (a surviving
+            # container is no reason to leave DSNs on tmpfs); the preflight blocks
+            # every later lease instead.
+            LOG.error("a job container survives from an earlier run: leases blocked")
         for role in self.job_accessors.roles():
             try:
                 self.purge_job_role(role)
@@ -356,6 +359,22 @@ class Launcher:
             stopped = self._reconcile(materials.dispatch_id, standing)
             if stopped is not None:
                 return stopped
+        if self._orphan_preflight():
+            # Before ANY lease, job or serving: a labelled job container (stopped
+            # ones included) from an earlier run blocks everything until a human
+            # has dealt with it.
+            self._report(
+                self._observation(
+                    materials.dispatch_id,
+                    "refused",
+                    "job_container_orphaned",
+                    {"page": True},
+                    kind=kind_for_operation(materials.operation),
+                )
+            )
+            return CycleResult(
+                "refused", "job_container_orphaned", materials.dispatch_id
+            )
         if materials.dispatched_job is not None:
             return self._execute_job(materials)
         return self._execute(materials, reply)
@@ -605,6 +624,7 @@ class Launcher:
                 dispatch_id=materials.dispatch_id,
                 ttl_seconds=materials.lease_ttl_seconds,
             )
+            acquired_at = int(self.epoch())
             details["lease"] = {
                 "lease_id": lease.lease_id,
                 "ttl_seconds": lease.ttl_seconds,
@@ -637,7 +657,13 @@ class Launcher:
             # R6-1: Foundation gets an ABSOLUTE deadline; the agent's own bound is
             # that deadline plus the time Foundation needs to stop and remove the
             # container, so Foundation's `finally` always runs first.
-            deadline = int(self.epoch()) + job.timeout_seconds
+            now = int(self.epoch())
+            lease_end = acquired_at + lease.ttl_seconds
+            reserve = JOB_STOP_MARGIN + JOB_TERM_GRACE + JOB_TEARDOWN_RESERVE
+            # The deadline always binds: never later than the lease allows.
+            deadline = min(now + job.timeout_seconds, lease_end - reserve)
+            if deadline <= now:
+                raise Refusal("lease_unavailable")  # setup used the whole lease
             result = self.runner.run(
                 RunSpec(
                     dispatch_id=materials.dispatch_id,
@@ -650,7 +676,7 @@ class Launcher:
                     credentials_directory=str(credentials_dir),
                     lease_id=lease.lease_id,
                     job_deadline=deadline,
-                    job_bound_seconds=job.timeout_seconds + JOB_STOP_MARGIN,
+                    job_bound_seconds=deadline - now + JOB_STOP_MARGIN,
                     job_name=job.name,
                     job_params_env=job_params,
                     job_secrets_dir=secrets_dir,
@@ -674,16 +700,16 @@ class Launcher:
             if refusal.detail is not None:
                 details["refusal_detail"] = refusal.detail
         finally:
-            # R6-1: BEFORE any purge or release, prove no container labelled with
-            # this dispatch remains. If one does (or it cannot be proven), HOLD the
-            # lease, purge nothing, and page: a job container can outlive its
-            # runner and still hold both DSNs.
+            # P-SEC rev7: a surviving job container does NOT stop the purge: the
+            # files go and the accessor is destroyed regardless. It only HOLDS the
+            # lease (never released: it expires unreleased) and pages. The receipt
+            # says `orphan_container` and never claims the container was contained.
             orphaned = ran and self._job_container_present(materials.dispatch_id)
             if orphaned:
                 outcome, reason = "failed", "job_container_orphaned"
-                receipt["orphaned"] = True
+                receipt["orphan_container"] = True
                 details["page"] = True
-            elif job.role is not None:
+            if job.role is not None:
                 # Purge first (the agent's secret_id, the purge unit, the accessor),
                 # whatever happened above; the receipt is written only after.
                 try:
@@ -709,26 +735,28 @@ class Launcher:
         )
         return CycleResult(outcome, reason, materials.dispatch_id)
 
-    def _job_container_present(self, dispatch_id: str) -> bool:
-        """True unless it is PROVEN that no container labelled with this dispatch
-        remains (read-only `docker ps -a --filter label=...`). An unreadable answer
-        counts as present: fail closed."""
+    def _orphan_preflight(self) -> bool:
+        """True if ANY container carries both job labels (`docker ps -a` lists the
+        stopped ones too), or the listing cannot be read: fail closed."""
+        return self._ps_present(
+            (f"label={JOB_DISPATCH_LABEL}", f"label={JOB_MARKER_LABEL}")
+        )
+
+    def _ps_present(self, filters: tuple[str, ...]) -> bool:
+        argv = [str(self.config.docker_path), "ps", "-a"]
+        for expression in filters:
+            argv += ["--filter", expression]
+        argv += ["--format", "{{.ID}}"]
         try:
-            result = self.read_only.run(
-                (
-                    str(self.config.docker_path),
-                    "ps",
-                    "-a",
-                    "--filter",
-                    f"label=dotmac.dispatch_id={dispatch_id}",
-                    "--format",
-                    "{{.ID}}",
-                ),
-                timeout=15.0,
-            )
+            result = self.read_only.run(tuple(argv), timeout=15.0)
         except Refusal:
             return True
         return result.exit_code != 0 or bool(result.stdout.strip())
+
+    def _job_container_present(self, dispatch_id: str) -> bool:
+        """True unless it is PROVEN that no container labelled with this dispatch
+        remains. An unreadable answer counts as present: fail closed."""
+        return self._ps_present((f"label={JOB_DISPATCH_LABEL}={dispatch_id}",))
 
     def _mint_job_role(self, materials: Materials, role: str) -> str:
         # The authored config was checked by `job_config_stem` before anything.

@@ -42,6 +42,14 @@ LEASE_MARGIN: Final = 120
 #: waits `JOB_TERM_GRACE` more before any SIGKILL. Both fit inside the lease margin.
 JOB_STOP_MARGIN: Final = 45
 JOB_TERM_GRACE: Final = 15
+#: Seconds kept at the end of the lease for the purge, the accessor destroy and the
+#: receipt. The deadline always binds: Foundation is stopped no later than
+#: `lease end - (stop margin + grace + reserve)`, whatever `timeout_seconds` says.
+JOB_TEARDOWN_RESERVE: Final = 40
+#: The labels Foundation sets on a job container. The second one is a PLACEHOLDER
+#: until it is agreed with the Foundation builder; one constant, never inlined.
+JOB_DISPATCH_LABEL: Final = "dotmac.dispatch_id"
+JOB_MARKER_LABEL: Final = "dotmac.job"
 #: Outer bound only; the real bound is the signed lease fit (timeout + margin).
 MAX_JOB_TIMEOUT: Final = 3600 - LEASE_MARGIN
 _DISPATCHED_KEYS: Final = frozenset(
