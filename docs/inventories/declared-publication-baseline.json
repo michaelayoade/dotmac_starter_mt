@@ -77,6 +77,11 @@
       "reason": "SOURCE PREPARATION ONLY; UNPUBLISHED AND UNALLOCATED. The previously released 0.1.0a1 remains immutable. This local PEP 440 development marker prevents source preparation from allocating a bare successor identity while the approved tagline addition is completed. Remove this row only after a separately authorized successor allocation and verified publication record; this entry grants no release, adoption, deployment, or flip authority.",
       "state": "declared-unpublished"
     },
+    "dotmac-collections": {
+      "declared": "0.1.0a3",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a2 IS published and tagged (dotmac-collections-v0.1.0a2). 0.1.0a3 adds the GAP-4 per-account access-hold ladder (cl_0002: holds, reminder attempts including skipped steps, subject-locked assess and transition-resume), which reads money-flows receivables, so it is released only after the published dotmac-money-flows 0.1.0a1 it depends on and never folded into a2 in place. Remove this row only after an authorized 0.1.0a3 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -130,6 +135,11 @@
     "dotmac-inbox-operations": {
       "declared": "0.1.0a5",
       "reason": "OUTSTANDING FOR SUB'S IDENTITY-PRESERVING ADOPTION AND THE ADR-0059 AVAILABILITY SLICE. Version a4 added typed historical presence, assignment, queue-entry and cursor imports; a5 adds the four-state availability owner, the browser heartbeat seam, the offline grace/requeue/supervisor-alert policy and the separated claim, cold-transfer, warm-transfer, requeue and escalation commands with their own declared permissions. Source presence is not registry evidence and Sub must not pin it until the protected release installs it back and tags the exact revision. Remove this row in the a5 release-record change, then repin Sub and retire its direct-model exception in the same adoption sequence; do not edit the declared version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-money-flows": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-money-flows-v0.1.0a1). 0.1.0a2 adds the receivables reader on top of published a1, and it requires dotmac-collections 0.1.0a3, so it is released only after collections 0.1.0a3 is published and the release allowlist is widened (dotmac-collections in allowed_requires, receivables.py in the required wheel files) under its own review. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
