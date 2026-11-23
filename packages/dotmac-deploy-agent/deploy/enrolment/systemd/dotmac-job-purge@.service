@@ -1,0 +1,17 @@
+# JOB ROLES ONLY. Instance = <secrets_namespace>-<role>. Static (never enabled),
+# started by the deploy agent through the polkit rule after a job, at agent start
+# and before every mint. It runs as the container uid, because `secrets/` is not
+# the agent's to delete in. The ExecStart is fixed: it removes only secrets/*.
+# User and path come from the per-instance drop-in (job-purge.conf.template).
+[Unit]
+Description=Purge rendered job secrets for %i
+
+[Service]
+Type=oneshot
+User=dotmac-job-unenrolled
+ExecStart=/usr/bin/find /run/dotmac/%i/secrets -mindepth 1 -maxdepth 1 -type f -delete
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes

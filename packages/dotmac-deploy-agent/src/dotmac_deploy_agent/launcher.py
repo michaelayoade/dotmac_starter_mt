@@ -34,6 +34,7 @@ from .files import (
     write_private,
 )
 from .job_delivery import (
+    check_images_present,
     deliver_job_secret_id,
     purge_job_role,
     render_job_credentials,
@@ -146,10 +147,10 @@ class Launcher:
             except Refusal as refusal:
                 LOG.warning("stale job purge deferred role=%s code=%s", role, refusal)
 
-    def purge_job_role(self, role: str, rendered: tuple[str, ...] = ()) -> int:
-        """A7, on job exit (any code) and on the container's `die` event: remove the
-        `secret_id` and the named rendered files, destroy every tracked accessor.
-        Returns how many accessors are still tracked (0 = clean)."""
+    def purge_job_role(self, role: str) -> int:
+        """A7, after a job (any exit code), at agent start and before every mint:
+        remove the agent's own `secret_id`, start the role's purge unit, destroy
+        every tracked accessor. Returns how many accessors are still tracked."""
         session: OpenBaoSession | None = None
         try:
             if self.job_accessors.load(role).retire:
@@ -158,7 +159,7 @@ class Launcher:
                 except Refusal:
                     session = None  # unreachable: files still go, accessors wait
             return purge_job_role(
-                self.config, self.job_accessors, role, session, rendered
+                self.config, self.commands, self.job_accessors, role, session
             )
         finally:
             if session is not None:
@@ -330,9 +331,10 @@ class Launcher:
         outcome: str,
         reason: str | None,
         details: dict[str, object],
+        kind: str = "deploy",
     ) -> dict[str, object]:
         return build_observation(
-            kind="deploy",
+            kind=kind,
             dispatch_id=dispatch_id,
             target_ref=self.config.target_ref,
             outcome=outcome,
@@ -473,21 +475,20 @@ class Launcher:
         return descriptor
 
     def _execute_job(self, materials: Materials) -> CycleResult:
-        """A signed `run_job` dispatch: one named job, its role minted for this
-        run only, purged on every exit path, then the receipt. Everything the
-        plan binds was checked at parse (operation, window, role fence, lease fit)."""
+        """A signed `run_job` dispatch: the one job `dispatched_job` names, its role
+        minted for this run only, purged on every exit path, then the receipt.
+        Everything executed is read from `dispatched_job`; everything the plan
+        binds was checked at parse (operation, window, role fence, lease fit)."""
         job = materials.dispatched_job
         if job is None:
             raise Refusal("materials_invalid")
-        spec = job.spec
-        scoped = materials.scoped_params.get(spec.name, ())
-        scoped_materials = {p.material for p in scoped if p.material}
-        credential_names = tuple(m for m in spec.materials if m not in scoped_materials)
+        env_materials = {material for material, _ in job.env}
+        credential_names = tuple(m for m in job.materials if m not in env_materials)
         details: dict[str, object] = {"params_env_digest": materials.params_env_digest}
         receipt: dict[str, object] = {
-            "name": spec.name,
-            "role": spec.role,
-            "materials": list(spec.materials),
+            "name": job.name,
+            "role": job.role,
+            "materials": list(job.materials),
             "window_id": job.window_id,
             "started_at": utc_stamp(self.clock()),
         }
@@ -506,12 +507,14 @@ class Launcher:
             planned = canonical_render(materials.params, materials.app_image)
             if render_digest(planned) != materials.params_env_digest:
                 raise Refusal("params_digest_mismatch")
-            job_lines = job_env(spec, scoped)  # per-job digest; never params.env
+            job_lines = job_env(job)  # signed values vs the signed digest
             require_private_dir(deploy_run_dir)
             if not getattr(self.runner, "job_entry_available", False):
                 # Before any lease, mint or file: nothing is spent on a job that
                 # Foundation cannot run yet.
                 raise Refusal("foundation_job_entry_unavailable")
+            # R2-C1: a job runs an image already on the host. No transfer.
+            check_images_present(self.config, self.read_only, materials.images)
 
             lease = self.lease.acquire(
                 dispatch_id=materials.dispatch_id,
@@ -521,24 +524,20 @@ class Launcher:
                 "lease_id": lease.lease_id,
                 "ttl_seconds": lease.ttl_seconds,
             }
-            transferred = self.transfer.transfer_all(
-                materials.images, ttl_seconds=lease.ttl_seconds
-            )
-            details["transfer"] = [t.as_details() for t in transferred]
             params_file = write_params_env(deploy_run_dir, planned)
             write_private(job_params, job_lines, 0o400)
 
             self.executed.record(materials.dispatch_id, order)  # before the mint
-            secrets_dir: Path = (
-                self.config.role_dir(spec.role) if spec.role else deploy_run_dir
-            )
-            if spec.role is not None:
-                receipt["accessor_prefix"] = self._mint_job_role(materials, spec.role)
-                receipt["files"] = list(
-                    render_job_credentials(
-                        self.config, self.commands, spec.role, credential_names
-                    )
+            secrets_dir = deploy_run_dir
+            secret_files: tuple[str, ...] = ()
+            if job.role is not None:
+                secrets_dir = self.config.role_dir(job.role) / "secrets"
+                self.purge_job_role(job.role)  # before every mint
+                receipt["accessor_prefix"] = self._mint_job_role(materials, job.role)
+                secret_files = render_job_credentials(
+                    self.config, self.commands, job.role, credential_names
                 )
+                receipt["files"] = list(secret_files)
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
                 raise Refusal("lease_unavailable")
             credentials_dir = self._prepare_run_credentials()
@@ -555,10 +554,11 @@ class Launcher:
                     bindings_env=self.config.bindings_env,
                     credentials_directory=str(credentials_dir),
                     lease_id=lease.lease_id,
-                    job_name=spec.name,
+                    job_name=job.name,
                     job_params_env=job_params,
                     job_secrets_dir=secrets_dir,
                     job_argv_digest=job.argv_digest,
+                    job_secret_files=secret_files,
                 )
             )
             receipt["exit_code"] = result.exit_code
@@ -576,14 +576,11 @@ class Launcher:
             if refusal.detail is not None:
                 details["refusal_detail"] = refusal.detail
         finally:
-            # Purge first (files, then the accessor), whatever happened above; the
-            # receipt is written only after.
-            if spec.role is not None:
-                names = tuple(m.lower() for m in credential_names)
+            # Purge first (the agent's secret_id, the purge unit, the accessor),
+            # whatever happened above; the receipt is written only after.
+            if job.role is not None:
                 try:
-                    receipt["accessors_still_tracked"] = self.purge_job_role(
-                        spec.role, names
-                    )
+                    receipt["accessors_still_tracked"] = self.purge_job_role(job.role)
                 except Refusal as refusal:
                     receipt["purge_failed"] = refusal.code
             remove_runtime_files(deploy_run_dir, (PARAMS_FILE, JOB_PARAMS_FILE))
@@ -595,7 +592,12 @@ class Launcher:
             if lock is not None:
                 os.close(lock)
             receipt["finished_at"] = utc_stamp(self.clock())
-        self._report(self._observation(materials.dispatch_id, outcome, reason, details))
+        # A job receipt is never a deploy observation (it cannot read as convergence).
+        self._report(
+            self._observation(
+                materials.dispatch_id, outcome, reason, details, kind="job"
+            )
+        )
         return CycleResult(outcome, reason, materials.dispatch_id)
 
     def _mint_job_role(self, materials: Materials, role: str) -> str:

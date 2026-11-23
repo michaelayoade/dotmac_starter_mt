@@ -1,0 +1,8 @@
+# /etc/systemd/system/openbao-agent@@SECRETS_NAMESPACE@-@ROLE@.service.d/job-render.conf
+# JOB ROLES ONLY: render once and exit. The authored HCL sets exit_after_auth and
+# no meta/render file. The agent reads Result=success and ExecMainStatus=0 from
+# `systemctl show` as the render-and-login signal.
+[Service]
+Type=oneshot
+Restart=no
+RemainAfterExit=no

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, cast
 
@@ -24,12 +24,14 @@ from .config import AgentConfig
 from .dispatch import PinnedIdentity, plan_digest_of, verify_dispatch
 from .jobs import (
     DispatchedJob,
-    JobSpec,
+    JobDefinition,
     check_job_admissible,
+    check_matches_definition,
+    job_roles,
     plan_dispatched_job,
     plan_jobs,
+    refuse_cp_scoped_params,
     refuse_job_role_serving,
-    require_naming,
     split_params,
 )
 from .params import Param
@@ -122,10 +124,9 @@ class Materials:
     #: From the signed statement: the ordering the replay journal enforces.
     execution_sequence: int = 0
     attempt_no: int = 0
-    #: `deploy_binding.jobs` and each job's SCOPED params (A9). `params` above is
-    #: the serving set only: a scoped param never reaches `params.env`.
-    jobs: tuple[JobSpec, ...] = ()
-    scoped_params: dict[str, tuple[Param, ...]] = field(default_factory=dict)
+    #: `deploy_binding.jobs` DEFINITIONS (nothing runs from them). `params` above is
+    #: the serving set only: a param a job scopes never reaches `params.env`.
+    jobs: tuple[JobDefinition, ...] = ()
     #: The one job a `run_job` plan runs (its spec is also the last of `jobs`).
     operation: str = "deploy"
     dispatched_job: DispatchedJob | None = None
@@ -304,7 +305,7 @@ def _parse_images(raw: object) -> tuple[ImageSpec, ...]:
         planned_digest = _digest(row["planned_digest"])
         if (
             service in services
-            or row["source"] not in ("transfer", "pull")
+            or row["source"] not in ("transfer", "pull", "present")
             or planned_digest != release_digest  # Control guarantees it; re-checked
         ):
             raise Refusal("materials_invalid")
@@ -374,22 +375,25 @@ def parse_materials(
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
-    jobs = plan_jobs(snapshot)
+    jobs = plan_jobs(snapshot)  # definitions: nothing runs from them
     dispatched = plan_dispatched_job(binding, verified.operation)
+    cp_params = _parse_params(document["params"])
     if dispatched is not None:
         if roles:
             raise Refusal("materials_invalid", "run_job_mints_no_serving_role")
+        check_matches_definition(dispatched, jobs)
         check_job_admissible(
             dispatched,
             enrolled_roles=config.job_roles,
             store_now=store_now,
             lease_ttl_seconds=ttl,
         )
-        jobs = (*jobs, dispatched.spec)  # its params are scoped like any job's
-    refuse_job_role_serving([r.role for r in roles], jobs)
-    serving_params, scoped_params = split_params(
-        _parse_params(document["params"]), jobs
+        refuse_cp_scoped_params(cp_params, jobs)
+    all_roles = job_roles(jobs) | (
+        {dispatched.role} if dispatched and dispatched.role else set()
     )
+    refuse_job_role_serving([r.role for r in roles], jobs)
+    serving_params = split_params(cp_params, jobs)
     secrets_namespace = binding.get("secrets_namespace")
     secrets_environment = binding.get("secrets_environment")
     for value in (secrets_namespace, secrets_environment):
@@ -399,7 +403,7 @@ def parse_materials(
             isinstance(value, str) and _SEGMENT.fullmatch(value)
         ):
             raise Refusal("materials_invalid", "bad_secrets_name")
-    if require_naming(roles, jobs):
+    if roles or all_roles:
         # Roles (serving OR job) mean secret_ids: the naming is then required
         # and must be the one pinned in the root-owned config.
         if secrets_namespace is None or secrets_environment is None:
@@ -409,6 +413,11 @@ def parse_materials(
             config.secrets_environment,
         ):
             raise Refusal("secrets_naming_mismatch")
+    images = _parse_images(binding.get("images"))
+    # A role job runs an image that is already on the host (R2-C1): nothing is
+    # transferred for it. A serving plan never says `present`.
+    if any((i.source == "present") != (dispatched is not None) for i in images):
+        raise Refusal("materials_invalid", "image_source_for_operation")
     return Materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,
@@ -419,7 +428,7 @@ def parse_materials(
         params_env_digest=_digest(binding.get("params_env_digest")),
         roles=roles,
         legacy=_parse_legacy(binding.get("legacy")),
-        images=_parse_images(binding.get("images")),
+        images=images,
         lease_ttl_seconds=ttl,
         active_binding_names=tuple(
             _text(n, _NAME) for n in _list(binding.get("active_binding_names", []))
@@ -429,7 +438,6 @@ def parse_materials(
         execution_sequence=verified.execution_sequence,
         attempt_no=verified.attempt_no,
         jobs=jobs,
-        scoped_params=scoped_params,
         operation=verified.operation,
         dispatched_job=dispatched,
     )

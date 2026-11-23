@@ -37,6 +37,8 @@ class RunSpec:
     job_params_env: Path | None = None
     job_secrets_dir: Path | None = None
     job_argv_digest: str | None = None
+    #: Foundation mounts ONLY these files (per file, read-only), not the directory.
+    job_secret_files: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -83,6 +85,7 @@ def runner_environment(spec: RunSpec) -> dict[str, str]:
         env["DOTMAC_DEPLOY_JOB_PARAMS_ENV"] = str(spec.job_params_env)
         env["DOTMAC_DEPLOY_JOB_SECRETS_DIR"] = str(spec.job_secrets_dir)
         env["DOTMAC_DEPLOY_JOB_ARGV_DIGEST"] = spec.job_argv_digest
+        env["DOTMAC_DEPLOY_JOB_SECRET_FILES"] = ",".join(spec.job_secret_files)
     return env
 
 

@@ -1,70 +1,151 @@
-"""dotmac-deploy-agent: job roles (REVIEW-import-jobs A3-A9, A13). Names for the
-job-plan keys that Control has not published yet (dispatched_job, argv) are NOT
-assumed here; only `deploy_binding.jobs` (Control #76 at e9c0b60) is."""
+"""dotmac-deploy-agent: job roles and `run_job` (REVIEW-import-jobs A3-A13; r3 S1-S7).
+
+Shapes follow Control 170afa1e: `deploy_binding.jobs` are DEFINITIONS (nothing runs
+from them) and `dispatched_job` carries the signed `{MATERIAL: value}` params."""
 
 # ruff: noqa: E501
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
 import pytest
 from dotmac_deploy_agent.canon import digest
+from dotmac_deploy_agent.commands import CommandResult
 from dotmac_deploy_agent.jobs import (
-    JobSpec,
-    job_env,
+    JobDefinition,
+    plan_dispatched_job,
     refuse_sealing,
-    split_params,
 )
-from dotmac_deploy_agent.params import Param, job_env_render
 from dotmac_deploy_agent.refusal import Refusal
 from dotmac_deploy_agent.transport import Response
 
-from tests.unit.deploy_agent_support import Rig, make_materials, make_rig, prepare_role
+from tests.unit.deploy_agent_support import (
+    APP_IMAGE,
+    Rig,
+    base_images,
+    make_materials,
+    make_rig,
+    prepare_role,
+)
 
-GATE = Param("import_apply_ok", "ERP_IMPORT_APPROVED", "bool", "true")
+BASE_ROWS = [
+    {"name": "app_port", "material": "APP_PORT", "type": "int", "value": "8080"}
+]
 GATE_ROW = {
     "name": "import_apply_ok",
     "material": "ERP_IMPORT_APPROVED",
     "type": "bool",
     "value": "true",
 }
-BASE_ROWS = [
-    {"name": "app_port", "material": "APP_PORT", "type": "int", "value": "8080"},
-]
+ENV_DIGEST = digest(b"ERP_IMPORT_APPROVED=true\n")
+CLOSES = "2027-01-06T13:00:00Z"  # the rig's store_now is 12:00:00Z
+FILES = ("legacy_database_url", "migration_database_url")
 
 
-def job_row(**kw: object) -> dict[str, object]:
+def definition(**kw: object) -> dict[str, object]:
+    """A descriptor job as Control lists it in every plan (extra keys included)."""
     row: dict[str, object] = {
         "name": "import",
         "role": "import",
-        "single_use": True,
+        "command": ["python", "-m", "erp_v2.importer"],
         "materials": ["LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"],
         "params": ["import_apply_ok"],
-        "params_env_digest": digest(job_env_render([GATE])),
+        "args": [{"flag": "--x", "type": "string"}],
+        "timeout_seconds": 600,
     }
     row.update(kw)
     return row
 
 
-def job_rig(tmp_path: Path) -> Rig:
-    rig = make_rig(tmp_path)
+def dispatched(**kw: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "name": "import",
+        "role": "import",
+        "single_use": True,
+        "materials": ["LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"],
+        "params": {"ERP_IMPORT_APPROVED": "true"},
+        "params_env_digest": ENV_DIGEST,
+        "argv": ["python", "-m", "erp_v2.importer", "execute"],
+        "timeout_seconds": 600,
+        "window": {"window_id": "w1", "closes_at": CLOSES},
+    }
+    row.update(kw)
+    return row
+
+
+def present() -> list[dict[str, object]]:
+    return [{**i, "source": "present"} for i in base_images()]
+
+
+def run_job_materials(
+    job: dict[str, object] | None = None, **kw: object
+) -> dict[str, object]:
+    kw.setdefault("statement", {"operation": "run_job"})
+    kw.setdefault("images", present())
+    kw.setdefault("lease_ttl_seconds", 900)
+    kw.setdefault("jobs", [definition()])
+    kw.setdefault("params", BASE_ROWS)
+    return make_materials(dispatched_job=job or dispatched(), **kw)
+
+
+def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
+    config.setdefault("job_roles", ("import",))
+    rig = make_rig(tmp_path, **config)
     prepare_role(rig, "import")
+    secrets = rig.config.role_dir("import") / "secrets"
+    secrets.mkdir(mode=0o710)
+    secrets.chmod(0o710)
+    if render:  # what the static one-shot openbao-agent unit renders
+        for name in FILES:
+            (secrets / name).write_text("rendered")
+            (secrets / name).chmod(0o400)
+    rig.systemctl.script = {
+        ("--property=Result,ExecMainStatus",): CommandResult(
+            0, b"Result=success\nExecMainStatus=0\n"
+        ),
+        **rig.systemctl.script,
+    }
+    rig.commands.script[("image", "inspect")] = CommandResult(
+        0, json.dumps([APP_IMAGE]).encode()
+    )
+    rig.cp.materials = run_job_materials()
     return rig
+
+
+def secrets_dir(rig: Rig) -> Path:
+    return rig.config.role_dir("import") / "secrets"
 
 
 def mint_bodies(rig: Rig) -> list[dict[str, object]]:
     return [r[3] for r in rig.bao.requests if r[1].endswith("/secret-id")]
 
 
-def secret_file(rig: Rig) -> Path:
-    return rig.config.role_dir("import") / "secret_id"
-
-
 def tracked(rig: Rig) -> list[str]:
     path = rig.config.state_dir / "job-accessors" / "import.json"
     return json.loads(path.read_text())["retire"] if path.exists() else []
+
+
+def started(rig: Rig, unit: str) -> bool:
+    return any(
+        c[-2:] == ("start", unit) or (c[-1] == unit and "start" in c)
+        for c in rig.systemctl.calls
+    )
+
+
+def refused(rig: Rig) -> tuple[str, str | None]:
+    result = rig.launcher.run_once()
+    return result.outcome, result.reason
+
+
+def last(rig: Rig) -> dict[str, object]:
+    return rig.cp.observations[-1]
+
+
+def receipt(rig: Rig) -> dict[str, object]:
+    return last(rig)["details"]["job"]  # type: ignore[no-any-return, index]
 
 
 def deliver(rig: Rig) -> str:
@@ -79,28 +160,65 @@ def deliver(rig: Rig) -> str:
         session.revoke()
 
 
-# -- A5 / A7: the job mint -------------------------------------------------
-def test_a_job_mint_body_is_metadata_only(tmp_path: Path) -> None:
-    rig = job_rig(tmp_path)
-    deliver(rig)
-    assert [set(b) for b in mint_bodies(rig)] == [{"metadata"}]  # no ttl, no num_uses
-
-
-def test_a_serving_mint_still_sends_ttl(tmp_path: Path) -> None:
+# -- S1: definitions in every plan never refuse a serving deploy -------------
+def test_a_serving_plan_listing_job_definitions_runs_and_mints_no_job_role(
+    tmp_path: Path,
+) -> None:
     rig = make_rig(tmp_path)
     prepare_role(rig, "web")
-    rig.cp.materials = make_materials(roles=[{"role": "web", "single_use": False}])
-    rig.launcher.run_once()
-    assert set(mint_bodies(rig)[0]) == {"metadata", "ttl"}
+    rig.cp.materials = make_materials(
+        roles=[{"role": "web", "single_use": False}],
+        jobs=[
+            definition(),
+            definition(name="holdings", role=None, params=[], materials=[]),
+        ],
+        params=[*BASE_ROWS, GATE_ROW],
+    )
+    assert rig.launcher.run_once().outcome == "completed"
+    rig.cp.materials = None
+    for _ in range(3):
+        rig.epoch[0] += 900
+        rig.launcher.run_once()
+    assert not any("-import/" in p for p in rig.bao.paths)
+    assert list((rig.config.state_dir / "job-accessors").glob("*.json")) == []
+    assert b"ERP_IMPORT_APPROVED" not in (
+        rig.runner.seen_params or b""
+    )  # scoped: never params.env
 
 
-def test_the_job_accessor_is_tracked_before_the_file_exists_and_the_receipt_is_a_prefix(
+def test_a_role_that_is_both_serving_and_a_job_role_is_refused(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path)
+    prepare_role(rig, "import")
+    rig.cp.materials = make_materials(
+        roles=[{"role": "import", "single_use": True}], jobs=[definition()]
+    )
+    assert refused(rig) == ("refused", "materials_invalid")
+    assert rig.bao.paths == []
+
+
+# -- A5 / A7: the job mint and its tracking ----------------------------------
+def test_a_job_mint_body_is_metadata_only_and_a_serving_mint_still_sends_ttl(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
-    prefix = deliver(rig)
-    assert tracked(rig) == ["accessor-wrap-1"] and prefix == "accessor"[:8]
-    assert stat.S_IMODE(secret_file(rig).stat().st_mode) == 0o400
+    deliver(rig)
+    assert [set(b) for b in mint_bodies(rig)] == [{"metadata"}]
+    (tmp_path / "s").mkdir()
+    other = make_rig(tmp_path / "s")
+    prepare_role(other, "web")
+    other.cp.materials = make_materials(roles=[{"role": "web", "single_use": False}])
+    other.launcher.run_once()
+    assert set(mint_bodies(other)[0]) == {"metadata", "ttl"}
+
+
+def test_the_job_accessor_is_tracked_and_the_file_is_private(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    assert deliver(rig) == "accessor"
+    assert tracked(rig) == ["accessor-wrap-1"]
+    assert (
+        stat.S_IMODE((rig.config.role_dir("import") / "secret_id").stat().st_mode)
+        == 0o400
+    )
 
 
 def test_a_second_job_mint_is_refused_while_an_accessor_is_still_tracked(
@@ -108,9 +226,9 @@ def test_a_second_job_mint_is_refused_while_an_accessor_is_still_tracked(
 ) -> None:
     rig = job_rig(tmp_path)
     deliver(rig)
-    with pytest.raises(Refusal) as refused:
+    with pytest.raises(Refusal) as refused_mint:
         deliver(rig)
-    assert refused.value.code == "secret_delivery_failed"
+    assert refused_mint.value.code == "secret_delivery_failed"
     assert len(mint_bodies(rig)) == 1
 
 
@@ -129,44 +247,60 @@ def test_a_job_accessor_that_cannot_be_tracked_is_never_written(tmp_path: Path) 
     rig.launcher.bao_transport = type("T", (), {"request": staticmethod(no_accessor)})()
     with pytest.raises(Refusal):
         deliver(rig)
-    assert not secret_file(rig).exists() and tracked(rig) == []
+    assert (
+        not (rig.config.role_dir("import") / "secret_id").exists()
+        and tracked(rig) == []
+    )
 
 
-# -- A7: purge on exit, die and agent start --------------------------------
-def test_purge_removes_the_file_and_destroys_the_accessor(tmp_path: Path) -> None:
-    rig = job_rig(tmp_path)
-    deliver(rig)
-    (rig.config.role_dir("import") / "legacy_url").write_text("x")
-    assert rig.launcher.purge_job_role("import", ("legacy_url",)) == 0
-    assert not secret_file(rig).exists()
-    assert not (rig.config.role_dir("import") / "legacy_url").exists()
-    assert tracked(rig) == []
-    assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
-
-
-def test_purge_with_openbao_down_still_removes_files_and_keeps_the_accessor(
+# -- S3: purge through the purge unit; the agent never touches secrets/ ------
+def test_purge_removes_the_agents_secret_id_starts_the_purge_unit_and_destroys_the_accessor(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path)
     deliver(rig)
-    rig.bao.fail_destroy = True
-    assert rig.launcher.purge_job_role("import") == 1
-    assert not secret_file(rig).exists() and tracked(rig) == ["accessor-wrap-1"]
+    assert rig.launcher.purge_job_role("import") == 0
+    assert not (rig.config.role_dir("import") / "secret_id").exists()
+    assert started(rig, "dotmac-job-purge@erp-import.service")
+    assert tracked(rig) == []
+    assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
+    # the renders are the purge unit's to remove (as the container uid), never the agent's
+    assert sorted(p.name for p in secrets_dir(rig).iterdir()) == sorted(FILES)
 
 
-def test_purge_refuses_a_rendered_name_that_is_a_path(tmp_path: Path) -> None:
+def test_purge_with_openbao_down_keeps_the_accessor_tracked(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     deliver(rig)
-    with pytest.raises(Refusal):
-        rig.launcher.purge_job_role("import", ("../x",))
+    rig.bao.fail_destroy = True
+    assert rig.launcher.purge_job_role("import") == 1
+    assert tracked(rig) == ["accessor-wrap-1"]
+
+
+def test_a_failed_purge_unit_still_destroys_the_accessor_then_reports(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    deliver(rig)
+    rig.systemctl.script = {
+        ("dotmac-job-purge@erp-import.service",): CommandResult(1, b""),
+        **rig.systemctl.script,
+    }
+    with pytest.raises(Refusal) as failed:
+        rig.launcher.purge_job_role("import")
+    assert failed.value.code == "job_files_invalid"
+    assert tracked(rig) == []  # the accessor was destroyed regardless
 
 
 def test_agent_start_purges_a_stale_job_secret_and_accessor(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
-    deliver(rig)  # then the agent "crashes": file and tracking survive
+    deliver(rig)  # then the agent "crashes": the file and tracking survive
     rig.cp.materials = None
     assert rig.launcher.run_once().outcome == "idle"
-    assert not secret_file(rig).exists() and tracked(rig) == []
+    assert (
+        not (rig.config.role_dir("import") / "secret_id").exists()
+        and tracked(rig) == []
+    )
+    assert started(rig, "dotmac-job-purge@erp-import.service")
 
 
 def test_agent_start_with_openbao_unreachable_keeps_tracking_and_does_not_crash(
@@ -177,230 +311,71 @@ def test_agent_start_with_openbao_unreachable_keeps_tracking_and_does_not_crash(
     rig.bao.fail_destroy = True
     rig.cp.materials = None
     assert rig.launcher.run_once().outcome == "idle"
-    assert not secret_file(rig).exists() and tracked(rig) == ["accessor-wrap-1"]
+    assert tracked(rig) == ["accessor-wrap-1"]
 
 
-# -- A4: mint only at job dispatch -----------------------------------------
-def test_a_serving_deploy_and_idle_cycles_never_mint_a_job_role(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    prepare_role(rig, "web")
-    rig.cp.materials = make_materials(
-        roles=[{"role": "web", "single_use": False}],
-        jobs=[job_row()],
-        params=[*BASE_ROWS, GATE_ROW],
+def test_the_agent_never_lists_or_deletes_inside_secrets(tmp_path: Path) -> None:
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent/job_delivery.py"
+    ).read_text()
+    assert (
+        "scandir" not in src
+        and "iterdir" not in src
+        and "listdir" not in src
+        and "glob(" not in src
     )
-    assert rig.launcher.run_once().outcome == "completed"
-    rig.cp.materials = None
-    for _ in range(3):
-        rig.epoch[0] += 900
-        rig.launcher.run_once()
-    assert not any("-import/" in p for p in rig.bao.paths)
-    assert list((rig.config.state_dir / "job-accessors").glob("*.json")) == []
 
 
-def test_a_role_that_is_both_serving_and_a_job_role_is_refused(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    prepare_role(rig, "import")
-    rig.cp.materials = make_materials(
-        roles=[{"role": "import", "single_use": True}],
-        jobs=[job_row()],
-        params=[*BASE_ROWS, GATE_ROW],
-    )
-    result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("refused", "materials_invalid")
-    assert rig.bao.paths == []
-
-
-# -- A8: never sealed ------------------------------------------------------
+# -- A8: never sealed -------------------------------------------------------
 def test_sealing_refuses_a_job_role_and_the_job_only_names() -> None:
-    jobs = (JobSpec("import", "import", True, (), (), "sha256:" + "0" * 64),)
+    jobs = (JobDefinition("import", "import", (), ()),)
     for role, names in (
         ("import", ()),
         ("app", ("LEGACY_DATABASE_URL",)),
         ("app", ("MIGRATION_DATABASE_URL", "X")),
     ):
-        with pytest.raises(Refusal) as refused:
+        with pytest.raises(Refusal) as refused_seal:
             refuse_sealing(role, names, jobs)
-        assert refused.value.code == "job_role_refused"
-    refuse_sealing("app", ("DATABASE_URL",), jobs)  # an ordinary serving role
+        assert refused_seal.value.code == "job_role_refused"
+    refuse_sealing("app", ("DATABASE_URL",), jobs)
+
+
+KIT = Path(__file__).resolve().parents[2] / "packages/dotmac-deploy-agent/deploy"
 
 
 def test_the_kit_installs_no_sealed_copy_instance_for_a_job_role() -> None:
-    kit = Path(__file__).resolve().parents[2] / "packages/dotmac-deploy-agent/deploy"
-    names = [p.name.lower() for p in kit.rglob("*")]
+    names = [p.name.lower() for p in KIT.rglob("*")]
     assert not any("lkg" in n or "seal" in n or "restore" in n for n in names)
 
 
-# -- A9: scoped params reach the job env only ------------------------------
-def test_scoped_params_never_enter_params_env(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(jobs=[job_row()], params=[*BASE_ROWS, GATE_ROW])
-    assert rig.launcher.run_once().outcome == "completed"
-    seen = rig.runner.seen_params or b""
-    assert b"APP_PORT=8080" in seen and b"ERP_IMPORT_APPROVED" not in seen
-
-
-def test_a_serving_digest_that_counts_a_scoped_param_is_refused(tmp_path: Path) -> None:
-    from dotmac_deploy_agent.params import canonical_render
-
-    rig = make_rig(tmp_path)
-    wrong = digest(
-        canonical_render([Param("app_port", "APP_PORT", "int", "8080"), GATE], "x")
+def test_the_job_kit_is_the_narrow_widening_and_the_purge_unit_is_static() -> None:
+    tmpfiles = (KIT / "enrolment/tmpfiles.d/dotmac-job-role.conf.template").read_text()
+    assert "/@ROLE@/secrets 0710 @CONTAINER_USER@ dotmac-deploy" in tmpfiles
+    assert "W pending Michael" in tmpfiles
+    serving = (KIT / "enrolment/tmpfiles.d/dotmac-role.conf.template").read_text()
+    assert (
+        "/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in serving
+    )  # serving roles unchanged
+    purge = (KIT / "enrolment/systemd/dotmac-job-purge@.service").read_text()
+    assert (
+        "[Install]" not in purge and "WantedBy" not in purge and "Type=oneshot" in purge
     )
-    rig.cp.materials = make_materials(
-        jobs=[job_row()],
-        params=[*BASE_ROWS, GATE_ROW],
-        params_env_digest=wrong,
+    assert "-mindepth 1 -maxdepth 1 -type f -delete" in purge
+    polkit = (
+        KIT / "enrolment/polkit/50-dotmac-deploy-agent.rules.template"
+    ).read_text()
+    code = "\n".join(
+        line for line in polkit.splitlines() if not line.lstrip().startswith("//")
     )
-    result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("refused", "params_digest_mismatch")
+    assert "@ENROLLED_JOB_UNITS@" in code and 'action.lookup("verb") == "start"' in code
 
 
-def test_the_job_env_is_only_its_scoped_params_and_matches_the_per_job_digest() -> None:
-    job = JobSpec(
-        "import",
-        "import",
-        True,
-        (),
-        ("import_apply_ok",),
-        digest(job_env_render([GATE])),
-    )
-    serving, scoped = split_params(
-        [Param("app_port", "APP_PORT", "int", "8080"), GATE], (job,)
-    )
-    assert [p.name for p in serving] == ["app_port"]
-    assert job_env(job, scoped["import"]) == b"ERP_IMPORT_APPROVED=true\n"
-
-
-def test_a_job_env_with_a_changed_or_missing_scoped_value_is_refused() -> None:
-    job = JobSpec(
-        "import",
-        "import",
-        True,
-        (),
-        ("import_apply_ok",),
-        digest(job_env_render([GATE])),
-    )
-    changed = Param("import_apply_ok", "ERP_IMPORT_APPROVED", "bool", "false")
-    for scoped in ([changed], []):
-        with pytest.raises(Refusal) as refused:
-            job_env(job, scoped)
-        assert refused.value.code == "params_digest_mismatch"
-
-
-def test_a_job_credential_is_never_accepted_as_a_plain_param() -> None:
-    dsn = Param("dsn", "MIGRATION_DATABASE_URL", "string", "postgres-host")
-    job = JobSpec("import", "import", True, (), ("dsn",), digest(job_env_render([dsn])))
-    with pytest.raises(Refusal) as refused:
-        job_env(job, [dsn])
-    assert refused.value.code == "job_role_refused"
-
-
-# -- A13: the pinned naming also covers job-only plans ---------------------
-@pytest.mark.parametrize(
-    "override", [{"secrets_namespace": "other"}, {"secrets_environment": "prod"}]
-)
-def test_a_job_only_plan_with_a_different_naming_is_refused(
-    tmp_path: Path, override: dict[str, str]
-) -> None:
-    rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(
-        jobs=[job_row()], params=[*BASE_ROWS, GATE_ROW], **override
-    )
-    result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("refused", "secrets_naming_mismatch")
-
-
-def test_a_job_only_plan_without_naming_is_refused(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(
-        jobs=[job_row()], params=[*BASE_ROWS, GATE_ROW], secrets_environment=None
-    )
-    result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("refused", "materials_invalid")
-
-
-def test_a_plan_with_no_role_job_needs_no_naming(tmp_path: Path) -> None:
-    rig = make_rig(tmp_path)
-    rig.cp.materials = make_materials(
-        jobs=[job_row(role=None, single_use=None, params=[])],
-        secrets_environment=None,
-    )
-    assert rig.launcher.run_once().outcome == "completed"
-
-
-# -- run_job: the signed one-shot (REVIEW-import-jobs, Foundation runs it) --
-CLOSES = "2027-01-06T13:00:00Z"  # the rig's store_now is 12:00:00Z
-
-
-def dispatched(**kw: object) -> dict[str, object]:
-    row = job_row(
-        argv=["python", "-m", "erp_v2.importer", "execute"],
-        timeout_seconds=600,
-        window={"window_id": "w1", "closes_at": CLOSES},
-    )
-    row.update(kw)
-    return row
-
-
-def run_job_materials(
-    job: dict[str, object] | None = None, **kw: object
-) -> dict[str, object]:
-    kw.setdefault("statement", {"operation": "run_job"})
-    return make_materials(
-        dispatched_job=job or dispatched(),
-        params=[*BASE_ROWS, GATE_ROW],
-        lease_ttl_seconds=kw.pop("lease_ttl_seconds", 900),
-        **kw,
-    )
-
-
-def run_job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
-    config.setdefault("job_roles", ("import",))
-    rig = make_rig(tmp_path, **config)
-    prepare_role(rig, "import")
-    if render:  # what the static openbao-agent unit renders, once
-        for name in ("legacy_database_url", "migration_database_url"):
-            path = rig.config.role_dir("import") / name
-            path.write_text("rendered")
-            path.chmod(0o400)
-    rig.cp.materials = run_job_materials()
-    return rig
-
-
-def refused(rig: Rig) -> tuple[str, str | None]:
-    result = rig.launcher.run_once()
-    return result.outcome, result.reason
-
-
-def receipt(rig: Rig) -> dict[str, object]:
-    return rig.cp.observations[-1]["details"]["job"]  # type: ignore[no-any-return, index]
-
-
-def test_a_run_job_runs_with_a_metadata_only_mint_and_a_complete_receipt(
+# -- S2 / A9: the job env comes only from the signed params -----------------
+def test_the_job_params_file_holds_the_signed_values_and_never_params_env(
     tmp_path: Path,
 ) -> None:
-    rig = run_job_rig(tmp_path)
-    assert refused(rig) == ("completed", None)
-    assert [set(b) for b in mint_bodies(rig)] == [{"metadata"}]
-    spec = rig.runner.specs[0]
-    assert spec.job_name == "import" and spec.job_secrets_dir == rig.config.role_dir(
-        "import"
-    )
-    assert spec.job_argv_digest == digest(
-        b'["python","-m","erp_v2.importer","execute"]'
-    )
-    done = receipt(rig)
-    assert done["name"] == "import" and done["exit_code"] == 0
-    assert (
-        done["accessor_prefix"] == "accessor" and done["accessors_still_tracked"] == 0
-    )
-    assert done["files"] == ["legacy_database_url", "migration_database_url"]
-    assert {"started_at", "finished_at", "window_id"} <= set(done)
-
-
-def test_job_params_go_to_their_own_file_never_into_params_env(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     seen: dict[str, bytes] = {}
 
     def effect(spec) -> None:  # type: ignore[no-untyped-def]
@@ -411,56 +386,165 @@ def test_job_params_go_to_their_own_file_never_into_params_env(tmp_path: Path) -
     assert refused(rig) == ("completed", None)
     assert seen == {"job": b"ERP_IMPORT_APPROVED=true\n", "mode": b"0o400"}
     assert b"ERP_IMPORT_APPROVED" not in (rig.runner.seen_params or b"")
-    assert list(rig.config.deploy_run_dir.iterdir()) == []  # both files removed
+    assert list(rig.config.deploy_run_dir.iterdir()) == []
+
+
+def test_a_signed_value_that_does_not_match_the_signed_digest_is_refused_before_any_mint(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(params={"ERP_IMPORT_APPROVED": "false"})
+    )
+    assert refused(rig) == ("refused", "params_digest_mismatch")
+    assert rig.bao.paths == []
+
+
+def test_a_param_the_job_scopes_sent_by_cp_is_refused(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(params=[*BASE_ROWS, GATE_ROW])
+    assert refused(rig) == ("refused", "materials_invalid")
+    assert rig.bao.paths == []
+
+
+@pytest.mark.parametrize("name", ["MIGRATION_DATABASE_URL", "LEGACY_DATABASE_URL"])
+def test_a_job_credential_is_never_accepted_as_a_plain_param(
+    tmp_path: Path, name: str
+) -> None:
+    rig = job_rig(tmp_path)
+    line = f"{name}=host\n".encode()
+    rig.cp.materials = run_job_materials(
+        dispatched(params={name: "host"}, params_env_digest=digest(line))
+    )
+    assert refused(rig) == ("refused", "job_role_refused")
+    assert rig.bao.paths == []
+
+
+# -- A13: the pinned naming also covers job-only plans ----------------------
+@pytest.mark.parametrize(
+    "override", [{"secrets_namespace": "other"}, {"secrets_environment": "prod"}]
+)
+def test_a_job_only_plan_with_a_different_naming_is_refused(
+    tmp_path: Path, override: dict[str, str]
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(**override)
+    assert refused(rig) == ("refused", "secrets_naming_mismatch")
+
+
+def test_a_job_only_plan_without_naming_is_refused(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(secrets_environment=None)
+    assert refused(rig) == ("refused", "materials_invalid")
+
+
+# -- run_job -----------------------------------------------------------------
+def test_a_run_job_runs_with_a_metadata_only_mint_and_a_job_receipt(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    assert [set(b) for b in mint_bodies(rig)] == [{"metadata"}]
+    spec = rig.runner.specs[0]
+    assert spec.job_name == "import" and spec.job_secrets_dir == secrets_dir(rig)
+    assert spec.job_secret_files == FILES
+    assert spec.job_argv_digest == digest(
+        b'["python","-m","erp_v2.importer","execute"]'
+    )
+    assert last(rig)["kind"] == "job"  # never a deploy observation (S7)
+    done = receipt(rig)
+    assert done["name"] == "import" and done["exit_code"] == 0
+    assert (
+        done["accessor_prefix"] == "accessor" and done["accessors_still_tracked"] == 0
+    )
+    assert done["files"] == list(FILES)
+    assert {"started_at", "finished_at", "window_id"} <= set(done)
+
+
+def test_a_run_job_transfers_nothing_and_checks_the_image_by_digest(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    assert rig.transfer.calls == []
+    assert any(
+        c[1:3] == ("image", "inspect") and c[-1] == APP_IMAGE
+        for c in rig.commands.calls
+    )
+
+
+def test_a_missing_image_refuses_before_any_lease_mint_or_file(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("image", "inspect")] = CommandResult(1, b"")
+    assert refused(rig) == ("refused", "job_image_absent")
+    assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.transfer.calls == []
+
+
+def test_an_image_present_under_another_digest_is_absent(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.commands.script[("image", "inspect")] = CommandResult(
+        0, b'["127.0.0.1:5000/org/app@sha256:' + b"9" * 64 + b'"]'
+    )
+    assert refused(rig) == ("refused", "job_image_absent")
+
+
+def test_image_source_must_match_the_operation(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        images=base_images()
+    )  # `transfer` on a run_job
+    assert refused(rig) == ("refused", "materials_invalid")
+    rig.cp.materials = make_materials(
+        images=present(), dispatch_id="dispatch-2"
+    )  # `present` on a deploy
+    assert refused(rig) == ("refused", "materials_invalid")
 
 
 def test_files_and_accessor_are_purged_after_a_failing_run_and_before_the_receipt(
     tmp_path: Path,
 ) -> None:
-    from dotmac_deploy_agent.runner import RunResult  # noqa: F401
-
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.runner.exit_code = 3
     assert refused(rig) == ("failed", None)
-    assert list(rig.config.role_dir("import").iterdir()) == []
-    assert tracked(rig) == [] and receipt(rig)["exit_code"] == 3
+    assert (
+        not (rig.config.role_dir("import") / "secret_id").exists()
+        and tracked(rig) == []
+    )
+    assert (
+        started(rig, "dotmac-job-purge@erp-import.service")
+        and receipt(rig)["exit_code"] == 3
+    )
     assert any(r[1].endswith("/secret-id-accessor/destroy") for r in rig.bao.requests)
 
 
 def test_a_timed_out_job_is_purged_too(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.runner.timed_out = True
     assert refused(rig) == ("failed", "runner_timeout")
-    assert list(rig.config.role_dir("import").iterdir()) == [] and tracked(rig) == []
+    assert tracked(rig) == [] and started(rig, "dotmac-job-purge@erp-import.service")
 
 
-def test_a_crash_after_the_mint_is_purged_at_the_next_agent_start(
-    tmp_path: Path,
-) -> None:
-    rig = run_job_rig(tmp_path)
+def test_a_crash_inside_the_run_is_purged(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
 
     def crash(spec) -> None:  # type: ignore[no-untyped-def]
         raise Refusal("runner_start_failed")
 
     rig.runner.effect = crash
     assert refused(rig) == ("failed", "runner_start_failed")
-    assert list(rig.config.role_dir("import").iterdir()) == []
+    assert tracked(rig) == []
 
 
 def test_with_openbao_down_the_job_fails_closed_before_it_runs(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.launcher.bao_transport = None
     assert refused(rig) == ("refused", "secret_delivery_failed")
     assert rig.runner.specs == []
-    assert list(rig.config.role_dir("import").iterdir()) == []
 
 
 def test_a_job_run_refuses_a_second_dispatch_of_the_same_id(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     assert refused(rig)[0] == "completed"
-    for name in ("legacy_database_url", "migration_database_url"):
-        (rig.config.role_dir("import") / name).write_text("x")
-        (rig.config.role_dir("import") / name).chmod(0o400)
     rig.cp.materials = run_job_materials()
     assert refused(rig) == ("refused", "dispatch_replayed")
     assert len(mint_bodies(rig)) == 1
@@ -469,64 +553,70 @@ def test_a_job_run_refuses_a_second_dispatch_of_the_same_id(tmp_path: Path) -> N
 def test_a_second_role_job_on_the_host_is_refused_while_the_lock_is_held(
     tmp_path: Path,
 ) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     held = rig.launcher._lock_role_job()
     try:
         assert refused(rig) == ("refused", "lease_refused")
     finally:
-        import os
-
         os.close(held)
     assert rig.runner.specs == [] and mint_bodies(rig) == []
 
 
-# parse-time refusals: before any lease, mint or file
 @pytest.mark.parametrize(
-    ("override", "expected"),
+    ("job", "extra", "expected"),
     [
         (
-            {
-                "job": dispatched(
-                    window={"window_id": "w1", "closes_at": "2027-01-06T12:00:00Z"}
-                )
-            },
+            dispatched(window={"window_id": "w1", "closes_at": "2027-01-06T12:00:00Z"}),
+            {},
             "job_window_closed",
         ),
         (
-            {
-                "job": dispatched(
-                    window={"window_id": "w1", "closes_at": "2027-01-06T11:00:00Z"}
-                )
-            },
+            dispatched(window={"window_id": "w1", "closes_at": "2027-01-06T11:00:00Z"}),
+            {},
             "job_window_closed",
         ),
-        ({"job": dispatched(timeout_seconds=3481)}, "materials_invalid"),
+        (dispatched(timeout_seconds=3481), {}, "materials_invalid"),
         (
-            {"job": dispatched(timeout_seconds=600), "lease_ttl_seconds": 719},
+            dispatched(timeout_seconds=600),
+            {"lease_ttl_seconds": 719},
             "lease_ttl_invalid",
         ),
         (
-            {"job": dispatched(timeout_seconds=1800), "lease_ttl_seconds": 1919},
+            dispatched(timeout_seconds=1800),
+            {"lease_ttl_seconds": 1919},
             "lease_ttl_invalid",
         ),
-        ({"job": dispatched(role=None, single_use=None)}, "materials_invalid"),
-        ({"job": dispatched(role="other")}, "job_role_refused"),
+        (dispatched(role=None, single_use=None), {}, "materials_invalid"),
+        (
+            dispatched(role="other"),
+            {},
+            "materials_invalid",
+        ),  # not the definition's role
+        (dispatched(name="unknown"), {}, "materials_invalid"),  # not a plan definition
     ],
 )
 def test_run_job_is_refused_before_anything_when_the_plan_does_not_fit(
-    tmp_path: Path, override: dict[str, object], expected: str
+    tmp_path: Path, job: dict[str, object], extra: dict[str, object], expected: str
 ) -> None:
-    rig = run_job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(
-        override.pop("job"),
-        **override,  # type: ignore[arg-type]
-    )
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(job, **extra)
     assert refused(rig) == ("refused", expected)
     assert rig.bao.paths == [] and rig.runner.specs == [] and rig.cp.lease_log == []
 
 
+def test_a_lease_longer_than_900_is_accepted_when_the_job_fits_inside_it(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(timeout_seconds=1800), lease_ttl_seconds=3000
+    )
+    assert refused(rig) == ("completed", None)
+    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 3000  # type: ignore[index]
+
+
 def test_the_lease_fit_boundary_is_accepted(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.cp.materials = run_job_materials(
         dispatched(timeout_seconds=600), lease_ttl_seconds=720
     )
@@ -536,13 +626,13 @@ def test_the_lease_fit_boundary_is_accepted(tmp_path: Path) -> None:
 def test_a_job_role_the_host_has_not_enrolled_is_refused_by_default(
     tmp_path: Path,
 ) -> None:
-    rig = run_job_rig(tmp_path, job_roles=())
+    rig = job_rig(tmp_path, job_roles=())
     assert refused(rig) == ("refused", "job_role_refused")
     assert rig.bao.paths == [] and rig.runner.specs == []
 
 
 def test_operation_and_dispatched_job_must_agree(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.cp.materials = run_job_materials(statement={"operation": "deploy"})
     assert refused(rig) == ("refused", "materials_invalid")
     rig.cp.materials = make_materials(
@@ -554,71 +644,130 @@ def test_operation_and_dispatched_job_must_agree(tmp_path: Path) -> None:
 def test_a_run_job_plan_that_also_mints_serving_roles_is_refused(
     tmp_path: Path,
 ) -> None:
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.cp.materials = run_job_materials(roles=[{"role": "web", "single_use": False}])
     assert refused(rig) == ("refused", "materials_invalid")
 
 
-def test_a_run_job_plan_with_a_different_naming_is_refused(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(secrets_namespace="other")
-    assert refused(rig) == ("refused", "secrets_naming_mismatch")
-
-
-def test_a_per_job_digest_mismatch_is_refused_before_any_mint(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(
-        dispatched(params_env_digest="sha256:" + "9" * 64)
-    )
-    assert refused(rig) == ("refused", "params_digest_mismatch")
-    assert rig.bao.paths == []
-
-
-@pytest.mark.parametrize("mode", [0o440, 0o644, 0o600])
-def test_rendered_files_with_a_wrong_mode_stop_the_job(
-    tmp_path: Path, mode: int
+def test_a_refused_job_mint_fails_that_job_only_and_touches_no_serving_role(
+    tmp_path: Path,
 ) -> None:
-    rig = run_job_rig(tmp_path)
-    (rig.config.role_dir("import") / "legacy_database_url").chmod(mode)
+    from tests.unit.test_deploy_agent_delivery import WEB, secret_id_file, state
+
+    rig = job_rig(tmp_path)
+    prepare_role(rig, "web")
+    rig.cp.materials = make_materials(roles=WEB)
+    assert rig.launcher.run_once().outcome == "completed"
+    served_file = secret_id_file(rig, "web").read_bytes()
+    served_state = state(rig, "web")
+    rig.bao.requests.clear()
+    rig.bao.deny_mint = "erp-staging-import"  # OpenBao 403s the JOB mint
+    rig.cp.materials = run_job_materials(dispatch_id="dispatch-2")
+    assert refused(rig) == ("refused", "job_mint_refused")  # not a delivery fault
+    assert len(rig.runner.specs) == 1  # only the serving run ever started
+    assert (
+        secret_id_file(rig, "web").read_bytes() == served_file
+        and state(rig, "web") == served_state
+    )
+    assert not any("-web" in r[1] for r in rig.bao.requests)
+
+
+# -- S3: render verification without listing secrets/ -----------------------
+@pytest.mark.parametrize(
+    "show",
+    [
+        b"Result=exit-code\nExecMainStatus=0\n",
+        b"Result=success\nExecMainStatus=1\n",
+        b"",
+    ],
+)
+def test_the_render_unit_must_report_success_and_status_zero(
+    tmp_path: Path, show: bytes
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.systemctl.script = {
+        ("--property=Result,ExecMainStatus",): CommandResult(0, show),
+        **rig.systemctl.script,
+    }
     assert refused(rig) == ("refused", "job_files_invalid")
     assert rig.runner.specs == [] and tracked(rig) == []
 
 
-def test_a_missing_rendered_file_stops_the_job(tmp_path: Path) -> None:
-    rig = run_job_rig(tmp_path, render=False)
+def test_a_render_unit_that_fails_to_start_stops_the_job(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.systemctl.script = {
+        ("openbao-agent@erp-import.service",): CommandResult(1, b""),
+        **rig.systemctl.script,
+    }
     assert refused(rig) == ("refused", "job_files_invalid")
-    assert (
-        rig.runner.specs == [] and list(rig.config.role_dir("import").iterdir()) == []
+
+
+@pytest.mark.parametrize("mode", [0o440, 0o644, 0o600])
+def test_a_declared_file_with_a_wrong_mode_stops_the_job(
+    tmp_path: Path, mode: int
+) -> None:
+    rig = job_rig(tmp_path)
+    (secrets_dir(rig) / "legacy_database_url").chmod(mode)
+    assert refused(rig) == ("refused", "job_files_invalid")
+    assert rig.runner.specs == []
+
+
+def test_a_missing_or_empty_declared_file_stops_the_job(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    empty = secrets_dir(rig) / "legacy_database_url"
+    empty.chmod(0o600)
+    empty.write_text("")
+    empty.chmod(0o400)
+    assert refused(rig) == ("refused", "job_files_invalid")
+    (tmp_path / "b").mkdir()
+    rig = job_rig(tmp_path / "b", render=False)
+    assert refused(rig) == ("refused", "job_files_invalid")
+
+
+def test_a_declared_file_owned_by_another_uid_stops_the_job(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path, job_secrets_uid=os.geteuid() + 1)
+    assert refused(rig) == ("refused", "job_files_invalid")
+
+
+def test_an_undeclared_rendered_file_is_left_alone_and_never_reported(
+    tmp_path: Path,
+) -> None:
+    """Narrowing is Foundation's per-file mounts: the agent neither lists nor deletes."""
+    rig = job_rig(tmp_path)
+    (secrets_dir(rig) / "other_secret").write_text("x")
+    rig.cp.materials = run_job_materials(
+        dispatched(materials=["MIGRATION_DATABASE_URL"]),
+        jobs=[definition(materials=["MIGRATION_DATABASE_URL"])],
     )
-
-
-def test_rendered_files_owned_by_another_uid_stop_the_job(tmp_path: Path) -> None:
-    import os
-
-    rig = run_job_rig(tmp_path, job_secrets_uid=os.geteuid() + 1)
-    assert refused(rig) == ("refused", "job_files_invalid")
+    assert refused(rig) == ("completed", None)
+    assert rig.runner.specs[0].job_secret_files == ("migration_database_url",)
+    assert (
+        secrets_dir(rig) / "other_secret"
+    ).exists() and "other_secret" not in json.dumps(receipt(rig))
 
 
 # -- Foundation's operator-job entry does not exist yet ---------------------
 def test_the_real_runner_refuses_a_job_with_no_foundation_entry(tmp_path: Path) -> None:
     from dotmac_deploy_agent.runner import SubprocessRunner
 
-    rig = run_job_rig(tmp_path)
+    rig = job_rig(tmp_path)
     rig.launcher.runner = SubprocessRunner(("/usr/bin/true",), 60)
     assert refused(rig) == ("refused", "foundation_job_entry_unavailable")
-    # nothing was spent: no lease, no mint, no file, not journalled
-    assert rig.bao.paths == [] and rig.cp.lease_log == []
-    assert not rig.launcher.executed.seen("dispatch-1")
+    assert (
+        rig.bao.paths == []
+        and rig.cp.lease_log == []
+        and not rig.launcher.executed.seen("dispatch-1")
+    )
 
 
-def test_the_job_environment_names_for_foundation_are_exactly_the_four() -> None:
+def test_the_job_environment_names_for_foundation() -> None:
     from dotmac_deploy_agent.runner import RunSpec, runner_environment
 
     env = runner_environment(
         RunSpec(
             "d", "erp/staging/h", "erp", "sha256:" + "a" * 64, Path("/p"), None,
             job_name="import", job_params_env=Path("/j"), job_secrets_dir=Path("/s"),
-            job_argv_digest="sha256:" + "b" * 64,
+            job_argv_digest="sha256:" + "b" * 64, job_secret_files=("a", "b"),
         )
     )  # fmt: skip
     assert {k for k in env if k.startswith("DOTMAC_DEPLOY_JOB")} == {
@@ -626,7 +775,9 @@ def test_the_job_environment_names_for_foundation_are_exactly_the_four() -> None
         "DOTMAC_DEPLOY_JOB_PARAMS_ENV",
         "DOTMAC_DEPLOY_JOB_SECRETS_DIR",
         "DOTMAC_DEPLOY_JOB_ARGV_DIGEST",
+        "DOTMAC_DEPLOY_JOB_SECRET_FILES",
     }
+    assert env["DOTMAC_DEPLOY_JOB_SECRET_FILES"] == "a,b"
 
 
 def test_job_roles_config_is_validated(tmp_path: Path) -> None:
@@ -635,66 +786,12 @@ def test_job_roles_config_is_validated(tmp_path: Path) -> None:
     for bad in (("Import",), ("a", "a"), ("../x",)):
         with pytest.raises(Refusal):
             make_config(tmp_path, Keys(), job_roles=bad)
-    assert make_config(tmp_path, Keys()).job_roles == ()  # empty by default
+    assert make_config(tmp_path, Keys()).job_roles == ()
 
 
-def test_a_lease_longer_than_900_is_accepted_when_the_job_fits_inside_it(
-    tmp_path: Path,
-) -> None:
-    rig = run_job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(
-        dispatched(timeout_seconds=1800), lease_ttl_seconds=3000
-    )
-    assert refused(rig) == ("completed", None)
-    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 3000  # type: ignore[index]
-
-
-def test_only_the_declared_materials_are_left_for_the_job_to_mount(
-    tmp_path: Path,
-) -> None:
-    """An owner-only job declares MIGRATION only: the LEGACY file the role's
-    authored config also rendered is removed before the job starts."""
-    rig = run_job_rig(tmp_path)
-    rig.cp.materials = run_job_materials(
-        dispatched(materials=["MIGRATION_DATABASE_URL"])
-    )
-    seen: dict[str, list[str]] = {}
-
-    def effect(spec) -> None:  # type: ignore[no-untyped-def]
-        seen["files"] = sorted(p.name for p in spec.job_secrets_dir.iterdir())
-
-    rig.runner.effect = effect
-    assert refused(rig) == ("completed", None)
-    assert seen["files"] == ["migration_database_url"]
-    assert receipt(rig)["files"] == ["migration_database_url"]
-
-
-def test_a_refused_job_mint_fails_that_job_only_and_touches_no_serving_role(
-    tmp_path: Path,
-) -> None:
-    from tests.unit.test_deploy_agent_delivery import WEB, secret_id_file, state
-
-    rig = make_rig(tmp_path, job_roles=("import",))
-    prepare_role(rig, "web")
-    prepare_role(rig, "import")
-    rig.cp.materials = make_materials(roles=WEB)
-    assert rig.launcher.run_once().outcome == "completed"  # a delivered serving role
-    served_file = secret_id_file(rig, "web").read_bytes()
-    served_state = state(rig, "web")
-    rig.bao.requests.clear()
-    rig.bao.deny_mint = "erp-staging-import"  # OpenBao 403s the JOB mint
-    rig.cp.materials = make_materials(
-        dispatched_job=dispatched(),
-        params=[*BASE_ROWS, GATE_ROW],
-        statement={"operation": "run_job"},
-        dispatch_id="dispatch-2",
-    )
-    for name in ("legacy_database_url", "migration_database_url"):
-        (rig.config.role_dir("import") / name).write_text("x")
-        (rig.config.role_dir("import") / name).chmod(0o400)
-    assert refused(rig) == ("refused", "job_mint_refused")  # not a delivery fault
-    assert len(rig.runner.specs) == 1  # only the serving run ever started
-    assert secret_id_file(rig, "web").read_bytes() == served_file
-    assert state(rig, "web") == served_state
-    assert not any("-web" in r[1] for r in rig.bao.requests)  # nothing of web touched
-    assert list(rig.config.role_dir("import").iterdir()) == []  # job files purged
+def test_a_dispatched_job_is_parsed_only_from_a_run_job_statement() -> None:
+    binding = {"dispatched_job": dispatched()}
+    assert plan_dispatched_job(binding, "run_job") is not None
+    with pytest.raises(Refusal):
+        plan_dispatched_job(binding, "deploy")
+    assert plan_dispatched_job({"dispatched_job": None}, "deploy") is None

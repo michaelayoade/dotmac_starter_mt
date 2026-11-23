@@ -1,13 +1,15 @@
-"""Job roles (P-SEC rev4 3.14; REVIEW-import-jobs A3-A9, A13): policy only.
+"""Job roles (P-SEC rev4 3.14; REVIEW-import-jobs; REVIEW-agent-PR1143 r3): policy.
 
-A job role's `secret_id` is minted ONLY for a dispatched job: never on a serving
-deploy, at boot or from a timer. It is single-use, tracked from the moment it is
-unwrapped, purged (file plus accessor) on every exit path and at agent start, never
-sealed or restored, and its scoped params reach the job's env only.
+`deploy_binding.jobs` is a list of DEFINITIONS carried by every plan: nothing runs
+from it. A job runs only when the signed statement's operation is `run_job` and
+the plan's `dispatched_job` names it, and everything executed (role, env, argv,
+timeout, window) is read from `dispatched_job` alone.
 
-What is NOT here, waiting on Control's job-plan keys and the architect's ruling:
-which job a dispatch runs (A1), the import window (A2), starting the job
-container (A6), the closed argv (A11) and the lease fit (A12).
+A job role's `secret_id` is minted ONLY for that dispatched job: never on a serving
+deploy, at boot or from a timer. It is tracked from unwrap, purged on every exit
+path and at agent start, and never sealed or restored. The job env is built only
+from the signed `dispatched_job.params` (`{MATERIAL: value}`), never from CP's
+unsigned params, and never enters `params.env`.
 """
 
 from __future__ import annotations
@@ -19,28 +21,36 @@ from datetime import datetime
 from typing import Final
 
 from .canon import canonical_json, digest
-from .params import Param, job_env_render
+from .params import Param, check_value
 from .refusal import Refusal
 from .wire import parse_stamp
 
 #: Credentials that belong to a dispatched job and to nothing else (Control
-#: `JOB_ONLY_MATERIALS`). Never a serving role's, never sealed.
+#: `JOB_ONLY_MATERIALS`). Never a serving role's, never sealed, never a plain param.
 JOB_ONLY_NAMES: Final = frozenset({"MIGRATION_DATABASE_URL", "LEGACY_DATABASE_URL"})
 _SEGMENT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 _NAME: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}")
-_JOB_KEYS: Final = frozenset(
-    {"name", "role", "single_use", "materials", "params", "params_env_digest"}
-)
+_MATERIAL: Final = re.compile(r"[A-Z][A-Z0-9_]{0,127}")
+RUN_JOB: Final = "run_job"
+LEASE_MARGIN: Final = 120
+#: Outer bound only; the real bound is the signed lease fit (timeout + margin).
+MAX_JOB_TIMEOUT: Final = 3600 - LEASE_MARGIN
+_DISPATCHED_KEYS: Final = frozenset(
+    {
+        "name", "role", "single_use", "materials", "params", "params_env_digest",
+        "argv", "timeout_seconds", "window",
+    }
+)  # fmt: skip
 
 
 @dataclass(frozen=True)
-class JobSpec:
+class JobDefinition:
+    """A descriptor job as every plan lists it: names only, nothing runs from it."""
+
     name: str
     role: str | None
-    single_use: bool | None
     materials: tuple[str, ...]
     params: tuple[str, ...]
-    params_env_digest: str
 
 
 def _names(value: object) -> tuple[str, ...]:
@@ -51,36 +61,33 @@ def _names(value: object) -> tuple[str, ...]:
     return tuple(value)
 
 
-def plan_jobs(snapshot: Mapping[str, object]) -> tuple[JobSpec, ...]:
-    """`deploy_binding.jobs` from the SIGNED plan (absent: no jobs)."""
+def plan_jobs(snapshot: Mapping[str, object]) -> tuple[JobDefinition, ...]:
+    """`deploy_binding.jobs` as definitions. Only the fields the agent uses are
+    read (name, role, materials, params); other keys Control adds are ignored, so
+    a new definition field cannot refuse every plan."""
     binding = snapshot.get("deploy_binding")
     rows = binding.get("jobs", []) if isinstance(binding, dict) else None
     if not isinstance(rows, list):
         raise Refusal("materials_invalid")
-    jobs: list[JobSpec] = []
+    jobs: list[JobDefinition] = []
     for row in rows:
-        if not isinstance(row, dict) or set(row) != _JOB_KEYS:
+        if not isinstance(row, dict):
             raise Refusal("materials_invalid")
-        role, single_use = row["role"], row["single_use"]
+        role = row.get("role")
         if (
-            not isinstance(row["name"], str)
+            not isinstance(row.get("name"), str)
             or not _NAME.fullmatch(row["name"])
             or not (
                 role is None or (isinstance(role, str) and _SEGMENT.fullmatch(role))
             )
-            or not (single_use is None or type(single_use) is bool)
-            or (role is None) != (single_use is None)
-            or not isinstance(row["params_env_digest"], str)
         ):
             raise Refusal("materials_invalid")
         jobs.append(
-            JobSpec(
+            JobDefinition(
                 row["name"],
                 role,
-                single_use,
-                _names(row["materials"]),
-                _names(row["params"]),
-                row["params_env_digest"],
+                _names(row.get("materials", [])),
+                _names(row.get("params", [])),
             )
         )
     if len({j.name for j in jobs}) != len(jobs):
@@ -88,19 +95,17 @@ def plan_jobs(snapshot: Mapping[str, object]) -> tuple[JobSpec, ...]:
     return tuple(jobs)
 
 
-RUN_JOB: Final = "run_job"
-LEASE_MARGIN: Final = 120
-#: The plan's lease is capped by Control (per-target setting, at most 3600 s) and
-#: the agent re-checks that cap at parse; a job must fit INSIDE the plan's lease.
-MAX_JOB_TIMEOUT: Final = 3600 - LEASE_MARGIN
-_DISPATCHED_KEYS: Final = _JOB_KEYS | {"argv", "timeout_seconds", "window"}
-
-
 @dataclass(frozen=True)
 class DispatchedJob:
     """The one job a `run_job` plan runs (`deploy_binding.dispatched_job`)."""
 
-    spec: JobSpec
+    name: str
+    role: str | None
+    single_use: bool | None
+    materials: tuple[str, ...]
+    #: Signed `{MATERIAL: value}`, sorted by material.
+    env: tuple[tuple[str, str], ...]
+    params_env_digest: str
     argv: tuple[str, ...]
     timeout_seconds: int
     window_id: str | None
@@ -123,10 +128,23 @@ def plan_dispatched_job(
         return None
     if not isinstance(raw, dict) or set(raw) != _DISPATCHED_KEYS:
         raise Refusal("materials_invalid", "dispatched_job_missing")
-    (spec,) = plan_jobs({"deploy_binding": {"jobs": [{k: raw[k] for k in _JOB_KEYS}]}})
+    role, single_use = raw["role"], raw["single_use"]
     argv, timeout, window = raw["argv"], raw["timeout_seconds"], raw["window"]
+    params = raw["params"]
     if (
-        not isinstance(argv, list)
+        not isinstance(raw["name"], str)
+        or not _NAME.fullmatch(raw["name"])
+        or not (role is None or (isinstance(role, str) and _SEGMENT.fullmatch(role)))
+        or not (single_use is None or type(single_use) is bool)
+        or (role is None) != (single_use is None)
+        or (role is None) != (window is None)
+        or not isinstance(raw["params_env_digest"], str)
+        or not isinstance(params, dict)
+        or not all(
+            isinstance(k, str) and _MATERIAL.fullmatch(k) and isinstance(v, str)
+            for k, v in params.items()
+        )
+        or not isinstance(argv, list)
         or not 1 <= len(argv) <= 64
         or not all(
             isinstance(a, str) and a and len(a) <= 1024 and "\x00" not in a
@@ -134,7 +152,6 @@ def plan_dispatched_job(
         )
         or type(timeout) is not int
         or not 1 <= timeout <= MAX_JOB_TIMEOUT
-        or (spec.role is None) != (window is None)
     ):
         raise Refusal("materials_invalid", "dispatched_job_invalid")
     window_id, closes_at = None, None
@@ -149,7 +166,18 @@ def plan_dispatched_job(
             raise Refusal("materials_invalid", "dispatched_job_invalid")
         window_id = window["window_id"]
         closes_at = parse_stamp(window["closes_at"])
-    return DispatchedJob(spec, tuple(argv), timeout, window_id, closes_at)
+    return DispatchedJob(
+        raw["name"],
+        role,
+        single_use,
+        _names(raw["materials"]),
+        tuple(sorted((str(k), str(v)) for k, v in params.items())),
+        raw["params_env_digest"],
+        tuple(argv),
+        timeout,
+        window_id,
+        closes_at,
+    )
 
 
 def check_job_admissible(
@@ -160,8 +188,8 @@ def check_job_admissible(
     lease_ttl_seconds: int,
 ) -> None:
     """Before anything: the host fence, the signed window and the lease fit."""
-    if job.spec.role is not None:
-        if job.spec.role not in enrolled_roles:
+    if job.role is not None:
+        if job.role not in enrolled_roles:
             raise Refusal("job_role_refused")
         if job.closes_at is None or store_now >= job.closes_at:
             raise Refusal("job_window_closed")
@@ -169,12 +197,24 @@ def check_job_admissible(
         raise Refusal("lease_ttl_invalid")  # never extended: the plan must fit
 
 
-def job_roles(jobs: Sequence[JobSpec]) -> frozenset[str]:
+def check_matches_definition(
+    job: DispatchedJob, definitions: Sequence[JobDefinition]
+) -> None:
+    """The dispatched job is one of the plan's own definitions, same role."""
+    for definition in definitions:
+        if definition.name == job.name:
+            if definition.role != job.role:
+                raise Refusal("materials_invalid", "dispatched_job_role_differs")
+            return
+    raise Refusal("materials_invalid", "dispatched_job_undefined")
+
+
+def job_roles(jobs: Sequence[JobDefinition]) -> frozenset[str]:
     return frozenset(j.role for j in jobs if j.role)
 
 
 def refuse_job_role_serving(
-    serving_roles: Collection[str], jobs: Sequence[JobSpec]
+    serving_roles: Collection[str], jobs: Sequence[JobDefinition]
 ) -> None:
     """A role a job logs in as is never also minted for the serving deploy."""
     if set(serving_roles) & job_roles(jobs):
@@ -182,9 +222,7 @@ def refuse_job_role_serving(
 
 
 def refuse_sealing(
-    role: str,
-    names: Collection[str],
-    jobs: Sequence[JobSpec],
+    role: str, names: Collection[str], jobs: Sequence[JobDefinition]
 ) -> None:
     """A8: the sealed last-known-good and its restore refuse a job role, and any
     role whose names include a job-only credential. No boot fallback exists."""
@@ -193,43 +231,48 @@ def refuse_sealing(
 
 
 def split_params(
-    params: Sequence[Param], jobs: Sequence[JobSpec]
-) -> tuple[tuple[Param, ...], dict[str, tuple[Param, ...]]]:
-    """A9: `(serving params, scoped params by job name)`, split by the SIGNED plan.
-
-    A param a job scopes is never rendered into `params.env`. A scoped name CP did
-    not send is left out here and refused at dispatch (`job_env`), so a serving
-    deploy is not blocked by a job it does not run.
-    """
-    by_name = {p.name: p for p in params}
-    scoped_names = {n for j in jobs for n in j.params}
-    serving = tuple(p for p in params if p.name not in scoped_names)
-    scoped = {j.name: tuple(by_name[n] for n in j.params if n in by_name) for j in jobs}
-    return serving, scoped
+    params: Sequence[Param], jobs: Sequence[JobDefinition]
+) -> tuple[Param, ...]:
+    """The serving params: a param any job scopes is never rendered into
+    `params.env`."""
+    scoped = {n for j in jobs for n in j.params}
+    return tuple(p for p in params if p.name not in scoped)
 
 
-def job_env(job: JobSpec, scoped: Sequence[Param]) -> bytes:
-    """The job's env lines (scoped params only), refused unless they match the
-    per-job digest the plan bound. The role's materials come from its rendered
-    files, never from here."""
-    if {p.name for p in scoped} != set(job.params):
-        raise Refusal("params_digest_mismatch")
-    render = job_env_render(scoped)
+def refuse_cp_scoped_params(
+    params: Sequence[Param], jobs: Sequence[JobDefinition]
+) -> None:
+    """S2: a `run_job` plan's job values are signed in the plan; CP's unsigned
+    `params` may not carry any param a job scopes."""
+    scoped = {n for j in jobs for n in j.params}
+    if any(p.name in scoped for p in params):
+        raise Refusal("materials_invalid", "scoped_param_from_cp")
+
+
+def job_env(job: DispatchedJob) -> bytes:
+    """The job's env lines (sorted `K=V\\n`), from the signed `params` only, and
+    refused unless they match the digest the plan bound. The role's credentials
+    come from its rendered files, never from here."""
+    lines: list[str] = []
+    for material, value in job.env:
+        if material in JOB_ONLY_NAMES:
+            raise Refusal("job_role_refused")  # a credential is never a plain param
+        check_value(value)
+        lines.append(f"{material}={value}\n")
+    render = "".join(lines).encode("utf-8")
     if digest(render) != job.params_env_digest:
         raise Refusal("params_digest_mismatch")
-    if {
-        line.split(b"=", 1)[0].decode() for line in render.splitlines()
-    } & JOB_ONLY_NAMES:
-        raise Refusal("job_role_refused")  # a credential is never a plain param
     return render
 
 
-def require_naming(roles: Collection[object], jobs: Sequence[JobSpec]) -> bool:
+def require_naming(roles: Collection[object], jobs: Sequence[JobDefinition]) -> bool:
     """A13: the pinned naming applies when there are serving roles OR job roles."""
     return bool(roles) or bool(job_roles(jobs))
 
 
 __all__ = [
-    "JOB_ONLY_NAMES", "JobSpec", "job_env", "job_roles", "plan_jobs",
-    "refuse_job_role_serving", "refuse_sealing", "require_naming", "split_params",
+    "JOB_ONLY_NAMES", "DispatchedJob", "JobDefinition", "check_job_admissible",
+    "check_matches_definition", "job_env", "job_roles", "plan_dispatched_job",
+    "plan_jobs", "refuse_cp_scoped_params", "refuse_job_role_serving",
+    "refuse_sealing", "require_naming", "split_params",
 ]  # fmt: skip

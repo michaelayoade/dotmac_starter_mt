@@ -1,0 +1,9 @@
+# JOB ROLES ONLY (e.g. import). Same as dotmac-role.conf.template except
+# `secrets/` is 0710 <container uid>:dotmac-deploy. NARROW WIDENING (W pending
+# Michael): the agent uid may TRAVERSE `secrets/` to lstat file names it already
+# knows; it still cannot list or read it, and no other uid gains anything. Files
+# stay 0400, container-owned. The agent never lists, reads or deletes in here.
+d /run/dotmac 0711 root root -
+d /run/dotmac/@SECRETS_NAMESPACE@ 0711 dotmac-deploy dotmac-deploy -
+d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@ 0711 dotmac-deploy dotmac-deploy -
+d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets 0710 @CONTAINER_USER@ dotmac-deploy -

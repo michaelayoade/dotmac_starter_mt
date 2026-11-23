@@ -14,3 +14,19 @@ polkit.addRule(function (action, subject) {
     return polkit.Result.YES;
   }
 });
+
+// JOB ROLES ONLY: the agent may START (never restart) the static one-shot units of
+// an enrolled job role: its render unit and its purge unit. @ENROLLED_JOB_UNITS@ is
+// a JSON array, e.g. ["openbao-agent@erp-import.service",
+// "dotmac-job-purge@erp-import.service"]. Empty at enrolment unless a job role is named.
+polkit.addRule(function (action, subject) {
+  var enrolledJobs = @ENROLLED_JOB_UNITS@;
+  if (
+    action.id == "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("verb") == "start" &&
+    subject.user == "dotmac-deploy" &&
+    enrolledJobs.indexOf(action.lookup("unit")) !== -1
+  ) {
+    return polkit.Result.YES;
+  }
+});
