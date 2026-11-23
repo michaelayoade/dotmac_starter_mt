@@ -180,6 +180,47 @@ def plan_dispatched_job(
     )
 
 
+SERVING_TTL_RANGE: Final = (120, 900)
+MAX_LEASE_MAX: Final = 10800
+
+
+def check_plan_binding(
+    binding: Mapping[str, object], operation: str
+) -> DispatchedJob | None:
+    """Everything target_api_v2 pins about `deploy_binding`, as the agent enforces
+    it (the shape rules, the split lease, the naming and image-source rules). Returns
+    the dispatched job (None unless `run_job`)."""
+    job = plan_dispatched_job(binding, operation)
+    roles = binding.get("roles", [])
+    if job is not None and roles:
+        raise Refusal("materials_invalid", "run_job_mints_no_serving_role")
+    if job is not None and list(job.materials) != sorted(job.materials):
+        raise Refusal("materials_invalid", "dispatched_job_invalid")
+    images = binding.get("images", [])
+    if isinstance(images, list):
+        present = [isinstance(i, dict) and i.get("source") == "present" for i in images]
+        if any(present) != (job is not None) or (job is not None and not all(present)):
+            raise Refusal("materials_invalid", "image_source_for_operation")
+    ttl, lease_max = binding.get("lease_ttl_seconds"), binding.get("lease_max_seconds")
+    if lease_max is not None:  # the split lease (v2); v1 plans carry only the ttl
+        if type(ttl) is not int or type(lease_max) is not int:
+            raise Refusal("lease_ttl_invalid")
+        if job is not None:
+            if not ttl == lease_max == job.timeout_seconds + LEASE_MARGIN:
+                raise Refusal("lease_ttl_invalid")
+        elif (
+            not SERVING_TTL_RANGE[0] <= ttl <= SERVING_TTL_RANGE[1]
+            or not ttl <= lease_max <= MAX_LEASE_MAX
+        ):
+            raise Refusal("lease_ttl_invalid")
+    needs_naming = bool(roles) or (job is not None and job.role is not None)
+    if needs_naming and not (
+        binding.get("secrets_namespace") and binding.get("secrets_environment")
+    ):
+        raise Refusal("materials_invalid", "bad_secrets_name")
+    return job
+
+
 def check_job_admissible(
     job: DispatchedJob,
     *,

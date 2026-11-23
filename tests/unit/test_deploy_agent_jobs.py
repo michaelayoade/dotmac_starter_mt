@@ -12,6 +12,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from dotmac_deploy_agent import wire
 from dotmac_deploy_agent.canon import digest
 from dotmac_deploy_agent.commands import CommandResult
 from dotmac_deploy_agent.jobs import (
@@ -85,7 +86,9 @@ def run_job_materials(
 ) -> dict[str, object]:
     kw.setdefault("statement", {"operation": "run_job"})
     kw.setdefault("images", present())
-    kw.setdefault("lease_ttl_seconds", 900)
+    # v2 job plan: lease ttl = max = timeout + 120 (the default job runs 600 s)
+    kw.setdefault("lease_ttl_seconds", 720)
+    kw.setdefault("lease_max_seconds", kw["lease_ttl_seconds"])
     kw.setdefault("jobs", [definition()])
     kw.setdefault("params", BASE_ROWS)
     return make_materials(dispatched_job=job or dispatched(), **kw)
@@ -609,10 +612,10 @@ def test_a_lease_longer_than_900_is_accepted_when_the_job_fits_inside_it(
 ) -> None:
     rig = job_rig(tmp_path)
     rig.cp.materials = run_job_materials(
-        dispatched(timeout_seconds=1800), lease_ttl_seconds=3000
+        dispatched(timeout_seconds=1800), lease_ttl_seconds=1920
     )
     assert refused(rig) == ("completed", None)
-    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 3000  # type: ignore[index]
+    assert rig.cp.lease_log[0][1]["ttl_seconds"] == 1920  # type: ignore[index]
 
 
 def test_the_lease_fit_boundary_is_accepted(tmp_path: Path) -> None:
@@ -805,14 +808,67 @@ def test_target_api_v1_posts_the_observation_as_before(tmp_path: Path) -> None:
     assert rig.config.target_api_version == 1
 
 
-def test_target_api_v2_does_not_guess_an_envelope_and_keeps_the_observation_in_the_outbox(
+def test_target_api_v2_posts_a_pop_signed_envelope_for_a_job_refusal(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent import observation_v2 as o2
+
+    rig = job_rig(tmp_path, target_api_version=2)
+    rig.cp.materials = make_materials(
+        statement={"operation": "run_job"}
+    )  # no dispatched job: refused
+    assert rig.launcher.run_once().outcome == "refused"
+    envelope = rig.cp.observations[-1]
+    assert set(envelope) == {"signature", "statement"}
+    statement = envelope["statement"]
+    assert (
+        statement["kind"] == "job"
+        and statement["outcome"] == "refused"
+        and statement["key_id"] == rig.config.credential_id
+    )
+    assert (
+        statement["reason"] == "materials_invalid" and statement["schema"] == o2.SCHEMA
+    )
+    key = rig.keys.agent.public_key()
+    key.verify(
+        wire.decode_b64url(envelope["signature"]) or b"", o2.signed_bytes(statement)
+    )
+    assert rig.launcher.outbox.pending() == []  # acknowledged
+
+
+def test_target_api_v2_posts_a_completed_job_as_kind_job_succeeded(
     tmp_path: Path,
 ) -> None:
     rig = job_rig(tmp_path, target_api_version=2)
-    rig.cp.materials = make_materials(statement={"operation": "run_job"})  # a refusal
-    assert rig.launcher.run_once().outcome == "refused"
-    assert rig.cp.observations == []  # nothing posted in an unpublished format
-    assert len(rig.launcher.outbox.pending()) == 1  # sealed, retried later
+    assert refused(rig) == ("completed", None)
+    statement = rig.cp.observations[-1]["statement"]
+    assert (statement["kind"], statement["outcome"], statement["reason"]) == (
+        "job",
+        "succeeded",
+        "",
+    )
+    assert statement["details"]["job"]["name"] == "import"
+
+
+def test_a_record_that_cannot_become_a_statement_is_dead_lettered_not_blocking(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path, target_api_version=2)
+    rig.launcher.outbox.seal(
+        {
+            "schema": "x",
+            "kind": "other",
+            "dispatch_id": "d9",
+            "target_ref": rig.config.target_ref,
+            "outcome": "refused",
+            "reason": None,
+            "details": {},
+            "agent_version": "0",
+            "observed_at": "2027-01-06T12:00:00Z",
+        }
+    )
+    rig.launcher.flush_outbox()
+    assert rig.launcher.outbox.pending() == [] and rig.cp.observations == []
 
 
 def test_target_api_version_is_validated(tmp_path: Path) -> None:
@@ -820,3 +876,25 @@ def test_target_api_version_is_validated(tmp_path: Path) -> None:
 
     with pytest.raises(Refusal):
         make_config(tmp_path, Keys(), target_api_version=3)
+
+
+def test_a_job_plan_whose_lease_max_differs_from_its_ttl_is_refused(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(lease_ttl_seconds=720, lease_max_seconds=900)
+    assert refused(rig) == ("refused", "lease_ttl_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == []
+
+
+def test_a_serving_plan_with_a_split_lease_is_accepted_and_one_over_900_is_not(
+    tmp_path: Path,
+) -> None:
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(lease_ttl_seconds=600, lease_max_seconds=3120)
+    assert rig.launcher.run_once().outcome == "completed"
+    rig.cp.materials = make_materials(
+        lease_ttl_seconds=901, lease_max_seconds=3120, dispatch_id="dispatch-2"
+    )
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")

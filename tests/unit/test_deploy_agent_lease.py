@@ -669,3 +669,37 @@ def test_an_invalid_lease_max_seconds_is_refused(tmp_path: Path, bad: object) ->
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")
     assert "lease/acquire" not in [n for n, _ in rig.cp.lease_log]
+
+
+@pytest.mark.parametrize(
+    ("running", "last_pin", "expected"),
+    [
+        (b"", None, "not_needed"),  # nothing of the stack runs
+        (
+            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
+            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
+            "reconciled",
+        ),
+        (
+            b"127.0.0.1:5000/org/app@sha256:" + b"b" * 64 + b" sha256:" + b"f" * 64,
+            "127.0.0.1:5000/org/app@sha256:" + "a" * 64,
+            "failed",
+        ),
+        (
+            b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64,
+            None,
+            "failed",
+        ),
+    ],
+)
+def test_reconcile_reports_control_s_outcome_words(
+    tmp_path: Path, running: bytes, last_pin: str | None, expected: str
+) -> None:
+    rig, double, clock = with_double(tmp_path)
+    expired_host(double, clock)
+    rig.commands.script[("inspect",)] = CommandResult(0 if running else 1, running)
+    if last_pin:
+        (rig.config.state_dir / "last_app_image").write_text(last_pin)
+    rig.launcher.run_once()
+    assert rig.cp.observations[0]["kind"] == "reconcile"
+    assert rig.cp.observations[0]["outcome"] == expected

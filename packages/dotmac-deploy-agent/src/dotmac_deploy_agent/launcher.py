@@ -53,6 +53,7 @@ from .observation import (
     read_inflight,
     safe_id,
 )
+from .observation_v2 import kind_for_operation
 from .openbao import OpenBaoSession
 from .openbao_config import check_authored_configs
 from .params import (
@@ -293,14 +294,31 @@ class Launcher:
             dispatch_id = safe_id(
                 statement.get("dispatch_id") if isinstance(statement, dict) else None
             )
-            self._report(self._observation(dispatch_id, "refused", refusal.code, {}))
+            operation = (
+                statement.get("operation") if isinstance(statement, dict) else None
+            )
+            self._report(
+                self._observation(
+                    dispatch_id,
+                    "refused",
+                    refusal.code,
+                    {},
+                    kind=kind_for_operation(
+                        operation if isinstance(operation, str) else None
+                    ),
+                )
+            )
             return CycleResult("refused", refusal.code, dispatch_id)
         try:
             standing = self.lease.standing()
         except Refusal as refusal:
             self._report(
                 self._observation(
-                    materials.dispatch_id, "refused", refusal.code, _detail(refusal)
+                    materials.dispatch_id,
+                    "refused",
+                    refusal.code,
+                    _detail(refusal),
+                    kind=kind_for_operation(materials.operation),
                 )
             )
             return CycleResult("refused", refusal.code, materials.dispatch_id)
@@ -324,6 +342,7 @@ class Launcher:
                 self.read_only,
                 dispatch_id=dispatch_id,
                 standing=standing,
+                expected_image=self._last_app_image(),
                 clock=self.clock,
             )
         except Refusal as refusal:

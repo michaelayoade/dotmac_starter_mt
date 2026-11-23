@@ -27,8 +27,8 @@ from .jobs import (
     JobDefinition,
     check_job_admissible,
     check_matches_definition,
+    check_plan_binding,
     job_roles,
-    plan_dispatched_job,
     plan_jobs,
     refuse_cp_scoped_params,
     refuse_job_role_serving,
@@ -117,6 +117,8 @@ class Materials:
     legacy: LegacyPolicy | None
     images: tuple[ImageSpec, ...]
     lease_ttl_seconds: int
+    #: v2 split lease: the maximum the lease may be renewed to (None on v1 plans).
+    lease_max_seconds: int | None
     active_binding_names: tuple[str, ...]
     #: From the SIGNED plan binding (never the target ref): the descriptor's
     #: `secrets_namespace` and the namespace-env fixed on the target. Required
@@ -132,9 +134,6 @@ class Materials:
     #: The one job a `run_job` plan runs (its spec is also the last of `jobs`).
     operation: str = "deploy"
     dispatched_job: DispatchedJob | None = None
-    #: The most this run may hold the host lease in total, renewals included
-    #: (`lease_max_seconds`; a plan without one holds no more than one grant).
-    lease_max_seconds: int = 0
 
 
 def _list(value: object) -> list[object]:
@@ -379,12 +378,16 @@ def parse_materials(
     ttl = binding.get("lease_ttl_seconds")
     if type(ttl) is not int or not 1 <= ttl <= MAX_LEASE_TTL:
         raise Refusal("lease_ttl_invalid")
-    max_seconds = binding.get("lease_max_seconds", ttl)
-    if type(max_seconds) is not int or not ttl <= max_seconds <= MAX_LEASE_SECONDS:
-        raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
+    lease_max = binding.get("lease_max_seconds")
+    if lease_max is not None and (
+        type(lease_max) is not int or not ttl <= lease_max <= MAX_LEASE_SECONDS
+    ):
+        raise Refusal("lease_ttl_invalid")
     jobs = plan_jobs(snapshot)  # definitions: nothing runs from them
-    dispatched = plan_dispatched_job(binding, verified.operation)
+    if verified.operation not in ("deploy", "rollback", "run_job"):
+        raise Refusal("materials_invalid", "operation_unsupported")  # fail closed
+    dispatched = check_plan_binding(binding, verified.operation)
     cp_params = _parse_params(document["params"])
     if dispatched is not None:
         if roles:
@@ -394,7 +397,7 @@ def parse_materials(
             dispatched,
             enrolled_roles=config.job_roles,
             store_now=store_now,
-            lease_ttl_seconds=ttl,
+            lease_ttl_seconds=lease_max if lease_max is not None else ttl,
         )
         refuse_cp_scoped_params(cp_params, jobs)
     all_roles = job_roles(jobs) | (
@@ -422,10 +425,6 @@ def parse_materials(
         ):
             raise Refusal("secrets_naming_mismatch")
     images = _parse_images(binding.get("images"))
-    # A role job runs an image that is already on the host (R2-C1): nothing is
-    # transferred for it. A serving plan never says `present`.
-    if any((i.source == "present") != (dispatched is not None) for i in images):
-        raise Refusal("materials_invalid", "image_source_for_operation")
     return Materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,
@@ -438,7 +437,7 @@ def parse_materials(
         legacy=_parse_legacy(binding.get("legacy")),
         images=images,
         lease_ttl_seconds=ttl,
-        lease_max_seconds=max_seconds,
+        lease_max_seconds=lease_max,
         active_binding_names=tuple(
             _text(n, _NAME) for n in _list(binding.get("active_binding_names", []))
         ),

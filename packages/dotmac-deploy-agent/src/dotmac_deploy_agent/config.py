@@ -131,8 +131,8 @@ class AgentConfig:
     job_roles: tuple[str, ...] = ()
     #: The target-API generation the agent speaks. 1 (default) posts today's
     #: unsigned `dotmac.deploy_observation/1`. 2 is the PoP-signed observation
-    #: envelope of Control's `target_api_v2.json`, which is not published yet: until
-    #: it is, 2 refuses to post (the observation stays in the outbox).
+    #: envelope of Control's `target_api_v2.json` (vendored beside v1). The default
+    #: moves to 2 once every v2 vector passes on hosted CI.
     target_api_version: int = 1
     #: uid the rendered job files must belong to (None: the agent's own uid).
     job_secrets_uid: int | None = None

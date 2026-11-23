@@ -271,6 +271,9 @@ def make_materials(**overrides: object) -> dict[str, object]:
         "secrets_environment": overrides.pop("secrets_environment", "staging"),
         "roles": overrides.pop("roles", []),
     }
+    lease_max = overrides.pop("lease_max_seconds", None)
+    if lease_max is not None:
+        binding["lease_max_seconds"] = lease_max
     if jobs is not None:
         binding["jobs"] = jobs
     if dispatched is not None:
