@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime, time, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
 from dotmac_campaigns import (
@@ -18,10 +19,14 @@ from dotmac_campaigns import (
     AudienceCandidate,
     CampaignKind,
     CampaignStatus,
+    ContractError,
     CreateCampaign,
+    DatedCampaignOccurrence,
     DeliveryState,
     Observation,
     ObservationKind,
+    RenderedMessage,
+    RenderRequest,
     SequenceStep,
     SnapshotImmutable,
     UnsubscribeRequest,
@@ -33,17 +38,20 @@ from dotmac_campaigns import (
     delivery_intent,
     ingest_audience,
     next_send_at,
+    pause_campaign,
     purge_expired_pii,
     rebuild_counters,
     record_observation,
     report_drift,
     request_unsubscribe,
     response_facts,
+    resume_campaign,
     schedule_campaign,
 )
 from dotmac_campaigns.fakes import FakeRenderer, FakeSenderResolver, FakeTimerPort
 from dotmac_campaigns.models import (
     ALL_MODELS,
+    Campaign,
     CampaignCounter,
     CampaignDeliveryIntent,
     CampaignRecipient,
@@ -178,6 +186,323 @@ def _publish_first_intent(db: Session, *, timers: FakeTimerPort | None = None):
         accepted_at=NOW,
     )
     return campaign, timer_port, accepted
+
+
+def _dated(
+    db: Session, *, window: tuple[time, time] | None = None
+) -> tuple[Campaign, FakeTimerPort, CreateCampaign]:
+    occurrence = DatedCampaignOccurrence(
+        local_date=NOW.date(), local_time=time(9), timezone="Africa/Lagos"
+    )
+    command = occurrence.as_campaign(
+        code="holiday",
+        name="Holiday greeting",
+        channel="email",
+        template_slug="holiday",
+        sender_key="growth",
+        evidence_expires_at=NOW + timedelta(days=365),
+        pii_expires_at=NOW + timedelta(days=30),
+    )
+    if window is not None:
+        command = replace(
+            command, send_window_start=window[0], send_window_end=window[1]
+        )
+    campaign = create_campaign(
+        db,
+        tenant_id=TENANT_ID,
+        command=command,
+        idempotency_key="holiday-create",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        recorded_at=NOW,
+    )
+    ingest_audience(
+        db,
+        tenant_id=TENANT_ID,
+        campaign_id=campaign.id,
+        batch=_audience(),
+        idempotency_key="holiday-audience",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        evaluated_at=NOW,
+    )
+    timers = FakeTimerPort()
+    schedule_campaign(
+        db,
+        tenant_id=TENANT_ID,
+        campaign_id=campaign.id,
+        timers=timers,
+        idempotency_key="holiday-schedule",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        recorded_at=NOW,
+    )
+    return campaign, timers, command
+
+
+def test_dated_occurrence_uses_local_midnight_not_a_fixed_utc_day() -> None:
+    occurrence = DatedCampaignOccurrence(
+        local_date=NOW.date(), local_time=time(9), timezone="Africa/Lagos"
+    )
+    assert occurrence.scheduled_at == NOW
+    assert occurrence.delivery_expires_at == NOW.replace(hour=23)
+    assert (
+        occurrence.as_campaign(
+            code="greeting",
+            name="Greeting",
+            channel="sms",
+            template_slug="greeting",
+            sender_key="support",
+            evidence_expires_at=NOW + timedelta(days=30),
+            pii_expires_at=NOW + timedelta(days=7),
+        ).kind
+        is CampaignKind.ONE_TIME
+    )
+
+
+@pytest.mark.parametrize(
+    ("day", "clock"),
+    (
+        (datetime(2026, 3, 8).date(), time(2, 30)),
+        (datetime(2026, 11, 1).date(), time(1, 30)),
+    ),
+)
+def test_dated_occurrence_refuses_nonexistent_or_ambiguous_local_time(
+    day: date, clock: time
+) -> None:
+    with pytest.raises(ContractError):
+        DatedCampaignOccurrence(
+            local_date=day, local_time=clock, timezone="America/New_York"
+        )
+
+
+def test_dated_occurrence_checks_zone_and_naive_wall_clock() -> None:
+    for zone, clock in (("invalid/timezone", time(9)), ("UTC", time(9, tzinfo=UTC))):
+        with pytest.raises(ContractError):
+            DatedCampaignOccurrence(
+                local_date=NOW.date(), local_time=clock, timezone=zone
+            )
+
+
+def test_delivery_deadline_must_follow_schedule_and_fit_retention() -> None:
+    command = _command()
+    for deadline in (NOW, NOW.replace(tzinfo=None), NOW + timedelta(days=91)):
+        with pytest.raises(ContractError):
+            replace(command, delivery_expires_at=deadline)
+    assert "delivery_expires_at" not in command.fingerprint_payload()
+    bounded = replace(command, delivery_expires_at=NOW + timedelta(hours=1))
+    assert bounded.fingerprint_payload() != command.fingerprint_payload()
+
+
+def test_expired_due_work_never_renders_or_publishes(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    campaign, timers, command = _dated(db)
+    assert command.delivery_expires_at is not None
+    renderer = FakeRenderer()
+
+    def forbidden_render(request: RenderRequest) -> RenderedMessage:
+        raise AssertionError("Expired work reached the renderer")
+
+    monkeypatch.setattr(renderer, "render", forbidden_render)
+    trigger = timers.only_current_trigger()
+    result = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=trigger,
+        timers=timers,
+        renderer=renderer,
+        senders=FakeSenderResolver(),
+        idempotency_key="holiday-due",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=command.delivery_expires_at,
+    )
+    assert result.status == "expired"
+    replay = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=trigger,
+        timers=timers,
+        renderer=renderer,
+        senders=FakeSenderResolver(),
+        idempotency_key="holiday-due",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=command.delivery_expires_at,
+    )
+    assert replay.status == "expired" and replay.replayed
+    assert db.scalars(select(OutboxEvent)).all() == []
+    snapshot = campaign_snapshot(db, tenant_id=TENANT_ID, campaign_id=campaign.id)
+    assert snapshot.delivery_expires_at == command.delivery_expires_at
+    assert snapshot.counters.suppressed == 1
+    assert len(snapshot.recipients[0].consent_receipts) == 2
+    assert (
+        snapshot.recipients[0].consent_receipts[-1].reason
+        == "campaign_delivery_expired"
+    )
+    assert (
+        snapshot.recipients[0].consent_receipts[-1].policy_owner == "dotmac_campaigns"
+    )
+
+
+def test_expiry_after_publication_stops_transport_and_keeps_consent_evidence(
+    db: Session,
+) -> None:
+    campaign, timers, command = _dated(db)
+    assert command.delivery_expires_at is not None
+    result = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=timers.only_current_trigger(),
+        timers=timers,
+        renderer=FakeRenderer(),
+        senders=FakeSenderResolver(),
+        idempotency_key="holiday-due",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=NOW,
+    )
+    assert result.dispatch_id is not None
+    before = authorize_delivery(
+        db,
+        tenant_id=TENANT_ID,
+        dispatch_id=result.dispatch_id,
+        evaluated_at=command.delivery_expires_at - timedelta(microseconds=1),
+    )
+    after = authorize_delivery(
+        db,
+        tenant_id=TENANT_ID,
+        dispatch_id=result.dispatch_id,
+        evaluated_at=command.delivery_expires_at,
+    )
+    assert before.allowed
+    assert not after.allowed and after.reason == "campaign_delivery_expired"
+    assert (
+        campaign_snapshot(
+            db, tenant_id=TENANT_ID, campaign_id=campaign.id
+        ).counters.suppressed
+        == 1
+    )
+    assert may_send(
+        db,
+        TENANT_ID,
+        channel="email",
+        address="person@example.com",
+        category="campaign",
+    )
+
+
+def test_expiry_cannot_erase_an_already_delivered_fact(db: Session) -> None:
+    campaign, timers, command = _dated(db)
+    assert command.delivery_expires_at is not None
+    result = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=timers.only_current_trigger(),
+        timers=timers,
+        renderer=FakeRenderer(),
+        senders=FakeSenderResolver(),
+        idempotency_key="holiday-due",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=NOW,
+    )
+    assert result.dispatch_id is not None
+    record_observation(
+        db,
+        tenant_id=TENANT_ID,
+        observation=Observation(
+            dispatch_id=result.dispatch_id,
+            source_owner="test",
+            source_event_id="delivered",
+            source_fingerprint="d" * 64,
+            kind=ObservationKind.DELIVERY,
+            delivery_state=DeliveryState.DELIVERED,
+            occurred_at=NOW + timedelta(minutes=1),
+        ),
+        idempotency_expires_at=NOW + timedelta(days=7),
+        recorded_at=NOW + timedelta(minutes=1),
+        timers=timers,
+    )
+    assert not authorize_delivery(
+        db,
+        tenant_id=TENANT_ID,
+        dispatch_id=result.dispatch_id,
+        evaluated_at=command.delivery_expires_at,
+    ).allowed
+    snapshot = campaign_snapshot(db, tenant_id=TENANT_ID, campaign_id=campaign.id)
+    assert snapshot.counters.delivered == 1
+    assert snapshot.recipients[0].steps[0].delivery_state is DeliveryState.DELIVERED
+
+
+def test_expired_stale_trigger_cannot_suppress_a_new_timer_generation(
+    db: Session,
+) -> None:
+    campaign, timers, command = _dated(db)
+    assert command.delivery_expires_at is not None
+    stale = timers.only_current_trigger()
+    pause_campaign(db, tenant_id=TENANT_ID, campaign_id=campaign.id, paused_at=NOW)
+    resume_campaign(
+        db,
+        tenant_id=TENANT_ID,
+        campaign_id=campaign.id,
+        timers=timers,
+        resumed_at=NOW + timedelta(seconds=1),
+    )
+    result = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=stale,
+        timers=timers,
+        renderer=FakeRenderer(),
+        senders=FakeSenderResolver(),
+        idempotency_key="stale-dated",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=command.delivery_expires_at,
+    )
+    assert result.status == "stale"
+    assert (
+        campaign_snapshot(
+            db, tenant_id=TENANT_ID, campaign_id=campaign.id
+        ).counters.suppressed
+        == 0
+    )
+    assert timers.only_current_trigger().generation != stale.generation
+
+
+def test_dated_campaign_cannot_resume_after_its_deadline(db: Session) -> None:
+    campaign, timers, command = _dated(db)
+    assert command.delivery_expires_at is not None
+    pause_campaign(db, tenant_id=TENANT_ID, campaign_id=campaign.id, paused_at=NOW)
+    from dotmac_campaigns import InvalidTransition
+
+    with pytest.raises(InvalidTransition, match="deadline"):
+        resume_campaign(
+            db,
+            tenant_id=TENANT_ID,
+            campaign_id=campaign.id,
+            timers=timers,
+            resumed_at=command.delivery_expires_at,
+        )
+
+
+def test_next_send_window_cannot_push_a_dated_greeting_into_tomorrow(
+    db: Session,
+) -> None:
+    campaign, timers, _ = _dated(db, window=(time(8), time(10)))
+    result = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=timers.only_current_trigger(),
+        timers=timers,
+        renderer=FakeRenderer(),
+        senders=FakeSenderResolver(),
+        idempotency_key="late-window",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=NOW + timedelta(hours=3),
+    )
+    assert result.status == "delivery_window_closed"
+    assert not db.scalars(select(OutboxEvent)).all()
+    snapshot = campaign_snapshot(db, tenant_id=TENANT_ID, campaign_id=campaign.id)
+    assert snapshot.counters.suppressed == 1
+    assert (
+        snapshot.recipients[0].consent_receipts[-1].reason
+        == "campaign_delivery_window_closed"
+    )
 
 
 def test_changed_create_fingerprint_conflicts_instead_of_reusing_the_key(

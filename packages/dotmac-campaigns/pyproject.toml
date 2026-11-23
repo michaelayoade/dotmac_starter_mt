@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-campaigns"
-version = "0.1.0a1"
+version = "0.1.0a1+dev"
 description = "Provider-neutral outbound campaign lifecycle, immutable audiences and ordered recipient progression"
 authors = ["DotMac"]
 readme = "README.md"

@@ -151,3 +151,19 @@ provider paths.
 **Treat dotmac_mkt advertising ids as campaigns ids.** Provider identity is an
 external observation. Promoting it would bind the module to today's advertising
 hierarchy and make replay/repair depend on a remote system.
+
+## 2026-11-23 source-preparation amendment: dated greetings
+
+The requested Starter holiday capability reuses this campaign owner. A dated
+occurrence constructs a one-time campaign; an optional revision-owned delivery
+deadline is separate from PII and evidence retention. The existing due-work
+admission and final transport gate enforce that deadline and record campaigns
+policy evidence without asserting a kernel unsubscribe or changing past
+delivery observations. Existing unbounded campaigns remain unbounded.
+
+This amendment describes source prepared for review under `0.1.0a1+dev`.
+Campaigns a1 was published (see its CHANGELOG); that supply-chain fact does not
+establish Sub or reference-app adoption. No new scheduler, holiday module,
+SystemJob ledger, country calendar or product authority switch is introduced.
+The remaining assembly UI, audience, timer, transport and cutover duties are
+explicit in [the dated-port inventory](../inventories/dated-holiday-campaigns.md).

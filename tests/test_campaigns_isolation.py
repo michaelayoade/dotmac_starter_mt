@@ -12,6 +12,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
@@ -20,11 +21,14 @@ from dotmac_campaigns import (
     AudienceBatch,
     AudienceCandidate,
     CampaignKind,
+    CampaignNotFound,
     CreateCampaign,
     DeliveryState,
     SequenceBlocked,
     SequenceStep,
     accept_due_work,
+    authorize_delivery,
+    campaign_snapshot,
     create_campaign,
     ingest_audience,
     repair_missing_publications,
@@ -69,7 +73,7 @@ def _url_for(base_url: str, dbname: str, *, user: str | None = None) -> str:
 
 
 @pytest.fixture
-def migrated_scratch() -> Iterator[tuple[str, str]]:
+def migrated_scratch(request: pytest.FixtureRequest) -> Iterator[tuple[str, str]]:
     superuser = _superuser_url()
     name = f"campaigns_rls_{uuid.uuid4().hex[:12]}"
     server = create_engine(superuser, isolation_level="AUTOCOMMIT")
@@ -84,8 +88,9 @@ def migrated_scratch() -> Iterator[tuple[str, str]]:
     setup.dispose()
     admin_url = _url_for(superuser, name, user="app_admin")
     try:
-        from alembic import command
         from alembic.config import Config
+
+        from alembic import command
 
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
@@ -93,7 +98,7 @@ def migrated_scratch() -> Iterator[tuple[str, str]]:
             "version_locations", f"{KERNEL_VERSIONS} {CAMPAIGNS_VERSIONS}"
         )
         os.environ["MIGRATION_DATABASE_URL"] = admin_url
-        command.upgrade(cfg, "heads")
+        command.upgrade(cfg, getattr(request, "param", "heads"))
         yield admin_url, _url_for(superuser, name, user="app_user")
     finally:
         with server.connect() as conn:
@@ -202,6 +207,138 @@ def _seed_campaign(db: Session, tenant_id: uuid.UUID):
         evaluated_at=NOW,
     )
     return campaign
+
+
+def test_dated_deadline_is_tenant_scoped_and_immutable_after_scheduling(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    admin_url, app_url = migrated_scratch
+    tenant, other = _seed_tenants(admin_url)
+    deadline = NOW + timedelta(hours=15)
+    timers = FakeTimerPort()
+    with _tenant_session(app_url, tenant) as db:
+        campaign = create_campaign(
+            db,
+            tenant_id=tenant,
+            command=replace(_command(), delivery_expires_at=deadline),
+            idempotency_key="dated-create",
+            idempotency_expires_at=NOW + timedelta(days=7),
+            recorded_at=NOW,
+        )
+        ingest_audience(
+            db,
+            tenant_id=tenant,
+            campaign_id=campaign.id,
+            batch=_audience(),
+            idempotency_key="dated-audience",
+            idempotency_expires_at=NOW + timedelta(days=7),
+            evaluated_at=NOW,
+        )
+        schedule_campaign(
+            db,
+            tenant_id=tenant,
+            campaign_id=campaign.id,
+            timers=timers,
+            idempotency_key="dated-schedule",
+            idempotency_expires_at=NOW + timedelta(days=7),
+            recorded_at=NOW,
+        )
+        accepted = accept_due_work(
+            db,
+            tenant_id=tenant,
+            trigger=timers.only_current_trigger(),
+            timers=timers,
+            renderer=FakeRenderer(),
+            senders=FakeSenderResolver(),
+            idempotency_key="dated-due",
+            idempotency_expires_at=NOW + timedelta(days=7),
+            accepted_at=NOW,
+        )
+        campaign_id, dispatch_id = campaign.id, accepted.dispatch_id
+        assert dispatch_id is not None
+        assert (
+            campaign_snapshot(
+                db, tenant_id=tenant, campaign_id=campaign_id
+            ).delivery_expires_at
+            == deadline
+        )
+        db.commit()
+    with _tenant_session(app_url, other) as db:
+        with pytest.raises(CampaignNotFound):
+            campaign_snapshot(db, tenant_id=other, campaign_id=campaign_id)
+    with _tenant_session(app_url, tenant) as db:
+        with pytest.raises(DBAPIError, match="campaign snapshot is immutable"):
+            db.execute(
+                text(
+                    "UPDATE mod_campaigns.campaign_revisions SET delivery_expires_at=:later WHERE campaign_id=:id"
+                ),
+                {"later": deadline + timedelta(days=1), "id": campaign_id},
+            )
+        db.rollback()
+    with _tenant_session(app_url, tenant) as db:
+        denied = authorize_delivery(
+            db, tenant_id=tenant, dispatch_id=dispatch_id, evaluated_at=deadline
+        )
+        assert not denied.allowed and denied.reason == "campaign_delivery_expired"
+        db.commit()
+
+
+@pytest.mark.parametrize("migrated_scratch", ["ca_0001_campaigns"], indirect=True)
+def test_deadline_upgrade_preserves_existing_unbounded_revisions(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    from alembic.config import Config
+
+    from alembic import command
+
+    admin_url, app_url = migrated_scratch
+    tenant, _ = _seed_tenants(admin_url)
+    campaign_id, revision_id = uuid.uuid4(), uuid.uuid4()
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_campaigns.campaigns "
+                    "(id,tenant_id,code,name,status,scheduled_at,evidence_expires_at,pii_expires_at) "
+                    "VALUES (:id,:tenant,'legacy','Legacy','draft',:now,:retention,:retention)"
+                ),
+                {
+                    "id": campaign_id,
+                    "tenant": tenant,
+                    "now": NOW,
+                    "retention": NOW + timedelta(days=30),
+                },
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_campaigns.campaign_revisions "
+                    "(id,tenant_id,campaign_id,revision_number,kind,channel,timezone,send_window_start,send_window_end,sender_key) "
+                    "VALUES (:id,:tenant,:campaign,1,'one_time','email','UTC',:clock,:clock,'support')"
+                ),
+                {
+                    "id": revision_id,
+                    "tenant": tenant,
+                    "campaign": campaign_id,
+                    "clock": time.min,
+                },
+            )
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations", f"{KERNEL_VERSIONS} {CAMPAIGNS_VERSIONS}"
+        )
+        command.upgrade(cfg, "heads")
+        with _tenant_session(app_url, tenant) as db:
+            row = db.execute(
+                text(
+                    "SELECT id,delivery_expires_at FROM mod_campaigns.campaign_revisions WHERE id=:id"
+                ),
+                {"id": revision_id},
+            ).one()
+            assert row.id == revision_id and row.delivery_expires_at is None
+    finally:
+        engine.dispose()
 
 
 def test_live_catalog_proves_forced_rls_and_composite_tenant_contract(

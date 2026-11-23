@@ -12,7 +12,7 @@ from dotmac_campaigns.models import TABLES
 
 module = ModuleManifest(
     code="campaigns",
-    version="0.1.0a1",
+    version="0.1.0a1+dev",
     core=False,
     short_code="campaigns",
     migration_prefix="ca",

@@ -12,10 +12,11 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import Enum
 from typing import Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
 
@@ -146,6 +147,7 @@ class CreateCampaign:
     steps: tuple[SequenceStep, ...]
     evidence_expires_at: datetime
     pii_expires_at: datetime
+    delivery_expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "code", _required("code", self.code, 80).lower())
@@ -162,6 +164,12 @@ class CreateCampaign:
         _aware("pii_expires_at", self.pii_expires_at)
         if self.pii_expires_at > self.evidence_expires_at:
             raise ContractError("PII retention cannot outlive campaign evidence")
+        if self.delivery_expires_at is not None:
+            _aware("delivery_expires_at", self.delivery_expires_at)
+            if not self.scheduled_at < self.delivery_expires_at <= self.pii_expires_at:
+                raise ContractError(
+                    "delivery expiry must follow scheduling and fit PII retention"
+                )
         if not self.steps:
             raise ContractError("a campaign requires at least one step")
         expected = list(range(len(self.steps)))
@@ -188,13 +196,92 @@ class CreateCampaign:
             "steps": self.steps,
             "evidence_expires_at": self.evidence_expires_at,
             "pii_expires_at": self.pii_expires_at,
+            "delivery_expires_at": self.delivery_expires_at,
         }
 
     def fingerprint_payload(self) -> dict[str, object]:
         payload = self.as_dict()
         payload["kind"] = self.kind.value
         payload["steps"] = [step.as_dict() for step in self.steps]
+        # Preserve fingerprints admitted before delivery deadlines existed.
+        if self.delivery_expires_at is None:
+            payload.pop("delivery_expires_at")
         return payload
+
+
+def _local_instant(day: date, clock: time, zone: ZoneInfo) -> datetime:
+    wall = datetime.combine(day, clock)
+    first = wall.replace(tzinfo=zone, fold=0)
+    second = wall.replace(tzinfo=zone, fold=1)
+    if (
+        first.astimezone(UTC).astimezone(zone).replace(tzinfo=None) != wall
+        or first.utcoffset() != second.utcoffset()
+    ):
+        raise ContractError("local date/time is nonexistent or ambiguous")
+    return first.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class DatedCampaignOccurrence:
+    """One explicit local day; calendar discovery and recurrence stay outside."""
+
+    local_date: date
+    local_time: time
+    timezone: str
+
+    def __post_init__(self) -> None:
+        if self.local_time.tzinfo is not None:
+            raise ContractError("local_time must be a wall clock without an offset")
+        try:
+            zone = ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ContractError("timezone must name an installed IANA zone") from exc
+        _local_instant(self.local_date, self.local_time, zone)
+        _local_instant(self.local_date + timedelta(days=1), time.min, zone)
+
+    @property
+    def scheduled_at(self) -> datetime:
+        return _local_instant(self.local_date, self.local_time, ZoneInfo(self.timezone))
+
+    @property
+    def delivery_expires_at(self) -> datetime:
+        return _local_instant(
+            self.local_date + timedelta(days=1), time.min, ZoneInfo(self.timezone)
+        )
+
+    def as_campaign(
+        self,
+        *,
+        code: str,
+        name: str,
+        channel: str,
+        template_slug: str,
+        sender_key: str,
+        evidence_expires_at: datetime,
+        pii_expires_at: datetime,
+    ) -> CreateCampaign:
+        return CreateCampaign(
+            code=code,
+            name=name,
+            kind=CampaignKind.ONE_TIME,
+            channel=channel,
+            timezone=self.timezone,
+            scheduled_at=self.scheduled_at,
+            send_window_start=time.min,
+            send_window_end=time.min,
+            sender_key=sender_key,
+            steps=(
+                SequenceStep(
+                    position=0,
+                    delay=timedelta(0),
+                    template_slug=template_slug,
+                    template_channel=channel,
+                ),
+            ),
+            evidence_expires_at=evidence_expires_at,
+            pii_expires_at=pii_expires_at,
+            delivery_expires_at=self.delivery_expires_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +297,7 @@ class ReviseCampaign:
     steps: tuple[SequenceStep, ...]
     evidence_expires_at: datetime
     pii_expires_at: datetime
+    delivery_expires_at: datetime | None = None
 
     def as_create(self, code: str) -> CreateCampaign:
         return CreateCampaign(
@@ -225,6 +313,7 @@ class ReviseCampaign:
             steps=self.steps,
             evidence_expires_at=self.evidence_expires_at,
             pii_expires_at=self.pii_expires_at,
+            delivery_expires_at=self.delivery_expires_at,
         )
 
 
@@ -628,6 +717,7 @@ class ConsentReceiptView:
     allowed: bool
     reason: str | None
     evaluated_at: datetime
+    policy_owner: str = "dotmac_kernel.consent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -675,6 +765,9 @@ class CampaignSnapshot:
     revision_number: int
     counters: CounterView
     recipients: tuple[RecipientView, ...]
+    scheduled_at: datetime | None = None
+    timezone: str | None = None
+    delivery_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -706,6 +799,7 @@ __all__ = [
     "ContractError",
     "CounterView",
     "CreateCampaign",
+    "DatedCampaignOccurrence",
     "DeliveryGateResult",
     "DeliveryIntentView",
     "DeliveryState",
