@@ -543,6 +543,24 @@ def test_the_runner_never_outlasts_the_lease_budget() -> None:
     assert result.timed_out is True  # killed at the lease budget, not at 600 s
 
 
+def test_the_lease_budget_and_the_job_bound_are_a_min_not_either_or() -> None:
+    runner = SubprocessRunner(("/bin/sleep", "30"), timeout_seconds=600)
+    base = {
+        "dispatch_id": "d",
+        "target_ref": "erp/staging/host-a",
+        "product": "erp",
+        "plan_digest": "sha256:" + "0" * 64,
+        "params_env": Path("/nonexistent/params.env"),
+        "agent_config": None,
+    }
+    # A generous deadline-derived bound does not lift the lease budget...
+    tight = RunSpec(**base, job_bound_seconds=600, timeout_seconds=1)  # type: ignore[arg-type]
+    assert runner.run(tight).timed_out is True
+    # ...and a generous lease budget does not lift a tight job bound.
+    bound = RunSpec(**base, job_bound_seconds=1, timeout_seconds=600)  # type: ignore[arg-type]
+    assert runner.run(bound).timed_out is True
+
+
 # -- ruling 4: renewal (S5) and signed replay on a second release (S6) -------------
 
 

@@ -38,7 +38,7 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v2.json"
-PIN = "0fe9c6be1b49af5fb4b9267bce51dfaccc016e83b1c5dd8b2332916f698d834d"
+PIN = "95756ba1d9a1e4c12cafef82ba4fb7e343c29c677772087bec2dd3bbc5374988"
 CONTRACT = json.loads(VENDORED.read_text())
 TYPES = {"str": str, "int": int, "bool": bool}
 
