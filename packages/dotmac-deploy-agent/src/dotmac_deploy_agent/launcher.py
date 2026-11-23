@@ -305,7 +305,13 @@ class Launcher:
             )
             return CycleResult("refused", refusal.code, materials.dispatch_id)
         if standing == EXPIRED_UNRELEASED:
-            return self._reconcile(materials.dispatch_id, standing)
+            # The v2 standing has no "reconciled" value: Control issues the marker
+            # from this read-only observation, and the acquire below is what proves
+            # it (`reconcile_marker_required` stops the run). If the observation
+            # cannot be made, nothing proceeds.
+            reconciled = self._reconcile(materials.dispatch_id, standing)
+            if reconciled.outcome != "reconcile_reported":
+                return reconciled
         if materials.dispatched_job is not None:
             return self._execute_job(materials)
         return self._execute(materials, reply)

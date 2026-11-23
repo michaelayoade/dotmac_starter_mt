@@ -343,14 +343,14 @@ class FakeCp:
         self.tamper_signature = False
         self.omit_signature = False
         self.status_5xx = False
-        self.standing = "CLEAN"
+        self.standing = "free"
         self.lease_log: list[tuple[str, dict[str, object]]] = []
         self.handlers: dict[str, Callable[[dict[str, object]], dict[str, object]]] = {
             "lease/standing": lambda _p: {"standing": self.standing},
             "lease/acquire": self._acquire,
             "lease/covers": lambda p: self._log("lease/covers", p) | {"covers": True},
             "lease/release": lambda p: self._log("lease/release", p)
-            | {"released": True},
+            | {"released": True, "replay": False},
         }
 
     def _log(self, endpoint: str, payload: dict[str, object]) -> dict[str, object]:

@@ -17,7 +17,29 @@ from typing import Final
 from .client import Reply, TargetClient
 from .refusal import Refusal
 
-EXPIRED_UNRELEASED: Final = "EXPIRED_UNRELEASED"
+#: Control `target_api_v2.json` `standing_values`: the ONLY standings CP may report.
+STANDING_VALUES: Final = ("free", "held", "expired_unreleased")
+EXPIRED_UNRELEASED: Final = "expired_unreleased"
+#: `lease_bodies` of the same file: exact key sets and strict types per route.
+_BODIES: Final[dict[str, dict[str, dict[str, type]]]] = {
+    "lease/acquire": {
+        "request": {"dispatch_run": str, "ttl_seconds": int},
+        "response": {"lease_id": str, "ttl_seconds": int},
+    },
+    "lease/covers": {
+        "request": {"dispatch_run": str, "lease_id": str},
+        "response": {"covers": bool},
+    },
+    "lease/release": {
+        "request": {"host_mutated": bool, "lease_id": str},
+        "response": {"released": bool, "replay": bool},
+    },
+    "lease/renew": {
+        "request": {"dispatch_run": str, "lease_id": str},
+        "response": {"lease_id": str, "ttl_seconds": int},
+    },
+    "lease/standing": {"request": {}, "response": {"standing": str}},
+}
 MAX_TTL: Final = 3600
 #: Kept back from the lease for the runner's TERM-to-KILL wait (60 s) and the
 #: release call; the same 120 s a job plan adds to its timeout (lease fit).
@@ -30,6 +52,34 @@ RENEW_REFUSALS: Final = frozenset(
 )
 #: How often the keeper thread looks at the clock; a renew is due every ttl/3.
 POLL_SECONDS: Final = 2.0
+
+
+def check_body(route: str, direction: str, body: object) -> None:
+    """The v2 lease body rules, shared by what the agent sends and what it accepts.
+    Raises `Refusal("response_malformed", <code>)` with one of Control's codes:
+    `unknown_body`, `body_keys`, `body_type`, `body_value`."""
+    shape = _BODIES.get(route, {}).get(direction)
+    if shape is None:
+        raise Refusal("response_malformed", "unknown_body")
+    if not isinstance(body, dict) or set(body) != set(shape):
+        raise Refusal("response_malformed", "body_keys")
+    for key, kind in shape.items():
+        value = body[key]
+        if type(value) is not kind:  # a bool is never an int
+            raise Refusal("response_malformed", "body_type")
+        if kind is str and not value:
+            raise Refusal("response_malformed", "body_value")
+    if "ttl_seconds" in shape and body["ttl_seconds"] <= 0:  # type: ignore[operator]
+        raise Refusal("response_malformed", "body_value")
+    if route == "lease/standing" and direction == "response":
+        if body["standing"] not in STANDING_VALUES:
+            raise Refusal("response_malformed", "body_value")
+
+
+def _answer(reply: Reply, route: str) -> dict[str, object]:
+    document = {k: v for k, v in reply.document.items() if k != "store_now"}
+    check_body(route, "response", document)
+    return document
 
 
 @dataclass(frozen=True)
@@ -150,6 +200,9 @@ class LeaseClient:
         return refusal
 
     def _post(self, endpoint: str, payload: dict[str, object]) -> Reply:
+        check_body(
+            f"lease/{endpoint}", "request", payload
+        )  # what we send is closed too
         try:
             return self._client.call("POST", f"lease/{endpoint}", payload)
         except Refusal as refusal:
@@ -160,10 +213,7 @@ class LeaseClient:
             reply = self._client.call("GET", "lease/standing", None)
         except Refusal as refusal:
             raise self._refuse_as_lease(refusal) from None
-        value = reply.document.get("standing")
-        if not isinstance(value, str) or not value or len(value) > 64:
-            raise Refusal("response_malformed")
-        return value
+        return str(_answer(reply, "lease/standing")["standing"])
 
     def acquire(
         self, *, dispatch_id: str, ttl_seconds: int, max_seconds: int | None = None
@@ -174,27 +224,27 @@ class LeaseClient:
         reply = self._post(
             "acquire", {"dispatch_run": dispatch_id, "ttl_seconds": ttl_seconds}
         )
-        lease_id = reply.document.get("lease_id")
-        granted = reply.document.get("ttl_seconds")
-        if not isinstance(lease_id, str) or not lease_id or len(lease_id) > 128:
+        answer = _answer(reply, "lease/acquire")
+        lease_id, granted = answer["lease_id"], answer["ttl_seconds"]
+        if len(lease_id) > 128:  # type: ignore[arg-type]
             raise Refusal("lease_refused")
         # The plan bound this TTL; CP may not grant a longer one.
-        if type(granted) is not int or not 0 < granted <= ttl_seconds:
+        if not 0 < granted <= ttl_seconds:  # type: ignore[operator]
             # CP holds a lease the plan did not bind: give it straight back.
             try:
-                self.release(Lease(lease_id, ttl_seconds), host_mutated=False)
+                self.release(Lease(lease_id, ttl_seconds), host_mutated=False)  # type: ignore[arg-type]
             except Refusal:
                 pass
             raise Refusal("lease_ttl_invalid")
         # No `lease_max_seconds` means one grant is all the plan allows (job plans).
         total = granted if max_seconds is None else max_seconds
-        return Lease(lease_id, granted, sent + granted, sent, total)
+        return Lease(lease_id, granted, sent + granted, sent, total)  # type: ignore[arg-type]
 
     def covers(self, lease: Lease, *, dispatch_id: str) -> bool:
         reply = self._post(
             "covers", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}
         )
-        return reply.document.get("covers") is True
+        return _answer(reply, "lease/covers")["covers"] is True
 
     def renew(self, lease: Lease, *, dispatch_id: str) -> Lease:
         """`POST lease/renew {lease_id, dispatch_run}` -> `{lease_id, ttl_seconds}`.
@@ -203,11 +253,10 @@ class LeaseClient:
         reply = self._post(
             "renew", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}
         )
-        granted = reply.document.get("ttl_seconds")
+        answer = _answer(reply, "lease/renew")
+        granted = answer["ttl_seconds"]
         if (
-            reply.document.get("lease_id") != lease.lease_id
-            or type(granted) is not int
-            or not 0 < granted <= lease.ttl_seconds
+            answer["lease_id"] != lease.lease_id or granted > lease.ttl_seconds  # type: ignore[operator]
         ):
             raise Refusal("lease_refused", "renew_malformed")
         return Lease(
@@ -239,5 +288,5 @@ class LeaseClient:
         )
         # A second release is a signed 200 replay `{released, replay}`; any 4xx
         # already raised above as a refusal.
-        if reply.document.get("released") is not True:
+        if _answer(reply, "lease/release")["released"] is not True:
             raise Refusal("lease_refused", "release_malformed")

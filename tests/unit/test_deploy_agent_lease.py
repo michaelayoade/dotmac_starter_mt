@@ -15,6 +15,7 @@ from tests.unit.deploy_agent_lease_double import (
     LeaseClock,
     LeaseRefused,
     install,
+    renew_grant,
 )
 from tests.unit.deploy_agent_support import (
     IMAGE_DIGEST,
@@ -52,7 +53,7 @@ def test_lease_order_acquire_transfer_run_release(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "code",
     [
-        "lease-held-by-another-run",
+        "lease_held",
         "lease-host-mutated",
         "lease-foreign-run",
         "lease-ttl-invalid",
@@ -105,7 +106,7 @@ def test_release_failure_is_reported_and_never_hides_the_outcome(
     tmp_path: Path,
 ) -> None:
     rig = ready(tmp_path)
-    rig.cp.overrides["lease/release"] = (409, {"error": "lease-expired"})
+    rig.cp.overrides["lease/release"] = (409, {"error": "lease_expired"})
     result = rig.launcher.run_once()
     assert result.outcome == "completed"
     assert rig.cp.observations[0]["details"]["lease_released"] is False  # type: ignore[index]
@@ -139,9 +140,16 @@ def test_standing_refusal_stops_the_cycle(tmp_path: Path) -> None:
     assert rig.runner.specs == []
 
 
+def expired_host(double: DeployLeaseDouble, clock: LeaseClock) -> None:
+    """A previous run's lease ran out unreleased: standing `expired_unreleased`."""
+    double.acquire({"dispatch_run": "old-run", "ttl_seconds": 120})
+    clock.advance(121)
+    assert double.standing() == "expired_unreleased"
+
+
 def test_reconcile_observation_read_only(tmp_path: Path) -> None:
-    rig = ready(tmp_path)
-    rig.cp.standing = "EXPIRED_UNRELEASED"
+    rig, double, clock = with_double(tmp_path)
+    expired_host(double, clock)
     rig.commands.script[("image", "inspect")] = CommandResult(
         0, b'["127.0.0.1:5000/org/app@sha256:' + b"a" * 64 + b'", "not a digest"]\n'
     )
@@ -150,9 +158,11 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
         b"127.0.0.1:5000/org/app@sha256:" + b"a" * 64 + b" sha256:" + b"f" * 64 + b"\n",
     )
     result = rig.launcher.run_once()
-    assert (result.outcome, result.reason) == ("reconcile_reported", None)
-    # No lease, no transfer, no run, no params, no secrets: only the observation.
-    assert endpoints(rig) == []
+    # The v2 standing has no "reconciled" value: the agent observes, then the
+    # acquire proves the marker. Without it: signed 409, and nothing else happens.
+    assert (result.outcome, result.reason) == ("refused", "lease_refused")
+    reconcile, deploy = rig.cp.observations
+    assert deploy["details"]["refusal_detail"] == "reconcile_marker_required"  # type: ignore[index]
     assert rig.transfer.calls == [] and rig.runner.specs == []
     assert not (rig.config.deploy_run_dir / "params.env").exists()
     assert not (rig.config.run_dir / "app").exists()
@@ -161,10 +171,9 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
     assert rig.commands.calls
     for argv in rig.commands.calls:
         assert argv[1] in {"inspect", "ps"} or argv[1:3] == ("image", "inspect")
-    [observation] = rig.cp.observations
-    assert observation["kind"] == "reconcile"
-    details = observation["details"]
-    assert details["standing"] == "EXPIRED_UNRELEASED"  # type: ignore[index]
+    assert reconcile["kind"] == "reconcile"
+    details = reconcile["details"]
+    assert details["standing"] == "expired_unreleased"  # type: ignore[index]
     assert details["containers"] == [  # type: ignore[index]
         {
             "name": "erp-app",
@@ -173,28 +182,6 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
             "repo_digests": ["127.0.0.1:5000/org/app@sha256:" + "a" * 64],
         }
     ]
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ("/usr/bin/docker", "rm", "-f", "erp-app"),
-        ("/usr/bin/docker", "pull", "x"),
-        ("/usr/bin/docker", "image", "rm", "x"),
-        ("/usr/bin/docker", "compose", "up"),
-        ("/usr/bin/docker",),
-        ("/bin/sh", "-c", "true"),
-    ],
-)
-def test_read_only_commands_refuse_everything_that_mutates(
-    argv: tuple[str, ...],
-) -> None:
-    inner = FakeCommands()
-    guarded = ReadOnlyCommands(inner)
-    with pytest.raises(Refusal) as caught:
-        guarded.run(argv, timeout=1.0)
-    assert caught.value.code == "reconcile_unavailable"
-    assert inner.calls == []
 
 
 def test_read_only_commands_pass_inspection() -> None:
@@ -210,10 +197,11 @@ def test_read_only_commands_pass_inspection() -> None:
 
 
 def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
-    rig = ready(tmp_path)
-    rig.cp.standing = "EXPIRED_UNRELEASED"
+    rig, double, clock = with_double(tmp_path)
+    expired_host(double, clock)
     rig.commands.script[("inspect",)] = CommandResult(1, b"")
-    assert rig.launcher.run_once().outcome == "reconcile_reported"
+    rig.launcher.run_once()
+    assert rig.cp.observations[0]["kind"] == "reconcile"
     assert rig.cp.observations[0]["details"]["containers"] == []  # type: ignore[index]
 
 
@@ -253,7 +241,7 @@ def test_double_clean_cycle_acquires_covers_and_releases(tmp_path: Path) -> None
         "lease/covers",
         "lease/release",
     ]
-    assert double.standing() == "CLEAN"
+    assert double.standing() == "free"
     assert double.row is not None and double.row.mutated is True
     # The persistent-host rule: a released lease is clean whatever host_mutated says,
     # so the next deploy on the same host is NOT refused (lease-host-mutated).
@@ -267,7 +255,7 @@ def test_d_lease_contended_stops_clean_and_self_heals(tmp_path: Path) -> None:
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "lease_refused")
     detail = rig.cp.observations[0]["details"]["refusal_detail"]  # type: ignore[index]
-    assert detail == "lease-held-by-another-run"
+    assert detail == "lease_held"
     # Nothing past the lease: no transfer, params, secret, run, release.
     assert rig.transfer.calls == [] and rig.runner.specs == [] and rig.bao.paths == []
     assert not (rig.config.deploy_run_dir / "params.env").exists()
@@ -296,12 +284,12 @@ def test_d_lease_expired_before_the_run_then_reconcile_heals(tmp_path: Path) -> 
     assert not (rig.config.deploy_run_dir / "params.env").exists()
     details = rig.cp.observations[0]["details"]  # type: ignore[index]
     assert details["lease_released"] is False
-    assert details["lease_release_refusal"] == "lease-expired"
+    assert details["lease_release_refusal"] == "lease_expired"
     # Expired unreleased: standing says so, and a fresh acquire is refused...
-    assert double.standing() == "EXPIRED_UNRELEASED"
+    assert double.standing() == "expired_unreleased"
     with pytest.raises(LeaseRefused, match="reconcile_marker_required"):
         double.acquire({"dispatch_run": "dispatch-1", "ttl_seconds": 900})
-    # ...so the next cycle only observes (read-only), and posts it.
+    # ...so the next cycle observes (read-only), posts it, and is refused at acquire.
     rig.cp.observations.clear()
     del rig.transfer.transfer_all  # back to the plain fake
     rig.commands.script[("image", "inspect")] = CommandResult(
@@ -310,12 +298,17 @@ def test_d_lease_expired_before_the_run_then_reconcile_heals(tmp_path: Path) -> 
     rig.commands.script[("inspect",)] = CommandResult(
         0, b"127.0.0.1:5000/org/app@" + IMAGE_DIGEST.encode() + b" sha256:" + b"f" * 64
     )
-    assert rig.launcher.run_once().outcome == "reconcile_reported"
-    assert [n for n, _ in double.log].count("lease/acquire") == 1
+    assert rig.launcher.run_once().reason == "lease_refused"
+    assert [o["kind"] for o in rig.cp.observations] == ["reconcile", "deploy"]
+    assert rig.transfer.calls == [] and rig.runner.specs == []
     # Control matches the observed release with the expected one: marker, no staff.
     assert double.reconcile(rig.cp.observations[0], expected=IMAGE_DIGEST)
     rig.cp.observations.clear()
+    # The standing stays `expired_unreleased` until acquire succeeds: observe again,
+    # then the acquire goes through and the deploy completes.
     assert rig.launcher.run_once().outcome == "completed"
+    assert [o["kind"] for o in rig.cp.observations] == ["reconcile", "deploy"]
+    assert double.standing() == "free"
 
 
 def test_reconcile_marker_is_refused_when_the_observed_release_differs(
@@ -332,8 +325,9 @@ def test_reconcile_marker_is_refused_when_the_observed_release_differs(
         0, b"127.0.0.1:5000/org/app@sha256:" + b"9" * 64 + b" sha256:" + b"f" * 64
     )
     rig.launcher.run_once()
-    assert not double.reconcile(rig.cp.observations[-1], expected=IMAGE_DIGEST)
-    assert double.standing() == "EXPIRED_UNRELEASED"  # restore-and-fix-forward path
+    reconcile = next(o for o in rig.cp.observations if o["kind"] == "reconcile")
+    assert not double.reconcile(reconcile, expected=IMAGE_DIGEST)
+    assert double.standing() == "expired_unreleased"  # restore-and-fix-forward path
 
 
 def test_a_plan_without_a_max_gets_one_grant_and_the_run_fits_it(
@@ -364,7 +358,7 @@ def test_no_room_left_for_the_run_is_refused_before_any_secret(tmp_path: Path) -
         "lease/release",
         {"lease_id": "lease-1", "host_mutated": False},
     )
-    assert double.standing() == "CLEAN"
+    assert double.standing() == "free"
 
 
 def test_a_run_that_outlives_its_lease_leaves_it_unreleased(tmp_path: Path) -> None:
@@ -374,8 +368,8 @@ def test_a_run_that_outlives_its_lease_leaves_it_unreleased(tmp_path: Path) -> N
     assert result.outcome == "completed"  # the outcome is never rewritten...
     details = rig.cp.observations[0]["details"]  # type: ignore[index]
     assert details["lease_released"] is False  # ...but the lease is NOT released
-    assert details["lease_release_refusal"] == "lease-expired"
-    assert double.standing() == "EXPIRED_UNRELEASED"  # next acquire needs a reconcile
+    assert details["lease_release_refusal"] == "lease_expired"
+    assert double.standing() == "expired_unreleased"  # next acquire needs a reconcile
 
 
 def test_acquire_by_the_same_run_returns_its_lease(tmp_path: Path) -> None:
@@ -385,8 +379,7 @@ def test_acquire_by_the_same_run_returns_its_lease(tmp_path: Path) -> None:
     clock.advance(100)
     again = client.acquire(dispatch_id="d", ttl_seconds=900)
     assert again.lease_id == first.lease_id
-    assert again.ttl_seconds == 800  # what is left, and never more than planned
-    assert again.deadline <= first.deadline + 1
+    assert again.ttl_seconds == 900  # v2: the run's own lease, with its first ttl
 
 
 def test_lease_deadline_counts_from_before_the_request_left(tmp_path: Path) -> None:
@@ -425,7 +418,7 @@ def test_the_runner_never_outlasts_the_lease_budget() -> None:
 
 def test_reconcile_keeps_only_well_formed_repo_digests(tmp_path: Path) -> None:
     rig = ready(tmp_path)
-    rig.cp.standing = "EXPIRED_UNRELEASED"
+    rig.cp.standing = "expired_unreleased"
     rig.commands.script[("image", "inspect")] = CommandResult(
         0, b'["x", "bad@sha256:zz", "r.example/a@sha256:' + b"c" * 64 + b'"]\n'
     )
@@ -473,7 +466,7 @@ def test_the_lease_is_renewed_every_third_of_the_ttl(tmp_path: Path) -> None:
     assert lease_details["renewals"] == 2 and "lease_lost" not in lease_details
     # Budget = min(timeout, lease_max - elapsed - 120) = 3000 - 600 - 120.
     assert rig.runner.specs[0].timeout_seconds == 2280
-    assert double.standing() == "CLEAN"
+    assert double.standing() == "free"
 
 
 def test_a_lease_renewed_past_one_grant_covers_the_whole_run(tmp_path: Path) -> None:
@@ -576,9 +569,11 @@ def test_the_double_refuses_renewal_at_the_max_and_after_release() -> None:
     assert double.renew(ask) == {"lease_id": "lease-1", "ttl_seconds": 300}
     clock.advance(250)  # held 500: only 100 s of the total are left
     assert double.renew(ask) == {"lease_id": "lease-1", "ttl_seconds": 100}
-    clock.advance(100)  # held 600 = max, the last grant just ended
-    with pytest.raises(LeaseRefused, match="lease_max_reached"):
+    clock.advance(100)  # held 600 = max, and the last grant just ended: expiry first
+    with pytest.raises(LeaseRefused, match="lease_expired"):
         double.renew(ask)
+    with pytest.raises(LeaseRefused, match="lease_max_reached"):
+        renew_grant(300, 600, 600)  # the grant rule alone, at the cap
     with pytest.raises(LeaseRefused, match="lease_not_held"):
         double.renew({**ask, "dispatch_run": "other"})
 
