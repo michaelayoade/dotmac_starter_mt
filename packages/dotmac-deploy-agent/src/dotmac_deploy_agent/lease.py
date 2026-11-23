@@ -20,8 +20,10 @@ from .refusal import Refusal
 #: Control `target_api_v2.json` `standing_values`: the ONLY standings CP may report.
 STANDING_VALUES: Final = ("free", "held", "expired_unreleased")
 EXPIRED_UNRELEASED: Final = "expired_unreleased"
+#: A string or null, always present (Control's "optstr").
+OPTSTR: Final = "optstr"
 #: `lease_bodies` of the same file: exact key sets and strict types per route.
-_BODIES: Final[dict[str, dict[str, dict[str, type]]]] = {
+_BODIES: Final[dict[str, dict[str, dict[str, object]]]] = {
     "lease/acquire": {
         "request": {"dispatch_run": str, "ttl_seconds": int},
         "response": {"lease_id": str, "ttl_seconds": int},
@@ -38,7 +40,11 @@ _BODIES: Final[dict[str, dict[str, dict[str, type]]]] = {
         "request": {"dispatch_run": str, "lease_id": str},
         "response": {"lease_id": str, "ttl_seconds": int},
     },
-    "lease/standing": {"request": {}, "response": {"standing": str}},
+    # `dispatch_run`: the dispatch of an expired, unreleased lease row, else null.
+    "lease/standing": {
+        "request": {},
+        "response": {"dispatch_run": OPTSTR, "standing": str},
+    },
 }
 MAX_TTL: Final = 3600
 #: Kept back from the lease for the runner's TERM-to-KILL wait (60 s) and the
@@ -65,6 +71,12 @@ def check_body(route: str, direction: str, body: object) -> None:
         raise Refusal("response_malformed", "body_keys")
     for key, kind in shape.items():
         value = body[key]
+        if kind == OPTSTR:
+            if value is not None and type(value) is not str:
+                raise Refusal("response_malformed", "body_type")
+            if value == "":
+                raise Refusal("response_malformed", "body_value")
+            continue
         if type(value) is not kind:  # a bool is never an int
             raise Refusal("response_malformed", "body_type")
         if kind is str and not value:
@@ -215,18 +227,7 @@ class LeaseClient:
             reply = self._client.call("GET", "lease/standing", None)
         except Refusal as refusal:
             raise self._refuse_as_lease(refusal) from None
-        # CP names the expired lease's dispatch (`dispatch_run`) next to an
-        # `expired_unreleased` standing; the reconcile reads it from its own call.
-        # It is not in Control's v2 standing body yet (open question), so it is
-        # tolerated here for that one standing and for no other key.
-        document = dict(reply.document)
-        if document.get("standing") == EXPIRED_UNRELEASED:
-            document.pop("dispatch_run", None)
-        return str(
-            _answer(Reply(reply.status, document, reply.store_now), "lease/standing")[
-                "standing"
-            ]
-        )
+        return str(_answer(reply, "lease/standing")["standing"])
 
     def acquire(
         self, *, dispatch_id: str, ttl_seconds: int, max_seconds: int | None = None

@@ -2,9 +2,8 @@
 `contract/target_api_v2.json` (lease section: bodies, scenarios, renew grants).
 
 The file is vendored byte-identical under `src/dotmac_deploy_agent/contract/` and
-its sha256 pinned. The pin is PROVISIONAL (Control CI pending, 5c6cbcb); when the
-#1143 builder vendors the file, the same bytes arrive there and this pin moves
-with theirs.
+its sha256 pinned. The bytes are the ones #1143 vendored (Control be74634); this
+pin and theirs move together when Control regenerates.
 """
 
 from __future__ import annotations
@@ -39,7 +38,7 @@ SOURCE = (
     / "packages/dotmac-deploy-agent/src/dotmac_deploy_agent"
 )
 VENDORED = SOURCE / "contract/target_api_v2.json"
-PIN = "6d3f0b1b536c8a9a2306cc72e2a3c6dea83d4d6604c3499f5c7f8a9eaf54d382"
+PIN = "0fe9c6be1b49af5fb4b9267bce51dfaccc016e83b1c5dd8b2332916f698d834d"
 CONTRACT = json.loads(VENDORED.read_text())
 TYPES = {"str": str, "int": int, "bool": bool}
 
@@ -58,7 +57,9 @@ def test_constants_equal_the_agents() -> None:
     assert constants["endpoints_added"] == [["POST", "lease/renew", "agent"]]
     assert {
         route: {
-            direction: {k: v.__name__ for k, v in shape.items()}
+            direction: {
+                k: v if isinstance(v, str) else v.__name__ for k, v in shape.items()
+            }
             for direction, shape in bodies.items()
         }
         for route, bodies in _BODIES.items()
@@ -111,8 +112,7 @@ def test_lease_scenarios_replay_through_the_signed_wire(
     rig = make_rig(tmp_path)
     clock = LeaseClock()
     double = DeployLeaseDouble(clock)
-    double.marker_always_required = True  # the scenarios always name a marker
-    double.names_expired_dispatch = False  # v2's standing body is {standing} only
+    double.padded_ids = True  # the scenarios name `lease-0001`, `lease-0002`
     install(rig, double, clock)
     client = rig.launcher.client
     base = clock.t
@@ -121,7 +121,7 @@ def test_lease_scenarios_replay_through_the_signed_wire(
         args = dict(step["args"])
         if step["call"] == "acquire":
             double.max_seconds = args.pop("lease_max_seconds")
-            double.marker = args.pop("reconcile_marker")
+            double.marker = args.pop("marker_present")
         route = f"lease/{step['call']}"
         method = "GET" if step["call"] == "standing" else "POST"
         payload = None if method == "GET" else args

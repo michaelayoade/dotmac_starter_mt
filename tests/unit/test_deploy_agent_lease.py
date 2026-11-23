@@ -255,7 +255,11 @@ def test_a_standing_that_does_not_name_the_expired_dispatch_refuses(
     tmp_path: Path,
 ) -> None:
     rig, double, _ = expired_rig(tmp_path)
-    double.names_expired_dispatch = False  # an old Control that does not name it
+    # An expired standing that names no dispatch (null) cannot be reconciled.
+    rig.cp.handlers["lease/standing"] = lambda _p: {
+        "standing": "expired_unreleased",
+        "dispatch_run": None,
+    }
     assert rig.launcher.run_once().outcome == "refused"
     [observation] = rig.cp.observations
     assert (observation["dispatch_id"], observation["reason"]) == (
@@ -479,14 +483,13 @@ def test_acquire_by_the_same_run_returns_its_lease(tmp_path: Path) -> None:
     clock.advance(100)
     again = client.acquire(dispatch_id="d", ttl_seconds=900)
     assert again.lease_id == first.lease_id
-    assert again.ttl_seconds == 900  # v2 vector: the run's own lease, first ttl
+    assert again.ttl_seconds == 800  # v2: the REMAINING ttl of the run's own lease
 
 
 def test_a_replayed_acquire_counts_its_deadline_from_the_ttl_returned(
     tmp_path: Path,
 ) -> None:
     rig, double, clock = with_double(tmp_path)
-    double.replay_returns_remaining = True  # the architect's r4 reading
     client = rig.launcher.lease
     first = client.acquire(dispatch_id="d", ttl_seconds=900, max_seconds=3000)
     clock.advance(400)

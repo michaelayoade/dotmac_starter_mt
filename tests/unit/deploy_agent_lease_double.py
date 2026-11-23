@@ -22,10 +22,9 @@ Bodies, standing values and error codes are Control's. The vectors in
 Time is injected: `LeaseClock` is the one clock the agent's lease budget and this
 store share.
 
-Marker rule (open question): the v2 scenario "acquire without the reconcile marker
-is a signed 409" has no prior expired lease, so the harness reads as "a marker is
-always required". `marker_always_required` models that for the replay; by default
-the marker is needed only after an expired, unreleased lease.
+Marker rule (settled in v2): a marker is required only when the target's latest
+lease row is expired_unreleased; a never-leased or cleanly released host acquires
+without one.
 """
 
 from __future__ import annotations
@@ -87,15 +86,9 @@ class DeployLeaseDouble:
         self.max_seconds = max_seconds
         self.row: _Row | None = None
         self.marker = False
-        self.marker_always_required = False
         self.rehearsal_live = False  # the other class holds the shared row
-        #: A same-run acquire returns what is LEFT of the lease (the architect's r4
-        #: reading) instead of its first ttl (what Control's v2 scenario shows today).
-        self.replay_returns_remaining = False
-        #: #1143's reconcile reads `dispatch_run` from the standing of an expired
-        #: lease. Control's v2 standing body does not carry it (open question), so
-        #: the contract replay turns this off.
-        self.names_expired_dispatch = True
+        #: Control's replay scenario ids are zero-padded (`lease-0001`).
+        self.padded_ids = False
         self.counter = 0
         self.log: list[tuple[str, dict[str, object]]] = []
 
@@ -113,16 +106,13 @@ class DeployLeaseDouble:
         return "free"
 
     def _standing_body(self, _payload: dict[str, object]) -> dict[str, object]:
-        body: dict[str, object] = {"standing": self.standing()}
-        if (
-            self.names_expired_dispatch
-            and self.standing() == "expired_unreleased"
-            and self.row is not None
-        ):
-            # CP names the expired lease's dispatch (used by the reconcile); not in
-            # Control's v2 standing body yet.
-            body["dispatch_run"] = self.row.run
-        return body
+        """`{standing, dispatch_run}`; the dispatch is named only for an expired,
+        unreleased lease and is null otherwise."""
+        expired = self.standing() == "expired_unreleased" and self.row is not None
+        return {
+            "standing": self.standing(),
+            "dispatch_run": self.row.run if expired and self.row else None,
+        }
 
     # -- endpoints ---------------------------------------------------------
     def handlers(self) -> dict[str, Callable[[dict[str, object]], dict[str, object]]]:
@@ -147,19 +137,18 @@ class DeployLeaseDouble:
         if row is not None and self._live():
             if row.run != run:
                 raise LeaseRefused(409, HELD)
-            # The same run: its own lease. v2 vector: its first ttl; r4: what is left.
+            # The same run: its own lease, with what is LEFT of it (v2 scenario).
             left = max(1, int(row.expires_at - self.clock.t))
-            return {
-                "lease_id": row.lease_id,
-                "ttl_seconds": left if self.replay_returns_remaining else row.ttl,
-            }
+            return {"lease_id": row.lease_id, "ttl_seconds": left}
+        # A marker is needed ONLY when the latest lease row expired unreleased: a
+        # never-leased host and a cleanly released one acquire without it.
         expired_unreleased = row is not None and not row.released
-        if (expired_unreleased or self.marker_always_required) and not self.marker:
+        if expired_unreleased and not self.marker:
             raise LeaseRefused(409, MARKER_REQUIRED)
         self.counter += 1
         self.marker = False
         total = ttl if self.max_seconds is None else self.max_seconds
-        number = f"{self.counter:04d}" if self.marker_always_required else self.counter
+        number = f"{self.counter:04d}" if self.padded_ids else self.counter
         self.row = _Row(
             f"lease-{number}", run, ttl, total, self.clock.t, self.clock.t + ttl
         )

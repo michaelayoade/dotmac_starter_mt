@@ -350,8 +350,10 @@ class FakeCp:
         self.expired_run: str | None = None  # CP's lease row, once expired
         self.lease_log: list[tuple[str, dict[str, object]]] = []
         self.handlers: dict[str, Callable[[dict[str, object]], dict[str, object]]] = {
-            "lease/standing": lambda _p: {"standing": self.standing}
-            | ({"dispatch_run": self.expired_run} if self.expired_run else {}),
+            "lease/standing": lambda _p: {
+                "standing": self.standing,
+                "dispatch_run": self.expired_run,  # null unless expired_unreleased
+            },
             "lease/acquire": self._acquire,
             "lease/covers": lambda p: self._log("lease/covers", p) | {"covers": True},
             "lease/release": lambda p: self._log("lease/release", p)
