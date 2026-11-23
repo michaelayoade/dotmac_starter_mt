@@ -178,7 +178,8 @@ class AgentConfig:
 
     @property
     def deploy_run_dir(self) -> Path:
-        """`/run/dotmac/<product>/deploy`: params.env and the legacy copy live here."""
+        """`<runtime_root>/<product>/deploy` (the agent's own RuntimeDirectory, never
+        `/run/dotmac`): params.env, the legacy copy and the capture file live here."""
         return self.run_dir / "deploy"
 
     @property

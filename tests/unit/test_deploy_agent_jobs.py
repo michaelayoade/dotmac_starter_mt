@@ -2097,3 +2097,36 @@ def test_fh_a_failing_job_with_no_receipt_is_flagged_not_reclassified(
         receipt(rig)["foundation_receipt"] == "missing"
         and receipt(rig)["exit_code"] == 3
     )
+
+
+def test_fh_an_oversized_capture_is_flagged_and_only_the_tail_is_read(
+    tmp_path: Path,
+) -> None:
+    from dotmac_deploy_agent.runner import MAX_CAPTURE_BYTES
+
+    script = (
+        f"yes x | head -c {MAX_CAPTURE_BYTES + 4096}; " "echo; echo '{\"ok\": true}'"
+    )
+    result = real_receipt(tmp_path, script)
+    assert result.exit_code == 0
+    assert result.receipt is None and result.receipt_error == "oversized"
+
+
+def test_fh_an_oversized_capture_makes_a_clean_exit_job_receipt_invalid(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.runner.receipt = None
+    rig.runner.receipt_error = "oversized"
+    assert refused(rig) == ("failed", "job_receipt_invalid")
+    assert receipt(rig)["foundation_receipt"] == "oversized"
+
+
+def test_fh_the_capture_file_lives_in_the_agents_own_run_directory(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    run = rig.config.deploy_run_dir
+    assert str(run).startswith(str(rig.config.runtime_root))  # its RuntimeDirectory
+    assert not str(run).startswith(str(rig.config.secrets_root))  # never /run/dotmac
+    assert list(run.iterdir()) == []  # the anonymous file leaves no name behind

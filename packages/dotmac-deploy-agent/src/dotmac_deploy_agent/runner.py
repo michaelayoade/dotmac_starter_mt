@@ -55,6 +55,10 @@ class RunSpec:
 #: keeps at most this many trailing bytes (the job's own stdio is DEVNULL inside
 #: Foundation, so no job output is mixed in).
 MAX_RECEIPT_BYTES: Final = 64 * 1024
+#: Foundation's stdout is small. A capture larger than this is flagged `oversized`
+#: (a clean exit then fails as `job_receipt_invalid`) but is never limited while the
+#: job runs: RLIMIT_FSIZE would raise SIGXFSZ and could kill Foundation mid-cleanup.
+MAX_CAPTURE_BYTES: Final = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -158,7 +162,8 @@ class SubprocessRunner:
             raise Refusal("foundation_job_entry_unavailable")
         capture: int | None = None
         if spec.job_name is not None:
-            # An anonymous file (opened, then unlinked) rather than a pipe: nothing
+            # An anonymous file (opened, then unlinked) in the agent's own run
+            # directory (its RuntimeDirectory, never /run/dotmac), not a pipe: nothing
             # has to drain it while the job runs, and only the TAIL is ever read.
             path = spec.params_env.parent / f".foundation-stdout-{os.getpid()}"
             try:
@@ -211,6 +216,8 @@ class SubprocessRunner:
                 capture, MAX_RECEIPT_BYTES, max(0, size - MAX_RECEIPT_BYTES)
             )
             receipt, error = parse_receipt(tail)
+            if size > MAX_CAPTURE_BYTES:
+                receipt, error = None, "oversized"  # only the tail was read
             return RunResult(result.exit_code, result.timed_out, receipt, error)
         finally:
             if capture is not None:
