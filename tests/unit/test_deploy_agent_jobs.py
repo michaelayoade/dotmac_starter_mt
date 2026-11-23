@@ -400,7 +400,7 @@ def test_the_job_kit_keeps_secrets_0700_and_verifies_inside_the_render_unit() ->
     )
     assert "ExecStart=/usr/bin/false" in purge  # an unenrolled role purges nothing
     dropin = (KIT / "enrolment/systemd/secrets-purge.conf.template").read_text()
-    assert "-mindepth 1 -maxdepth 1 -type f -delete" in dropin
+    assert "-maxdepth 1 ! -type d -delete" in dropin
     assert "User=@OWNER_USER@" in dropin  # the owning uid (F26)
     assert not (KIT / "enrolment/systemd/dotmac-job-purge@.service").exists()
     render = (KIT / "enrolment/systemd/job-render.conf.template").read_text()
@@ -1455,3 +1455,78 @@ def test_the_polkit_start_list_is_exact_names_only_no_wildcard() -> None:
     ):
         assert wild not in code, wild
     assert code.count('enrolledJobs.indexOf(action.lookup("unit")) !== -1') == 1
+
+
+def test_the_agent_s12_is_compact_json_and_never_the_spaced_form() -> None:
+    import hashlib
+
+    from dotmac_deploy_agent.openbao_config import material_set_id
+
+    names = ["legacy_database_url", "migration_database_url"]
+    spaced = hashlib.sha256(json.dumps(names).encode()).hexdigest()[
+        :12
+    ]  # ", " separators
+    assert spaced == "a50fd593917c"
+    produced = material_set_id(("LEGACY_DATABASE_URL", "MIGRATION_DATABASE_URL"))
+    assert produced == "0dcc661ea25f" and produced != spaced
+
+
+def test_a_purge_instance_without_its_dropin_fails_closed() -> None:
+    base = (KIT / "enrolment/systemd/dotmac-secrets-purge@.service").read_text()
+    live = [
+        ln.strip() for ln in base.splitlines() if ln.strip() and not ln.startswith("#")
+    ]
+    assert [ln for ln in live if ln.startswith("ExecStart")] == [
+        "ExecStart=/usr/bin/false"
+    ]
+    assert "User=dotmac-secrets-unenrolled" in live  # a user that does not exist
+    assert not any(
+        "find" in ln or "-delete" in ln or "ReadWritePaths" in ln for ln in live
+    )
+
+
+def purge_argv(secrets: Path) -> list[str]:
+    dropin = (KIT / "enrolment/systemd/secrets-purge.conf.template").read_text()
+    line = next(
+        ln for ln in dropin.splitlines() if ln.startswith("ExecStart=/usr/bin/find")
+    )
+    path = "/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets"
+    return [
+        "find",
+        *line.removeprefix("ExecStart=/usr/bin/find ")
+        .replace(path, str(secrets))
+        .split(),
+    ]
+
+
+def test_the_purge_find_does_not_follow_symlinks_or_leave_the_filesystem() -> None:
+    argv = purge_argv(Path("/x"))
+    assert (
+        argv[1] == "-P" and "-xdev" in argv and argv[argv.index("-maxdepth") + 1] == "1"
+    )
+    assert (
+        argv[-4:] == ["!", "-type", "d", "-delete"]
+        and "-L" not in argv
+        and "-H" not in argv
+    )
+
+
+def test_the_purge_find_removes_a_link_as_a_link_and_leaves_its_target(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_text("precious")
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "a_url").write_text("x")
+    (secrets / "link").symlink_to(outside)  # a link to a DIRECTORY outside
+    (secrets / "flink").symlink_to(outside / "keep")  # a link to a file outside
+    (secrets / "sub").mkdir()
+    (secrets / "sub" / "inner").write_text("y")
+    subprocess.run(purge_argv(secrets), check=True)  # noqa: S603
+    assert sorted(p.name for p in secrets.iterdir()) == ["sub"]  # files and links gone
+    assert (outside / "keep").read_text() == "precious"  # nothing followed
+    assert (secrets / "sub" / "inner").exists()  # no recursion
