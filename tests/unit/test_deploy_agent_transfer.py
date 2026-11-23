@@ -104,6 +104,10 @@ def setup(
         skopeo_sha256=sha256_hex(b"skopeo"),
         skopeo_policy=tmp_path / "policy.json",
     )
+    (tmp_path / "policy.json").write_text("{}")
+    (tmp_path / "policy.json").chmod(0o644)
+    registry.chmod(0o755)
+    skopeo.chmod(0o755)
     config.run_dir.mkdir(mode=0o700)
     config.inbox_dir.mkdir(mode=0o700)
     archive = config.inbox_dir / ARCHIVE
@@ -134,6 +138,7 @@ def setup(
         manifest_probe=manifest_probe,
         monotonic=lambda: clock[0],
         sleep=lambda _s: None,
+        root_uid=os.geteuid(),
     )
     image = ImageSpec(
         "app", "transfer", "registry.example.invalid/org/app", DIGEST,
@@ -402,3 +407,28 @@ def test_app_image_must_be_a_planned_image_exactly(tmp_path: Path) -> None:
     )
     assert rig.transfer.calls == [] and rig.runner.specs == []
     assert not rig.cp.lease_log  # no lease was taken for an unbound image
+
+
+def test_binaries_and_the_policy_must_be_root_owned_and_not_group_or_world_writable(
+    tmp_path: Path,
+) -> None:
+    """L4: a hash pin alone leaves a window between hash and exec."""
+    for name, victim in (
+        ("registry", lambda s: s.config.registry_binary),
+        ("skopeo", lambda s: s.config.skopeo_path),
+        ("policy", lambda s: s.config.skopeo_policy),
+    ):
+        s = setup(tmp_path / name)
+        victim(s).chmod(0o775)  # group-writable
+        with pytest.raises(Refusal) as caught:
+            s.transfer.transfer_all((s.image,), ttl_seconds=900)
+        assert caught.value.code == "transfer_binary_unpinned", name
+        assert s.launcher.started == []
+    s = setup(tmp_path / "owner")
+    other = ImageTransfer(
+        s.config, s.commands, s.launcher, root_uid=os.geteuid() + 1,
+        manifest_probe=lambda *_a: DIGEST,
+    )  # fmt: skip
+    with pytest.raises(Refusal) as owner:
+        other.transfer_all((s.image,), ttl_seconds=900)
+    assert owner.value.code == "transfer_binary_unpinned"

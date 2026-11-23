@@ -145,7 +145,23 @@ def loopback_manifest_digest(port: int, path: str, digest: str) -> str | None:
         connection.close()
 
 
-def pinned(path: Path, expected_sha256: str) -> None:
+def root_owned(path: Path, required_uid: int) -> None:
+    """Hash-pinning alone leaves a window between hash and exec: the file (and the
+    skopeo policy) must also be owned by root and not writable by group or others."""
+    try:
+        info = path.lstat()
+    except OSError:
+        raise Refusal("transfer_binary_unpinned") from None
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != required_uid
+        or info.st_mode & 0o022
+    ):
+        raise Refusal("transfer_binary_unpinned")
+
+
+def pinned(path: Path, expected_sha256: str, *, required_uid: int = 0) -> None:
+    root_owned(path, required_uid)
     try:
         content = read_regular(path, limit=512 * 1024 * 1024)
     except Refusal:
@@ -167,6 +183,7 @@ class ImageTransfer:
         ] = loopback_manifest_digest,
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        root_uid: int = 0,
     ) -> None:
         self._config = config
         self._commands = commands
@@ -175,6 +192,7 @@ class ImageTransfer:
         self._manifest_probe = manifest_probe
         self._monotonic = monotonic
         self._sleep = sleep
+        self._root_uid = root_uid
 
     # -- public ------------------------------------------------------------
     def transfer_all(
@@ -221,8 +239,14 @@ class ImageTransfer:
 
     def _transfer(self, image: ImageSpec, deadline: float) -> TransferResult:
         port, planned_path, archive = self._validate(image)
-        pinned(self._config.registry_binary, self._config.registry_binary_sha256)
-        pinned(self._config.skopeo_path, self._config.skopeo_sha256)
+        uid = self._root_uid
+        pinned(
+            self._config.registry_binary,
+            self._config.registry_binary_sha256,
+            required_uid=uid,
+        )
+        pinned(self._config.skopeo_path, self._config.skopeo_sha256, required_uid=uid)
+        root_owned(self._config.skopeo_policy, uid)
         reference = f"{LOOPBACK}:{port}/{planned_path}@{image.planned_digest}"
         media_type = self._inspect_archive(image, archive, deadline)
 

@@ -340,6 +340,7 @@ def parse_materials(
         config=config,
         identity=identity,
         store_now=store_now,
+        max_age_seconds=config.dispatch_max_age_seconds,
     )
     if document["dispatch_id"] != verified.dispatch_id:
         raise Refusal("materials_invalid")
@@ -352,10 +353,23 @@ def parse_materials(
     roles = plan_roles(snapshot)
     secrets_namespace = binding.get("secrets_namespace")
     secrets_environment = binding.get("secrets_environment")
-    if roles or secrets_namespace is not None or secrets_environment is not None:
-        for value in (secrets_namespace, secrets_environment):
-            if not isinstance(value, str) or not _SEGMENT.fullmatch(value):
-                raise Refusal("materials_invalid", "bad_secrets_name")
+    for value in (secrets_namespace, secrets_environment):
+        # Control emits a namespace with a NULL namespace-env when no role is
+        # bound; a value that is present must be a segment.
+        if value is not None and not (
+            isinstance(value, str) and _SEGMENT.fullmatch(value)
+        ):
+            raise Refusal("materials_invalid", "bad_secrets_name")
+    if roles:
+        # Roles mean secret_ids: the naming is then required, and it must be the
+        # one pinned in the root-owned config (the plan stays the source).
+        if secrets_namespace is None or secrets_environment is None:
+            raise Refusal("materials_invalid", "bad_secrets_name")
+        if (secrets_namespace, secrets_environment) != (
+            config.secrets_namespace,
+            config.secrets_environment,
+        ):
+            raise Refusal("secrets_naming_mismatch")
     return Materials(
         dispatch_id=verified.dispatch_id,
         plan_digest=verified.plan_digest,

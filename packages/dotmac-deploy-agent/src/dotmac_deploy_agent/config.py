@@ -26,6 +26,7 @@ DB_ENV_EXACT: Final = frozenset(
 _ID: Final = re.compile(r"[a-z0-9][a-z0-9_.-]{0,62}")
 # Control's target-ref grammar: three lowercase segments (target_api_v1 `paths`).
 _SEG = r"([a-z0-9][a-z0-9._-]{0,63})"
+_SEG_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 _TARGET: Final = re.compile(f"{_SEG}/{_SEG}/{_SEG}")
 _HEX64: Final = re.compile(r"[0-9a-f]{64}")
 
@@ -37,15 +38,16 @@ def refuse_db_environment(environ: Mapping[str, str]) -> None:
             raise Refusal("db_environment_present")
 
 
-def protected_config_file(path: Path) -> None:
-    """Regular, not a symlink, root- or agent-owned, not group/other writable."""
+def protected_config_file(path: Path, *, owner_uid: int = 0) -> None:
+    """Regular, not a symlink, ROOT-owned, not group/other writable: the agent
+    cannot rewrite its own keys or argv for persistence."""
     try:
         info = path.lstat()
     except OSError:
         raise Refusal("config_invalid") from None
     if (
         not stat.S_ISREG(info.st_mode)
-        or info.st_uid not in (0, os.geteuid())
+        or info.st_uid != owner_uid
         or info.st_mode & 0o022
     ):
         raise Refusal("config_invalid")
@@ -102,8 +104,16 @@ class AgentConfig:
     skopeo_policy: Path
     reconcile_containers: tuple[str, ...]
     bindings_env: tuple[tuple[str, str], ...]
+    #: Enrolment-pinned OpenBao naming (the same values the kit templates use).
+    #: The signed plan stays the source; a plan that differs is refused.
+    secrets_namespace: str
+    secrets_environment: str
     cp_ca_file: Path | None = None
-    runtime_root: Path = Path("/run/dotmac")
+    #: The agent's OWN runtime state (params.env, inbox, registry): its own
+    #: RuntimeDirectory, so stopping the agent never deletes the per-role
+    #: directories that tmpfiles.d owns under `secrets_root`.
+    runtime_root: Path = Path("/run/dotmac-deploy-agent")
+    secrets_root: Path = Path("/run/dotmac")
     pop_key_credential: str = "pop-key"  # nosec B105 - a credential NAME, not a value
     delivery_role_id_credential: str = "delivery-role-id"
     delivery_secret_id_credential: str = "delivery-secret-id"  # nosec B105
@@ -113,6 +123,8 @@ class AgentConfig:
     runtime_secret_id_ttl_seconds: int = 35 * 86400
     migrate_secret_id_ttl_seconds: int = 900
     wrap_ttl_seconds: int = 120
+    dispatch_max_age_seconds: int = 6 * 3600
+    settle_seconds: int = 600
     poll_seconds: int = 45
     foundation_timeout_seconds: int = 2700
     config_path: Path | None = None
@@ -135,8 +147,13 @@ class AgentConfig:
 
     @property
     def run_dir(self) -> Path:
-        """`/run/dotmac/<product>`: the systemd RuntimeDirectory."""
+        """The agent's private runtime directory (0700), one per instance."""
         return self.runtime_root / self.product
+
+    def role_dir(self, role: str) -> Path:
+        """`/run/dotmac/<secrets_namespace>/<role>`: tmpfiles.d-owned, and the ONE
+        naming key for every per-role artefact (unit, HCL, drop-in, this)."""
+        return self.secrets_root / self.secrets_namespace / role
 
     @property
     def inbox_dir(self) -> Path:
@@ -210,6 +227,7 @@ class AgentConfig:
             self.deploy_dir,
             self.openbao_config_dir,
             self.runtime_root,
+            self.secrets_root,
             self.registry_binary,
             self.skopeo_path,
             self.skopeo_policy,
@@ -240,6 +258,13 @@ class AgentConfig:
         ):
             raise Refusal("config_invalid")
         _check_bindings_env(self.bindings_env)
+        for value in (self.secrets_namespace, self.secrets_environment):
+            if not _SEG_RE.fullmatch(value):
+                raise Refusal("config_invalid", "bad_secrets_name")
+        if not 300 <= self.dispatch_max_age_seconds <= 7 * 86400:
+            raise Refusal("config_invalid")
+        if not 60 <= self.settle_seconds <= 86400:
+            raise Refusal("config_invalid")
         if not 30 <= self.poll_seconds <= 60:
             raise Refusal("config_invalid")
         if not 1 <= self.foundation_timeout_seconds <= 7200:
@@ -277,7 +302,8 @@ class AgentConfig:
             "skopeo_path", "skopeo_sha256", "skopeo_policy", "reconcile_containers",
             "docker_path", "systemctl_path", "bindings_env",
             "runtime_secret_id_ttl_seconds", "migrate_secret_id_ttl_seconds",
-            "wrap_ttl_seconds",
+            "wrap_ttl_seconds", "secrets_namespace", "secrets_environment",
+            "secrets_root", "dispatch_max_age_seconds", "settle_seconds",
         }  # fmt: skip
         if not set(values) <= known:
             raise Refusal("config_invalid")
@@ -314,7 +340,7 @@ class AgentConfig:
         ):
             if name in values:
                 extra[name] = text(name)
-        for name in ("docker_path", "systemctl_path", "runtime_root"):
+        for name in ("docker_path", "systemctl_path", "runtime_root", "secrets_root"):
             if name in values:
                 extra[name] = Path(text(name))
         for name in (
@@ -323,6 +349,8 @@ class AgentConfig:
             "runtime_secret_id_ttl_seconds",
             "migrate_secret_id_ttl_seconds",
             "wrap_ttl_seconds",
+            "dispatch_max_age_seconds",
+            "settle_seconds",
         ):
             if name in values:
                 number = values[name]
@@ -349,6 +377,8 @@ class AgentConfig:
             skopeo_policy=Path(text("skopeo_policy")),
             reconcile_containers=texts("reconcile_containers"),
             bindings_env=pairs,
+            secrets_namespace=text("secrets_namespace"),
+            secrets_environment=text("secrets_environment"),
             config_path=config_path,
             **extra,  # type: ignore[arg-type]
         )

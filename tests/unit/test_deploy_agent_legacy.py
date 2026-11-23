@@ -40,6 +40,7 @@ def fixture(tmp_path: Path) -> Fixture:
     creds = tmp_path / "creds"
     creds.mkdir(mode=0o700)
     (creds / "legacy").write_bytes(CONTENT)
+    (creds / "pop-key").write_bytes(b"unused-by-these-tests")
     run_dir = tmp_path / "deploy-run"
     run_dir.mkdir(mode=0o700)
     deploy_dir = tmp_path / "app"

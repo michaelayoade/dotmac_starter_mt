@@ -1,7 +1,7 @@
 // /etc/polkit-1/rules.d/50-dotmac-deploy-agent.rules (W-12)
 // The deploy agent may RESTART exactly the enrolled OpenBao Agent instances and
 // nothing else. @ENROLLED_UNITS@ is a JSON array of full unit names written at
-// enrolment, e.g. ["openbao-agent@erp-web.service"]. There is no wildcard: a
+// enrolment, e.g. ["openbao-agent@erp-web.service"] (`<secrets_namespace>-<role>`). There is no wildcard: a
 // role that is not enrolled cannot be restarted by the agent.
 polkit.addRule(function (action, subject) {
   var enrolled = @ENROLLED_UNITS@;

@@ -16,6 +16,10 @@ skopeo_path = "/usr/bin/skopeo"
 skopeo_sha256 = "<hex, pinned at enrolment>"
 skopeo_policy = "/etc/dotmac/skopeo/policy.json"      # enrolment-pinned --policy
 reconcile_containers = ["erp-app"]
+# Enrolment-pinned OpenBao naming (the kit templates use the same values). The
+# signed plan must equal them; a plan that differs is refused.
+secrets_namespace = "erp"                 # the descriptor's secrets_namespace, not the product code
+secrets_environment = "staging"           # the namespace-env of the <env>/<product> layout
 
 # Optional, existing apps only (M11): the relocated original, checked by lstat.
 # The content is read ONLY through $CREDENTIALS_DIRECTORY/legacy.

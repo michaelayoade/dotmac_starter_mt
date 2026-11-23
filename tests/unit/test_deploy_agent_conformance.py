@@ -325,8 +325,16 @@ def test_materials_vectors() -> None:
     check_shape(group["ok"])
     check_shape(group["idle"])  # nothing pending: exactly the always keys
     for vector in group["refused"]:
-        with pytest.raises(Refusal):
+        with pytest.raises(Refusal) as caught:
             check_shape(vector["document"])
+        # An app_image that is not the primary service's planned reference is its
+        # own refusal; every other structural fault is `materials_invalid`.
+        expected = (
+            "transfer_repository_mismatch"
+            if vector["reason"].startswith("app_image")
+            else "materials_invalid"
+        )
+        assert caught.value.code == expected, vector["reason"]
     snapshot = group["ok"]["plan_snapshot"]
     assert plan_digest_of(snapshot) == group["plan_digest"]
     assert expected_app_image(snapshot) == group["expected_app_image"]

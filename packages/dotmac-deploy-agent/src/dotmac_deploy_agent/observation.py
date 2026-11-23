@@ -71,6 +71,16 @@ class Outbox:
     def acknowledge(self, path: Path) -> None:
         remove_file(path)
 
+    def dead_letter(self, path: Path) -> None:
+        """Move a refused or unreadable observation aside, keeping a count."""
+        dead = self._dir.parent / "outbox-dead"
+        ensure_private_dir(dead)
+        os.replace(path, dead / path.name)
+
+    def dead_count(self) -> int:
+        dead = self._dir.parent / "outbox-dead"
+        return len(list(dead.glob("*.json"))) if dead.exists() else 0
+
     @staticmethod
     def read(path: Path) -> bytes:
         return path.read_bytes()

@@ -8,7 +8,10 @@ started and is reported as a refused observation.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,14 +20,19 @@ from pathlib import Path
 from .client import Reply, TargetClient
 from .commands import Commands
 from .config import AgentConfig, refuse_db_environment
-from .delivery import Delivered, deliver_secret_ids
+from .delivery import (
+    Delivered,
+    deliver_secret_ids,
+    remove_single_use_files,
+    settle_accessors,
+)
 from .dispatch import read_identity
 from .files import (
     ensure_private_dir,
-    ensure_traversable_dir,
     require_private_dir,
     write_private,
 )
+from .journal import AccessorStore, ExecutedDispatches
 from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient
 from .legacy import prepare_legacy, remove_legacy_copy
 from .materials import Materials, parse_materials
@@ -56,6 +64,8 @@ from .systemd_creds import read_credential
 from .transfer import Transfer
 from .transport import Transport
 
+LOG = logging.getLogger("dotmac.deploy_agent")
+
 
 @dataclass(frozen=True)
 class CycleResult:
@@ -80,6 +90,7 @@ class Launcher:
         environ: Mapping[str, str] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         root_uid: int = 0,
+        epoch: Callable[[], float] = time.time,
     ) -> None:
         self.config = config
         self.client = client
@@ -92,11 +103,14 @@ class Launcher:
         self.read_only = read_only
         self.environ: Mapping[str, str] = os.environ if environ is None else environ
         self.clock = clock
+        self.epoch = epoch
         self.outbox = Outbox(config.state_dir)
+        self.executed = ExecutedDispatches(config.state_dir)
+        self.accessors = AccessorStore(config.state_dir)
 
     # -- housekeeping ------------------------------------------------------
     def _prepare_dirs(self) -> None:
-        ensure_traversable_dir(self.config.run_dir)
+        ensure_private_dir(self.config.run_dir)
         ensure_private_dir(self.config.deploy_run_dir)
         ensure_private_dir(self.config.inbox_dir)
 
@@ -104,14 +118,29 @@ class Launcher:
         """A file left by a crashed run is removed before anything else (s2.5.5)."""
         remove_runtime_files(self.config.deploy_run_dir, (PARAMS_FILE,))
         remove_legacy_copy(self.config.deploy_run_dir)
+        # A kill mid-copy leaves the loopback registry's storage on tmpfs (R5.6),
+        # and a kill mid-run leaves the per-run credentials directory.
+        shutil.rmtree(self.config.registry_dir, ignore_errors=True)
+        shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+
+    def _run_credentials_dir(self) -> Path:
+        return self.config.run_dir / "credentials"
 
     def flush_outbox(self) -> None:
         for path in self.outbox.pending():
             try:
                 document = json.loads(self.outbox.read(path))
                 self.client.post_observation(document)
-            except (Refusal, ValueError):
-                return  # keep it; the next cycle retries
+            except Refusal as refusal:
+                if refusal.code == "cp_refused":
+                    # A signed 4xx will not change on retry: move it aside so one
+                    # refused observation cannot block the ones behind it.
+                    self.outbox.dead_letter(path)
+                    continue
+                return  # unreachable or unsigned: keep it, retry next cycle
+            except ValueError:
+                self.outbox.dead_letter(path)
+                continue
             self.outbox.acknowledge(path)
 
     def _report(self, observation: dict[str, object]) -> None:
@@ -151,6 +180,47 @@ class Launcher:
         )
         clear_inflight(self.config.state_dir)
 
+    def _prepare_run_credentials(self) -> Path:
+        """Foundation reads only `pop-key` from its credentials directory (to sign
+        `consume`). Give it a per-run directory holding just that, not the whole
+        credentials directory with secret zero. Same uid, so this narrows reach and
+        accident, not a hard boundary; it is removed after the run."""
+        directory = self._run_credentials_dir()
+        shutil.rmtree(directory, ignore_errors=True)
+        ensure_private_dir(directory)
+        pop_key = read_credential(
+            self.environ, self.config.pop_key_credential, code="config_invalid"
+        )
+        write_private(directory / "pop-key", pop_key, 0o400)
+        return directory
+
+    def _bao_session(self) -> OpenBaoSession:
+        """A logged-in delivery session (pinned namespace-env); the caller revokes."""
+        if self.bao_transport is None:
+            raise Refusal("secret_delivery_failed")
+        role_id = _credential_text(
+            self.environ, self.config.delivery_role_id_credential
+        )
+        secret_id = _credential_text(
+            self.environ, self.config.delivery_secret_id_credential
+        )
+        session = OpenBaoSession(self.bao_transport, self.config.secrets_environment)
+        session.login(role_id, secret_id)
+        return session
+
+    def _settle(self) -> None:
+        """Retire superseded accessors on a LATER cycle, once the unit stayed up."""
+        try:
+            settle_accessors(
+                self._bao_session,
+                self.config,
+                self.commands,
+                self.accessors,
+                clock=self.epoch,
+            )
+        except Refusal as refusal:
+            LOG.warning("accessor settlement deferred code=%s", refusal)
+
     # -- the cycle ---------------------------------------------------------
     def run_once(self) -> CycleResult:
         refuse_db_environment(self.environ)
@@ -158,6 +228,7 @@ class Launcher:
         self._clean_stale()
         self._recover_interrupted()
         self.flush_outbox()
+        self._settle()
         reply = self.client.materials()
         if reply is None:
             return CycleResult("idle")
@@ -235,6 +306,9 @@ class Launcher:
         deploy_run_dir = self.config.deploy_run_dir
         lease: Lease | None = None
         try:
+            # Before any lease, transfer or secret: CP can re-serve an old signed
+            # dispatch, so one already taken to delivery or run is refused.
+            self.executed.refuse_replay(materials.dispatch_id)
             refuse_preexisting_overrides(self.config.deploy_dir)
             planned = canonical_render(materials.params, materials.app_image)
             if render_digest(planned) != materials.params_env_digest:
@@ -276,19 +350,22 @@ class Launcher:
                     "names": list(materials.legacy.names),
                 }
 
+            # The first irreversible step: recorded durably BEFORE it, so a crash
+            # makes the dispatch un-repeatable rather than repeatable.
+            self.executed.record(materials.dispatch_id)
             delivered = self._deliver(materials, details)
             details["delivered_roles"] = [
                 {
                     "role": d.role,
                     "single_use": d.single_use,
                     "restarted": d.restarted,
-                    "old_accessors_destroyed": d.old_accessors_destroyed,
                 }
                 for d in delivered
             ]
 
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
                 raise Refusal("lease_unavailable")
+            credentials_dir = self._prepare_run_credentials()
             mark_inflight(self.config.state_dir, materials.dispatch_id)
             ran = True
             result = self.runner.run(
@@ -300,7 +377,7 @@ class Launcher:
                     params_env=params_file,
                     agent_config=self.config.config_path,
                     bindings_env=self.config.bindings_env,
-                    credentials_directory=self.environ.get("CREDENTIALS_DIRECTORY"),
+                    credentials_directory=str(credentials_dir),
                     legacy_env=legacy_file,
                     lease_id=lease.lease_id,
                 )
@@ -326,6 +403,8 @@ class Launcher:
         finally:
             remove_runtime_files(deploy_run_dir, (PARAMS_FILE,))
             remove_legacy_copy(deploy_run_dir)
+            remove_single_use_files(self.config, materials.roles)
+            shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
             if lease is not None:
                 details["lease_released"] = self._release(lease, host_mutated=ran)
             if ran:
@@ -356,34 +435,23 @@ class Launcher:
     ) -> tuple[Delivered, ...]:
         if not materials.roles:
             return ()
-        if self.bao_transport is None:
-            raise Refusal("secret_delivery_failed")
         # The authored configs are root-installed; the agent checks and reports them.
-        if not materials.secrets_namespace or not materials.secrets_environment:
-            raise Refusal("materials_invalid", "bad_secrets_name")
         details["openbao_config"] = check_authored_configs(
             self.config,
-            materials.secrets_namespace,
+            self.config.secrets_namespace,
             materials.roles,
             required_uid=self.root_uid,
         )
-        role_id = _credential_text(
-            self.environ, self.config.delivery_role_id_credential
-        )
-        secret_id = _credential_text(
-            self.environ, self.config.delivery_secret_id_credential
-        )
-        session = OpenBaoSession(self.bao_transport, materials.secrets_environment)
+        session = self._bao_session()
         try:
-            session.login(role_id, secret_id)
             return deliver_secret_ids(
                 session,
                 self.config,
                 materials.roles,
                 self.commands,
-                secrets_namespace=materials.secrets_namespace,
-                secrets_environment=materials.secrets_environment,
+                store=self.accessors,
                 dispatch_id=materials.dispatch_id,
+                clock=self.epoch,
             )
         finally:
             session.revoke()  # the 5 minute token never outlives the run

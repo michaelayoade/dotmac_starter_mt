@@ -284,3 +284,38 @@ def test_every_refusal_code_is_in_the_closed_set() -> None:
         Refusal("not_a_code")
     assert "lease_refused" in CODES
     assert "secret_chown_failed" not in CODES  # chown is gone, not renamed
+
+
+def test_the_config_file_must_be_root_owned_and_not_writable(tmp_path: Path) -> None:
+    """L2: an agent that can rewrite its own keys or argv can persist."""
+    from dotmac_deploy_agent.config import protected_config_file
+
+    path = tmp_path / "config.toml"
+    path.write_text("x = 1\n")
+    path.chmod(0o644)
+    protected_config_file(path, owner_uid=os.geteuid())  # owner matches
+    with pytest.raises(Refusal):
+        protected_config_file(path, owner_uid=os.geteuid() + 1)
+    with pytest.raises(Refusal):  # the default owner is root: not us, on CI
+        if os.geteuid() == 0:  # pragma: no cover - the agent is never root
+            raise Refusal("config_invalid")
+        protected_config_file(path)
+    path.chmod(0o664)
+    with pytest.raises(Refusal):
+        protected_config_file(path, owner_uid=os.geteuid())
+    link = tmp_path / "link.toml"
+    link.symlink_to(path)
+    with pytest.raises(Refusal):
+        protected_config_file(link, owner_uid=os.geteuid())
+
+
+def test_the_pinned_secrets_naming_must_be_well_formed(tmp_path: Path) -> None:
+    for override in (
+        {"secrets_namespace": "Erp"},
+        {"secrets_environment": "prod/x"},
+        {"secrets_namespace": ""},
+        {"dispatch_max_age_seconds": 10},
+        {"settle_seconds": 5},
+    ):
+        with pytest.raises(Refusal):
+            make_config(tmp_path, Keys(), **override)

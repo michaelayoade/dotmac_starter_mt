@@ -184,7 +184,10 @@ def test_the_openbao_agent_unit_and_tmpfiles_follow_p_sec() -> None:
     assert unit["User"] == ["dotmac-bao-unenrolled"]  # a missing drop-in fails closed
     assert unit["CapabilityBoundingSet"] == [""] and unit["NoNewPrivileges"] == ["yes"]
     instance = (KIT / "systemd/instance.conf.template").read_text()
-    assert "LoadCredential=secret_id:/run/dotmac/@PRODUCT@/@ROLE@/secret_id" in instance
+    assert (
+        "LoadCredential=secret_id:/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secret_id"
+        in instance
+    )
     assert "User=@CONTAINER_USER@" in instance
     tmpfiles = (KIT / "tmpfiles.d/dotmac-role.conf.template").read_text()
     assert "/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in tmpfiles
@@ -195,3 +198,26 @@ def test_the_enrolment_guards_bite() -> None:
     assert "*" in 'enrolled.indexOf("openbao-agent@*.service")'
     planted = unit_directives("User=root\nAmbientCapabilities=CAP_CHOWN\n")
     assert planted["User"] != ["dotmac-bao-unenrolled"]
+
+
+def test_one_naming_key_names_every_per_role_artefact_in_the_kit() -> None:
+    """H1: the unit instance, drop-in, tmpfiles and role directory share ONE key,
+    `@SECRETS_NAMESPACE@`; the Control product code is never a template variable."""
+    for path in KIT.rglob("*.template"):
+        assert "@PRODUCT@" not in path.read_text(), path.name
+    instance = (KIT / "systemd/instance.conf.template").read_text()
+    assert "openbao-agent@@SECRETS_NAMESPACE@-@ROLE@.service.d" in instance
+    assert "ReadWritePaths=/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@" in instance
+    tmpfiles = (KIT / "tmpfiles.d/dotmac-role.conf.template").read_text()
+    assert "/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets 0700" in tmpfiles
+
+
+def test_the_agent_unit_owns_only_its_own_runtime_directory() -> None:
+    """M4: /run/dotmac/<ns> stays with tmpfiles.d; a stop must not delete it."""
+    directives = unit_directives(UNIT.read_text())
+    assert directives["RuntimeDirectory"] == ["dotmac-deploy-agent/%i"]
+    assert directives["RuntimeDirectoryMode"] == ["0700"]
+    assert not any("/run/dotmac/%i" in v for vs in directives.values() for v in vs)
+    assert directives["ReadWritePaths"] == [
+        "/run/dotmac /var/lib/dotmac-deploy-agent/%i"
+    ]

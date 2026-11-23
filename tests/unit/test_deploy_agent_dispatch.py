@@ -216,3 +216,74 @@ def test_the_pinned_identity_rules(tmp_path: Path) -> None:
 def test_the_fingerprint_is_sha256_of_the_raw_key() -> None:
     raw = DISPATCH_KEY.public_key().public_bytes_raw()
     assert fingerprint_of(raw).startswith("sha256:") and len(fingerprint_of(raw)) == 71
+
+
+def test_a_dispatch_older_than_the_bound_is_refused_as_stale(tmp_path: Path) -> None:
+    """M3: CP can re-serve an old signed dispatch; staleness has a past bound too."""
+    old = make_materials(
+        statement={"issued_at": "2027-01-06T05:00:00Z"}
+    )  # 7 h before NOW
+    assert refused(tmp_path, old) == "dispatch_stale"
+    fresh = make_materials(
+        statement={"issued_at": "2027-01-06T07:00:00Z"}
+    )  # 5 h: inside 6 h
+    parse(tmp_path, fresh)
+
+
+def test_a_replayed_dispatch_is_refused_before_anything_is_minted_or_moved(
+    tmp_path: Path,
+) -> None:
+    from tests.unit.deploy_agent_support import make_rig
+
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials(roles=[{"role": "web", "single_use": False}])
+    from tests.unit.deploy_agent_support import prepare_role
+
+    prepare_role(rig, "web")
+    assert rig.launcher.run_once().outcome == "completed"
+    minted = len(rig.bao.paths)
+    transfers = len(rig.transfer.calls)
+    leases = len(rig.cp.lease_log)
+    again = rig.launcher.run_once()  # CP serves the SAME signed dispatch again
+    assert (again.outcome, again.reason) == ("refused", "dispatch_replayed")
+    assert len(rig.bao.paths) == minted and len(rig.transfer.calls) == transfers
+    assert len(rig.cp.lease_log) == leases  # no lease either
+    assert len(rig.runner.specs) == 1
+
+
+def test_a_dispatch_that_only_reached_a_refusal_before_delivery_may_be_retried(
+    tmp_path: Path,
+) -> None:
+    """A lease refusal happens before the first irreversible step, so the same
+    dispatch is not consumed by it."""
+    from tests.unit.deploy_agent_support import make_rig
+
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials()
+    rig.cp.overrides["lease/acquire"] = (409, {"error": "lease-held"})
+    assert rig.launcher.run_once().reason == "lease_refused"
+    del rig.cp.overrides["lease/acquire"]
+    assert rig.launcher.run_once().outcome == "completed"
+
+
+def test_a_pinned_dispatch_identity_whose_seed_is_published_is_refused(
+    tmp_path: Path,
+) -> None:
+    """L3: the vector file publishes two private seeds; their keys sign nothing."""
+    import json as _json
+
+    from tests.unit.deploy_agent_support import write_identity
+
+    path = tmp_path / "ids" / "dispatch.json"
+    write_identity(path)
+    document = _json.loads(path.read_text())
+    document["public_key_b64url"] = "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+    from dotmac_deploy_agent.canon import sha256_hex
+    from dotmac_deploy_agent.wire import decode_b64url
+
+    raw = decode_b64url(document["public_key_b64url"], length=32) or b""
+    document["public_key_fingerprint"] = "sha256:" + sha256_hex(raw)  # self-consistent
+    path.write_text(_json.dumps(document))
+    with pytest.raises(Refusal) as caught:
+        read_identity(path, owner_uid=os.geteuid())
+    assert caught.value.code == "dispatch_identity_invalid"

@@ -30,7 +30,11 @@ The agent acts only on a Control-signed, plan-bound dispatch (`dispatch.py`): th
 params digest, images, legacy policy and lease TTL are read from the signed plan
 binding, never from CP-supplied fields.
 
-Secrets: no chown, no capability. `secret_id` is written 0400 as the agent uid and
+Secrets: no chown, no capability. ONE naming key, `secrets_namespace` (pinned in the
+root-owned config; the plan must equal it), names every per-role artefact: the
+`/run/dotmac/<secrets_namespace>/<role>` directory, the `openbao-agent@` unit, the
+authored HCL and the drop-in. The agent's own tmpfs state has its own
+RuntimeDirectory and never touches tmpfiles.d's role directories. `secret_id` is written 0400 as the agent uid and
 read by the per-role OpenBao Agent unit through `LoadCredential`; the authored
 OpenBao configs are root-installed and only checked and reported.
 

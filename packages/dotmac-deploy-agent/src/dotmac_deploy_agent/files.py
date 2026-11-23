@@ -34,28 +34,6 @@ def ensure_private_dir(path: Path) -> None:
     require_private_dir(path)
 
 
-def ensure_traversable_dir(path: Path) -> None:
-    """The per-product run directory: ours, never writable by group or others, but
-    traversable (0711) so the per-role OpenBao Agent can reach its own `secrets/`.
-    Everything the agent keeps for itself lives in 0700 subdirectories."""
-    try:
-        path.mkdir(mode=0o711)
-    except FileExistsError:
-        pass
-    except OSError:
-        raise Refusal("runtime_dir_unsafe") from None
-    try:
-        info = path.lstat()
-    except OSError:
-        raise Refusal("runtime_dir_unsafe") from None
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.geteuid()
-        or info.st_mode & 0o066  # traverse only: no group/other read or write
-    ):
-        raise Refusal("runtime_dir_unsafe")
-
-
 def write_private(path: Path, data: bytes, mode: int) -> None:
     """Write `data` to `path` atomically with `mode`; never follows a symlink."""
     temporary = path.with_name(f".{path.name}.{os.getpid()}.pending")

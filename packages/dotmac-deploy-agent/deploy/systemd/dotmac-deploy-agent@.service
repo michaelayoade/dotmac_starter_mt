@@ -15,11 +15,13 @@ Group=dotmac-deploy
 # Docker-group reach is root-equivalent (W-c): the control is against other uids
 # and silent drift, not against root.
 SupplementaryGroups=docker
-# tmpfs: params.env, the legacy copy, the image inbox, role files, the registry.
-# 0711: the per-role OpenBao Agent (a different uid) must traverse to its own
-# `secrets/` directory; the agent's own subdirectories stay 0700.
-RuntimeDirectory=dotmac/%i
-RuntimeDirectoryMode=0711
+# The agent's OWN tmpfs state (params.env, the legacy copy, the image inbox, the
+# loopback registry, the per-run credentials): private, and deleted on a stop.
+# /run/dotmac/<secrets_namespace> belongs to tmpfiles.d, NOT to this unit: if the
+# agent owned it a plain stop or upgrade would delete the role directories, the
+# delivered secret_id files and the mounts the containers hold.
+RuntimeDirectory=dotmac-deploy-agent/%i
+RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=restart
 StateDirectory=dotmac-deploy-agent/%i
 StateDirectoryMode=0700
@@ -48,7 +50,9 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-ReadWritePaths=/run/dotmac/%i /var/lib/dotmac-deploy-agent/%i
+# /run/dotmac: the per-role directories tmpfiles.d made; the agent writes only
+# `secret_id` into them. Its own state is the RuntimeDirectory above.
+ReadWritePaths=/run/dotmac /var/lib/dotmac-deploy-agent/%i
 
 [Install]
 WantedBy=multi-user.target

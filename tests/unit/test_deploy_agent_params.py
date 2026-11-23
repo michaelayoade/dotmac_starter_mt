@@ -246,8 +246,17 @@ def test_stale_files_are_removed_at_start(tmp_path: Path) -> None:
     stale.write_text("OLD=1\n")
     legacy = rig.config.deploy_run_dir / "legacy.env"
     legacy.write_text("OLD=1\n")
+    # A kill mid-copy leaves the registry's tmpfs storage, a kill mid-run the
+    # per-run credentials directory (R5.6, L5, L6).
+    storage = rig.config.registry_dir / "data"
+    storage.mkdir(parents=True, mode=0o700)
+    (storage / "blob").write_text("layer")
+    creds = rig.config.run_dir / "credentials"
+    creds.mkdir(mode=0o700)
+    (creds / "pop-key").write_text("key")
     rig.launcher.run_once()  # nothing pending
     assert not stale.exists() and not legacy.exists()
+    assert not rig.config.registry_dir.exists() and not creds.exists()
 
 
 def test_failed_run_is_reported_and_files_removed(tmp_path: Path) -> None:
@@ -275,14 +284,31 @@ def test_interrupted_run_is_reported_on_next_start(tmp_path: Path) -> None:
 def test_observation_is_kept_in_outbox_until_cp_acknowledges(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     rig.cp.materials = make_materials()
-    rig.cp.overrides["observations"] = (409, {"error": "busy"})
+    rig.cp.status_5xx = True  # CP unreachable: nothing is lost, it is retried
     rig.launcher.run_once()
+    rig.cp.status_5xx = False
     assert len(rig.launcher.outbox.pending()) == 1
-    del rig.cp.overrides["observations"]
     rig.cp.materials = None
     rig.launcher.run_once()
     assert rig.launcher.outbox.pending() == []
     assert os.listdir(rig.config.state_dir / "outbox") == []
+
+
+def test_a_refused_observation_is_moved_aside_and_does_not_block_the_others(
+    tmp_path: Path,
+) -> None:
+    """L7: a signed 4xx will not change on retry; it must not stop the queue."""
+    rig = make_rig(tmp_path)
+    rig.cp.materials = make_materials()
+    rig.cp.overrides["observations"] = (409, {"error": "busy"})
+    rig.launcher.run_once()
+    assert rig.launcher.outbox.pending() == []  # moved aside, not retried forever
+    assert rig.launcher.outbox.dead_count() == 1
+    del rig.cp.overrides["observations"]
+    rig.cp.materials = make_materials(dispatch_id="dispatch-2")
+    rig.launcher.run_once()
+    assert [o["dispatch_id"] for o in rig.cp.observations] == ["dispatch-2"]
+    assert rig.launcher.outbox.dead_count() == 1
 
 
 def _new_image_materials():  # type: ignore[no-untyped-def]

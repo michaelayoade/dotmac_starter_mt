@@ -56,6 +56,7 @@ IMAGE_DIGEST = "sha256:" + "a" * 64
 APP_IMAGE = f"127.0.0.1:5000/org/app@{IMAGE_DIGEST}"
 PREVIOUS_IMAGE = "127.0.0.1:5000/org/app@sha256:" + "b" * 64  # a previously applied pin
 DISPATCH_KEY_ID = "control-dispatch-1"
+UNIT_ACTIVE = b"ActiveState=active\nNRestarts=0\nActiveEnterTimestampMonotonic=1000\n"
 
 #: A stand-in for Control's dispatch signing key. Shared so `make_materials()`
 #: works without a rig; a test that needs a rogue signer passes its own.
@@ -100,6 +101,9 @@ def make_config(tmp_path: Path, keys: Keys, **overrides: object) -> AgentConfig:
     tmp_path.mkdir(parents=True, exist_ok=True)
     root = tmp_path / "run"
     root.mkdir(exist_ok=True)
+    secrets_root = tmp_path / "secrets"
+    secrets_root.mkdir(exist_ok=True)
+    secrets_root.chmod(0o711)
     state = tmp_path / "state"
     state.mkdir(exist_ok=True, mode=0o700)
     app = tmp_path / "app"
@@ -138,6 +142,9 @@ def make_config(tmp_path: Path, keys: Keys, **overrides: object) -> AgentConfig:
             ),
         ),
         "runtime_root": root,
+        "secrets_root": secrets_root,
+        "secrets_namespace": "erp",
+        "secrets_environment": "staging",
         "config_path": tmp_path / "config.toml",
     }
     values.update(overrides)
@@ -291,11 +298,17 @@ def make_materials(**overrides: object) -> dict[str, object]:
 class FakeCp:
     """The CP target API as the agent sees it. Verifies requests, signs responses."""
 
-    def __init__(self, keys: Keys, clock: Callable[[], datetime] = lambda: NOW) -> None:
+    def __init__(
+        self,
+        keys: Keys,
+        clock: Callable[[], datetime] = lambda: NOW,
+        target: str = TARGET,
+    ) -> None:
+        self.target = target
         self.keys = keys
         self.clock = clock
         self.materials: dict[str, object] | None = None
-        self.credential_target_ref = TARGET
+        self.credential_target_ref = target
         self.credential_id = "cred-1"
         self.observations: list[dict[str, object]] = []
         self.nonces: set[str] = set()
@@ -375,7 +388,7 @@ class FakeCp:
             doc = self.materials or {
                 "schema": "dotmac.deploy_target_materials/1",
                 "pending": False,
-                "target_ref": TARGET,
+                "target_ref": self.target,
             }
             return self._reply(method, path, nonce, 200, dict(doc))
         if endpoint == "observations":
@@ -548,16 +561,19 @@ class Rig:
     transfer: FakeTransfer
     commands: FakeCommands
     systemctl: FakeCommands
+    epoch: list[float]
 
 
-def prepare_role(rig: Rig, role: str, secrets_namespace: str = "erp") -> None:
-    """What enrolment does: the role directory (tmpfiles.d) and the authored config."""
-    rig.config.run_dir.mkdir(parents=True, exist_ok=True)
-    rig.config.run_dir.chmod(0o711)  # RuntimeDirectoryMode: traverse only
-    role_dir = rig.config.run_dir / role
-    role_dir.mkdir(exist_ok=True)
-    role_dir.chmod(0o711)
-    authored = rig.config.openbao_config_dir / f"{secrets_namespace}-{role}.hcl"
+def prepare_role(rig: Rig, role: str, secrets_namespace: str | None = None) -> None:
+    """What enrolment does: tmpfiles.d makes `/run/dotmac/<secrets_namespace>/<role>`
+    (traverse-only) and the kit installs the authored config."""
+    namespace = secrets_namespace or rig.config.secrets_namespace
+    rig.config.secrets_root.mkdir(parents=True, exist_ok=True)
+    rig.config.secrets_root.chmod(0o711)
+    for directory in (rig.config.secrets_root / namespace, rig.config.role_dir(role)):
+        directory.mkdir(exist_ok=True)
+        directory.chmod(0o711)
+    authored = rig.config.openbao_config_dir / f"{namespace}-{role}.hcl"
     authored.write_text(f"# authored config for {role}\n")
     authored.chmod(0o644)
 
@@ -567,11 +583,12 @@ def make_rig(
     *,
     runner: FakeRunner | None = None,
     environ: dict[str, str] | None = None,
+    target_ref: str = TARGET,
     **config_overrides: object,
 ) -> Rig:
     keys = Keys()
-    config = make_config(tmp_path, keys, **config_overrides)
-    cp = FakeCp(keys)
+    config = make_config(tmp_path, keys, target_ref=target_ref, **config_overrides)
+    cp = FakeCp(keys, target=target_ref)
     bao = FakeBaoTransport()
     runner = runner or FakeRunner()
     env = environ if environ is not None else {}
@@ -580,12 +597,15 @@ def make_rig(
         creds.mkdir(exist_ok=True, mode=0o700)
         (creds / "delivery-role-id").write_text("delivery-role-id-value")
         (creds / "delivery-secret-id").write_text("delivery-secret-id-value")
+        (creds / "pop-key").write_bytes(keys.seed())
         env["CREDENTIALS_DIRECTORY"] = str(creds)
     signer = wire.PopSigner.from_seed(config.credential_id, keys.seed())
     client = TargetClient(config, signer, cp, clock=lambda: NOW)
     transfer = FakeTransfer()
     commands = FakeCommands()
     systemctl = FakeCommands()
+    systemctl.script[("show",)] = CommandResult(0, UNIT_ACTIVE)
+    epoch = [1_800_000_000.0]
     launcher = Launcher(
         config,
         client,
@@ -598,7 +618,18 @@ def make_rig(
         environ=env,
         clock=lambda: NOW,
         root_uid=os.geteuid(),
+        epoch=lambda: epoch[0],
     )
     return Rig(
-        config, keys, cp, runner, bao, launcher, env, transfer, commands, systemctl
+        config,
+        keys,
+        cp,
+        runner,
+        bao,
+        launcher,
+        env,
+        transfer,
+        commands,
+        systemctl,
+        epoch,
     )

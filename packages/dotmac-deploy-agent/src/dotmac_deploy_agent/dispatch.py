@@ -38,7 +38,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .canon import DIGEST, canonical_json
 from .config import AgentConfig
 from .refusal import Refusal
-from .wire import decode_b64url
+from .wire import decode_b64url, is_denied_public_key
 
 IDENTITY_SCHEMA: Final = "PlatformCpPublicVerificationIdentity.v1"
 MAX_IDENTITY_BYTES: Final = 16 * 1024
@@ -155,8 +155,10 @@ def read_identity(path: Path, *, owner_uid: int = 0) -> PinnedIdentity:
         or key is None
     ):
         raise refused
-    if document["public_key_fingerprint"] != fingerprint_of(key):
-        raise refused
+    if document["public_key_fingerprint"] != fingerprint_of(
+        key
+    ) or is_denied_public_key(str(document["public_key_b64url"])):
+        raise refused  # a key whose seed is published authenticates nobody
     return PinnedIdentity(key_id, key, fingerprint_of(key))
 
 
@@ -184,6 +186,7 @@ def verify_dispatch(
     identity: PinnedIdentity,
     store_now: datetime,
     skew_seconds: int = 60,
+    max_age_seconds: int = 6 * 3600,
 ) -> VerifiedDispatch:
     if not isinstance(envelope, dict) or set(envelope) != {"statement", "signature"}:
         raise Refusal("dispatch_envelope_invalid")
@@ -219,8 +222,12 @@ def verify_dispatch(
         or statement["environment"] != config.environment
     ):
         raise Refusal("materials_target_mismatch")
-    if _instant(statement["issued_at"]) > store_now + timedelta(seconds=skew_seconds):
+    issued_at = _instant(statement["issued_at"])
+    if issued_at > store_now + timedelta(seconds=skew_seconds):
         raise Refusal("dispatch_envelope_invalid")
+    # A signed dispatch does not stay servable forever: CP could replay an old one.
+    if store_now - issued_at > timedelta(seconds=max_age_seconds):
+        raise Refusal("dispatch_stale")
     dispatch_id = statement["dispatch_id"]
     plan_digest = statement["plan_digest"]
     if (

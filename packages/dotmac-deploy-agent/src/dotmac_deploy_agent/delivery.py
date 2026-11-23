@@ -1,35 +1,53 @@
 """D1 `secret_id` delivery (ruling R2, P-SEC s3.5-3.7). No chown, no capability.
 
-For each role the agent writes `/run/dotmac/<product>/<role>/secret_id`, 0400, as
-its OWN uid, then restarts `openbao-agent@<product>-<role>.service` through the
-enrolled polkit rule. That unit runs as the container uid and reads the file only
-through `LoadCredential=secret_id:<that path>`, a per-unit ramfs copy. Only the
-OpenBao Agent ever reads a `secret_id`; the container reads rendered values.
+For each role the agent writes `/run/dotmac/<secrets_namespace>/<role>/secret_id`,
+0400, as its OWN uid, then restarts `openbao-agent@<secrets_namespace>-<role>.service`
+through the enrolled polkit rule. ONE naming key, `secrets_namespace`, names every
+per-role host artefact (role dir, unit, authored HCL, drop-in, tmpfiles): it is
+pinned in the root-owned config and the signed plan must equal it. That unit runs
+as the container uid and reads the file only through `LoadCredential=secret_id:`.
 
-The role directory is created at enrolment by `tmpfiles.d`; the agent never
-creates it, and never takes a uid from a dispatch (the uid is an enrolment fact,
-the unit's `User=`).
+## Accessor lifecycle (no valid id is ever left untracked, none destroyed early)
 
-After the restart is confirmed, the PREVIOUS accessor is destroyed so a
-delivered `secret_id` is never left valid beside its replacement.
+1. After unwrap, the new accessor is recorded as the `candidate` BEFORE the file
+   is written or the unit restarted. A restart that fails destroys it.
+2. Older accessors (`current`, an earlier candidate) move to `retire`. They are
+   NOT destroyed in this run: `systemctl is-active` is true right after exec, long
+   before a login can have succeeded.
+3. On a LATER cycle, once the unit has been continuously active since the restart
+   (same `NRestarts` and `ActiveEnterTimestampMonotonic`, for `settle_seconds`),
+   the candidate is promoted and every `retire` accessor is destroyed.
+4. State that cannot be read is a refusal, never "empty".
+
+A single-use (migrate) id is consumed by its one login and is not tracked; the
+launcher removes its file after the run.
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import stat
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .commands import Commands
 from .config import AgentConfig
-from .files import ensure_private_dir, remove_file, write_private
+from .files import remove_file, write_private
+from .journal import AccessorStore, Candidate
 from .materials import RoleSpec
 from .openbao import OpenBaoSession, mint_path
 from .refusal import Refusal
 
+LOG = logging.getLogger("dotmac.deploy_agent")
 SECRET_ID_FILE = "secret_id"  # noqa: S105  # nosec B105 - a file name, not a value
+_SHOW = (
+    "--property=ActiveState",
+    "--property=NRestarts",
+    "--property=ActiveEnterTimestampMonotonic",
+)
 
 
 @dataclass(frozen=True)
@@ -39,7 +57,6 @@ class Delivered:
     role: str
     single_use: bool
     restarted: bool
-    old_accessors_destroyed: int
 
 
 def unit_name(secrets_namespace: str, role: str) -> str:
@@ -48,6 +65,7 @@ def unit_name(secrets_namespace: str, role: str) -> str:
 
 
 def _require_role_dir(path: Path) -> None:
+    """tmpfiles.d made it; the agent owns it and it is traverse-only."""
     try:
         info = path.lstat()
     except OSError:
@@ -55,33 +73,48 @@ def _require_role_dir(path: Path) -> None:
     if (
         not stat.S_ISDIR(info.st_mode)
         or info.st_uid != os.geteuid()
-        or info.st_mode & 0o022
+        or info.st_mode & 0o066
     ):
         raise Refusal("runtime_dir_unsafe")
 
 
-def _systemctl(
-    config: AgentConfig, commands: Commands, *args: str, timeout: float = 60.0
-) -> bool:
+def _systemctl(config: AgentConfig, commands: Commands, *args: str) -> bytes | None:
     try:
         result = commands.run(
-            (str(config.systemctl_path), "--no-ask-password", *args), timeout=timeout
+            (str(config.systemctl_path), "--no-ask-password", *args), timeout=60.0
+        )
+    except Refusal:
+        return None
+    return result.stdout if result.exit_code == 0 else None
+
+
+def unit_state(
+    config: AgentConfig, commands: Commands, unit: str
+) -> dict[str, str] | None:
+    out = _systemctl(config, commands, "show", *_SHOW, unit)
+    if out is None:
+        return None
+    state: dict[str, str] = {}
+    for line in out.decode("utf-8", errors="replace").splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            state[key] = value
+    return state
+
+
+def _destroy(
+    session: OpenBaoSession, config: AgentConfig, role: str, accessor: str
+) -> bool:
+    try:
+        session.destroy_accessor(
+            secrets_namespace=config.secrets_namespace,
+            secrets_environment=config.secrets_environment,
+            role=role,
+            accessor=accessor,
         )
     except Refusal:
         return False
-    return result.exit_code == 0
-
-
-def _accessor_file(config: AgentConfig, role: str) -> Path:
-    return config.state_dir / "accessors" / f"{role}.json"
-
-
-def _load_accessors(path: Path) -> list[str]:
-    try:
-        raw = json.loads(path.read_bytes())
-    except (OSError, ValueError):
-        return []
-    return [a for a in raw if isinstance(a, str)] if isinstance(raw, list) else []
+    return True
 
 
 def deliver_secret_ids(
@@ -90,18 +123,39 @@ def deliver_secret_ids(
     roles: tuple[RoleSpec, ...],
     commands: Commands,
     *,
-    secrets_namespace: str,
-    secrets_environment: str,
+    store: AccessorStore,
     dispatch_id: str,
+    clock: Callable[[], float] = time.time,
 ) -> tuple[Delivered, ...]:
-    ensure_private_dir(config.state_dir / "accessors")
+    ns, env = config.secrets_namespace, config.secrets_environment
     delivered: list[Delivered] = []
     for spec in roles:
-        role_dir = config.run_dir / spec.role
+        role_dir = config.role_dir(spec.role)
         _require_role_dir(role_dir)
+        target = role_dir / SECRET_ID_FILE
+        unit = unit_name(ns, spec.role)
+        state = store.load(spec.role)  # refuses corrupt state
+
+        if not spec.single_use:
+            # A candidate stuck at `issued` is a crash between unwrap and a
+            # confirmed restart: the file may or may not hold it. Nothing may
+            # refer to it any more, so drop the file and the accessor.
+            if state.candidate is not None and state.candidate.stage == "issued":
+                remove_file(target)
+                if not _destroy(session, config, spec.role, state.candidate.accessor):
+                    state.retire.append(state.candidate.accessor)
+                state.candidate = None
+            # Everything the unit may be running is now older than what we mint.
+            superseded = [state.current] if state.current else []
+            if state.candidate is not None:
+                superseded.append(state.candidate.accessor)
+            state.retire = sorted({*state.retire, *superseded})
+            state.current, state.candidate = None, None
+            store.save(spec.role, state)
+
         wrapping = session.mint_wrapped(
-            secrets_namespace=secrets_namespace,
-            secrets_environment=secrets_environment,
+            secrets_namespace=ns,
+            secrets_environment=env,
             role=spec.role,
             single_use=spec.single_use,
             ttl_seconds=(
@@ -112,62 +166,104 @@ def deliver_secret_ids(
             wrap_ttl_seconds=config.wrap_ttl_seconds,
             dispatch_id=dispatch_id,
         )
-        session.require_creation_path(
-            wrapping, mint_path(secrets_namespace, secrets_environment, spec.role)
-        )
+        session.require_creation_path(wrapping, mint_path(ns, env, spec.role))
         secret_id, accessor = session.unwrap(wrapping)
-        target = role_dir / SECRET_ID_FILE
+        if not spec.single_use:
+            if accessor is None:
+                raise Refusal("secret_delivery_failed")
+            # Tracked BEFORE the file or the restart: a crash here cannot leave a
+            # valid, untracked secret_id behind.
+            state.candidate = Candidate(accessor, "issued", int(clock()))
+            store.save(spec.role, state)
         write_private(target, secret_id.encode("utf-8"), 0o400)
         del secret_id
 
-        unit = unit_name(secrets_namespace, spec.role)
-        restarted = _systemctl(config, commands, "restart", unit)
-        if not restarted:
-            remove_file(target)  # a delivered id nobody consumed is not left behind
+        if _systemctl(config, commands, "restart", unit) is None:
+            remove_file(target)  # no file for a unit nobody restarted
+            if state.candidate is not None:
+                if not _destroy(session, config, spec.role, state.candidate.accessor):
+                    state.retire.append(state.candidate.accessor)
+                state.candidate = None
+                store.save(spec.role, state)
             raise Refusal("secret_delivery_failed")
-        confirmed = _systemctl(config, commands, "is-active", "--quiet", unit)
-        destroyed = 0
-        if not spec.single_use and accessor is not None:
-            destroyed = _rotate_accessor(
-                session,
-                config,
-                (secrets_namespace, secrets_environment),
-                spec.role,
-                accessor,
-                confirmed=confirmed,
+        if state.candidate is not None:
+            info = unit_state(config, commands, unit) or {}
+            state.candidate = Candidate(
+                state.candidate.accessor,
+                "restarted",
+                int(clock()),
+                info.get("NRestarts"),
+                info.get("ActiveEnterTimestampMonotonic"),
             )
-        delivered.append(Delivered(spec.role, spec.single_use, restarted, destroyed))
+            store.save(spec.role, state)
+        delivered.append(Delivered(spec.role, spec.single_use, True))
     return tuple(delivered)
 
 
-def _rotate_accessor(
-    session: OpenBaoSession,
+def remove_single_use_files(config: AgentConfig, roles: tuple[RoleSpec, ...]) -> None:
+    """A migrate secret_id is spent by its one login: do not leave the file."""
+    for spec in roles:
+        if spec.single_use:
+            remove_file(config.role_dir(spec.role) / SECRET_ID_FILE)
+
+
+def _stable(
+    config: AgentConfig, commands: Commands, role: str, candidate: Candidate, now: int
+) -> bool:
+    if (
+        candidate.stage != "restarted"
+        or candidate.nrestarts is None
+        or candidate.active_enter is None
+        or now - candidate.at < config.settle_seconds
+    ):
+        return False
+    info = unit_state(config, commands, unit_name(config.secrets_namespace, role))
+    return (
+        info is not None
+        and info.get("ActiveState") == "active"
+        and info.get("NRestarts") == candidate.nrestarts
+        and info.get("ActiveEnterTimestampMonotonic") == candidate.active_enter
+    )
+
+
+def settle_accessors(
+    open_session: Callable[[], OpenBaoSession],
     config: AgentConfig,
-    naming: tuple[str, str],
-    role: str,
-    new_accessor: str,
+    commands: Commands,
+    store: AccessorStore,
     *,
-    confirmed: bool,
+    clock: Callable[[], float] = time.time,
 ) -> int:
-    """Destroy older accessors once the Agent is up; keep the ones that could not
-    be, so none is ever forgotten while still valid."""
-    path = _accessor_file(config, role)
-    pending = [a for a in _load_accessors(path) if a != new_accessor]
-    kept: list[str] = []
+    """Later-cycle retirement: promote a candidate the unit has run on, unbroken,
+    for `settle_seconds`, then destroy every older accessor. Returns the number
+    destroyed. A unit that failed, restarted or is not yet old enough keeps its
+    predecessors valid."""
+    now = int(clock())
+    eligible: list[str] = []
+    for role in store.roles():
+        state = store.load(role)
+        if state.candidate is not None and _stable(
+            config, commands, role, state.candidate, now
+        ):
+            eligible.append(role)
+    if not eligible:
+        return 0
+    session = open_session()
     destroyed = 0
-    for old in pending:
-        if not confirmed:
-            kept.append(old)
-            continue
-        try:
-            session.destroy_accessor(
-                secrets_namespace=naming[0],
-                secrets_environment=naming[1],
-                role=role,
-                accessor=old,
-            )
-            destroyed += 1
-        except Refusal:
-            kept.append(old)
-    write_private(path, json.dumps([*kept, new_accessor]).encode("utf-8"), 0o600)
+    try:
+        for role in eligible:
+            state = store.load(role)
+            assert state.candidate is not None
+            kept: list[str] = []
+            for old in state.retire:
+                if _destroy(session, config, role, old):
+                    destroyed += 1
+                else:
+                    kept.append(old)
+            state.current = state.candidate.accessor
+            state.candidate, state.retire = None, kept
+            store.save(role, state)
+            LOG.info("accessors settled role=%s destroyed_total=%d", role, destroyed)
+    finally:
+        session.revoke()
     return destroyed
