@@ -112,6 +112,13 @@ MODULE_RELEASE_ALLOWLIST = REPO_ROOT / ".github" / "release-modules.json"
 _MIGRATIONS = "src/{import_name}/migrations/versions"
 
 
+PUBLICATION_RECORDS = (
+    REPO_ROOT / "docs" / "inventories" / "foundation-publication-records.json"
+)
+PUBLICATION_RECORDS_SCHEMA = "dotmac.foundation.publication-records.v1"
+PUBLICATION_GATES = ("lane3_rehearsal", "gate2_evidence")
+
+
 class ReleaseRecordError(RuntimeError):
     """The record cannot be written, and guessing is not an option."""
 
@@ -1910,6 +1917,127 @@ def write_record(
     return changed
 
 
+def _gate2_row(gate_record: str, distribution: str, version: str) -> dict:
+    """The Gate 2 fields of the record, read from the build job's `gate.json`.
+
+    Ids and digests only: never a private file's contents or path. The ruling
+    comes from the committed policy, not from the retained artifact, and the
+    evidence ids must be exactly the policy's required set.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import foundation_publication_gate as gate
+
+    try:
+        selected = gate.load_policy().exceptions[(distribution, version)]
+        document = json.loads(Path(gate_record).read_text(encoding="ascii"))
+    except (KeyError, gate.GateIndeterminate, OSError, ValueError):
+        raise ReleaseRecordError(
+            f"{distribution} {version} has no readable gate-2 record or policy row"
+        ) from None
+    keys = {
+        "gate",
+        "manifest_sha256",
+        "signature_sha256",
+        "signer_fingerprint",
+        "e3_baseline_sha256",
+        "evidence",
+    }
+    if (
+        type(document) is not dict
+        or set(document) != keys
+        or (document["gate"] != gate.GATE_2)
+    ):
+        raise ReleaseRecordError("the gate-2 record has an unexpected shape")
+    for name in ("manifest_sha256", "signature_sha256", "e3_baseline_sha256"):
+        if type(document[name]) is not str or not re.fullmatch(
+            r"sha256:[0-9a-f]{64}", document[name]
+        ):
+            raise ReleaseRecordError(f"the gate-2 record's {name} is malformed")
+    if type(document["signer_fingerprint"]) is not str or not re.fullmatch(
+        r"SHA256:[A-Za-z0-9+/]{43}", document["signer_fingerprint"]
+    ):
+        raise ReleaseRecordError("the gate-2 record's signer_fingerprint is malformed")
+    evidence = document["evidence"]
+    if (
+        type(evidence) is not list
+        or [item.get("id") if type(item) is dict else None for item in evidence]
+        != list(selected.required_evidence)
+        or any(
+            set(item) != {"id", "sha256", "status"}
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(item["sha256"]))
+            or item["status"] not in gate.STATUSES
+            for item in evidence
+        )
+    ):
+        raise ReleaseRecordError("the gate-2 record's evidence does not match policy")
+    return {
+        "gate2_manifest_sha256": document["manifest_sha256"],
+        "gate2_signature_sha256": document["signature_sha256"],
+        "gate2_signer_fingerprint": document["signer_fingerprint"],
+        "e3_baseline_sha256": document["e3_baseline_sha256"],
+        "ruling": {
+            "register": selected.ruling_register,
+            "version": selected.ruling_version,
+        },
+        "evidence": evidence,
+    }
+
+
+def write_publication_gate_record(
+    *,
+    distribution: str,
+    version: str,
+    tag: str,
+    publication_gate: str,
+    gate_record: str | None,
+) -> list[str]:
+    """Record WHICH publication gate admitted this version, by id and sha.
+
+    Lane 3 keeps its existing fields: the row carries only the gate name. A
+    row that already exists must match exactly; a disagreeing row refuses
+    rather than being overwritten, because a published record is written once.
+    """
+    if publication_gate not in PUBLICATION_GATES:
+        raise ReleaseRecordError(f"unknown publication gate {publication_gate!r}")
+    row: dict = {
+        "distribution": distribution,
+        "version": version,
+        "tag": tag,
+        "publication_gate": publication_gate,
+    }
+    if publication_gate == "gate2_evidence":
+        if not gate_record:
+            raise ReleaseRecordError("--gate2-record is required for gate2_evidence")
+        row.update(_gate2_row(gate_record, distribution, version))
+    elif gate_record:
+        raise ReleaseRecordError("--gate2-record is only valid for gate2_evidence")
+    try:
+        text = PUBLICATION_RECORDS.read_text(encoding="utf-8")
+        ledger = json.loads(text)
+    except (OSError, ValueError):
+        raise ReleaseRecordError(
+            "the publication-records ledger is unreadable"
+        ) from None
+    if (
+        type(ledger) is not dict
+        or ledger.get("schema") != PUBLICATION_RECORDS_SCHEMA
+        or type(ledger.get("records")) is not list
+    ):
+        raise ReleaseRecordError("the publication-records ledger has a bad shape")
+    for existing in ledger["records"]:
+        if existing.get("tag") == tag:
+            if existing != row:
+                raise ReleaseRecordError(
+                    f"{tag} already has a different publication-gate record"
+                )
+            return []
+    ledger["records"].append(row)
+    PUBLICATION_RECORDS.write_text(
+        json.dumps(ledger, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return [f"recorded the {publication_gate} publication gate for {tag}"]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--distribution", required=True)
@@ -1961,6 +2089,17 @@ def main(argv: list[str] | None = None) -> int:
         help="recovery only: this recovery run's id when it ADOPTED a tag the "
         "original run wrote (then --expected-run-id is the original run)",
     )
+    parser.add_argument(
+        "--publication-gate",
+        choices=PUBLICATION_GATES,
+        default=None,
+        help="facility lane only: which publication gate admitted this version",
+    )
+    parser.add_argument(
+        "--gate2-record",
+        default=None,
+        help="facility lane only: the retained .gate2/gate.json (gate2_evidence)",
+    )
     args = parser.parse_args(argv)
 
     # The two always agree in this repository, and threading a second value
@@ -2007,6 +2146,25 @@ def main(argv: list[str] | None = None) -> int:
         )
     except ReleaseRecordError as failure:
         print(f"release record REFUSED: {failure}", file=sys.stderr)
+        return 1
+
+    if args.publication_gate:
+        try:
+            changed += write_publication_gate_record(
+                distribution=args.distribution,
+                version=args.version,
+                tag=args.tag,
+                publication_gate=args.publication_gate,
+                gate_record=args.gate2_record,
+            )
+        except ReleaseRecordError as failure:
+            print(f"release record REFUSED: {failure}", file=sys.stderr)
+            return 1
+    elif args.gate2_record:
+        print(
+            "release record REFUSED: --gate2-record needs --publication-gate",
+            file=sys.stderr,
+        )
         return 1
 
     if not changed:

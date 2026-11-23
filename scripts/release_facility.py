@@ -703,6 +703,63 @@ def require_tag_peels_to(
     return peeled
 
 
+def require_gate2_revision_relationship(
+    receipt: dict[str, Any],
+    *,
+    release_revision: str,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, str]:
+    """The gate-2 twin of :func:`require_revision_relationships`.
+
+    Lane 3 is absent on this path, so there is NO runner revision to bind: the
+    candidate source must still be an ancestor of the release revision, and the
+    check still refuses rather than answers when history is shallow.
+    """
+    source = candidate_source_revision(receipt)
+    release = _require_known_commit(
+        release_revision, what="the release revision", repo_root=repo_root
+    )
+    _require_known_commit(
+        source, what="the candidate source revision", repo_root=repo_root
+    )
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source, release],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 1:
+        raise ReleaseRefused(
+            f"the candidate was built from {source}, which is NOT an ancestor "
+            f"of the release revision {release}"
+        )
+    if proc.returncode != 0:
+        raise ReleaseRefused(
+            f"`git merge-base --is-ancestor` could not answer for {source} "
+            f"and {release}: {proc.stderr.strip()}. An oracle that cannot "
+            "answer is not a pass"
+        )
+    return {"candidate_source_revision": source, "release_revision": release}
+
+
+def _require_gate2_selected(distribution: str, version: str) -> None:
+    """`--gate gate2_evidence` needs the same policy file to select it."""
+    import foundation_publication_gate as gate
+
+    try:
+        selected = gate.select_gate(gate.load_policy(), distribution, version)
+    except gate.GateIndeterminate as failure:
+        raise ReleaseRefused(
+            f"the publication-gate policy is unusable: {failure}"
+        ) from None
+    if selected != gate.GATE_2:
+        raise ReleaseRefused(
+            f"{distribution} {version} is not selected for {gate.GATE_2} by "
+            "docs/inventories/foundation-publication-gates.json"
+        )
+
+
 def cmd_verify_revisions(args: argparse.Namespace) -> None:
     """Refuse unless the three revisions stand in the ruled relationship.
 
@@ -713,11 +770,21 @@ def cmd_verify_revisions(args: argparse.Namespace) -> None:
     """
     resolve(args.distribution)
     _, receipt = candidate_receipt(args.distribution, args.version)
-    bound = require_revision_relationships(
-        receipt,
-        runner_revision=args.runner_revision,
-        release_revision=args.release_revision,
-    )
+    if getattr(args, "gate", "lane3_rehearsal") == "gate2_evidence":
+        if args.runner_revision:
+            raise ReleaseRefused("gate2_evidence has no Lane 3 runner revision")
+        _require_gate2_selected(args.distribution, args.version)
+        bound = require_gate2_revision_relationship(
+            receipt, release_revision=args.release_revision
+        )
+    else:
+        if not args.runner_revision:
+            raise ReleaseRefused("--runner-revision is required for lane3_rehearsal")
+        bound = require_revision_relationships(
+            receipt,
+            runner_revision=args.runner_revision,
+            release_revision=args.release_revision,
+        )
     for key, value in bound.items():
         print(f"{key}={value}")
     print(f"candidate_artifact_digest={receipt['sha256']}")
@@ -1433,8 +1500,13 @@ def main() -> int:
     )
     p.add_argument("distribution")
     p.add_argument("--version", required=True)
-    p.add_argument("--runner-revision", required=True)
+    p.add_argument("--runner-revision", default=None)
     p.add_argument("--release-revision", required=True)
+    p.add_argument(
+        "--gate",
+        choices=("lane3_rehearsal", "gate2_evidence"),
+        default="lane3_rehearsal",
+    )
     p.set_defaults(func=cmd_verify_revisions)
 
     p = sub.add_parser(
