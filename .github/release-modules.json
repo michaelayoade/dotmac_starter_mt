@@ -2553,6 +2553,7 @@
           "dotmac_payables/migrations/versions/pa_0004_supplier_payments.py",
           "dotmac_payables/migrations/versions/pa_0005_reversal_settled_history.py",
           "dotmac_payables/migrations/versions/pa_0006_tax_release_hist_credit.py",
+          "dotmac_payables/migrations/versions/pa_0007_separation_policy.py",
           "dotmac_payables/models.py",
           "dotmac_payables/service.py"
         ],
