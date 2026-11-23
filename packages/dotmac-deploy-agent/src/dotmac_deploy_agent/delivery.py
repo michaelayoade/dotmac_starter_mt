@@ -253,7 +253,8 @@ def settle_accessors(
     try:
         for role in eligible:
             state = store.load(role)
-            assert state.candidate is not None
+            if state.candidate is None:
+                continue  # nothing to promote (state changed under us)
             kept: list[str] = []
             for old in state.retire:
                 if _destroy(session, config, role, old):
