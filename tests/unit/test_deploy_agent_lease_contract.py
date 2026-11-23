@@ -149,7 +149,7 @@ def test_the_typed_client_accepts_what_the_double_serves(tmp_path: Path) -> None
     install(rig, double, clock)
     client = rig.launcher.lease
     lease = client.acquire(dispatch_id="run-1", ttl_seconds=600, max_seconds=1500)
-    assert lease == Lease("lease-1", 600, lease.deadline, lease.started, 1500)
+    assert lease == Lease("lease-1", 600, lease.deadline, lease.started, 1500, 600)
     assert client.standing() == "held"
     assert client.covers(lease, dispatch_id="run-1") is True
     clock.advance(400)

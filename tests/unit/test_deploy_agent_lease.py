@@ -379,7 +379,31 @@ def test_acquire_by_the_same_run_returns_its_lease(tmp_path: Path) -> None:
     clock.advance(100)
     again = client.acquire(dispatch_id="d", ttl_seconds=900)
     assert again.lease_id == first.lease_id
-    assert again.ttl_seconds == 900  # v2: the run's own lease, with its first ttl
+    assert again.ttl_seconds == 900  # v2 vector: the run's own lease, first ttl
+
+
+def test_a_replayed_acquire_counts_its_deadline_from_the_ttl_returned(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(tmp_path)
+    double.replay_returns_remaining = True  # the architect's r4 reading
+    client = rig.launcher.lease
+    first = client.acquire(dispatch_id="d", ttl_seconds=900, max_seconds=3000)
+    clock.advance(400)
+    again = client.acquire(dispatch_id="d", ttl_seconds=900, max_seconds=3000)
+    assert again.lease_id == first.lease_id and again.ttl_seconds == 500
+    # Deadline = receipt time + the ttl returned = the original end, never later.
+    assert again.deadline == first.deadline
+    # Its true start is unknown, so the hold is not counted beyond this grant...
+    assert again.max_seconds == 500
+    assert client.run_budget(again, configured_seconds=7200) == 380  # 500 - 120
+    # A later renewal may still grant up to what the plan asked for (the cap), not
+    # only the shortened ttl: the returned grant is not the plan's.
+    rig.cp.handlers["lease/renew"] = lambda _p: {
+        "lease_id": again.lease_id,
+        "ttl_seconds": 900,
+    }
+    assert client.renew(again, dispatch_id="d").ttl_seconds == 900
 
 
 def test_lease_deadline_counts_from_before_the_request_left(tmp_path: Path) -> None:

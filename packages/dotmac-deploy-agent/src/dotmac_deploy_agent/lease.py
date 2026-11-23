@@ -95,6 +95,9 @@ class Lease:
     #: from the current grant, because renewal keeps the grant alive.
     started: float = 0.0
     max_seconds: int = 0
+    #: The per-grant ttl the plan asked for: the most any grant may be. The
+    #: current `ttl_seconds` can be shorter (a replayed acquire returns what is left).
+    cap: int = 0
 
 
 class LeaseKeeper:
@@ -111,7 +114,6 @@ class LeaseKeeper:
         self._client = client
         self._dispatch_id = dispatch_id
         self._lease = lease
-        self._ttl = lease.ttl_seconds  # a grant never exceeds the first one
         self._last_ok = lease.deadline - lease.ttl_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -132,7 +134,7 @@ class LeaseKeeper:
             return
         if now >= lease.started + lease.max_seconds:
             return  # the plan's total is spent: nothing left to renew into
-        if now < self._last_ok + self._ttl / 3:
+        if now < self._last_ok + lease.ttl_seconds / 3:
             return
         try:
             renewed = self._client.renew(lease, dispatch_id=self._dispatch_id)
@@ -143,7 +145,7 @@ class LeaseKeeper:
             # deadline check above turns a long outage into `lease_lost`.
             return
         self._lease = renewed
-        self._last_ok = renewed.deadline - renewed.ttl_seconds
+        self._last_ok = renewed.deadline - renewed.ttl_seconds  # cadence follows grants
         self.renewals += 1
 
     def start(self) -> None:
@@ -238,7 +240,15 @@ class LeaseClient:
             raise Refusal("lease_ttl_invalid")
         # No `lease_max_seconds` means one grant is all the plan allows (job plans).
         total = granted if max_seconds is None else max_seconds
-        return Lease(lease_id, granted, sent + granted, sent, total)  # type: ignore[arg-type]
+        if granted < ttl_seconds:
+            # Shorter than asked: possibly a replayed acquire, whose lease began
+            # earlier by an amount we cannot see. Never count on more than we were
+            # given: the whole hold is what this grant covers, measured from receipt.
+            total = min(total, granted)
+        # Deadline from the ttl RETURNED, counted from before the request left.
+        return Lease(  # type: ignore[arg-type]
+            lease_id, granted, sent + granted, sent, total, ttl_seconds
+        )
 
     def covers(self, lease: Lease, *, dispatch_id: str) -> bool:
         reply = self._post(
@@ -260,8 +270,8 @@ class LeaseClient:
         ):
             raise Refusal("lease_refused", "renew_malformed")
         return Lease(
-            lease.lease_id, lease.ttl_seconds, sent + granted, lease.started,
-            lease.max_seconds,
+            lease.lease_id, granted, sent + granted, lease.started,  # type: ignore[arg-type]
+            lease.max_seconds, lease.cap,
         )  # fmt: skip
 
     def keeper(self, lease: Lease, *, dispatch_id: str) -> LeaseKeeper:

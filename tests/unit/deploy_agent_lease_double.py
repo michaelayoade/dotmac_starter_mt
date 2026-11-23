@@ -89,6 +89,9 @@ class DeployLeaseDouble:
         self.marker = False
         self.marker_always_required = False
         self.rehearsal_live = False  # the other class holds the shared row
+        #: A same-run acquire returns what is LEFT of the lease (the architect's r4
+        #: reading) instead of its first ttl (what Control's v2 scenario shows today).
+        self.replay_returns_remaining = False
         self.counter = 0
         self.log: list[tuple[str, dict[str, object]]] = []
 
@@ -128,8 +131,12 @@ class DeployLeaseDouble:
         if row is not None and self._live():
             if row.run != run:
                 raise LeaseRefused(409, HELD)
-            # The same run: its own lease, with its FIRST ttl (not what is left).
-            return {"lease_id": row.lease_id, "ttl_seconds": row.ttl}
+            # The same run: its own lease. v2 vector: its first ttl; r4: what is left.
+            left = max(1, int(row.expires_at - self.clock.t))
+            return {
+                "lease_id": row.lease_id,
+                "ttl_seconds": left if self.replay_returns_remaining else row.ttl,
+            }
         expired_unreleased = row is not None and not row.released
         if (expired_unreleased or self.marker_always_required) and not self.marker:
             raise LeaseRefused(409, MARKER_REQUIRED)
