@@ -80,10 +80,12 @@ def _require_role_dir(path: Path) -> None:
         raise Refusal("runtime_dir_unsafe")
 
 
-def _systemctl(config: AgentConfig, commands: Commands, *args: str) -> bytes | None:
+def _systemctl(
+    config: AgentConfig, commands: Commands, *args: str, timeout: float = 60.0
+) -> bytes | None:
     try:
         result = commands.run(
-            (str(config.systemctl_path), "--no-ask-password", *args), timeout=60.0
+            (str(config.systemctl_path), "--no-ask-password", *args), timeout=timeout
         )
     except Refusal:
         return None

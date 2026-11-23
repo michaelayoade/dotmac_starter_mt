@@ -117,8 +117,8 @@ def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
         path.write_text(authored(*files))
         path.chmod(0o644)
     secrets = rig.config.role_dir("import") / "secrets"
-    secrets.mkdir(mode=0o710)
-    secrets.chmod(0o710)
+    secrets.mkdir(mode=0o700)
+    secrets.chmod(0o700)
     if render:  # what the static one-shot openbao-agent unit renders
         for name in FILES:
             (secrets / name).write_text("rendered")
@@ -346,6 +346,7 @@ def test_the_agent_never_lists_or_deletes_inside_secrets(tmp_path: Path) -> None
         and "listdir" not in src
         and "glob(" not in src
     )
+    assert "lstat" not in src and ".stat(" not in src and "S_ISREG" not in src  # N2
 
 
 # -- A8: never sealed -------------------------------------------------------
@@ -370,19 +371,18 @@ def test_the_kit_installs_no_sealed_copy_instance_for_a_job_role() -> None:
     assert not any("lkg" in n or "seal" in n or "restore" in n for n in names)
 
 
-def test_the_job_kit_is_the_narrow_widening_and_the_purge_unit_is_static() -> None:
+def test_the_job_kit_keeps_secrets_0700_and_verifies_inside_the_render_unit() -> None:
     tmpfiles = (KIT / "enrolment/tmpfiles.d/dotmac-job-role.conf.template").read_text()
-    assert "/@ROLE@/secrets 0710 @CONTAINER_USER@ dotmac-deploy" in tmpfiles
-    assert "W pending Michael" in tmpfiles
-    serving = (KIT / "enrolment/tmpfiles.d/dotmac-role.conf.template").read_text()
-    assert (
-        "/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in serving
-    )  # serving roles unchanged
+    assert "/@ROLE@/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@" in tmpfiles
+    assert "0710" not in tmpfiles and "W pending" not in tmpfiles  # no widening (N2)
     purge = (KIT / "enrolment/systemd/dotmac-job-purge@.service").read_text()
     assert (
         "[Install]" not in purge and "WantedBy" not in purge and "Type=oneshot" in purge
     )
     assert "-mindepth 1 -maxdepth 1 -type f -delete" in purge
+    render = (KIT / "enrolment/systemd/job-render.conf.template").read_text()
+    assert "ExecStartPost=/usr/local/libexec/dotmac/job-verify " in render
+    assert "Type=oneshot" in render
     polkit = (
         KIT / "enrolment/polkit/50-dotmac-deploy-agent.rules.template"
     ).read_text()
@@ -390,6 +390,48 @@ def test_the_job_kit_is_the_narrow_widening_and_the_purge_unit_is_static() -> No
         line for line in polkit.splitlines() if not line.lstrip().startswith("//")
     )
     assert "@ENROLLED_JOB_UNITS@" in code and 'action.lookup("verb") == "start"' in code
+
+
+def run_verify(directory: Path, *names: str) -> int:
+    import subprocess
+
+    script = KIT / "enrolment/libexec/job-verify.sh"
+    return subprocess.run(  # noqa: S603
+        ["/bin/sh", str(script), str(directory), *names],
+        check=False,
+    ).returncode
+
+
+def test_the_in_unit_verifier_accepts_exactly_the_declared_set(tmp_path: Path) -> None:
+    for name in ("a_url", "b_url"):
+        (tmp_path / name).write_text("x")
+        (tmp_path / name).chmod(0o400)
+    assert run_verify(tmp_path, "a_url", "b_url") == 0
+    assert (
+        run_verify(tmp_path, "a_url") != 0
+    )  # an undeclared file exists (owner-only job)
+    assert (
+        run_verify(tmp_path, "a_url", "b_url", "c_url") != 0
+    )  # a declared file is missing
+
+
+def test_the_in_unit_verifier_refuses_wrong_mode_empty_and_symlink(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a_url").write_text("x")
+    (tmp_path / "a_url").chmod(0o440)
+    assert run_verify(tmp_path, "a_url") != 0
+    (tmp_path / "a_url").chmod(0o400)
+    assert run_verify(tmp_path, "a_url") == 0
+    (tmp_path / "a_url").chmod(0o600)
+    (tmp_path / "a_url").write_text("")
+    (tmp_path / "a_url").chmod(0o400)
+    assert run_verify(tmp_path, "a_url") != 0  # empty
+    (tmp_path / "a_url").unlink()
+    (tmp_path / "real").write_text("x")
+    (tmp_path / "real").chmod(0o400)
+    (tmp_path / "a_url").symlink_to(tmp_path / "real")
+    assert run_verify(tmp_path, "a_url") != 0
 
 
 # -- S2 / A9: the job env comes only from the signed params -----------------
@@ -720,33 +762,6 @@ def test_a_render_unit_that_fails_to_start_stops_the_job(tmp_path: Path) -> None
         ("openbao-agent@erp-import.service",): CommandResult(1, b""),
         **rig.systemctl.script,
     }
-    assert refused(rig) == ("refused", "job_files_invalid")
-
-
-@pytest.mark.parametrize("mode", [0o440, 0o644, 0o600])
-def test_a_declared_file_with_a_wrong_mode_stops_the_job(
-    tmp_path: Path, mode: int
-) -> None:
-    rig = job_rig(tmp_path)
-    (secrets_dir(rig) / "legacy_database_url").chmod(mode)
-    assert refused(rig) == ("refused", "job_files_invalid")
-    assert rig.runner.specs == []
-
-
-def test_a_missing_or_empty_declared_file_stops_the_job(tmp_path: Path) -> None:
-    rig = job_rig(tmp_path)
-    empty = secrets_dir(rig) / "legacy_database_url"
-    empty.chmod(0o600)
-    empty.write_text("")
-    empty.chmod(0o400)
-    assert refused(rig) == ("refused", "job_files_invalid")
-    (tmp_path / "b").mkdir()
-    rig = job_rig(tmp_path / "b", render=False)
-    assert refused(rig) == ("refused", "job_files_invalid")
-
-
-def test_a_declared_file_owned_by_another_uid_stops_the_job(tmp_path: Path) -> None:
-    rig = job_rig(tmp_path, job_secrets_uid=os.geteuid() + 1)
     assert refused(rig) == ("refused", "job_files_invalid")
 
 
@@ -1122,3 +1137,60 @@ def test_rq5_a_serving_delivery_login_403_is_the_same_delivery_scope_refusal(
     rig.cp.materials = make_materials(roles=WEB)
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "secret_delivery_failed")
+
+
+# -- N5: setup plus teardown fits the 120 s lease margin ------------------------
+def test_n5_job_setup_and_teardown_fit_the_lease_margin_with_injected_timings(
+    tmp_path: Path,
+) -> None:
+    from datetime import timedelta
+
+    from dotmac_deploy_agent.jobs import LEASE_MARGIN
+
+    from tests.unit.deploy_agent_support import NOW
+
+    rig = job_rig(tmp_path)
+    elapsed = [0.0]
+    original_bao = rig.bao.request
+    original_systemctl = rig.systemctl.run
+
+    def timed_bao(method, path, headers, body):  # type: ignore[no-untyped-def]
+        elapsed[0] += 4.0  # a typical OpenBao round trip
+        return original_bao(method, path, headers, body)
+
+    def timed_systemctl(argv, *, timeout):  # type: ignore[no-untyped-def]
+        verb = argv[2] if len(argv) > 2 else ""
+        elapsed[0] += {"start": 15.0, "show": 1.0}.get(verb, 1.0)
+        assert timeout <= 30.0  # every systemd step carries a hard timeout
+        return original_systemctl(argv, timeout=timeout)
+
+    rig.bao.request = timed_bao  # type: ignore[method-assign]
+    rig.systemctl.run = timed_systemctl  # type: ignore[method-assign]
+    rig.launcher.bao_transport = rig.bao
+    rig.launcher.commands = rig.systemctl
+    rig.launcher.clock = lambda: NOW + timedelta(seconds=elapsed[0])
+    assert refused(rig) == ("completed", None)  # the fake runner takes no time
+    done = receipt(rig)
+    from dotmac_deploy_agent.wire import parse_stamp
+
+    spent = (
+        parse_stamp(str(done["finished_at"])) - parse_stamp(str(done["started_at"]))
+    ).total_seconds()
+    assert 0 < spent <= LEASE_MARGIN
+
+
+def test_n5_the_systemd_steps_carry_timeouts_that_leave_room_for_openbao() -> None:
+    from dotmac_deploy_agent import job_delivery as jd
+    from dotmac_deploy_agent.jobs import LEASE_MARGIN
+
+    assert (
+        jd.SYSTEMD_BUDGET_SECONDS
+        == jd.RENDER_START_TIMEOUT + jd.SHOW_TIMEOUT + 2 * jd.PURGE_START_TIMEOUT
+    )
+    assert jd.SYSTEMD_BUDGET_SECONDS <= LEASE_MARGIN - 40  # about eight OpenBao calls
+
+
+def test_n4_a_missing_image_is_refused_job_image_absent() -> None:
+    """Pointer: `test_a_missing_image_refuses_before_any_lease_mint_or_file` (c7789470)."""
+    names = {n for n in globals() if n.startswith("test_")}
+    assert "test_a_missing_image_refuses_before_any_lease_mint_or_file" in names

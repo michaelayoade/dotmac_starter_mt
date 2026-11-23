@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import stat
 from typing import Final
 
 from .commands import Commands
@@ -107,7 +105,11 @@ def purge_job_role(
         raise Refusal("runtime_dir_unsafe") from None  # not ours to remove
     purged = (
         _systemctl(
-            config, commands, "start", purge_unit_name(config.secrets_namespace, role)
+            config,
+            commands,
+            "start",
+            purge_unit_name(config.secrets_namespace, role),
+            timeout=PURGE_START_TIMEOUT,
         )
         is not None
     )
@@ -125,6 +127,17 @@ def purge_job_role(
     return len(kept)
 
 
+#: Setup plus teardown of a job (mint, render, verify, purge, accessor destroy) has
+#: to fit the 120 s lease margin. The systemd steps carry hard timeouts that sum to
+#: well under it, leaving the rest for the OpenBao round trips (about eight calls).
+RENDER_START_TIMEOUT: Final = 30.0
+SHOW_TIMEOUT: Final = 5.0
+PURGE_START_TIMEOUT: Final = 20.0  # runs twice: before the mint and after the job
+SYSTEMD_BUDGET_SECONDS: Final = (
+    RENDER_START_TIMEOUT + SHOW_TIMEOUT + 2 * PURGE_START_TIMEOUT
+)
+
+
 def render_job_credentials(
     config: AgentConfig,
     commands: Commands,
@@ -132,23 +145,30 @@ def render_job_credentials(
     names: tuple[str, ...],
     config_stem: str | None = None,
 ) -> tuple[str, ...]:
-    """Render once, then verify WITHOUT listing or reading `secrets/`.
+    """Render once. The agent never looks inside `secrets/` (0700, container uid).
 
-    Starts the static one-shot `openbao-agent@<ns>-<role>` (it logs in with the one
-    secret_id, renders and exits), requires `Result=success` and `ExecMainStatus=0`
-    from `systemctl show` as the render-and-login signal, then `lstat`s each
-    DECLARED `secrets/<lower(name)>`: a regular, non-empty file, mode 0400, owned
-    by the enrolled uid. Narrowing to the declared files is Foundation's per-file
-    read-only mounts, not a deletion here. Returns the verified names."""
+    Starts the static one-shot `openbao-agent@<stem>` (it logs in with the one
+    secret_id, renders and exits). The unit's own `ExecStartPost`, run as the
+    container uid, checks each declared file (regular, 0400, owned, non-empty) and
+    that NO undeclared file exists, and fails the unit otherwise. The agent reads
+    only the unit's `Result` and `ExecMainStatus`. Returns the declared names."""
     unit = (
         f"openbao-agent@{config_stem}.service"
         if config_stem
         else unit_name(config.secrets_namespace, role)
     )
-    if _systemctl(config, commands, "start", unit) is None:
+    if (
+        _systemctl(config, commands, "start", unit, timeout=RENDER_START_TIMEOUT)
+        is None
+    ):
         raise Refusal("job_files_invalid", "render_unit_failed")
     shown = _systemctl(
-        config, commands, "show", "--property=Result,ExecMainStatus", unit
+        config,
+        commands,
+        "show",
+        "--property=Result,ExecMainStatus",
+        unit,
+        timeout=SHOW_TIMEOUT,
     )
     fields = dict(
         line.split("=", 1)
@@ -157,26 +177,10 @@ def render_job_credentials(
     )
     if fields.get("Result") != "success" or fields.get("ExecMainStatus") != "0":
         raise Refusal("job_files_invalid", "render_not_successful")
-    uid = config.job_secrets_uid if config.job_secrets_uid is not None else os.geteuid()
-    secrets = config.role_dir(role) / "secrets"
-    verified: list[str] = []
-    for material in names:
-        name = material.lower()
-        if not _FILENAME.fullmatch(name):
-            raise Refusal("job_files_invalid")
-        try:
-            info = (secrets / name).lstat()
-        except OSError:
-            raise Refusal("job_files_invalid") from None
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or stat.S_IMODE(info.st_mode) != 0o400
-            or info.st_uid != uid
-            or info.st_size == 0
-        ):
-            raise Refusal("job_files_invalid")
-        verified.append(name)
-    return tuple(verified)
+    declared = tuple(material.lower() for material in names)
+    if not all(_FILENAME.fullmatch(name) for name in declared):
+        raise Refusal("job_files_invalid")
+    return declared
 
 
 def check_images_present(

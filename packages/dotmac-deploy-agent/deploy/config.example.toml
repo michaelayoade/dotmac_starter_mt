@@ -24,7 +24,6 @@ secrets_environment = "staging"           # the namespace-env of the <env>/<prod
 # Role jobs (P-SEC rev4): the host fence. Empty (the default) refuses every
 # `run_job` dispatch; the enrolment op names the one role, and I-C1/I-C2 removes it.
 # job_roles = ["import"]
-# job_secrets_uid = <uid the rendered job files belong to>   # default: the agent's uid
 
 # Optional, existing apps only (M11): the relocated original, checked by lstat.
 # The content is read ONLY through $CREDENTIALS_DIRECTORY/legacy.
