@@ -778,10 +778,11 @@ def test_the_render_unit_must_report_success_and_status_zero(
     tmp_path: Path, show: bytes
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.systemctl.script = {
-        ("--property=Result,ExecMainStatus,InvocationID",): CommandResult(0, show),
-        **rig.systemctl.script,
-    }
+    # assignment, not `{new, **old}`: the rig already has this key and the old one
+    # would win the merge
+    rig.systemctl.script[("--property=Result,ExecMainStatus,InvocationID",)] = (
+        CommandResult(0, show)
+    )
     assert refused(rig) == ("refused", "job_files_invalid")
     assert rig.runner.specs == [] and tracked(rig) == []
 
@@ -1484,10 +1485,7 @@ def test_a_unit_whose_description_lists_another_set_is_a_collision_and_is_refuse
         "--property=LoadState,Description",
         f"openbao-agent@{stem_of(rig, BOTH)}.service",
     )
-    rig.systemctl.script = {
-        key: CommandResult(0, loaded(OWNER)),
-        **rig.systemctl.script,
-    }
+    rig.systemctl.script[key] = CommandResult(0, loaded(OWNER))
     assert refused(rig) == ("refused", "job_files_invalid")
     assert rig.bao.paths == [] and rig.cp.lease_log == []
 
@@ -1500,10 +1498,9 @@ def test_a_unit_description_without_the_materials_key_is_refused(
         "--property=LoadState,Description",
         f"openbao-agent@{stem_of(rig, BOTH)}.service",
     )
-    rig.systemctl.script = {
-        key: CommandResult(0, b"LoadState=loaded\nDescription=Render\n"),
-        **rig.systemctl.script,
-    }
+    rig.systemctl.script[key] = CommandResult(
+        0, b"LoadState=loaded\nDescription=Render\n"
+    )
     assert refused(rig) == ("refused", "job_files_invalid")
 
 
@@ -1703,7 +1700,7 @@ def preflight_calls(rig: Rig) -> list[tuple[str, ...]]:
     return [
         c
         for c in ps_filter(rig)
-        if "label=dotmac.dispatch_id" in c and "label=dotmac.job" in c
+        if "label=dotmac.dispatch_id" in c and "label=dotmac.role_job=1" in c
     ]
 
 
@@ -1725,7 +1722,7 @@ def test_rev7_an_orphan_blocks_every_lease_job_or_serving(
     tmp_path: Path, kind: str
 ) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[("--filter", "label=dotmac.job")] = CommandResult(
+    rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(
         0, b"abc123\n"
     )
     if kind == "serving":
@@ -1738,7 +1735,7 @@ def test_rev7_an_orphan_blocks_every_lease_job_or_serving(
 
 def test_rev7_an_unreadable_preflight_blocks_too(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
-    rig.commands.script[("--filter", "label=dotmac.job")] = CommandResult(1, b"")
+    rig.commands.script[("--filter", "label=dotmac.role_job=1")] = CommandResult(1, b"")
     assert refused(rig) == ("refused", "job_container_orphaned")
 
 
