@@ -659,6 +659,13 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return EXIT_REFUSED
 
 
+def cmd_run_job(args: argparse.Namespace) -> int:
+    """Registration only: the entry point lives in `operator_job.py`."""
+    from .operator_job import cmd_run_job as run
+
+    return run(args)
+
+
 def _load_prestate(path: str) -> HostPrestateV1:
     """Read a HostPrestateV1 document from a file, refusing loudly.
 
@@ -1509,6 +1516,21 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PROVIDER",
         help="the Effects implementation `--execute` runs the plan against",
     )
+
+    run_job = add(
+        "run-job",
+        cmd_run_job,
+        "run ONE dispatched operator job (preflight list unless --execute)",
+    )
+    run_job.add_argument("--execute", action="store_true")
+    run_job.add_argument("--target", default="")
+    run_job.add_argument(
+        "--authorization",
+        default="",
+        help="the Control V2 authorization and dispatch pair; REQUIRED with --execute",
+    )
+    run_job.add_argument("--docker-bin", dest="docker_bin", default="")
+    run_job.add_argument("--systemctl-bin", dest="systemctl_bin", default="")
 
     policy = add(
         "ingress-policy",

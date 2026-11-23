@@ -2,6 +2,30 @@
 
 ## Unreleased — successor not allocated
 
+### Added: operator-job entry point (`dotmac-deploy run-job`)
+
+`dotmac-deploy run-job --execute --target <ref> --authorization <pair>` runs ONE
+Control-dispatched operator job. Additive: a new optional
+`[compose_topology.jobs.operator]` table (absent means `ComposeJob.operator is
+None` and every existing descriptor parses and renders byte-identically), new
+modules `operator_job.py`, `operator_job_contract.py` and
+`providers/compose_operator_job.py`, one `StepKind.OPERATOR_JOB` member and the
+subcommand registration. The dispatch is resolved and consumed through the
+installed bindings before any container exists; a `409 already_consumed` is the
+refusal `job_already_consumed`. The container is created from the declared shape
+only, read back with `docker inspect` before start, stopped at the deadline or
+on SIGTERM, and always removed. Never root, never a secret value, no secrets
+directory listing.
+
+The deploy, rollback, recovery, support-job, render and existing spec-parse
+bytes are unchanged, proved by the AST-hash guard
+`tests/architecture/test_foundation_operator_job_isolation.py`. Cross-repo key
+names are PROVISIONAL and live only in `operator_job_contract.py`.
+
+This is an unpublished source change that must land before the next candidate
+freeze. It allocates no version and publishes nothing; `0.4.0a2` is still
+unallocated.
+
 ### Added: scoped restore-rehearsal admission binding
 
 `ExecutionBindings.restore_rehearsal_admission_provider` supplies the trusted
