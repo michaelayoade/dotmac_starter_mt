@@ -938,6 +938,23 @@ type = "directory"
 url = "packages/dotmac-connector-remita"
 
 [[package]]
+name = "dotmac-connector-smtp"
+version = "0.1.0a1"
+description = "Dotmac Integrator delivery connector for SMTP submission: STARTTLS with hostname verification, operator-bound network target, classified outcomes"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a20"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-smtp"
+
+[[package]]
 name = "dotmac-connector-sub-accounting"
 version = "0.1.0a1"
 description = "Sub invoice-accounting-sync feed, POLL-only observation connector"
@@ -1044,23 +1061,6 @@ sqlalchemy = "==2.0.51"
 [package.source]
 type = "directory"
 url = "packages/dotmac-delivery-resend"
-
-[[package]]
-name = "dotmac-delivery-smtp"
-version = "0.1.0a1"
-description = "SMTP delivery adapter for the kernel delivery-provider seam: STARTTLS-required, classified outcomes, UI-entered settings"
-optional = false
-python-versions = ">=3.11,<3.14"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-dotmac-kernel = ">=0.1.0a109"
-
-[package.source]
-type = "directory"
-url = "packages/dotmac-delivery-smtp"
 
 [[package]]
 name = "dotmac-deploy-agent"
@@ -1379,7 +1379,7 @@ url = "packages/dotmac-inbox-operations"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a21"
+version = "0.1.0a22"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1434,7 +1434,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a110"
+version = "0.1.0a110+dev"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1699,7 +1699,7 @@ url = "packages/dotmac-party"
 
 [[package]]
 name = "dotmac-payables"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Tenant supplier-liability and payment-obligation authority"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4616,4 +4616,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "7edd7974f88cef15adcd9bb98fcce5e3ca0a183a7cad644fa2fc6de073dc9eac"
+content-hash = "533d129cb4d5bb97bd0849932cf145b37841823de5ddf73aedd3f9fedcb13863"

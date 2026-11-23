@@ -104,6 +104,7 @@ from dotmac_integration.models import (
 )
 from dotmac_integration.operations import record_operation, replay_delivery
 from dotmac_integration.retention import (
+    REDACTION_MARKER,
     active_delivery_hold_for,
     is_delivery_redacted,
 )
@@ -307,9 +308,10 @@ _REFUSAL_DETAIL: Mapping[str, str] = MappingProxyType(
         "already_queued": "this command is already queued and will be attempted",
         "in_flight": (
             "a worker holds the lease for this command. If that worker died, "
-            "`operations.release_expired_leases` is what returns it to the queue "
-            "— it owns lease recovery, and unlike a repair it does not reset the "
-            "attempt budget, because the attempt genuinely happened"
+            "`operations.release_expired_leases` moves it to "
+            "`reconciliation_required` once the lease expires, because the "
+            "provider may already have acted; it is never returned to the "
+            "queue automatically"
         ),
         "ambiguous_outcome": (
             "this attempt's outcome is INDETERMINATE: it may have half-landed at "
@@ -1054,6 +1056,7 @@ def reconcile_with_evidence(
     if evidence.verdict is ProviderVerdict.LANDED:
         values = {
             "state": "delivered",
+            "terminal_at": moment,
             "delivered_at": moment,
             "next_attempt_at": None,
             "leased_until": None,
@@ -1084,6 +1087,7 @@ def reconcile_with_evidence(
             raise _refuse(delivery, "binding_missing")
         values = {
             "state": "pending",
+            "terminal_at": None,
             # Reset, for `operations.replay_delivery`'s reason: leaving the
             # count at the cap makes the requeue a no-op that looks like an
             # action, because the very next outcome dead-letters it again.
@@ -1096,13 +1100,20 @@ def reconcile_with_evidence(
     else:
         values = {"error_code": INCONCLUSIVE_CODE, "error_detail": None}
 
+    guards = [
+        DeliveryAttempt.id == subject.delivery_id,
+        DeliveryAttempt.state == _AMBIGUOUS_STATE,
+        DeliveryAttempt.attempt_count == subject.attempt_count,
+    ]
+    if evidence.verdict is ProviderVerdict.NOT_LANDED:
+        # Re-arming must never race the retention purge into a `pending`
+        # tombstone: the database re-checks "not redacted" in the UPDATE.
+        guards.append(
+            DeliveryAttempt.payload_json[REDACTION_MARKER].as_string().is_(None)
+        )
     result = db.execute(
         sa.update(DeliveryAttempt)
-        .where(
-            DeliveryAttempt.id == subject.delivery_id,
-            DeliveryAttempt.state == _AMBIGUOUS_STATE,
-            DeliveryAttempt.attempt_count == subject.attempt_count,
-        )
+        .where(*guards)
         .values(**values)
         .execution_options(synchronize_session=False)
     )

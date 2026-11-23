@@ -524,6 +524,55 @@
         ]
       }
     },
+    "dotmac-connector-smtp": {
+      "$comment": [
+        "SMTP submission for the Dotmac Integrator companion (DELIVERY,",
+        "email.send.v1, SPI 1.7). The logic MOVED from the never-released",
+        "dotmac-delivery-smtp: STARTTLS with certificate and hostname",
+        "verification (TLS 1.2 minimum), the SMTP reply classification table",
+        "byte-identical, and every failure after the DATA payload left reported",
+        "as RECONCILIATION_REQUIRED and never retried. The destination is an",
+        "operator-bound network target (require_network_target, refused before",
+        "any I/O); the manifest declares only the TCP 587 ceiling and no",
+        "provider egress host.",
+        "",
+        "HELD BACK, deliberately, not a gap: `release_enabled` is false, so",
+        "the release gate refuses this connector before build and again after",
+        "protected-environment approval. It is composable in the root dev",
+        "environment but is NOT selectable or releasable. Publication needs",
+        "its own approval after the Integrator pump (B5) and the bound-target",
+        "delivery path exist."
+      ],
+      "package_dir": "packages/dotmac-connector-smtp",
+      "release_enabled": false,
+      "import_name": "dotmac_connector_smtp",
+      "plugin_attr": "PLUGIN",
+      "connector_key": "smtp",
+      "spi_range": ">=1.7,<2.0",
+      "integration_floor": "0.1.0a20",
+      "tag_prefix": "dotmac-connector-smtp-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_connector_smtp/__init__.py",
+          "dotmac_connector_smtp/classify.py",
+          "dotmac_connector_smtp/config.py",
+          "dotmac_connector_smtp/connection.py",
+          "dotmac_connector_smtp/plugin.py",
+          "dotmac_connector_smtp/provider.py",
+          "dotmac_connector_smtp/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-integration",
+          "python"
+        ]
+      }
+    },
     "dotmac-connector-sub-accounting": {
       "$comment": [
         "Sub's invoices/accounting-sync/v2 feed transport: authenticated",
