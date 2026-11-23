@@ -134,7 +134,7 @@
     },
     "dotmac-integration": {
       "declared": "0.1.0a22",
-      "reason": "TODO: state why this version has no verified publication",
+      "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a22 carries the DELIVERY crash-safety, terminal-state retention and DELIVERY network-target fixes; published 0.1.0a21 (tag dotmac-integration-v0.1.0a21) remains immutable. This gap is NOT to be repaired by editing the version down. Remove this row in the a22 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a22 from the exact merged revision and records its verification; allocation is not publication.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
