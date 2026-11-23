@@ -723,7 +723,7 @@ def test_a_second_release_is_a_signed_replay_and_a_4xx_is_a_refusal(
 ) -> None:
     rig, double, _ = with_double(tmp_path)
     client = rig.launcher.lease
-    lease = client.acquire(dispatch_id="d", ttl_seconds=60)
+    lease = client.acquire(dispatch_id="d", ttl_seconds=120)
     client.release(lease, host_mutated=False)
     client.release(lease, host_mutated=False)  # signed 200 {released, replay: true}
     assert double.release({"lease_id": "lease-1", "host_mutated": False}) == {
@@ -822,3 +822,61 @@ def test_only_the_serving_path_names_the_keeper() -> None:
         )
     }
     assert users == {"_execute"}  # never `_execute_job`
+
+
+# -- ruling 4: the per-grant range is for SERVING plans; run_job is ttl == max ----
+
+
+@pytest.mark.parametrize(
+    ("ttl", "max_seconds", "ok"),
+    [
+        (120, None, True),
+        (900, None, True),
+        (600, 10800, True),
+        (119, None, False),  # under the serving floor
+        (901, None, False),  # over the serving ceiling
+        (600, 599, False),  # the total may not be below one grant
+        (600, 10801, False),  # nor above Control's hard maximum
+    ],
+)
+def test_a_serving_lease_is_120_to_900_per_grant_and_at_most_10800_in_total(
+    tmp_path: Path, ttl: int, max_seconds: int | None, ok: bool
+) -> None:
+    rig, double, _ = with_double(tmp_path)
+    client = rig.launcher.lease
+    if ok:
+        client.acquire(dispatch_id="d", ttl_seconds=ttl, max_seconds=max_seconds)
+        return
+    with pytest.raises(Refusal) as caught:
+        client.acquire(dispatch_id="d", ttl_seconds=ttl, max_seconds=max_seconds)
+    assert caught.value.code == "lease_ttl_invalid"
+    assert double.log == []  # refused before anything is asked of CP
+
+
+@pytest.mark.parametrize(
+    ("ttl", "max_seconds", "ok"),
+    [
+        (720, None, True),  # a job's ttl may exceed 900 ...
+        (2920, 2920, True),  # ... and equals its max
+        (3600, None, True),  # the role-job ceiling
+        (3601, None, False),  # above the ceiling
+        (1920, 3120, False),  # ttl != max: a job is one grant
+    ],
+)
+def test_a_run_job_lease_is_ttl_equal_max_and_at_most_3600(
+    tmp_path: Path, ttl: int, max_seconds: int | None, ok: bool
+) -> None:
+    rig, double, _ = with_double(tmp_path)
+    client = rig.launcher.lease
+    if ok:
+        lease = client.acquire(
+            dispatch_id="d", ttl_seconds=ttl, max_seconds=max_seconds, serving=False
+        )
+        assert lease.max_seconds == ttl  # one grant, never renewed
+        return
+    with pytest.raises(Refusal) as caught:
+        client.acquire(
+            dispatch_id="d", ttl_seconds=ttl, max_seconds=max_seconds, serving=False
+        )
+    assert caught.value.code == "lease_ttl_invalid"
+    assert double.log == []

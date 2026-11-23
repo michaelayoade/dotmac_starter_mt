@@ -619,6 +619,7 @@ class Launcher:
             lease = self.lease.acquire(
                 dispatch_id=materials.dispatch_id,
                 ttl_seconds=materials.lease_ttl_seconds,
+                serving=False,
             )
             details["lease"] = {
                 "lease_id": lease.lease_id,

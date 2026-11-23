@@ -47,6 +47,10 @@ _BODIES: Final[dict[str, dict[str, dict[str, object]]]] = {
     },
 }
 MAX_TTL: Final = 3600
+#: Architect ruling 4 / Control `lease_ttl_range`: a SERVING plan's per-grant ttl.
+SERVING_TTL: Final = (120, 900)
+#: The total a serving plan may hold across renewals (Control `lease_max_limit`).
+MAX_HOLD: Final = 10800
 #: Kept back from the lease for the runner's TERM-to-KILL wait (60 s) and the
 #: release call; the same 120 s a job plan adds to its timeout (lease fit).
 RUN_MARGIN: Final = 120
@@ -230,9 +234,22 @@ class LeaseClient:
         return str(_answer(reply, "lease/standing")["standing"])
 
     def acquire(
-        self, *, dispatch_id: str, ttl_seconds: int, max_seconds: int | None = None
+        self,
+        *,
+        dispatch_id: str,
+        ttl_seconds: int,
+        max_seconds: int | None = None,
+        serving: bool = True,
     ) -> Lease:
-        if not 1 <= ttl_seconds <= MAX_TTL:
+        """A serving plan: per-grant ttl 120..900, total `max_seconds` (ttl..10800,
+        or absent = one grant). A run_job plan (`serving=False`): ttl = max =
+        timeout + 120, at most 3600, one grant, never renewed."""
+        if serving:
+            low, high = SERVING_TTL
+            ceiling = ttl_seconds if max_seconds is None else max_seconds
+            if not low <= ttl_seconds <= high or not ttl_seconds <= ceiling <= MAX_HOLD:
+                raise Refusal("lease_ttl_invalid")
+        elif not 1 <= ttl_seconds <= MAX_TTL or max_seconds not in (None, ttl_seconds):
             raise Refusal("lease_ttl_invalid")
         sent = self._monotonic()
         reply = self._post(
