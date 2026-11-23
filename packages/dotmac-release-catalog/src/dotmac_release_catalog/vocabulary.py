@@ -72,6 +72,9 @@ class AttestationKind(StrEnum):
     * `DEPLOY_UNIT` — the deploy contract the product revision declares. The
       attestation row records the descriptor's URI and the sha256 of its exact
       bytes; the catalogue holds that claim and never fetches the document.
+    * `PRODUCT_SPEC` — the Foundation `product.toml` at the revision, held and
+      never fetched. One row per document path (the existing unique on
+      artifact, kind and digest already allows it).
 
     An artifact can have any subset. Having none is a legal state and an
     informative one; it is the reason attestations are rows rather than columns
@@ -87,6 +90,8 @@ class AttestationKind(StrEnum):
     PRODUCT_DATABASE_CATALOG = "product_database_catalog"
     #: The deploy contract the revision declares; held, never fetched.
     DEPLOY_UNIT = "deploy_unit"
+    #: The Foundation product.toml at the revision; held, never fetched.
+    PRODUCT_SPEC = "product_spec"
 
 
 #: Every member, for exhaustiveness checks in consumers and in tests.

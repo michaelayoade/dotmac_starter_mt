@@ -149,7 +149,7 @@
     },
     "dotmac-release-catalog": {
       "declared": "0.1.0a6",
-      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a5 remains the last published and tagged version (dotmac-release-catalog-v0.1.0a5); 0.1.0a6 adds AttestationKind.DEPLOY_UNIT (the deploy contract a product revision declares; held, never fetched), so src/ no longer matches the bytes the a5 tag names and a bare 0.1.0a5 would make one version name two vocabularies. No migration. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a6 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
+      "reason": "ALLOCATED SUPPLY VERSION, NOT YET PUBLISHED. 0.1.0a5 remains the last published and tagged version (dotmac-release-catalog-v0.1.0a5); 0.1.0a6 adds AttestationKind.DEPLOY_UNIT and AttestationKind.PRODUCT_SPEC (the deploy contract and the Foundation product.toml a product revision declares; held, never fetched), so src/ no longer matches the bytes the a5 tag names and a bare 0.1.0a5 would make one version name two vocabularies. No migration. Michael authorizes release versions; nothing authorizes main to claim a version it is not, so a6 awaits the protected publication workflow and its oracle-backed release record. Remove this row only in that release-record change; never by editing the declared version merely to quiet this sweep.",
       "state": "declared-unpublished"
     },
     "dotmac-runner-transport": {

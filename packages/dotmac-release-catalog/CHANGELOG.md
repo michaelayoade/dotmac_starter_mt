@@ -11,7 +11,12 @@ deploy contract a product revision declares. Like every other attestation it is
 held and never fetched: the row records the descriptor's URI and the sha256 of
 its exact bytes, and a consumer fetches, verifies and parses through its own
 transport (ADR-0009). Additive only; no existing kind, column or index changes.
-`ATTESTATION_KINDS` now has seven members.
+
+**`AttestationKind.PRODUCT_SPEC = "product_spec"`.** The Foundation `product.toml`
+at the revision, held and never fetched, with the same row shape (URI, sha256 of
+the exact bytes). The existing unique on (artifact, kind, digest) already allows
+one row per document path. Additive only. `ATTESTATION_KINDS` now has eight
+members.
 
 No migration: `attestation_kind` is a plain `String(40)` column with no CHECK constraint, so the lineage head stays at
 `rl_0002_db_catalog_attestations`.
