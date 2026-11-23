@@ -394,6 +394,7 @@ def parse_materials(
             enrolled_roles=config.job_roles,
             store_now=store_now,
             lease_ttl_seconds=lease_max if lease_max is not None else ttl,
+            foundation_timeout_seconds=config.foundation_timeout_seconds,
         )
         refuse_cp_scoped_params(cp_params, jobs)
     all_roles = job_roles(jobs) | (

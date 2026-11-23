@@ -14,10 +14,14 @@ unsigned params, and never enters `params.env`.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import stat
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Final
 
 from .canon import canonical_json, digest
@@ -41,6 +45,12 @@ _DISPATCHED_KEYS: Final = frozenset(
         "argv", "timeout_seconds", "window",
     }
 )  # fmt: skip
+#: Added by Control's next v2 (P-SEC rev5 RQ-2, RQ-3). Optional until the vendored
+#: contract carries them; once it does, the agent requires them.
+_DISPATCHED_OPTIONAL: Final = frozenset({"input_digests", "apply_class"})
+#: The closed list of apply-mode argv tokens (RQ-3). A token not here is not apply.
+APPLY_ARGV_TOKENS: Final = frozenset({"--apply"})
+_SHA256: Final = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 @dataclass(frozen=True)
@@ -110,6 +120,10 @@ class DispatchedJob:
     timeout_seconds: int
     window_id: str | None
     closes_at: datetime | None
+    #: `(absolute path, sha256:<hex>)` of every input file, from the signed plan.
+    input_digests: tuple[tuple[str, str], ...] = ()
+    #: Control's apply-class for this dispatch (None until the contract carries it).
+    apply_class: bool | None = None
 
     @property
     def argv_digest(self) -> str:
@@ -126,7 +140,11 @@ def plan_dispatched_job(
         if raw is not None:
             raise Refusal("materials_invalid", "dispatched_job_unexpected")
         return None
-    if not isinstance(raw, dict) or set(raw) != _DISPATCHED_KEYS:
+    if (
+        not isinstance(raw, dict)
+        or not _DISPATCHED_KEYS <= set(raw)
+        or not set(raw) <= _DISPATCHED_KEYS | _DISPATCHED_OPTIONAL
+    ):
         raise Refusal("materials_invalid", "dispatched_job_missing")
     role, single_use = raw["role"], raw["single_use"]
     argv, timeout, window = raw["argv"], raw["timeout_seconds"], raw["window"]
@@ -154,6 +172,21 @@ def plan_dispatched_job(
         or not 1 <= timeout <= MAX_JOB_TIMEOUT
     ):
         raise Refusal("materials_invalid", "dispatched_job_invalid")
+    inputs = raw.get("input_digests", {})
+    apply_class = raw.get("apply_class")
+    if (
+        not isinstance(inputs, dict)
+        or not all(
+            isinstance(k, str)
+            and k.startswith("/")
+            and "\x00" not in k
+            and isinstance(v, str)
+            and _SHA256.fullmatch(v)
+            for k, v in inputs.items()
+        )
+        or not (apply_class is None or type(apply_class) is bool)
+    ):
+        raise Refusal("materials_invalid", "dispatched_job_invalid")
     window_id, closes_at = None, None
     if window is not None:
         if (
@@ -177,6 +210,8 @@ def plan_dispatched_job(
         timeout,
         window_id,
         closes_at,
+        tuple(sorted(inputs.items())),
+        apply_class,
     )
 
 
@@ -227,8 +262,11 @@ def check_job_admissible(
     enrolled_roles: Collection[str],
     store_now: datetime,
     lease_ttl_seconds: int,
+    foundation_timeout_seconds: int | None = None,
 ) -> None:
-    """Before anything: the host fence, the signed window and the lease fit."""
+    """Before anything: the host fence, the signed window and the lease fit. The
+    lease is never renewed for a job (RQ-1), and the agent's Foundation bound must
+    cover the job's own `timeout_seconds`."""
     if job.role is not None:
         if job.role not in enrolled_roles:
             raise Refusal("job_role_refused")
@@ -236,6 +274,11 @@ def check_job_admissible(
             raise Refusal("job_window_closed")
     if job.timeout_seconds + LEASE_MARGIN > lease_ttl_seconds:
         raise Refusal("lease_ttl_invalid")  # never extended: the plan must fit
+    if (
+        foundation_timeout_seconds is not None
+        and foundation_timeout_seconds < job.timeout_seconds
+    ):
+        raise Refusal("lease_ttl_invalid")  # Foundation would be cut off early
 
 
 def check_matches_definition(
@@ -248,6 +291,52 @@ def check_matches_definition(
                 raise Refusal("materials_invalid", "dispatched_job_role_differs")
             return
     raise Refusal("materials_invalid", "dispatched_job_undefined")
+
+
+def derive_apply_class(job: DispatchedJob) -> bool:
+    """RQ-3: apply-class from the SIGNED plan alone: any scoped gate `"1"`, or an
+    apply-mode argv token from the closed list. Never from the job name or a label."""
+    return any(value == "1" for _, value in job.env) or any(
+        token in APPLY_ARGV_TOKENS for token in job.argv
+    )
+
+
+def check_apply_class(job: DispatchedJob) -> None:
+    """Refuse a plan whose stated class disagrees with the agent's derivation."""
+    if job.apply_class is not None and job.apply_class != derive_apply_class(job):
+        raise Refusal("job_apply_class_mismatch")
+
+
+def check_job_paths(secrets_root: Path, job: DispatchedJob) -> None:
+    """RQ-2: the output (or any) path never sits under the secrets root
+    (`/run/dotmac`): job work and secrets do not share a tree."""
+    root = str(secrets_root).rstrip("/")
+    candidates = [*job.argv, *(path for path, _ in job.input_digests)]
+    for token in candidates:
+        if token.startswith("/") and (token == root or token.startswith(root + "/")):
+            raise Refusal("job_input_mismatch", "path_under_secrets_root")
+
+
+def check_job_inputs(secrets_root: Path, job: DispatchedJob) -> None:
+    """RQ-2: before Foundation runs, every input file's sha256 equals the signed
+    `input_digests`. A symlink, a non-regular file or a missing file is a mismatch."""
+    check_job_paths(secrets_root, job)
+    for path, expected in job.input_digests:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
+            raise Refusal("job_input_mismatch") from None
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise Refusal("job_input_mismatch")
+            hasher = hashlib.sha256()
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                for chunk in iter(lambda stream=stream: stream.read(1 << 20), b""):
+                    hasher.update(chunk)
+        finally:
+            os.close(descriptor)
+        if "sha256:" + hasher.hexdigest() != expected:
+            raise Refusal("job_input_mismatch")
 
 
 def job_roles(jobs: Sequence[JobDefinition]) -> frozenset[str]:
@@ -312,7 +401,8 @@ def require_naming(roles: Collection[object], jobs: Sequence[JobDefinition]) -> 
 
 
 __all__ = [
-    "JOB_ONLY_NAMES", "DispatchedJob", "JobDefinition", "check_job_admissible",
+    "JOB_ONLY_NAMES", "DispatchedJob", "JobDefinition", "check_apply_class",
+    "check_job_admissible", "check_job_inputs", "derive_apply_class",
     "check_matches_definition", "job_env", "job_roles", "plan_dispatched_job",
     "plan_jobs", "refuse_cp_scoped_params", "refuse_job_role_serving",
     "refuse_sealing", "require_naming", "split_params",

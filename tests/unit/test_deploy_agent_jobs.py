@@ -94,10 +94,28 @@ def run_job_materials(
     return make_materials(dispatched_job=job or dispatched(), **kw)
 
 
+def authored(*names: str, extra: str = "") -> str:
+    """An authored static config: the exit settings plus one template per file."""
+    from tests.unit.deploy_agent_support import AUTHORED
+
+    body = "".join(
+        f'template {{\n  destination = "/run/dotmac/erp/import/secrets/{n}"\n}}\n'
+        for n in names
+    )
+    return AUTHORED + body + extra
+
+
 def job_rig(tmp_path: Path, *, render: bool = True, **config: object) -> Rig:
     config.setdefault("job_roles", ("import",))
     rig = make_rig(tmp_path, **config)
     prepare_role(rig, "import")
+    for name, files in (
+        ("erp-import.hcl", FILES),  # owner + legacy
+        ("erp-import-owner.hcl", ("migration_database_url",)),  # owner only
+    ):
+        path = rig.config.openbao_config_dir / name
+        path.write_text(authored(*files))
+        path.chmod(0o644)
     secrets = rig.config.role_dir("import") / "secrets"
     secrets.mkdir(mode=0o710)
     secrets.chmod(0o710)
@@ -898,3 +916,209 @@ def test_a_serving_plan_with_a_split_lease_is_accepted_and_one_over_900_is_not(
     )
     result = rig.launcher.run_once()
     assert (result.outcome, result.reason) == ("refused", "lease_ttl_invalid")
+
+
+# -- P-SEC rev5 RQ-1 .. RQ-5 ---------------------------------------------------
+def test_rq1_a_job_lease_is_never_renewed_and_is_released(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    assert ("POST", "lease/renew") not in rig.cp.calls
+    assert [e for e, _ in rig.cp.lease_log][
+        -1
+    ] == "lease/release"  # never EXPIRED_UNRELEASED
+
+
+def test_rq1_the_import_default_fits_under_the_2700_foundation_bound(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)  # foundation_timeout_seconds default 2700
+    rig.cp.materials = run_job_materials(
+        dispatched(timeout_seconds=2400), lease_ttl_seconds=2520
+    )
+    assert refused(rig) == ("completed", None)
+
+
+def test_rq1_a_job_the_foundation_bound_cannot_cover_is_refused_before_anything(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(timeout_seconds=2800), lease_ttl_seconds=2920
+    )
+    assert refused(rig) == ("refused", "lease_ttl_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == []
+
+
+def input_file(tmp_path: Path, content: bytes = b"manifest") -> tuple[Path, str]:
+    import hashlib
+
+    path = tmp_path / "work-manifest.json"
+    path.write_bytes(content)
+    return path, "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+def test_rq2_an_input_whose_sha256_matches_the_plan_is_accepted(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    path, digest_ = input_file(tmp_path)
+    rig.cp.materials = run_job_materials(dispatched(input_digests={str(path): digest_}))
+    assert refused(rig) == ("completed", None)
+
+
+def test_rq2_an_input_digest_mismatch_is_refused_before_any_lease_or_mint(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    path, _ = input_file(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(input_digests={str(path): "sha256:" + "0" * 64})
+    )
+    assert refused(rig) == ("refused", "job_input_mismatch")
+    assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.runner.specs == []
+
+
+def test_rq2_a_missing_or_symlinked_input_is_a_mismatch(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    path, digest_ = input_file(tmp_path)
+    link = tmp_path / "link.json"
+    link.symlink_to(path)
+    for target in (str(tmp_path / "absent.json"), str(link)):
+        rig.cp.materials = run_job_materials(
+            dispatched(input_digests={target: digest_}),
+            dispatch_id=f"dispatch-{len(target)}",
+        )
+        assert refused(rig) == ("refused", "job_input_mismatch")
+
+
+def test_rq2_a_path_under_the_secrets_root_is_refused(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    out = f"{rig.config.secrets_root}/erp/import/out.json"
+    rig.cp.materials = run_job_materials(
+        dispatched(
+            argv=["python", "-m", "erp_v2.importer", "execute", "--receipt", out]
+        )
+    )
+    assert refused(rig) == ("refused", "job_input_mismatch")
+    assert rig.bao.paths == []
+
+
+def gate(value: str) -> dict[str, object]:
+    return {
+        "params": {"ERP_IMPORT_APPROVED": value},
+        "params_env_digest": digest(f"ERP_IMPORT_APPROVED={value}\n".encode()),
+    }
+
+
+@pytest.mark.parametrize(
+    ("extra", "declared", "expected"),
+    [
+        (gate("1"), True, None),  # a gate "1" is apply-class, labelled so
+        (
+            gate("1"),
+            False,
+            "job_apply_class_mismatch",
+        ),  # a "verify" label with a gate "1"
+        (gate("0"), False, None),  # defaults "0": not apply
+        (
+            gate("0"),
+            True,
+            "job_apply_class_mismatch",
+        ),  # labelled apply, nothing applies
+        (
+            {
+                **gate("0"),
+                "argv": ["python", "-m", "erp_v2.importer", "execute", "--apply"],
+            },
+            True,
+            None,
+        ),  # an apply-mode argv token with gates "0" is still apply
+        (
+            {
+                **gate("0"),
+                "argv": ["python", "-m", "erp_v2.importer", "execute", "--apply"],
+            },
+            False,
+            "job_apply_class_mismatch",
+        ),
+    ],
+)
+def test_rq3_apply_class_is_rederived_from_the_signed_plan(
+    tmp_path: Path, extra: dict[str, object], declared: bool, expected: str | None
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(dispatched(apply_class=declared, **extra))
+    result = refused(rig)
+    if expected is None:
+        assert result == ("completed", None)
+    else:
+        assert result == ("refused", expected)
+        assert rig.bao.paths == []
+
+
+def test_rq3_a_plan_without_a_stated_class_is_not_refused_until_the_contract_carries_it(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+
+
+def test_rq4_an_owner_only_job_renders_exactly_the_owner_file(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(materials=["MIGRATION_DATABASE_URL"]),
+        jobs=[definition(materials=["MIGRATION_DATABASE_URL"])],
+    )
+    assert refused(rig) == ("completed", None)
+    assert started(rig, "openbao-agent@erp-import-owner.service")
+    assert not started(rig, "openbao-agent@erp-import.service")
+    assert receipt(rig)["files"] == ["migration_database_url"]
+
+
+def test_rq4_an_owner_plus_legacy_job_uses_the_two_file_config(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    assert refused(rig) == ("completed", None)
+    assert started(rig, "openbao-agent@erp-import.service")
+    assert receipt(rig)["files"] == list(FILES)
+
+
+def test_rq4_a_materials_set_that_matches_no_config_is_refused_with_nothing_minted(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.cp.materials = run_job_materials(
+        dispatched(materials=["LEGACY_DATABASE_URL"]),
+        jobs=[definition(materials=["LEGACY_DATABASE_URL"])],
+    )
+    assert refused(rig) == ("refused", "job_files_invalid")
+    assert rig.bao.paths == [] and rig.cp.lease_log == [] and rig.runner.specs == []
+
+
+def test_rq4_a_config_that_renders_a_meta_file_is_refused(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    path = rig.config.openbao_config_dir / "erp-import.hcl"
+    path.write_text(authored(*FILES, "meta/render"))
+    path.chmod(0o644)
+    assert refused(rig) == ("refused", "openbao_config_invalid")
+    assert rig.bao.paths == []
+
+
+def test_rq5_a_delivery_login_403_is_still_a_delivery_scope_refusal(
+    tmp_path: Path,
+) -> None:
+    """Control case: the identity itself being refused is NOT the job-mint class."""
+    rig = job_rig(tmp_path)
+    rig.bao.deny_login = True
+    assert refused(rig) == ("refused", "secret_delivery_failed")
+    assert rig.runner.specs == [] and mint_bodies(rig) == []
+
+
+def test_rq5_a_serving_delivery_login_403_is_the_same_delivery_scope_refusal(
+    tmp_path: Path,
+) -> None:
+    from tests.unit.test_deploy_agent_delivery import WEB
+
+    rig = make_rig(tmp_path)
+    prepare_role(rig, "web")
+    rig.bao.deny_login = True
+    rig.cp.materials = make_materials(roles=WEB)
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "secret_delivery_failed")

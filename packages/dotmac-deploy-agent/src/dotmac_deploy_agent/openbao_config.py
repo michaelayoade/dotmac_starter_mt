@@ -79,3 +79,71 @@ def check_authored_configs(
             raise Refusal("openbao_config_invalid", missing[0])
         digests[spec.role] = digest(content)
     return digests
+
+
+_DESTINATION = re.compile(r'(?m)^\s*destination\s*=\s*"([^"]+)"')
+_VARIANT = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+
+
+def _live(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith(("#", "//"))
+    )
+
+
+def rendered_file_set(content: str) -> frozenset[str]:
+    """The file names an authored job config renders into `secrets/`. A config that
+    also renders a `meta` file (the sealed-copy trigger) is refused: an import role
+    never feeds the last-known-good path."""
+    names: set[str] = set()
+    for destination in _DESTINATION.findall(_live(content)):
+        parts = destination.split("/")
+        if "meta" in parts:
+            raise Refusal("openbao_config_invalid", "meta_render")
+        if "secrets" in parts:
+            names.add(parts[-1])
+    return frozenset(names)
+
+
+def job_config_stem(
+    config: AgentConfig,
+    role: str,
+    materials: tuple[str, ...],
+    *,
+    required_uid: int = 0,
+) -> str:
+    """RQ-4: the authored static config whose rendered file set EQUALS the job's
+    declared materials (`<ns>-<role>[-<variant>].hcl`), or a refusal with nothing
+    minted. Returns the render unit's instance stem (`<ns>-<role>[-<variant>]`).
+    Each candidate passes the same root-owned and exit-settings checks as a serving
+    config."""
+    prefix = f"{config.secrets_namespace}-{role}"
+    wanted = frozenset(m.lower() for m in materials)
+    try:
+        listing = sorted(p.name for p in config.openbao_config_dir.iterdir())
+    except OSError:
+        raise Refusal("openbao_config_invalid") from None
+    matches: list[str] = []
+    for name in listing:
+        if not name.endswith(".hcl"):
+            continue
+        stem = name.removesuffix(".hcl")
+        variant = stem.removeprefix(prefix + "-") if stem != prefix else ""
+        if not (
+            stem == prefix
+            or (stem.startswith(prefix + "-") and _VARIANT.fullmatch(variant))
+        ):
+            continue
+        key = stem.removeprefix(config.secrets_namespace + "-")
+        check_authored_configs(
+            config,
+            config.secrets_namespace,
+            (RoleSpec(key, True),),
+            required_uid=required_uid,
+        )
+        content = read_regular(config.openbao_config_dir / name, limit=LIMIT)
+        if rendered_file_set(content.decode("utf-8", errors="replace")) == wanted:
+            matches.append(stem)
+    if len(matches) != 1:
+        raise Refusal("job_files_invalid", "config_set_mismatch")
+    return matches[0]

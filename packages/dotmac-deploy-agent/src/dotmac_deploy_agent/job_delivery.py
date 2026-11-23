@@ -130,6 +130,7 @@ def render_job_credentials(
     commands: Commands,
     role: str,
     names: tuple[str, ...],
+    config_stem: str | None = None,
 ) -> tuple[str, ...]:
     """Render once, then verify WITHOUT listing or reading `secrets/`.
 
@@ -139,7 +140,11 @@ def render_job_credentials(
     DECLARED `secrets/<lower(name)>`: a regular, non-empty file, mode 0400, owned
     by the enrolled uid. Narrowing to the declared files is Foundation's per-file
     read-only mounts, not a deletion here. Returns the verified names."""
-    unit = unit_name(config.secrets_namespace, role)
+    unit = (
+        f"openbao-agent@{config_stem}.service"
+        if config_stem
+        else unit_name(config.secrets_namespace, role)
+    )
     if _systemctl(config, commands, "start", unit) is None:
         raise Refusal("job_files_invalid", "render_unit_failed")
     shown = _systemctl(
