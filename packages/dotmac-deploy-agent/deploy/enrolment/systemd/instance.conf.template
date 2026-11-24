@@ -1,0 +1,9 @@
+# Drop-in: /etc/systemd/system/openbao-agent@@SECRETS_NAMESPACE@-@ROLE@.service.d/10-instance.conf
+# ONE naming key for every per-role artefact: @SECRETS_NAMESPACE@ (the descriptor's
+# `secrets_namespace`, e.g. `erp` for product dotmac-erp-v2, `erp-integrator` for
+# dotmac-integrator-companion). It is NOT the Control product code.
+# @CONTAINER_USER@ is the host system user whose uid equals the container uid.
+[Service]
+User=@CONTAINER_USER@
+LoadCredential=secret_id:/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secret_id
+ReadWritePaths=/run/dotmac/@SECRETS_NAMESPACE@/@ROLE@

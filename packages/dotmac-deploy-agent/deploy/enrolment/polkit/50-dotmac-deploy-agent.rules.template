@@ -1,0 +1,34 @@
+// /etc/polkit-1/rules.d/50-dotmac-deploy-agent.rules (W-12)
+// The deploy agent may RESTART exactly the enrolled OpenBao Agent instances and
+// nothing else. @ENROLLED_UNITS@ is a JSON array of full unit names written at
+// enrolment, e.g. ["openbao-agent@erp-web.service"] (`<secrets_namespace>-<role>`). There is no wildcard: a
+// role that is not enrolled cannot be restarted by the agent.
+polkit.addRule(function (action, subject) {
+  var enrolled = @ENROLLED_UNITS@;
+  if (
+    action.id == "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("verb") == "restart" &&
+    subject.user == "dotmac-deploy" &&
+    enrolled.indexOf(action.lookup("unit")) !== -1
+  ) {
+    return polkit.Result.YES;
+  }
+});
+
+// JOB ROLES ONLY: the agent may START (never restart) the static one-shot units of
+// an enrolled job role: its render unit and its purge unit. @ENROLLED_JOB_UNITS@ is
+// a JSON array, e.g. ["openbao-agent@erp-import.service",
+// "dotmac-secrets-purge@erp-import.service"]. EXACT names only (W-12a), no wildcard:
+// each import render unit `openbao-agent@<ns>-<role>-<S12>.service` and each purge
+// unit. Empty at enrolment unless a job role is named.
+polkit.addRule(function (action, subject) {
+  var enrolledJobs = @ENROLLED_JOB_UNITS@;
+  if (
+    action.id == "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("verb") == "start" &&
+    subject.user == "dotmac-deploy" &&
+    enrolledJobs.indexOf(action.lookup("unit")) !== -1
+  ) {
+    return polkit.Result.YES;
+  }
+});

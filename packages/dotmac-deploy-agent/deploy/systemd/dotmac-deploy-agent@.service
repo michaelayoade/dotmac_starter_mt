@@ -1,0 +1,60 @@
+# Instance = product, e.g. dotmac-deploy-agent@erp.service. Outbound only.
+# Per-host drop-ins (installed by the governed enrolment, never by the agent):
+#   ReadWritePaths=<deploy_dir> /run/dotmac/<secrets_namespace>   (agent-paths.conf.template)
+#   LoadCredential=legacy:/etc/dotmac/legacy/<target>.env   (M11, existing apps only)
+# Enrolment kit (root-installed, per host): deploy/enrolment/.
+[Unit]
+Description=Dotmac deploy agent for %i (launch only)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dotmac-deploy
+Group=dotmac-deploy
+# Docker-group reach is root-equivalent (W-c): the control is against other uids
+# and silent drift, not against root.
+SupplementaryGroups=docker
+# The agent's OWN tmpfs state (params.env, the legacy copy, the image inbox, the
+# loopback registry, the per-run credentials): private, and deleted on a stop.
+# /run/dotmac/<secrets_namespace> belongs to tmpfiles.d, NOT to this unit: if the
+# agent owned it a plain stop or upgrade would delete the role directories, the
+# delivered secret_id files and the mounts the containers hold.
+RuntimeDirectory=dotmac-deploy-agent/%i
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
+StateDirectory=dotmac-deploy-agent/%i
+StateDirectoryMode=0700
+UMask=0077
+# Secret zero (the delivery AppRole) and the PoP key arrive as credentials, never
+# as environment, and there is no static token: the agent logs in per run.
+LoadCredential=pop-key:/etc/dotmac-deploy-agent/%i/pop-key
+LoadCredential=delivery-role-id:/etc/dotmac/bao/delivery/role_id
+LoadCredential=delivery-secret-id:/etc/dotmac/bao/delivery/secret_id
+ExecStart=/opt/dotmac-deploy-agent/launcher.sh --config /etc/dotmac-deploy-agent/%i/config.toml
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+# A run in flight is finished or fenced by Foundation, not cut off by the agent.
+TimeoutStopSec=infinity
+NoNewPrivileges=true
+# No capabilities, ever: the agent writes secret_id as its own uid; the per-role
+# OpenBao Agent reads it through LoadCredential (see deploy/enrolment/).
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Only the instance's own state is writable here. The per-role directories under
+# /run/dotmac/<secrets_namespace> and the Compose directory are added by the
+# per-host drop-in (deploy/enrolment/systemd/agent-paths.conf.template), so the
+# agent cannot write another instance's namespace.
+ReadWritePaths=/var/lib/dotmac-deploy-agent/%i
+
+[Install]
+WantedBy=multi-user.target
