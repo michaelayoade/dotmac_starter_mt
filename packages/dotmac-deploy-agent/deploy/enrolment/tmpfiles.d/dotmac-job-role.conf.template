@@ -1,0 +1,10 @@
+# JOB ROLES ONLY (e.g. import). Identical in effect to dotmac-role.conf.template:
+# `secrets/` stays 0700 <container uid>. The agent never stats, lists, reads or
+# deletes in it: render verification runs inside the render unit as the container
+# uid (verify-job-render via ExecStartPost) and the purge unit removes the files.
+# For the import role @CONTAINER_USER@ is `dotmac-erp-import` (uid:gid 10040:10040, C-29),
+# which is NOT in the docker group.
+d /run/dotmac 0711 root root -
+d /run/dotmac/@SECRETS_NAMESPACE@ 0711 dotmac-deploy dotmac-deploy -
+d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@ 0711 dotmac-deploy dotmac-deploy -
+d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@ -

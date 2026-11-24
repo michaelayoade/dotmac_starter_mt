@@ -724,7 +724,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane collections policy and case owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1061,6 +1061,23 @@ sqlalchemy = "==2.0.51"
 [package.source]
 type = "directory"
 url = "packages/dotmac-delivery-resend"
+
+[[package]]
+name = "dotmac-deploy-agent"
+version = "0.1.0a1"
+description = "Product-neutral outbound deploy launcher: signed fetch, lease, governed image transfer, params and secret_id delivery, then launch Foundation and return an observation. Launch only; it decides nothing."
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = ">=42"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-deploy-agent"
 
 [[package]]
 name = "dotmac-deployment-control"
@@ -1499,7 +1516,7 @@ url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-money-flows"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1509,6 +1526,7 @@ develop = true
 
 [package.dependencies]
 dotmac-billing = ">=0.1.0a13"
+dotmac-collections = ">=0.1.0a3"
 dotmac-kernel = ">=0.1.0a110"
 dotmac-payments = ">=0.1.0a4"
 dotmac-service-access-policy = ">=0.1.0a2"
@@ -1916,7 +1934,7 @@ url = "packages/dotmac-referrals"
 
 [[package]]
 name = "dotmac-release-catalog"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -4599,4 +4617,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9ce10a3a0d7b9e5c62fb0491cbc51e35b76cd3a816a5abe911e66d27ac071b9d"
+content-hash = "533d129cb4d5bb97bd0849932cf145b37841823de5ddf73aedd3f9fedcb13863"

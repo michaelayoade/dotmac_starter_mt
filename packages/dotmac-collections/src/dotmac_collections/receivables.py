@@ -45,6 +45,9 @@ class ReceivableObservationV1:
     completeness: PositionCompleteness
     completeness_reason_code: str | None
     observed_at: datetime
+    # a3: when the subject's access hold is demanded; None (the default) never
+    # demands one, so an adopter with no services only gets reminders.
+    access_hold_from: datetime | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -100,6 +103,12 @@ class ReceivableObservationV1:
             raise ValueError("an unverified due date cannot carry due_at")
         if self.due_date_status not in ("verified", "unknown_unverified"):
             raise ValueError("due_date_status is unsupported")
+        if self.access_hold_from is not None:
+            require_aware("access_hold_from", self.access_hold_from)
+            if self.due_date_status != "verified" or self.due_at is None:
+                raise ValueError("access_hold_from requires a verified due date")
+            if self.access_hold_from < self.due_at:
+                raise ValueError("access_hold_from cannot precede due_at")
         period_values = (self.service_period_starts_at, self.service_period_ends_at)
         if self.service_period_status == "verified":
             starts_at = self.service_period_starts_at
