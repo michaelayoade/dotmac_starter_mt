@@ -1,0 +1,9 @@
+# /etc/tmpfiles.d/dotmac-@SECRETS_NAMESPACE@-@ROLE@.conf. @SECRETS_NAMESPACE@ is the one
+# naming key (see instance.conf.template). Directories are made here, never
+# by the deploy agent. The deploy agent owns the role directory and writes
+# `secret_id` (0400) into it as itself; `secrets/` belongs to the container uid
+# and is mounted into the container read-only as a DIRECTORY, never per file.
+d /run/dotmac 0711 root root -
+d /run/dotmac/@SECRETS_NAMESPACE@ 0711 dotmac-deploy dotmac-deploy -
+d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@ 0711 dotmac-deploy dotmac-deploy -
+d /run/dotmac/@SECRETS_NAMESPACE@/@ROLE@/secrets 0700 @CONTAINER_USER@ @CONTAINER_USER@ -

@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "dotmac-deploy-agent"
+version = "0.1.0a1"
+description = "Product-neutral outbound deploy launcher: signed fetch, lease, governed image transfer, params and secret_id delivery, then launch Foundation and return an observation. Launch only; it decides nothing."
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_deploy_agent", from = "src" }]
+include = [
+    { path = "src/dotmac_deploy_agent/py.typed", format = ["sdist", "wheel"] },
+    # Control's target-API vectors, vendored byte-identical and sha256-pinned.
+    { path = "src/dotmac_deploy_agent/contract/target_api_v1.json", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# Ed25519 for the target PoP request signature and for verifying CP responses.
+# The only third-party runtime dependency: HTTP, TOML, subprocess are stdlib.
+# NOT the kernel, any database driver, or any registry client (DESIGN-rev3 s7:
+# no CP DB credential or reach, no lease DSN, no registry pull credential).
+cryptography = ">=42"
+
+[tool.poetry.scripts]
+dotmac-deploy-agent = "dotmac_deploy_agent.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

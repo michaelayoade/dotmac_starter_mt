@@ -248,6 +248,10 @@ argon2-cffi = "^25.1.0"
 # distribution by exact version; this path entry is what makes the source
 # testable in the repository that owns it (ADR-0070).
 dotmac-deployment-foundation = { path = "packages/dotmac-deployment-foundation", develop = true }
+# The outbound deploy launcher runs on a deployment HOST, never in the Starter
+# image, so it is a dev-group path entry like the facility it launches. Nothing
+# imports it; boundaries are pinned by tests/architecture/test_deploy_agent_package.py.
+dotmac-deploy-agent = { path = "packages/dotmac-deploy-agent", develop = true }
 # Self-hosted runner policy is a build/host-control facility, not application
 # runtime. The provider adapter is discovered only by its offline renderer;
 # neither distribution ships in the Starter image or handles a request.
