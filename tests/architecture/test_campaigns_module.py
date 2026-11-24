@@ -129,3 +129,16 @@ def test_services_never_commit_rollback_or_own_a_session() -> None:
     assert ".commit(" not in service
     assert ".rollback(" not in service
     assert "SessionLocal(" not in service
+
+
+def test_delivery_deadline_expands_the_existing_immutable_revision() -> None:
+    column = models.CampaignRevision.__table__.c.delivery_expires_at
+    assert column.nullable
+    path = MODULE_ROOT / "migrations/versions/ca_0002_delivery_deadline.py"
+    source = path.read_text(encoding="utf-8")
+    assert 'down_revision = "ca_0001_campaigns"' in source
+    assert 'schema="mod_campaigns"' in source
+    assert "drop_column" not in source
+    # The existing trigger compares the whole row, so the new column cannot
+    # quietly escape snapshot immutability.
+    assert "to_jsonb(NEW)" in MIGRATION_TEXT

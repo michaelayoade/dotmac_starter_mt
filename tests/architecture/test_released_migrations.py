@@ -9171,7 +9171,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-assets": frozenset(),
     "dotmac-banking": frozenset(),
     "dotmac-brand-profiles": frozenset({"bp_0002_tagline.py"}),
-    "dotmac-campaigns": frozenset(),
+    "dotmac-campaigns": frozenset({"ca_0002_delivery_deadline.py"}),
     "dotmac-content": frozenset(),
     "dotmac-documents": frozenset(),
     "dotmac-durable-timers": frozenset(),

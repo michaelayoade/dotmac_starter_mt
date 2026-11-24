@@ -618,6 +618,7 @@
           "dotmac_campaigns/manifest.py",
           "dotmac_campaigns/migrations/__init__.py",
           "dotmac_campaigns/migrations/versions/ca_0001_campaigns.py",
+          "dotmac_campaigns/migrations/versions/ca_0002_delivery_deadline.py",
           "dotmac_campaigns/models.py",
           "dotmac_campaigns/service.py"
         ],
