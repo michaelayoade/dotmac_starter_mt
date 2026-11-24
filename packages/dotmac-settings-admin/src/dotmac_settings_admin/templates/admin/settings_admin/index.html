@@ -1,0 +1,56 @@
+{#
+  Settings index. Context: `by_owner` (owner module -> [DomainSummary]), `proposals`,
+  `maker_checker`, `can_approve`, optional `error`. No value is rendered here at all.
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:56rem;">
+  {{ ui.heading("Settings") }}
+  {{ ui.error_box(error) }}
+
+  <div style="display:flex; gap:var(--dmui-space-md); margin-bottom:var(--dmui-space-lg);">
+    {{ ui.link(surface_url('branding_form'), "Branding") }}
+    {{ ui.link(surface_url('domain', domain='organisation'), "Organisation profile") }}
+    {{ ui.link(surface_url('flags'), "Feature flags") }}
+    {{ ui.link(surface_url('import_form'), "Import") }}
+    {{ ui.link(surface_url('export'), "Export") }}
+  </div>
+
+  {% if organisation and (organisation.legal_name or organisation.trading_name) %}
+  <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+    Organisation: {{ organisation.trading_name or organisation.legal_name }}
+  </p>
+  {% endif %}
+
+  {% if proposals %}
+  <h2 style="font-size:var(--dmui-font-size-md); color:var(--dmui-text-primary);">Pending proposals</h2>
+  {% for p in proposals %}
+  <form method="post" action="{{ surface_url('decide', proposal_id=p.id, decision='approve') }}"
+        style="display:flex; gap:var(--dmui-space-sm); align-items:end; margin-bottom:var(--dmui-space-sm);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <span style="font-size:var(--dmui-font-size-sm);">{{ p.domain }}/{{ p.key }} proposed: {{ p.reason }}</span>
+    {% if can_approve %}
+    {{ ui.field("reason", "Decision reason") }}
+    {{ ui.button("Approve") }}
+    <button type="submit" formaction="{{ surface_url('decide', proposal_id=p.id, decision='reject') }}">Reject</button>
+    {% endif %}
+  </form>
+  {% endfor %}
+  {% endif %}
+
+  {% for owner, domains in by_owner.items() %}
+  <h2 style="font-size:var(--dmui-font-size-md); color:var(--dmui-text-primary); margin-top:var(--dmui-space-lg);">{{ owner }}</h2>
+  <ul style="list-style:none; padding:0; margin:0;">
+    {% for d in domains %}
+    <li style="padding:var(--dmui-space-xs) 0; border-bottom:1px solid var(--dmui-border-default);">
+      {{ ui.link(surface_url('domain', domain=d.domain), d.domain) }}
+      {{ ui.badge(d.count ~ " settings") }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endfor %}
+  {% if maker_checker %}<p style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">Maker-checker is on for this tenant.</p>{% endif %}
+</div>
+{% endblock %}

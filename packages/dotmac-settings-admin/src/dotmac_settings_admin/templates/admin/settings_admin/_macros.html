@@ -1,0 +1,47 @@
+{# Shared presentational macros. Only `var(--dmui-*)` tokens; no palette classes. #}
+{% macro heading(text) %}
+<h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold);
+           color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-lg);">{{ text }}</h1>
+{% endmacro %}
+
+{% macro error_box(error) %}
+{% if error %}
+<div role="alert" style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+            border:1px solid var(--dmui-status-negative-border);
+            background:var(--dmui-status-negative-surface);
+            color:var(--dmui-status-negative-foreground);
+            border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">{{ error }}</div>
+{% endif %}
+{% endmacro %}
+
+{% macro field(name, label, value="", type="text", help="") %}
+<label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
+              font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+  {{ label }}
+  <input type="{{ type }}" name="{{ name }}" value="{{ value }}" autocomplete="off"
+         style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default);
+                border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+  {% if help %}<span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">{{ help }}</span>{% endif %}
+</label>
+{% endmacro %}
+
+{% macro reason_field(value="") %}
+{{ field("reason", "Reason (required, recorded in the audit trail)", value) }}
+{% endmacro %}
+
+{% macro button(label) %}
+<button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default);
+        color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none;
+        font-size:var(--dmui-font-size-sm); font-weight:var(--dmui-font-weight-medium); cursor:pointer;">{{ label }}</button>
+{% endmacro %}
+
+{% macro link(href, label) %}
+<a href="{{ href }}" style="font-size:var(--dmui-font-size-sm); color:var(--dmui-action-primary-default);
+   text-decoration:none;">{{ label }}</a>
+{% endmacro %}
+
+{% macro badge(text) %}
+<span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);
+             border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+             padding:0 var(--dmui-space-xs);">{{ text }}</span>
+{% endmacro %}

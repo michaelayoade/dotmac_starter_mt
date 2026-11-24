@@ -211,6 +211,9 @@ dotmac-ai-operations = { path = "packages/dotmac-ai-operations", develop = true 
 # deterministic projections (ADR-0055). The adopting product supplies origin,
 # event, consent and retention policy; the reference assembly installs none.
 dotmac-web-analytics = { path = "packages/dotmac-web-analytics", develop = true }
+# Stateless generic settings administration (Starter parity Wave 0, lane C).
+# Replaces the reference app's `settings` feature; installed by the assembly.
+dotmac-settings-admin = { path = "packages/dotmac-settings-admin", develop = true }
 # Tenant sales authority through the immutable accepted Quote (ADR-0033).
 # Built and proven here; Sub composes the first `sa` lineage after shadowing.
 dotmac-sales = { path = "packages/dotmac-sales", develop = true }
@@ -396,6 +399,7 @@ module = [
     "dotmac_compliance_reporting.*",
     "dotmac_ai_operations.*",
     "dotmac_web_analytics.*",
+    "dotmac_settings_admin.*",
     "dotmac_sales.*",
     "dotmac_document_rendering.*",
     "dotmac_device_cli.*",
@@ -546,6 +550,7 @@ root_packages = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_settings_admin",
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_device_cli",
@@ -724,6 +729,7 @@ source_modules = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_settings_admin",
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_config_layers",
@@ -855,6 +861,7 @@ modules = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_settings_admin",
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_device_cli",
@@ -982,6 +989,7 @@ source_modules = [
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
     "dotmac_web_analytics",
+    "dotmac_settings_admin",
     "dotmac_sales",
     "dotmac_document_rendering",
     "dotmac_device_cli",
@@ -1103,7 +1111,6 @@ modules = [
     "app.features.auth",
     "app.features.parties",
     "app.features.rbac",
-    "app.features.settings",
     "app.features.presentation",
     "app.features.custom_fields",
     "app.features.licensing",

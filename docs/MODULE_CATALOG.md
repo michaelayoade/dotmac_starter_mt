@@ -135,6 +135,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-service-changes`](../packages/dotmac-service-changes/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-changes/EXTRACTION.toml) | [tenant · `mod_servicechanges`](../packages/dotmac-service-changes/src/dotmac_service_changes/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a91` | — | `dotmac_sub` |
 | [`dotmac-service-orders`](../packages/dotmac-service-orders/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-orders/EXTRACTION.toml) | [tenant · `mod_serviceorders`](../packages/dotmac-service-orders/src/dotmac_service_orders/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a91` | — | `dotmac_sub` |
 | [`dotmac-services`](../packages/dotmac-services/README.md) | optional module | [`audit-complete`](../packages/dotmac-services/EXTRACTION.toml) | [tenant · `mod_services`](../packages/dotmac-services/src/dotmac_services/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a91` | — | `dotmac_sub` |
+| [`dotmac-settings-admin`](../packages/dotmac-settings-admin/README.md) | optional module | [`audit-complete`](../packages/dotmac-settings-admin/EXTRACTION.toml) | [stateless](../packages/dotmac-settings-admin/src/dotmac_settings_admin/manifest.py) | — | — | not allowlisted | `0.1.0a1` | `>=0.1.0a110` | — | `dotmac_erp_v2`, `dotmac_sub_thin` |
 | [`dotmac-sites`](../packages/dotmac-sites/README.md) | optional module | [`audit-complete`](../packages/dotmac-sites/EXTRACTION.toml) | [tenant · `mod_sites`](../packages/dotmac-sites/src/dotmac_sites/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
 | [`dotmac-subscriptions`](../packages/dotmac-subscriptions/README.md) | optional module | [`audit-complete`](../packages/dotmac-subscriptions/EXTRACTION.toml) | [tenant+platform · `mod_subscriptions`](../packages/dotmac-subscriptions/src/dotmac_subscriptions/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a94` | — | `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-support-access`](../packages/dotmac-support-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-support-access/EXTRACTION.toml) | [platform · `mod_supportaccess`](../packages/dotmac-support-access/src/dotmac_support_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_vendor_control_plane` |
@@ -883,6 +884,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-services/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-settings-admin`](../packages/dotmac-settings-admin/README.md)
+
+- **Owner:** Generic administration of declared settings: edit, history, restore, export/import, branding, organisation profile and the optional maker-checker. Stateless: it owns no table
+- **Contract:** Render and write every SettingSpec of every installed module with no per-module code: an actor and a reason on every write, an audit event, restore as a new audited write, secrets only ever set or unset, undeclared keys refused. Not a settings store: the kernel owns the rows, the resolver and the history.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-settings-admin/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp_v2`, `dotmac_sub_thin`.
 
 ### [`dotmac-sites`](../packages/dotmac-sites/README.md)
 

@@ -1,25 +1,37 @@
-"""Initial setting spec declarations for this app.
+"""Setting declarations this module OWNS (moved from the reference app's
+`settings` feature, which this package replaces).
 
-Importing this module registers the specs with the core registry
-(`dotmac_kernel.settings_resolver.register_specs`) as a side effect —
-`app/features/settings/__init__.py` imports this module, so anything that
-loads the `settings` feature package (e.g. `dotmac_kernel.features.load_manifests`
-importing `app.features.settings.feature`, which first imports the parent
-package) registers these as a byproduct.
+Domains: `branding` and `display` (kernel-named domains whose screens this
+module renders), `organisation` (tenant profile) and `settings_admin` (this
+module's own policy: optional maker-checker, default OFF).
 
-Every spec carries a `description`: the settings screen renders it, and a
-setting an operator cannot interpret is a setting they will not touch. None of
-these is `required` — each ships a working default, so the deployment starts
-without operator configuration.
+Importing this module registers the specs, exactly like every other spec.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotmac_kernel.settings_models import SettingDomain, SettingValueType
 from dotmac_kernel.settings_resolver import SettingSpec, register_specs
+
+ADMIN_DOMAIN: Final = SettingDomain("settings_admin")
+ORGANISATION_DOMAIN: Final = SettingDomain("organisation")
+
+#: Domains this module declares on its manifest.
+OWNED_DOMAINS: Final = (
+    str(SettingDomain.branding),
+    str(SettingDomain.display),
+    str(ORGANISATION_DOMAIN),
+    str(ADMIN_DOMAIN),
+)
+
+#: Keys that are machine state, not operator configuration. They are declared
+#: (so the write path accepts them) but never offered by the generic editor,
+#: history restore or export/import.
+INTERNAL_KEYS: Final = frozenset({(str(ADMIN_DOMAIN), "pending_changes")})
 
 
 def _validate_timezone(value: object) -> None:
@@ -29,26 +41,11 @@ def _validate_timezone(value: object) -> None:
         raise ValueError(f"unknown IANA timezone: {value!r}") from exc
 
 
-# Documented, Python-portable strftime directive characters (i.e. the ones
-# whose behavior isn't left to the underlying platform C library — see
-# https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes).
-# `%` itself is the `%%` escape, handled separately below (not a "real"
-# directive — it doesn't count toward the "at least one directive" rule).
 _PORTABLE_DIRECTIVES = frozenset("aAbBcdfGHIjmMpSuUVwWxXyYzZ%")
 
 
 def _validate_strftime(value: object) -> None:
-    """Explicit tokenizer, not a substring-check + probe-render.
-
-    `datetime.strftime` delegates any directive it doesn't recognize to the
-    platform C library, which makes a naive `"%" in fmt` + try/except probe
-    unreliable: on glibc, an unknown directive like `%Q` passes through as
-    literal text with NO exception, `%%` (the literal-`%` escape) satisfies
-    a bare substring check while containing zero real directives, and a
-    dangling trailing `%` renders as a literal `%` with no exception too.
-    This walks the string directive-by-directive instead, so acceptance
-    never depends on what the host libc happens to do with an unknown code.
-    """
+    """Explicit tokenizer: acceptance never depends on the host libc."""
     fmt = str(value)
     if "\x00" in fmt:
         raise ValueError("format string must not contain null bytes")
@@ -69,16 +66,29 @@ def _validate_strftime(value: object) -> None:
         i += 2
     if real_directive_count == 0:
         raise ValueError("format must contain at least one strftime % directive")
-    # Belt-and-braces: the tokenizer above is the real gate, but still probe
-    # -render against a fixed reference datetime in case some accepted
-    # directive combination is otherwise malformed.
     try:
         datetime(2026, 1, 31, 13, 45, tzinfo=UTC).strftime(fmt)
     except (ValueError, TypeError) as exc:
         raise ValueError(f"invalid strftime format: {exc}") from exc
 
 
-SPECS: list[SettingSpec] = [
+def _validate_pending(value: object) -> None:
+    if not isinstance(value, dict) or not isinstance(value.get("items", {}), dict):
+        raise ValueError("pending changes must be an object with an `items` object")
+
+
+def _text(key: str, label: str, description: str) -> SettingSpec[str]:
+    return SettingSpec(
+        domain=ORGANISATION_DOMAIN,
+        key=key,
+        value_type=SettingValueType.string,
+        default="",
+        label=label,
+        description=description,
+    )
+
+
+SPECS: Final[list[SettingSpec[Any]]] = [
     SettingSpec(
         domain=SettingDomain.branding,
         key="ui_branding",
@@ -121,6 +131,36 @@ SPECS: list[SettingSpec] = [
         description="strftime format for dates with a time, e.g. %Y-%m-%d %H:%M.",
         validator=_validate_strftime,
     ),
+    _text("legal_name", "Legal name", "The organisation's registered legal name."),
+    _text("trading_name", "Trading name", "Name the organisation trades under."),
+    _text("registered_address", "Registered address", "Registered office address."),
+    _text("country_code", "Country code", "ISO 3166-1 alpha-2 country code."),
+    _text("contact_email", "Contact e-mail", "Public contact e-mail address."),
+    _text("contact_phone", "Contact phone", "Public contact phone number."),
+    SettingSpec(
+        domain=ADMIN_DOMAIN,
+        key="maker_checker",
+        value_type=SettingValueType.boolean,
+        default=False,
+        label="Require a second person to approve setting changes",
+        description=(
+            "When on, a person without the approve permission can only PROPOSE a "
+            "change; a different person holding the approve permission applies "
+            "it. Secret values cannot be proposed. Off by default: a single "
+            "operator can change settings directly."
+        ),
+    ),
+    SettingSpec(
+        domain=ADMIN_DOMAIN,
+        key="pending_changes",
+        value_type=SettingValueType.json,
+        default={"items": {}},
+        label="Pending setting proposals (internal)",
+        description="Internal state of the optional maker-checker. Not editable.",
+        validator=_validate_pending,
+    ),
 ]
 
 register_specs(SPECS)
+
+__all__ = ["ADMIN_DOMAIN", "INTERNAL_KEYS", "ORGANISATION_DOMAIN", "OWNED_DOMAINS"]

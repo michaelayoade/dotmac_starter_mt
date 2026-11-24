@@ -37,7 +37,7 @@ from dotmac_kernel.settings_models import SettingDomain
 
 # Import for the side effect: registers branding/ui_branding into the
 # resolver registry (app.features.settings.spec, imported transitively).
-from app.features.settings import spec as _settings_spec  # noqa: F401
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -287,7 +287,7 @@ def test_the_write_guard_compares_domains_by_value_not_identity(db, tenant_row) 
     pins the property directly so the reason is legible without reading the
     service.
     """
-    from app.features.settings import service as settings_service
+    from dotmac_settings_admin import service as settings_service
 
     fresh = SettingDomain("branding")
     assert fresh == SettingDomain.branding
@@ -297,24 +297,48 @@ def test_the_write_guard_compares_domains_by_value_not_identity(db, tenant_row) 
     )
 
     with pytest.raises(BadRequestError, match="no longer accepts"):
-        settings_service.update_setting(
+        settings_service.write_setting(
             db,
-            tenant_row,
-            "branding",
-            "ui_branding",
-            {"name": "Acme", "custom_css": ".evil{}"},
+            tenant_row.id,
+            actor=_actor(db, tenant_row),
+            domain="branding",
+            key="ui_branding",
+            value={"name": "Acme", "custom_css": ".evil{}"},
+            reason="test",
         )
 
 
 def test_a_permitted_branding_write_still_succeeds(db, tenant_row) -> None:
     """Sensitivity proof: the guard must not refuse everything."""
-    from app.features.settings import service as settings_service
+    from dotmac_settings_admin import service as settings_service
 
-    settings_service.update_setting(
-        db, tenant_row, "branding", "ui_branding", {"name": "Acme", "tagline": "Hi"}
+    settings_service.write_setting(
+        db,
+        tenant_row.id,
+        actor=_actor(db, tenant_row),
+        domain="branding",
+        key="ui_branding",
+        value={"name": "Acme", "tagline": "Hi"},
+        reason="test",
     )
 
     assert load_branding(db, tenant_row.id)["name"] == "Acme"
+
+
+def _actor(db, tenant_row):
+    """A real party to attribute a settings write to (history FK, audit actor)."""
+    from dotmac_kernel.models import Party, PartyType
+    from dotmac_settings_admin.service import Actor
+
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Brand Admin",
+        email="brand-admin@example.test",
+    )
+    db.add(party)
+    db.flush()
+    return Actor(party_id=party.id)
 
 
 def test_every_retired_key_is_refused(hidden_key=None) -> None:
@@ -347,7 +371,7 @@ def test_load_branding_ignores_unknown_override_keys(db, tenant_row) -> None:
 
 
 def test_known_brand_keys_matches_the_branding_editor_form_fields() -> None:
-    """Pin the allowlist to the exact fields `app.features.settings.web`'s
+    """Pin the allowlist to the exact fields `dotmac_settings_admin.web`'s
     `_branding_form`/`branding_submit` expose -- if the editor ever grows a
     field, this test forces a conscious allowlist update in the same task.
 

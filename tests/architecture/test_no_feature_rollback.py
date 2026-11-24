@@ -34,14 +34,7 @@ DISALLOWED = re.compile(r"\bdb\.rollback\(\)")
 # and its `SET LOCAL` tenant context. Nothing in this set translates the
 # rollback into a `ConflictError` for a caller to keep going after — it's a
 # whole-operation failure, logged and re-raised.
-ALLOWLIST = {
-    # `seed_platform_defaults` runs from the app lifespan (not a request),
-    # opens its own `PlatformSessionLocal` session, and rolls back the WHOLE
-    # seed operation on any failure — there is no request-scoped SET LOCAL
-    # tenant context to preserve (it writes NULL-tenant platform rows), and
-    # no ConflictError translation happens here (see module docstring).
-    "app/features/settings/seed.py",
-}
+ALLOWLIST: set[str] = set()
 
 
 def _feature_py_files() -> list[Path]:

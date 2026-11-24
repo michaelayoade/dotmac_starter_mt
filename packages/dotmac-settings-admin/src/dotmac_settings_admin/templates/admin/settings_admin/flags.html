@@ -1,0 +1,19 @@
+{# Declared feature flags and what each resolves to for this tenant (read-only). #}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:56rem;">
+  {{ ui.heading("Feature flags") }}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    {% for r in rows %}
+    <tr style="border-bottom:1px solid var(--dmui-border-default);">
+      <td style="padding:var(--dmui-space-sm);"><code>{{ r.spec.code }}</code><br>
+        <span style="color:var(--dmui-text-muted);">{{ r.spec.description }}</span></td>
+      <td style="padding:var(--dmui-space-sm);">{{ r.value }}</td>
+      <td style="padding:var(--dmui-space-sm);">{{ ui.badge(r.source) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

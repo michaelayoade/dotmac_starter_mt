@@ -1,0 +1,36 @@
+schema_version = 1
+package = "dotmac-settings-admin"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Generic administration of declared settings: edit, history, restore, export/import, branding, organisation profile and the optional maker-checker. Stateless: it owns no table"
+contract = "Render and write every SettingSpec of every installed module with no per-module code: an actor and a reason on every write, an audit event, restore as a new audited write, secrets only ever set or unset, undeclared keys refused. Not a settings store: the kernel owns the rows, the resolver and the history."
+source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
+source_revisions = ["dotmac_starter_mt:9c016f99"]
+source_paths = [
+  "dotmac_starter_mt:app/features/settings",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_settings_web.py",
+  "dotmac_starter_mt:tests/unit/test_settings_api.py",
+  "dotmac_starter_mt:tests/unit/test_display_settings.py",
+  "dotmac_starter_mt:tests/architecture/test_settings_admin_module.py",
+  "dotmac_starter_mt:tests/unit/test_settings_admin.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp_v2", "dotmac_sub_thin"]
+composition_boundary = "An assembly composes the module and grants its permissions through role grant profiles; the module never names a prefix, facet or another module."
+inventory_evidence = [
+  "docs/inventories/settings-admin-sources.md",
+]
+first_cutover = "The Starter reference app switches to the module in the same change and deletes app/features/settings. ERP v2 composes it next (its AR prerequisite settings are proved settable by a composition test)."
+shadow_and_drift = "Not applicable: behaviour is proved by saved tests (write, refuse, restore, export, import, secrets) and a composition test over the ERP v2 AR prerequisite keys, not by side-by-side running."
+local_copy_retirement = "app/features/settings is deleted in the same change; ERP v2's local settings_specs copy is retired when it composes this module."
+next_action = "Compose it in ERP v2 and Sub thin; add surface_selection and run the conformance kit when lane A lands."
+
+[[product_writers]]
+product = "dotmac_starter_mt"
+writer_state = "qualifying_source"
+retirement_required = true
+revision = "9c016f99"
+evidence_paths = ["app/features/settings"]

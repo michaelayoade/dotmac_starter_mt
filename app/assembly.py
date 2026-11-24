@@ -37,6 +37,7 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import dotmac_settings_admin
 import dotmac_template_studio
 import dotmac_ticketing
 import dotmac_ui
@@ -133,6 +134,7 @@ assembly = ProductAssemblySpec(
     # module nor `dotmac-ui` imports this assembly or one another.
     modules=[
         *load_manifests(FEATURE_MODULES),
+        dotmac_settings_admin.module,
         dotmac_template_studio.module,
         dotmac_ticketing.module,
     ],
@@ -152,6 +154,9 @@ assembly = ProductAssemblySpec(
                 RoleGrant("admin", "rbac.roles.manage"),
                 RoleGrant("admin", "rbac.grants.manage"),
                 RoleGrant("admin", "rbac.audit.read"),
+                RoleGrant("admin", "settings_admin.read"),
+                RoleGrant("admin", "settings_admin.manage"),
+                RoleGrant("admin", "settings_admin.approve"),
                 RoleGrant("admin", "template_studio.templates.read"),
                 RoleGrant("admin", "template_studio.templates.manage"),
                 RoleGrant("admin", "template_studio.templates.publish"),

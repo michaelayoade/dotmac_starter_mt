@@ -110,21 +110,21 @@ def test_lifespan_does_not_seed_when_flag_false():
     assert calls == []
 
 
-def test_settings_feature_manifest_carries_the_real_seed_hook():
-    from app.features.settings.feature import feature as settings_feature
-    from app.features.settings.seed import seed_platform_defaults
+def test_settings_admin_manifest_carries_the_real_seed_hook():
+    from dotmac_settings_admin import module as settings_admin_module
+    from dotmac_settings_admin.seed import seed_platform_defaults
 
-    assert settings_feature.seed is seed_platform_defaults
+    assert settings_admin_module.seed is seed_platform_defaults
 
 
-def test_import_app_main_works_with_settings_feature_disabled():
-    """Disabling the settings feature via DISABLED_FEATURES: `import app.main`
+def test_import_app_main_works_with_settings_admin_disabled():
+    """Disabling the settings_admin module via DISABLED_FEATURES: `import app.main`
     must succeed and the disabled feature's seed must never run — exercised in
     a real subprocess (mirrors the final-gate `python -c "import app.main"`)."""
     env = {
         **os.environ,
         "DATABASE_URL": "postgresql+psycopg://x:x@127.0.0.1:59999/x",
-        "DISABLED_FEATURES": "settings",
+        "DISABLED_FEATURES": "settings_admin",
         "SEED_ON_STARTUP": "false",
     }
     result = subprocess.run(  # noqa: S603 # nosec B603 — fixed argv, no shell

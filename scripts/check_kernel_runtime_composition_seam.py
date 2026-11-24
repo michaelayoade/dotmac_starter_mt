@@ -745,8 +745,7 @@ def main_real_assembly_strict() -> None:
     # which would otherwise turn a real defect into silence).
     from dotmac_kernel.session_runtime import resolve_database_runtime
     from dotmac_kernel.settings_admin import all_specs
-
-    from app.features.settings.seed import seed_platform_defaults
+    from dotmac_settings_admin.seed import seed_platform_defaults
 
     # (a) the spec registry itself — a seed hook with nothing registered to
     # seed would also write no row, with NO runtime-binding defect at all.
@@ -755,8 +754,8 @@ def main_real_assembly_strict() -> None:
         "the setting-spec registry is EMPTY at this point -- "
         "seed_platform_defaults() would have nothing to write regardless of "
         "which runtime it resolves; this is a spec-registration gap (check "
-        "app/features/settings/__init__.py's `from app.features.settings "
-        "import spec` import), not evidence about resolve_database_runtime()"
+        "dotmac_settings_admin/manifest.py's `from dotmac_settings_admin "
+        "import specs` import), not evidence about resolve_database_runtime()"
     )
 
     # (b) resolve_database_runtime(), called directly, right after

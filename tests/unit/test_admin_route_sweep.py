@@ -63,6 +63,7 @@ from dotmac_kernel.web_surfaces import (
 # Installed MODULE web routers are swept too — the sweep enumerates from the
 # production app, so a module route omitted here would 404 on this minimal
 # app and read as a failure rather than as a missing mount.
+from dotmac_settings_admin import module as settings_admin_module
 from dotmac_template_studio import module as template_studio_module
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
@@ -75,7 +76,6 @@ from app.features.comms_operations.web import router as comms_web_router
 from app.features.custom_fields.web import router as custom_fields_web_router
 from app.features.parties.web import router as parties_web_router
 from app.features.rbac.web import router as rbac_web_router
-from app.features.settings.web import router as settings_web_router
 from app.features.web.web import router as web_router
 from app.main import app as production_app
 
@@ -207,7 +207,6 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
                 ("web", web_router),
                 ("parties", parties_web_router),
                 ("rbac", rbac_web_router),
-                ("settings", settings_web_router),
                 ("custom_fields", custom_fields_web_router),
             )
         ),
@@ -219,6 +218,7 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
             permissions=comms_feature.permissions,
         ),
         template_studio_module,
+        settings_admin_module,
     )
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_capabilities(CapabilityCatalogue.from_manifests(manifests))

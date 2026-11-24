@@ -33,15 +33,15 @@ from dotmac_kernel.models import (
 )
 from dotmac_kernel.security import hash_password
 from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
+
+# Import for the side effect: registers the auth/registration_policy spec
+# into the settings resolver registry (register() resolves it).
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import LoginRequest, RegisterRequest
-
-# Import for the side effect: registers the auth/registration_policy spec
-# into the settings resolver registry (register() resolves it).
-from app.features.settings import spec as _settings_spec  # noqa: F401
 
 PASSWORD = "correct horse battery staple"
 

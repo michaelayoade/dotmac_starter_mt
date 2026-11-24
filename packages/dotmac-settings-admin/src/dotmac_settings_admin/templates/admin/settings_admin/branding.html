@@ -1,0 +1,25 @@
+{#
+  Friendly ui_branding editor. Context: `brand` (effective), `error`, `form`.
+  There is deliberately NO `| safe` anywhere, and no custom CSS field: tenant CSS
+  is retired (ADR-0006 D8) and any attempt is refused by the single write owner.
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:40rem;">
+  {{ ui.heading("Branding") }}
+  {{ ui.error_box(error) }}
+  <form method="post" action="{{ surface_url('branding_submit') }}"
+        style="display:flex; flex-direction:column; gap:var(--dmui-space-md);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ ui.field("name", "Display name", form.get("name", "")) }}
+    {{ ui.field("tagline", "Tagline", form.get("tagline", "")) }}
+    {{ ui.field("logo_url", "Logo URL", form.get("logo_url", "")) }}
+    {{ ui.field("primary_color", "Primary color", form.get("primary_color", "")) }}
+    {{ ui.field("accent_color", "Accent color", form.get("accent_color", "")) }}
+    {{ ui.reason_field() }}
+    <div>{{ ui.button("Save branding") }} {{ ui.link(surface_url('index'), "Cancel") }}</div>
+  </form>
+</div>
+{% endblock %}

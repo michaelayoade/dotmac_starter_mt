@@ -421,7 +421,7 @@ def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
     runs. `main_real_assembly_strict()` imports the real `app.assembly`,
     rebinds it to a product runtime under `require_database_runtime=True`,
     calls the real `create_app`, THEN enters the ASGI lifespan (driving the
-    real startup seed hook, `app/features/settings/seed.py
+    real startup seed hook, `dotmac_settings_admin/seed.py
     ::seed_platform_defaults`, which resolves `resolve_database_runtime()`
     rather than a deferred `dotmac_kernel.db` import) and verifies the
     seeded row landed in the PRODUCT runtime's own database — proving strict
@@ -444,7 +444,8 @@ def test_real_assembly_strict_composition_leaves_the_reference_unloaded(
     predecessor `refactor/conflict-savepoint-engine-free-owner` (#678,
     merged as `478540bb`) moved those onto the already-public, engine-free
     `dotmac_kernel.transactions.conflict_savepoint`; this branch has since
-    rebased onto that fix (`app/features/settings/seed.py` was left on its
+    rebased onto that fix (the settings seed, since moved to
+    `dotmac_settings_admin/seed.py`, was left on its
     pre-fix form by #678 deliberately, for this branch's own
     `resolve_database_runtime()` fix to land on — see that file). Confirmed
     by static reading: `grep -rn "dotmac_kernel\\.db" app/` now returns only
