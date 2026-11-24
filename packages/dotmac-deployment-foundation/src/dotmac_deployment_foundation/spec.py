@@ -2516,12 +2516,14 @@ class ComposeJob:
     verify_stdout: str
     root_justification: str
     root_approved_by: str
-    #: Operator-job declaration. INSIDE the approved descriptor digest, gated
-    #: by schema: ProductDeploymentSpec.v5 (the first unpublished schema) and
-    #: later carry it; v1-v4 canonical bytes, render and configuration digest
-    #: never contain the key, and an `[operator]` table on them is refused.
+    #: Operator-job declaration. Part of the descriptor identity (compare=True,
+    #: so inside the canonical document and every digest taken over it) but
+    #: OMITTED from the canonical bytes while None, so a descriptor without the
+    #: table is byte-identical to one written before the field existed. A
+    #: present table is fully specified (`_parse_operator_job` refuses empty and
+    #: partial tables), so "key absent" is the only spelling of "no table".
     operator: OperatorJob | None = field(
-        default=None, metadata={"descriptor_since": SCHEMA_V5}
+        default=None, metadata={"canonical_omit_when_none": True}
     )
 
     @classmethod
@@ -3045,14 +3047,6 @@ class ProductDeploymentSpec:
             self.startup_config.require_profile(self)
         elif self.startup_config is not None:
             raise SpecError("startup_config requires ProductDeploymentSpec.v5")
-        if (
-            self.descriptor_schema != SCHEMA_V5
-            and self.compose_topology is not None
-            and any(job.operator is not None for job in self.compose_topology.jobs)
-        ):
-            raise SpecError(
-                "a compose job [operator] table requires ProductDeploymentSpec.v5"
-            )
         catalogs = self.database.catalogs if self.database is not None else ()
         if self.descriptor_schema == SCHEMA_V1 and catalogs:
             raise SpecError(

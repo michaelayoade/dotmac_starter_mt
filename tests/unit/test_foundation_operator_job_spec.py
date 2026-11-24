@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 
@@ -16,6 +17,9 @@ from tests.unit.foundation_operator_job_support import (
     make_spec,
 )
 from tests.unit.test_deployment_foundation_compose_topology import DESCRIPTOR
+from tests.unit.test_deployment_foundation_live_instance import (
+    document as v5_document,
+)
 from tests.unit.test_deployment_foundation_material_readiness import (
     descriptor as material_readiness_descriptor,
 )
@@ -135,33 +139,15 @@ def _digest(doc: dict) -> str:
     )
 
 
-def _plain_v5() -> ProductDeploymentSpec:
-    return make_spec(PLAIN_JOB)
+V3, V4, V5 = (f"ProductDeploymentSpec.v{n}" for n in (3, 4, 5))
+_COMPOSE_SCHEMAS = [V3, V4, V5]
 
 
-_CONFIG_DIGEST_LINE = re.compile(
-    r"^.*io\.dotmac\.deployment\.configuration\.digest:.*$", re.M
-)
-
-
-def test_t13_the_operator_table_changes_the_v5_digest_but_not_the_render_shape() -> (
-    None
-):
-    plain, operator = _plain_v5(), make_spec()
-    assert (
-        plain.to_canonical_document().canonical_bytes()
-        != operator.to_canonical_document().canonical_bytes()
-    )
-    # The rendered compose bytes differ only in the configuration-digest
-    # label, which IS the approved descriptor digest and so must change.
-    strip = lambda text: _CONFIG_DIGEST_LINE.sub("", text)  # noqa: E731
-    assert strip(render_compose(plain)) == strip(render_compose(operator))
-    assert render_compose(plain) != render_compose(operator)
-
-
-def _older(schema: str, job_toml: str) -> dict:
-    """A valid pre-v5 descriptor document with the given job tables appended."""
-    base = DESCRIPTOR if schema.endswith("v3") else material_readiness_descriptor()
+def _doc(schema: str, job_toml: str) -> dict:
+    """A valid descriptor document of `schema` with the given job tables appended."""
+    if schema == V5:
+        return make_document(job_toml)
+    base = DESCRIPTOR if schema == V3 else material_readiness_descriptor()
     doc = tomllib.loads(base)
     assert doc["schema"] == schema
     doc["compose_topology"]["jobs"] = [
@@ -171,33 +157,123 @@ def _older(schema: str, job_toml: str) -> dict:
     return doc
 
 
-_OLDER = ["ProductDeploymentSpec.v3", "ProductDeploymentSpec.v4"]
+def _keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        return set(value) | {k for v in value.values() for k in _keys(v)}
+    if isinstance(value, list):
+        return {k for v in value for k in _keys(v)}
+    return set()
 
 
-@pytest.mark.parametrize("schema", _OLDER)
-def test_t13_older_schema_canonical_bytes_never_carry_the_operator_key(
+def _canonical_keys(spec: ProductDeploymentSpec) -> set[str]:
+    return _keys(json.loads(spec.to_canonical_document().canonical_bytes()))
+
+
+@pytest.mark.parametrize("schema", _COMPOSE_SCHEMAS)
+def test_t13_an_operatorless_descriptor_has_no_operator_key_in_its_bytes(
     schema: str,
 ) -> None:
-    older = ProductDeploymentSpec.from_document(_older(schema, PLAIN_JOB))
-    assert b'"operator"' not in older.to_canonical_document().canonical_bytes()
+    # compose jobs, no table: the canonical bytes are exactly what they were
+    # before the field existed (the key is OMITTED, not UNSET)
+    spec = ProductDeploymentSpec.from_document(_doc(schema, PLAIN_JOB))
+    assert "operator" not in _canonical_keys(spec)
+    assert b"operator" not in spec.to_canonical_document().canonical_bytes()
 
 
-def test_t13_v5_materializes_the_operator_key() -> None:
-    assert b'"operator"' in _plain_v5().to_canonical_document().canonical_bytes()
+def test_t13_the_live_instance_fixture_has_no_operator_key() -> None:
+    spec = ProductDeploymentSpec.from_document(v5_document())
+    assert any(job for job in spec.compose_topology.jobs)
+    assert "operator" not in _canonical_keys(spec)
 
 
-@pytest.mark.parametrize("schema", _OLDER)
-def test_t13_an_operator_table_on_an_older_schema_is_refused(schema: str) -> None:
-    # positive control: the same document without the operator table parses
-    ProductDeploymentSpec.from_document(_older(schema, PLAIN_JOB))
-    with pytest.raises(SpecError, match="requires ProductDeploymentSpec.v5"):
-        ProductDeploymentSpec.from_document(_older(schema, JOB_TOML))
+@pytest.mark.parametrize("schema", _COMPOSE_SCHEMAS)
+def test_t13_a_declared_table_is_in_the_bytes_and_in_the_digest(schema: str) -> None:
+    plain = ProductDeploymentSpec.from_document(_doc(schema, PLAIN_JOB))
+    declared = ProductDeploymentSpec.from_document(_doc(schema, JOB_TOML))
+    assert "operator" in _canonical_keys(declared)
+    assert (
+        declared.to_canonical_document().sha256_digest()
+        != plain.to_canonical_document().sha256_digest()
+    )
+
+
+@pytest.mark.parametrize("schema", _COMPOSE_SCHEMAS)
+def test_t13_the_render_differs_only_by_the_configuration_digest_label(
+    schema: str,
+) -> None:
+    plain = ProductDeploymentSpec.from_document(_doc(schema, PLAIN_JOB))
+    declared = ProductDeploymentSpec.from_document(_doc(schema, JOB_TOML))
+    strip = lambda text: _CONFIG_DIGEST_LINE.sub("", text)  # noqa: E731
+    assert strip(render_compose(plain)) == strip(render_compose(declared))
+    assert render_compose(plain) != render_compose(declared)
+
+
+_CONFIG_DIGEST_LINE = re.compile(
+    r"^.*io\.dotmac\.deployment\.configuration\.digest:.*$", re.M
+)
+
+
+def test_t13_a_null_operator_is_the_same_single_absent_state() -> None:
+    plain = _doc(V5, PLAIN_JOB)
+    nulled = _doc(V5, PLAIN_JOB)
+    nulled["compose_topology"]["jobs"][-1]["operator"] = None
+    assert _digest(nulled) == _digest(plain)
+    assert "operator" not in _canonical_keys(
+        ProductDeploymentSpec.from_document(nulled)
+    )
+
+
+_COMMANDS = (
+    "[compose_topology.jobs.operator.commands]\n"
+    'import_execute = ["python", "-m", "importer", "execute"]\n'
+)
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        pytest.param("[compose_topology.jobs.operator]\n", id="empty_table"),
+        pytest.param(
+            '[compose_topology.jobs.operator]\nsecrets_target = "/run/secrets/x"\n'
+            'inputs_root_material = "JOB_INPUTS_ROOT"\n',
+            id="no_commands",
+        ),
+        pytest.param(
+            "[compose_topology.jobs.operator]\n"
+            'inputs_root_material = "JOB_INPUTS_ROOT"\n' + _COMMANDS,
+            id="no_secrets_target",
+        ),
+        pytest.param(
+            '[compose_topology.jobs.operator]\nsecrets_target = "/run/secrets/x"\n'
+            + _COMMANDS,
+            id="no_inputs_root_material",
+        ),
+    ],
+)
+def test_t13_an_empty_or_partial_table_is_refused(tail: str) -> None:
+    for schema in _COMPOSE_SCHEMAS:
+        with pytest.raises(SpecError):
+            ProductDeploymentSpec.from_document(_doc(schema, PLAIN_JOB + tail))
+
+
+@pytest.mark.parametrize(
+    "schema", ["ProductDeploymentSpec.v1", "ProductDeploymentSpec.v2"]
+)
+def test_t13_an_operator_table_is_refused_where_there_is_no_compose_topology(
+    schema: str,
+) -> None:
+    for job_toml in (PLAIN_JOB, JOB_TOML):
+        doc = _doc(V3, job_toml)
+        doc["schema"] = schema
+        with pytest.raises(SpecError):
+            ProductDeploymentSpec.from_document(doc)
 
 
 def _operator(doc: dict) -> dict:
     return doc["compose_topology"]["jobs"][-1]["operator"]
 
 
+@pytest.mark.parametrize("schema", _COMPOSE_SCHEMAS)
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -223,9 +299,9 @@ def _operator(doc: dict) -> dict:
         ),
     ],
 )
-def test_t13_every_operator_field_is_inside_the_v5_digest(mutate) -> None:
-    base = make_document()
-    changed = make_document()
+def test_t13_every_operator_field_is_inside_the_digest(schema: str, mutate) -> None:
+    base = _doc(schema, JOB_TOML)
+    changed = _doc(schema, JOB_TOML)
     mutate(_operator(changed))
     assert _digest(changed) != _digest(base)
-    assert _digest(make_document()) == _digest(base)  # deterministic control
+    assert _digest(_doc(schema, JOB_TOML)) == _digest(base)  # deterministic control

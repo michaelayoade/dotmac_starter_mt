@@ -453,6 +453,35 @@ def test_t16_network_labels_are_read_and_a_plain_network_is_refused(env) -> None
 
 
 @needs_docker
+def test_t16_a_created_job_container_matches_the_agents_two_label_query(env) -> None:
+    plan = env.plan(["sh", "-c", "exit 0"], env.image(), name="q")
+    _docker("volume", "create", plan.volume_name)
+    assert env.effects(plan).create_container(plan, env_file=None).ok
+    # the deploy agent's orphan proof queries BOTH labels
+    both = _docker(
+        "ps",
+        "-a",
+        "-q",
+        "--filter",
+        f"label={contract.LABEL_DISPATCH_ID}={plan.dispatch_id}",
+        "--filter",
+        f"label={contract.LABEL_ROLE_JOB}=1",
+    ).strip()
+    assert both != ""
+    # and a different dispatch id does not match
+    other = _docker(
+        "ps",
+        "-a",
+        "-q",
+        "--filter",
+        f"label={contract.LABEL_DISPATCH_ID}={plan.dispatch_id}-other",
+        "--filter",
+        f"label={contract.LABEL_ROLE_JOB}=1",
+    ).strip()
+    assert other == ""
+
+
+@needs_docker
 def test_t16_a_real_container_passes_and_tampering_is_refused(env) -> None:
     plan = env.plan(["sh", "-c", "exit 0"], env.image(), name="c")
     effects = env.effects(plan)

@@ -16,11 +16,14 @@ hashed EXCEPT the three files that must change, and a new module is refused
 unless it is in `NEW_MODULES`. The three files get structured checks:
 
 * **plan.py** - one `StepKind` member (`OPERATOR_JOB`) may be added.
-* **spec.py** - every top-level node except `ComposeJob` is unchanged
-  (`ProductDeploymentSpec` is compared after removing the `if` statements whose
-  test reads an `.operator` attribute: the one schema-gate refusal);
+* **spec.py** - every top-level node except `ComposeJob` is unchanged;
   `ComposeJob` is compared after removing the additive operator pieces; only
   the allow-listed new nodes may appear.
+* **document.py** (the canonicalizer; on the deploy path) - hashed whole-file
+  AFTER removing exactly ONE clause from the `_normalize` comprehension: the
+  one whose `ast.dump` sha256 equals `DOCUMENT_CLAUSE_SHA`
+  (`canonical_omit_when_none`). The removal count must be exactly 1, so a
+  second clause, a changed clause or a missing clause all fail.
 * **cli.py** - every top-level definition except `build_parser` is unchanged;
   `build_parser` is compared after removing the statements that mention
   `run_job`; only `cmd_run_job` may be added.
@@ -157,23 +160,8 @@ def _node_hashes(tree: ast.Module, *, skip: frozenset[str]) -> dict[str, str]:
     return nodes
 
 
-class _StripOperatorGates(ast.NodeTransformer):
-    """Remove `if <test reading .operator>:` statements (the schema gate)."""
-
-    def visit_If(self, node: ast.If) -> ast.AST | None:
-        if any(
-            isinstance(inner, ast.Attribute) and inner.attr == _OPERATOR_PREFIX
-            for inner in ast.walk(node.test)
-        ):
-            return None
-        return self.generic_visit(node)
-
-
 def spec_fingerprint(source: str) -> dict[str, object]:
     tree = ast.parse(source)
-    for index, node in enumerate(tree.body):
-        if isinstance(node, ast.ClassDef) and node.name == "ProductDeploymentSpec":
-            tree.body[index] = _StripOperatorGates().visit(node)
     compose_job = ""
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "ComposeJob":
@@ -212,6 +200,34 @@ def cli_fingerprint(source: str) -> dict[str, object]:
     }
 
 
+#: `ast.dump` sha256 of the ONE clause document.py may add to `_normalize`.
+DOCUMENT_CLAUSE_SHA = "463eb8f6c6fa77940edfc9e026b9688d71fb151145bbba48d47f8562116561d7"
+
+
+def document_fingerprint(source: str) -> dict[str, object]:
+    """document.py with the single pinned clause removed, plus the removal count."""
+    tree = ast.parse(source)
+    removed = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != "_normalize":
+            continue
+        for comp in ast.walk(node):
+            if not isinstance(comp, ast.DictComp):
+                continue
+            for generator in comp.generators:
+                for condition in generator.ifs:
+                    if not isinstance(condition, ast.BoolOp):
+                        continue
+                    kept = [
+                        value
+                        for value in condition.values
+                        if _digest(value) != DOCUMENT_CLAUSE_SHA
+                    ]
+                    removed += len(condition.values) - len(kept)
+                    condition.values = kept
+    return {"whole": _digest(tree), "clauses_removed": removed}
+
+
 def package_files(src: Path) -> list[str]:
     return sorted(str(p.relative_to(src)) for p in src.rglob("*.py"))
 
@@ -222,11 +238,17 @@ def fingerprint_tree(src: Path) -> dict[str, object]:
     for relative in package_files(src):
         if relative in STRUCTURED_FILES or relative in NEW_MODULES:
             continue
-        whole[relative] = whole_file_hash((src / relative).read_text(encoding="utf-8"))
+        text = (src / relative).read_text(encoding="utf-8")
+        whole[relative] = (
+            document_fingerprint(text)["whole"]
+            if relative == "document.py"
+            else whole_file_hash(text)
+        )
     read = lambda name: (src / name).read_text(encoding="utf-8")  # noqa: E731
     return {
         "whole_file": whole,
         "plan_py": plan_hash(read("engine/plan.py")),
         "spec_py": spec_fingerprint(read("spec.py")),
         "cli_py": cli_fingerprint(read("cli.py")),
+        "document_py": document_fingerprint(read("document.py")),
     }

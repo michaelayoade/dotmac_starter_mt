@@ -11,6 +11,7 @@ Sensitivity is proved on in-memory source, never on a plant committed to disk.
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -146,27 +147,51 @@ def test_the_guard_accepts_only_the_operator_additions_to_compose_job() -> None:
     assert tampered["compose_job"] != base
 
 
-_SPEC = (
-    "class ProductDeploymentSpec:\n"
-    "    def __post_init__(self):\n"
-    "        check()\n"
-    "{gate}"
-    "        done()\n"
-)
-_GATE = (
-    "        if self.schema != 'v5' and any(j.operator for j in self.jobs):\n"
-    "            raise SpecError('gate')\n"
-)
+def test_document_py_differs_only_by_the_one_pinned_clause() -> None:
+    current = ast_guard.fingerprint_tree(SRC)["document_py"]
+    assert current["clauses_removed"] == 1
+    assert current["whole"] == BASELINE["whole_file"]["document.py"]
 
 
-def test_the_guard_accepts_only_the_operator_schema_gate_in_the_spec_class() -> None:
-    base = ast_guard.spec_fingerprint(_SPEC.format(gate=""))["nodes"]
-    gated = ast_guard.spec_fingerprint(_SPEC.format(gate=_GATE))["nodes"]
-    assert gated == base
-    other = _GATE.replace("j.operator", "j.other")
-    assert ast_guard.spec_fingerprint(_SPEC.format(gate=other))["nodes"] != base
-    extra = _GATE + "        sneaky()\n"
-    assert ast_guard.spec_fingerprint(_SPEC.format(gate=extra))["nodes"] != base
+def test_the_document_guard_bites_a_second_or_changed_clause() -> None:
+    real = (
+        "def _normalize(value):\n"
+        "    return {f.name: 1 for f in fields(value) if f.compare and not (\n"
+        '        f.metadata.get("canonical_omit_when_none", False)\n'
+        "        and getattr(value, f.name) is None\n"
+        "    )}\n"
+    )
+    # The pinned sha is over the exact node in document.py, so a differently
+    # spelled clause is NOT removed and the whole-file hash moves.
+    spelled = ast_guard.document_fingerprint(real)
+    plain = ast_guard.document_fingerprint(
+        "def _normalize(value):\n"
+        "    return {f.name: 1 for f in fields(value) if f.compare}\n"
+    )
+    assert spelled["clauses_removed"] == 0
+    assert spelled["whole"] != plain["whole"]
+
+
+def test_the_real_document_clause_removed_twice_would_still_be_visible() -> None:
+    source = (SRC / "document.py").read_text(encoding="utf-8")
+    assert ast_guard.document_fingerprint(source)["clauses_removed"] == 1
+    clause = (
+        "            and not (\n"
+        '                field.metadata.get("canonical_omit_when_none", False)\n'
+        "                and getattr(value, field.name) is None\n"
+        "            )\n"
+    )
+    assert clause in source
+    doubled = source.replace(clause, clause + clause, 1)
+    assert ast_guard.document_fingerprint(doubled)["clauses_removed"] == 2
+    extra = source.replace(
+        clause,
+        clause + "            and not (field.name == 'x')\n",
+        1,
+    )
+    changed = ast_guard.document_fingerprint(extra)
+    assert changed["clauses_removed"] == 1
+    assert changed["whole"] != BASELINE["whole_file"]["document.py"]
 
 
 def test_the_guard_bites_a_changed_existing_spec_definition() -> None:
@@ -220,3 +245,43 @@ def test_the_guard_bites_an_unregistered_build_parser_edit() -> None:
     base = ast_guard.cli_fingerprint(_cli())
     edited = _cli().replace("return deploy", "deploy.x = 1\n    return deploy")
     assert ast_guard.cli_fingerprint(edited)["build_parser"] != base["build_parser"]
+
+
+def _omit_flagged_fields() -> set[tuple[str, str]]:
+    """Every `Class.field` declaring the omit-when-None flag, across the package."""
+    flagged: set[tuple[str, str]] = set()
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for stmt in cls.body:
+                if not isinstance(stmt, ast.AnnAssign) or stmt.value is None:
+                    continue
+                if any(
+                    isinstance(node, ast.Constant)
+                    and node.value == "canonical_omit_when_none"
+                    for node in ast.walk(stmt.value)
+                ):
+                    target = stmt.target
+                    assert isinstance(target, ast.Name)
+                    flagged.add((cls.name, target.id))
+    return flagged
+
+
+def test_only_compose_job_operator_may_omit_itself_when_none() -> None:
+    assert _omit_flagged_fields() == {("ComposeJob", "operator")}
+
+
+def test_compose_job_operator_stays_semantic_and_is_the_only_flagged_field() -> None:
+    import dataclasses
+
+    from dotmac_deployment_foundation.spec import ComposeJob
+
+    fields = {f.name: f for f in dataclasses.fields(ComposeJob)}
+    assert fields["operator"].compare is True
+    assert fields["operator"].metadata == {"canonical_omit_when_none": True}
+    others = [
+        f.name for f in fields.values() if f.metadata.get("canonical_omit_when_none")
+    ]
+    assert others == ["operator"]

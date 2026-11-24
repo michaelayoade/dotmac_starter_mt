@@ -6,10 +6,12 @@
 
 `dotmac-deploy run-job --execute --target <ref> --authorization <pair>` runs ONE
 Control-dispatched operator job. Additive: a new optional
-`[compose_topology.jobs.operator]` table, accepted ONLY on
-`ProductDeploymentSpec.v5` (the first unpublished schema; v1-v4 refuse it and
-keep byte-identical canonical documents, renders and configuration digests;
-on v5 the table is inside the approved descriptor digest), new
+`[compose_topology.jobs.operator]` table (valid wherever a compose topology is,
+v3-v5; no new schema). The field is inside the approved descriptor digest but
+OMITTED from the canonical document while absent, so every descriptor without
+the table keeps byte-identical canonical bytes, render and configuration
+digest; a present table is always fully specified, so key-absent is the only
+spelling of "no table" (`canonical_omit_when_none`, one field, ratcheted), new
 modules `operator_job.py`, `operator_job_contract.py` and
 `providers/compose_operator_job.py`, one `StepKind.OPERATOR_JOB` member and the
 subcommand registration. The dispatch is resolved and consumed through the
