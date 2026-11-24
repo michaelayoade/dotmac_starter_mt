@@ -8938,6 +8938,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-money-flows ──
+    "dotmac-money-flows-v0.1.0a2": (
+        "dotmac-money-flows",
+        "d26951c1452567767fc977e0f76929818efc1ceb",
+        {
+            "mf_0001_settle_instances.py": (
+                "fa10195f884f7e6d7404e03af52d90003d24b91b7813f6c93ee1ea0c2f3ea03e"
+            ),
+            "mf_0002_funded_charge_instances.py": (
+                "f33b75e1ce84a3cfea69bd535067ea640dc614da4d61a575eb6c89c2f327842e"
+            ),
+        },
+    ),
     "dotmac-money-flows-v0.1.0a1": (
         "dotmac-money-flows",
         "2cac7c246b9a36580b9cd22360eb2d74ff8e0829",
