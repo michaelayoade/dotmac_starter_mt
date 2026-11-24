@@ -11,6 +11,13 @@ here.
 No version is bumped or allocated here; kernel releases are owned by the release
 allocation (this ships with the next allocated release).
 
+- `dotmac_kernel.jobs` adds `JobSpec` and `ModuleManifest.jobs` (module contract
+  2 only): code, handler import path, explicit plane, interval or five-field
+  cron cadence, max attempts, backoff, `concurrency='single'`. `ModuleRegistry`
+  refuses a duplicate code within a module, a malformed cadence, and a handler
+  that does not import or accept `(session, scope, run_context)`; it exposes
+  `jobs()` for the runner. Declaration only: the runner lands in
+  `dotmac-durable-timers`. Additive; contract-1 manifests are unchanged.
 - `dotmac_kernel.delivery_providers` publishes the `email.send.v1` payload
   contract for the delivery domain: `EMAIL_SEND_CAPABILITY_ID` and
   `EMAIL_SEND_COMMAND_SCHEMA` (one rendered message: `dispatch_id`, `address`,

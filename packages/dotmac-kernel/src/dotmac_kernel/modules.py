@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import APIRouter
 
 from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.jobs import JobSpec, JobSpecError, resolve_job_handler
 from dotmac_kernel.namespaces import (
     HOST_SCHEMA,
     MigrationOwner,
@@ -261,6 +262,12 @@ class ModuleManifest:
     # this contribution is accepted only when it describes that declaration
     # exactly. It is last to preserve every historical positional constructor.
     database_catalog: ModuleDatabaseCatalogContributionV1 | None = None
+    # Background jobs this module owns (contract 2). Declaration only: the
+    # kernel validates them (unique code per module, cadence, explicit plane,
+    # handler path resolvable at registry construction); the runner in
+    # `dotmac-durable-timers` executes them. Last, to preserve every positional
+    # constructor.
+    jobs: Sequence[JobSpec] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if not self.code:
@@ -297,8 +304,10 @@ class ModuleManifest:
             "requires",
             "tenant_requires",
             "platform_requires",
+            "jobs",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        self._validate_jobs()
         if self.web_surfaces and (self.web_routers or self.nav):
             raise ModuleRegistryError(
                 f"module {self.code!r} declares both legacy and v2 web surfaces; "
@@ -382,6 +391,27 @@ class ModuleManifest:
             object.__setattr__(self, "supported_plane_sets", supported)
         self._validate_namespace()
         self._validate_database_catalog()
+
+    def _validate_jobs(self) -> None:
+        if not self.jobs:
+            return
+        if self.contract_version < 2:
+            raise ModuleRegistryError(
+                f"module {self.code!r} uses module contract "
+                f"{self.contract_version}; `jobs` requires contract 2"
+            )
+        seen: set[str] = set()
+        for job in self.jobs:
+            if not isinstance(job, JobSpec):
+                raise ModuleRegistryError(
+                    f"module {self.code!r} `jobs` entries must be JobSpec, "
+                    f"got {type(job).__name__}"
+                )
+            if job.code in seen:
+                raise ModuleRegistryError(
+                    f"module {self.code!r} declares job {job.code!r} twice"
+                )
+            seen.add(job.code)
 
     def _validate_namespace(self) -> None:
         """Stateful and stateless are the only two coherent shapes (D1).
@@ -662,6 +692,7 @@ class ModuleRegistry:
         self._check_unique_codes(declared)
         self._check_contract_versions(declared, supported_contract_versions)
         self._check_dependencies_installed(declared)
+        self._check_job_handlers(declared)
         self._namespaces: NamespaceRegistry = NamespaceRegistry.from_manifests(declared)
         self._order: tuple[ModuleManifest, ...] = self._topological_order(declared)
         self._by_code: dict[str, ModuleManifest] = {m.code: m for m in self._order}
@@ -715,6 +746,19 @@ class ModuleRegistry:
             raise MissingModuleDependencyError(
                 f"module dependency not installed: {listed}"
             )
+
+    @staticmethod
+    def _check_job_handlers(manifests: Sequence[ModuleManifest]) -> None:
+        """Every declared job handler must import and accept the contract
+        signature at boot, so a typo fails the start, not the first due run."""
+        for manifest in manifests:
+            for job in manifest.jobs:
+                try:
+                    resolve_job_handler(job)
+                except JobSpecError as exc:
+                    raise ModuleRegistryError(
+                        f"module {manifest.code!r}: {exc}"
+                    ) from exc
 
     @staticmethod
     def _topological_order(
@@ -841,6 +885,14 @@ class ModuleRegistry:
                 f"enabled module depends on a module that is not enabled: {listed}"
             )
         return tuple(m for m in self._order if m.code in enabled)
+
+    def jobs(self, disabled: Set[str] = frozenset()) -> tuple[tuple[str, JobSpec], ...]:
+        """`(module code, JobSpec)` for every job of an ENABLED module, in
+        startup order then declaration order - what the job runner reads."""
+        enabled = self.enabled_codes(disabled)
+        return tuple(
+            (m.code, job) for m in self._order if m.code in enabled for job in m.jobs
+        )
 
     # ── Inventory (health / diagnostics) ────────────────────────────────────
 

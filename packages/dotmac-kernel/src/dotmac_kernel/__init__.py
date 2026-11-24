@@ -166,6 +166,7 @@ from dotmac_kernel.flags import (
     install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.jobs import JobSpec, JobSpecError
 from dotmac_kernel.machine_auth import (
     API_KEY_HEADER,
     MACHINE_KEY_SECRET_NAME,
@@ -410,6 +411,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.identity",
         "dotmac_kernel.identity_storage",
         "dotmac_kernel.identity_provisioning",
+        "dotmac_kernel.jobs",
         "dotmac_kernel.licensing",
         "dotmac_kernel.logging",
         "dotmac_kernel.machine_auth",
@@ -614,6 +616,8 @@ __all__ = [
     "mount_features",
     # module manifest + registry (module control-plane step 2)
     "ModuleManifest",
+    "JobSpec",
+    "JobSpecError",
     "ModuleRegistry",
     "ModuleInventoryEntry",
     "AnyManifest",

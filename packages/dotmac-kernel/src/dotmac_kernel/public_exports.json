@@ -676,6 +676,19 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.jobs": {
+      "classification": "supported",
+      "exports": [
+        "JOB_CONCURRENCY_SINGLE",
+        "JobSpec",
+        "JobSpecError",
+        "MAX_ATTEMPTS_CEILING",
+        "MIN_INTERVAL_SECONDS",
+        "resolve_job_handler",
+        "validate_cron"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.licensing": {
       "classification": "supported",
       "exports": [
@@ -2011,6 +2024,8 @@
     "InvalidRevisionIdError",
     "InvalidSchemaError",
     "InvalidSourceApplicationError",
+    "JobSpec",
+    "JobSpecError",
     "KERNEL_MODULE_CONTRACT_VERSION",
     "LocalizedText",
     "MACHINE_KEY_SECRET_NAME",
@@ -2233,6 +2248,7 @@
     "dotmac_kernel.identity",
     "dotmac_kernel.identity_provisioning",
     "dotmac_kernel.identity_storage",
+    "dotmac_kernel.jobs",
     "dotmac_kernel.licensing",
     "dotmac_kernel.logging",
     "dotmac_kernel.machine_auth",
