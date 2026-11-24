@@ -16,25 +16,8 @@ composition a Starter surface module will meet there.
 
 from __future__ import annotations
 
-from dotmac_accounting.manifest import module as accounting_module
-from dotmac_ai_operations.manifest import module as ai_operations_module
-from dotmac_analytics.manifest import module as analytics_module
-from dotmac_approvals.manifest import module as approvals_module
-from dotmac_assets.manifest import module as assets_module
-from dotmac_banking.manifest import module as banking_module
-from dotmac_billing.manifest import module as billing_module
-from dotmac_collections.manifest import module as collections_module
-from dotmac_commercial_agreements.manifest import module as agreements_module
-from dotmac_customers.manifest import module as customers_module
-from dotmac_documents.manifest import module as documents_module
-from dotmac_durable_timers.manifest import module as durable_timers_module
-from dotmac_expenses.manifest import module as expenses_module
-from dotmac_files.manifest import module as files_module
-from dotmac_finance.manifest import module as finance_module
-from dotmac_forms.manifest import module as forms_module
-from dotmac_imports.manifest import module as imports_module
-from dotmac_inbox.manifest import module as inbox_module
-from dotmac_inventory.manifest import module as inventory_module
+import functools
+
 from dotmac_kernel import (
     SELECT_ALL,
     ModuleManifest,
@@ -56,20 +39,7 @@ from dotmac_kernel.web_surfaces import (
     TemplateRef,
     WebFacetMount,
 )
-from dotmac_numbering.manifest import module as numbering_module
-from dotmac_party.manifest import module as party_module
-from dotmac_payables.manifest import module as payables_module
-from dotmac_payments.manifest import module as payments_module
-from dotmac_payroll.manifest import module as payroll_module
-from dotmac_people.manifest import module as people_module
-from dotmac_procurement.manifest import module as procurement_module
-from dotmac_projects.manifest import module as projects_module
-from dotmac_sales.manifest import module as sales_module
-from dotmac_tax.manifest import module as tax_module
-from dotmac_template_studio import module as template_studio_module
-from dotmac_ticketing.manifest import module as ticketing_module
 from dotmac_ui import UI_CONTRACT_VERSION
-from dotmac_workflow_runtime.manifest import module as workflow_runtime_module
 from fastapi.routing import APIRoute
 
 ADMISSION_PERMISSION = "erp.web.access"
@@ -87,42 +57,6 @@ _ERP_LOCAL_PROBE = ModuleManifest(
     ),
 )
 
-_ERP_MODULES: tuple[ModuleManifest, ...] = (
-    accounting_module,
-    agreements_module,
-    ai_operations_module,
-    analytics_module,
-    approvals_module,
-    assets_module,
-    banking_module,
-    billing_module,
-    collections_module,
-    customers_module,
-    documents_module,
-    durable_timers_module,
-    expenses_module,
-    files_module,
-    finance_module,
-    forms_module,
-    imports_module,
-    inbox_module,
-    inventory_module,
-    numbering_module,
-    party_module,
-    payables_module,
-    payments_module,
-    payroll_module,
-    people_module,
-    procurement_module,
-    projects_module,
-    sales_module,
-    tax_module,
-    ticketing_module,
-    workflow_runtime_module,
-)
-
-#: Same plane intent as ERP v2 (`erp_v2.migration_bindings`): TENANT only for
-#: the selectable modules, files on both planes.
 _MODULE_PLANES = (
     ModulePlaneSelection(module="approvals", planes=(ModulePlane.TENANT,)),
     ModulePlaneSelection(module="billing", planes=(ModulePlane.TENANT,)),
@@ -135,20 +69,97 @@ _MODULE_PLANES = (
     ModulePlaneSelection(module="ticketing", planes=(ModulePlane.TENANT,)),
 )
 
-_COMPOSED: tuple[ModuleManifest, ...] = (
-    _ERP_LOCAL_PROBE,
-    *_ERP_MODULES,
-    template_studio_module,
-)
+
+@functools.cache
+def _erp_modules() -> tuple[ModuleManifest, ...]:
+    """Imported lazily: manifests import their models, and tests that measure
+    which tables a module adds to `Base.metadata` must not see them pre-loaded
+    by collection."""
+    from dotmac_accounting.manifest import module as accounting_module
+    from dotmac_ai_operations.manifest import module as ai_operations_module
+    from dotmac_analytics.manifest import module as analytics_module
+    from dotmac_approvals.manifest import module as approvals_module
+    from dotmac_assets.manifest import module as assets_module
+    from dotmac_banking.manifest import module as banking_module
+    from dotmac_billing.manifest import module as billing_module
+    from dotmac_collections.manifest import module as collections_module
+    from dotmac_commercial_agreements.manifest import module as agreements_module
+    from dotmac_customers.manifest import module as customers_module
+    from dotmac_documents.manifest import module as documents_module
+    from dotmac_durable_timers.manifest import module as durable_timers_module
+    from dotmac_expenses.manifest import module as expenses_module
+    from dotmac_files.manifest import module as files_module
+    from dotmac_finance.manifest import module as finance_module
+    from dotmac_forms.manifest import module as forms_module
+    from dotmac_imports.manifest import module as imports_module
+    from dotmac_inbox.manifest import module as inbox_module
+    from dotmac_inventory.manifest import module as inventory_module
+    from dotmac_numbering.manifest import module as numbering_module
+    from dotmac_party.manifest import module as party_module
+    from dotmac_payables.manifest import module as payables_module
+    from dotmac_payments.manifest import module as payments_module
+    from dotmac_payroll.manifest import module as payroll_module
+    from dotmac_people.manifest import module as people_module
+    from dotmac_procurement.manifest import module as procurement_module
+    from dotmac_projects.manifest import module as projects_module
+    from dotmac_sales.manifest import module as sales_module
+    from dotmac_tax.manifest import module as tax_module
+    from dotmac_ticketing.manifest import module as ticketing_module
+    from dotmac_workflow_runtime.manifest import module as workflow_runtime_module
+
+    return (
+        accounting_module,
+        ai_operations_module,
+        analytics_module,
+        approvals_module,
+        assets_module,
+        banking_module,
+        billing_module,
+        collections_module,
+        agreements_module,
+        customers_module,
+        documents_module,
+        durable_timers_module,
+        expenses_module,
+        files_module,
+        finance_module,
+        forms_module,
+        imports_module,
+        inbox_module,
+        inventory_module,
+        numbering_module,
+        party_module,
+        payables_module,
+        payments_module,
+        payroll_module,
+        people_module,
+        procurement_module,
+        projects_module,
+        sales_module,
+        tax_module,
+        ticketing_module,
+        workflow_runtime_module,
+    )
+
+
+@functools.cache
+def _template_studio() -> ModuleManifest:
+    from dotmac_template_studio import module
+
+    return module
+
+
+def _composed() -> tuple[ModuleManifest, ...]:
+    return (_ERP_LOCAL_PROBE, *_erp_modules(), _template_studio())
 
 
 def _explicit_selection() -> SurfaceSelection:
     """The current set, written as explicit pairs (never ``SELECT_ALL``)."""
     return SurfaceSelection(
         surfaces={
-            (m.code, surface.code) for m in _COMPOSED for surface in m.web_surfaces
+            (m.code, surface.code) for m in _composed() for surface in m.web_surfaces
         },
-        api_routers={m.code for m in _COMPOSED if m.api_routers},
+        api_routers={m.code for m in _composed() if m.api_routers},
     )
 
 
@@ -157,7 +168,7 @@ def _erp_like_spec(
 ) -> ProductAssemblySpec:
     return ProductAssemblySpec(
         name="erp-like-composition",
-        modules=_COMPOSED,
+        modules=_composed(),
         module_planes=_MODULE_PLANES,
         tenancy="multi",
         platform_surface_enabled=False,
@@ -228,7 +239,7 @@ def test_explicit_selection_equals_the_current_set() -> None:
 def test_a_surface_missing_from_the_selection_is_not_mounted() -> None:
     narrowed = SurfaceSelection(
         surfaces=(),
-        api_routers={m.code for m in _COMPOSED if m.api_routers},
+        api_routers={m.code for m in _composed() if m.api_routers},
     )
     selected = _names(create_app(_erp_like_spec()))
     unselected = _names(create_app(_erp_like_spec(selection=narrowed)))
@@ -239,7 +250,7 @@ def test_a_surface_missing_from_the_selection_is_not_mounted() -> None:
 
 def test_surface_conformance_holds_inside_the_erp_like_composition() -> None:
     report = assert_surface_conformance(
-        template_studio_module,
+        _template_studio(),
         prefixes=("/",),
         spec_for_prefix=lambda prefix: _erp_like_spec(prefix),
     )
