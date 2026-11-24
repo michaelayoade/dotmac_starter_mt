@@ -376,7 +376,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .gate2
-          .foundation-candidate/bin/python -E -P scripts/foundation_publication_gate.py verify-gate2 \
+          python3 -I scripts/foundation_publication_gate.py verify-gate2 \
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             --candidate-sha256 "${{ steps.candidate.outputs.candidate_sha256 }}" \
             --candidate-source-sha "${{ steps.candidate.outputs.candidate_source_sha }}" \

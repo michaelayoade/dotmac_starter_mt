@@ -28,6 +28,25 @@
    ],
    "waivable": [
     "DR3_DR5"
+   ],
+   "subject_evidence": [
+    "RECOVERY",
+    "S3"
+   ],
+   "max_age_hours": 72,
+   "adoption_conditions": [
+    {
+     "id": "DR3_DR5_STAGING_DRILL",
+     "waives": "DR3_DR5",
+     "blocks": "production_governed_deploy",
+     "environment": "seabone-staging",
+     "required_faults": [
+      "db_outage_at_migrate",
+      "network_loss",
+      "timeout_sigterm"
+     ],
+     "register_ref": 2155
+    }
    ]
   }
  ]

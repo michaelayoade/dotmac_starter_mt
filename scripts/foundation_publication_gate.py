@@ -52,7 +52,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -97,11 +97,16 @@ E3_TEST = "tests/architecture/test_foundation_operator_job_isolation.py"
 E3_ID = "E3"
 #: The machine re-check can never be waived, whatever the policy lists.
 NEVER_WAIVABLE = frozenset({E3_ID})
-#: The one condition a waiver must carry verbatim (Michael's ruling, register
-#: `dotmac-debt-register`): the waiver defers the drill, it does not drop it.
-WAIVER_CONDITION = (
-    "seabone 3-fault staging drill before first production governed deploy"
+#: An adoption condition is POLICY data (Michael's ruling, register
+#: `dotmac-debt-register`): a waiver defers the drill, it does not drop it. The
+#: manifest names a condition by id; the structure below is the only shape the
+#: parser accepts, and the release record copies it in full.
+CONDITION_BLOCKS = "production_governed_deploy"
+CONDITION_ENVIRONMENT = "seabone-staging"
+CONDITION_FAULTS = frozenset(
+    {"db_outage_at_migrate", "network_loss", "timeout_sigterm"}
 )
+MAX_AGE_HOURS_LIMIT = 168
 STATUSES = ("PASS", "CLEAR", "WAIVED")
 
 _SSH_KEYGEN = "/usr/bin/ssh-keygen"
@@ -113,6 +118,7 @@ _REVISION = re.compile(r"[0-9a-f]{40}\Z")
 _TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z")
 _SSH_TIME = re.compile(r"[0-9]{14}Z\Z")
 _PERSON = re.compile(r"[A-Za-z0-9._@:+-][A-Za-z0-9._@:+ -]{0,127}\Z")
+_CONDITION_ID = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
 _REF = re.compile(r"[\x21-\x7e][\x20-\x7e]{0,254}\Z")
 
 
@@ -174,6 +180,26 @@ def _digest(payload: bytes) -> str:
 
 
 @dataclass(frozen=True)
+class AdoptionCondition:
+    id: str
+    waives: str
+    blocks: str
+    environment: str
+    required_faults: tuple[str, ...]
+    register_ref: int
+
+    def as_record(self) -> dict:
+        return {
+            "id": self.id,
+            "waives": self.waives,
+            "blocks": self.blocks,
+            "environment": self.environment,
+            "required_faults": list(self.required_faults),
+            "register_ref": self.register_ref,
+        }
+
+
+@dataclass(frozen=True)
 class GateException:
     facility: str
     version: str
@@ -182,12 +208,74 @@ class GateException:
     ruling_version: int
     required_evidence: tuple[str, ...]
     waivable: tuple[str, ...]
+    subject_evidence: tuple[str, ...]
+    max_age_hours: int
+    adoption_conditions: tuple[AdoptionCondition, ...]
+
+    def condition(self, identifier: object) -> AdoptionCondition | None:
+        for found in self.adoption_conditions:
+            if found.id == identifier:
+                return found
+        return None
 
 
 @dataclass(frozen=True)
 class Policy:
     default: str
     exceptions: dict[tuple[str, str], GateException]
+
+
+def _parse_conditions(
+    raw: object, waivable: tuple[str, ...], ruling_version: int, exc
+) -> tuple[AdoptionCondition, ...]:
+    """Strict: every waivable id has exactly one condition, nothing else."""
+    if type(raw) is not list:
+        raise exc("gate_policy.adoption_conditions")
+    found: list[AdoptionCondition] = []
+    for entry in raw:
+        item = _exact_keys(
+            entry,
+            {
+                "id",
+                "waives",
+                "blocks",
+                "environment",
+                "required_faults",
+                "register_ref",
+            },
+            "gate_policy.adoption_condition",
+            exc,
+        )
+        faults = item["required_faults"]
+        if (
+            type(item["id"]) is not str
+            or _CONDITION_ID.fullmatch(item["id"]) is None
+            or item["waives"] not in waivable
+            or item["blocks"] != CONDITION_BLOCKS
+            or item["environment"] != CONDITION_ENVIRONMENT
+            or type(faults) is not list
+            or any(type(fault) is not str for fault in faults)
+            or len(set(faults)) != len(faults)
+            or set(faults) != CONDITION_FAULTS
+            or type(item["register_ref"]) is not int
+            or item["register_ref"] != ruling_version
+        ):
+            raise exc("gate_policy.adoption_condition")
+        found.append(
+            AdoptionCondition(
+                id=item["id"],
+                waives=item["waives"],
+                blocks=item["blocks"],
+                environment=item["environment"],
+                required_faults=tuple(faults),
+                register_ref=item["register_ref"],
+            )
+        )
+    if len({each.id for each in found}) != len(found) or sorted(
+        each.waives for each in found
+    ) != sorted(waivable):
+        raise exc("gate_policy.adoption_condition")
+    return tuple(found)
 
 
 def parse_policy(payload: bytes) -> Policy:
@@ -217,6 +305,9 @@ def parse_policy(payload: bytes) -> Policy:
                 "ruling",
                 "required_evidence",
                 "waivable",
+                "subject_evidence",
+                "max_age_hours",
+                "adoption_conditions",
             },
             "gate_policy.exception",
             exc,
@@ -260,6 +351,19 @@ def parse_policy(payload: bytes) -> Policy:
             )
         ):
             raise exc("gate_policy.waivable")
+        subjects = entry["subject_evidence"]
+        if (
+            type(subjects) is not list
+            or len(set(map(str, subjects))) != len(subjects)
+            or any(type(item) is not str or item not in evidence for item in subjects)
+        ):
+            raise exc("gate_policy.subject_evidence")
+        max_age = entry["max_age_hours"]
+        if type(max_age) is not int or not 1 <= max_age <= MAX_AGE_HOURS_LIMIT:
+            raise exc("gate_policy.max_age_hours")
+        conditions = _parse_conditions(
+            entry["adoption_conditions"], tuple(waivable), ruling["version"], exc
+        )
         key = (facility, version)
         if key in exceptions:
             raise exc("gate_policy.duplicate_exception")
@@ -271,6 +375,9 @@ def parse_policy(payload: bytes) -> Policy:
             ruling_version=ruling["version"],
             required_evidence=tuple(evidence),
             waivable=tuple(waivable),
+            subject_evidence=tuple(subjects),
+            max_age_hours=max_age,
+            adoption_conditions=conditions,
         )
     return Policy(default=GATE_LANE3, exceptions=exceptions)
 
@@ -446,12 +553,37 @@ def _field(value: object, pattern: re.Pattern[str], code: str) -> str:
     return value
 
 
-def _check_time(value: object) -> None:
-    _field(value, _TIME, "gate2_manifest.item.recorded_at")
+def _utcnow() -> datetime:
+    """Naive UTC now; a seam so tests can fix the clock."""
+    return datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+
+
+def _check_time(
+    value: object, code: str = "gate2_manifest.item.recorded_at"
+) -> datetime:
+    _field(value, _TIME, code)
     try:
-        datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ")
+        return datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
-        raise GateRefused("gate2_manifest.item.recorded_at") from None
+        raise GateRefused(code) from None
+
+
+def _check_freshness(document: dict, policy: GateException) -> None:
+    """Signed evidence expires: bounded window, current, and recorded before issue."""
+    issued = _check_time(document["issued_at"], "gate2_manifest.issued_at")
+    expires = _check_time(document["expires_at"], "gate2_manifest.expires_at")
+    if expires <= issued:
+        raise GateRefused("gate2_manifest.validity_window")
+    if expires - issued > timedelta(hours=policy.max_age_hours):
+        raise GateRefused("gate2_manifest.over_max_age")
+    now = _utcnow()
+    if issued > now:
+        raise GateRefused("gate2_manifest.not_yet_valid")
+    if now >= expires:
+        raise GateRefused("gate2_manifest.expired")
+    for item in document["evidence"]:
+        if _check_time(item["recorded_at"]) > issued:
+            raise GateRefused("gate2_manifest.item.recorded_after_issue")
 
 
 def _check_items(manifest: dict, policy: GateException) -> dict[str, dict]:
@@ -479,6 +611,8 @@ def _check_items(manifest: dict, policy: GateException) -> dict[str, dict]:
         if status not in STATUSES:
             raise GateRefused("gate2_manifest.item.status")
         keys = set(base)
+        if identifier in policy.subject_evidence:
+            keys.add("subject_sha256")
         if status == "WAIVED":
             keys.add("waiver")
         _exact_keys(item, keys, "gate2_manifest.item")
@@ -486,18 +620,29 @@ def _check_items(manifest: dict, policy: GateException) -> dict[str, dict]:
         _field(item["reviewed_by"], _PERSON, "gate2_manifest.item.reviewed_by")
         _field(item["register_ref"], _REF, "gate2_manifest.item.register_ref")
         _check_time(item["recorded_at"])
+        if identifier in policy.subject_evidence:
+            # The record digest and the subject digest are different claims:
+            # RECOVERY's subject is the kit manifest digest.
+            _field(
+                item["subject_sha256"], _DIGEST, "gate2_manifest.item.subject_sha256"
+            )
         if status == "WAIVED":
             # The waivable ids are POLICY data; a manifest cannot extend them.
             if identifier not in policy.waivable:
                 raise GateRefused("gate2_manifest.item.waiver_not_allowed")
             waiver = _exact_keys(
                 item["waiver"],
-                {"register_ref", "condition"},
+                {"register_ref", "condition_id"},
                 "gate2_manifest.item.waiver",
             )
-            _field(waiver["register_ref"], _REF, "gate2_manifest.item.waiver")
-            if waiver["condition"] != WAIVER_CONDITION:
+            condition = policy.condition(waiver["condition_id"])
+            if condition is None or condition.waives != identifier:
                 raise GateRefused("gate2_manifest.item.waiver_condition")
+            if (
+                type(waiver["register_ref"]) is not int
+                or waiver["register_ref"] != condition.register_ref
+            ):
+                raise GateRefused("gate2_manifest.item.waiver")
     return by_id
 
 
@@ -522,7 +667,16 @@ def check_manifest(
         raise GateRefused("gate2_manifest.noncanonical")
     _exact_keys(
         document,
-        {"schema", "facility", "version", "candidate", "ruling", "evidence"},
+        {
+            "schema",
+            "facility",
+            "version",
+            "candidate",
+            "ruling",
+            "issued_at",
+            "expires_at",
+            "evidence",
+        },
         "gate2_manifest",
     )
     if document["schema"] != MANIFEST_SCHEMA:
@@ -558,7 +712,9 @@ def check_manifest(
         or ruling["version"] != policy_exception.ruling_version
     ):
         raise GateRefused("gate2_manifest.ruling")
-    return _check_items(document, policy_exception)
+    items = _check_items(document, policy_exception)
+    _check_freshness(document, policy_exception)
+    return items
 
 
 # ── E3 machine re-check ────────────────────────────────────────────────────
@@ -685,6 +841,19 @@ def cmd_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def _record_item(item: dict) -> dict:
+    """Ids and digests only, plus the waiver's register ref and condition id."""
+    shown = {"id": item["id"], "sha256": item["sha256"], "status": item["status"]}
+    if "subject_sha256" in item:
+        shown["subject_sha256"] = item["subject_sha256"]
+    if item["status"] == "WAIVED":
+        shown["waiver"] = {
+            "register_ref": item["waiver"]["register_ref"],
+            "condition_id": item["waiver"]["condition_id"],
+        }
+    return shown
+
+
 def cmd_verify_gate2(args: argparse.Namespace) -> int:
     policy = load_policy()
     selected = _require_selected(policy, args.facility, args.version)
@@ -697,6 +866,8 @@ def cmd_verify_gate2(args: argparse.Namespace) -> int:
         candidate_sha256=args.candidate_sha256,
         candidate_source_sha=args.candidate_source_sha,
     )
+    stamps = json.loads(manifest)
+    issued_at, expires_at = stamps["issued_at"], stamps["expires_at"]
     baseline_digest = recheck_e3(
         args.candidate_source_sha, os.path.abspath(args.e3_python)
     )
@@ -711,14 +882,9 @@ def cmd_verify_gate2(args: argparse.Namespace) -> int:
         "signature_sha256": signature_digest,
         "signer_fingerprint": signer,
         "e3_baseline_sha256": baseline_digest,
-        "evidence": [
-            {
-                "id": identifier,
-                "sha256": items[identifier]["sha256"],
-                "status": items[identifier]["status"],
-            }
-            for identifier in selected.required_evidence
-        ],
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "evidence": [_record_item(items[i]) for i in selected.required_evidence],
     }
     out = Path(args.out)
     try:

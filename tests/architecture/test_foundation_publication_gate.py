@@ -20,6 +20,7 @@ import json
 import pathlib
 import subprocess
 import sys
+from datetime import datetime
 
 import pytest
 import yaml
@@ -35,7 +36,14 @@ FACILITY = "dotmac-deployment-foundation"
 VERSION = "0.4.0a2"
 CANDIDATE_SHA256 = "ab" * 32
 LANE3_NAMESPACE = "foundation-rehearsal-verification-v1@dotmac.io"
-WAIVER_REF = "dotmac-debt-register ruling line 2026-11-23"
+WAIVER_REF = 2155
+COND_ID = "DR3_DR5_STAGING_DRILL"
+WAIVER = {"register_ref": WAIVER_REF, "condition_id": COND_ID}
+#: The test clock: after every item's recorded_at and the issue time, inside
+#: the 24 h window the world's manifest carries.
+NOW = datetime(2026, 11, 23, 12, 0, 0)
+ISSUED = "2026-11-23T11:00:00Z"
+EXPIRES = "2026-11-24T11:00:00Z"
 BASELINE = gate.E3_BASELINE
 ISOLATION_TEST = """\
 import hashlib
@@ -167,10 +175,9 @@ class World:
                 item["sha256"] = self.baseline_digest(source)
             if identifier == "DR3_DR5":
                 item["status"] = "WAIVED"
-                item["waiver"] = {
-                    "register_ref": WAIVER_REF,
-                    "condition": gate.WAIVER_CONDITION,
-                }
+                item["waiver"] = dict(WAIVER)
+            if identifier in policy.subject_evidence:
+                item["subject_sha256"] = "sha256:" + f"{number + 101:064x}"
             items.append(item)
         return {
             "schema": gate.MANIFEST_SCHEMA,
@@ -184,6 +191,8 @@ class World:
                 "register": policy.ruling_register,
                 "version": policy.ruling_version,
             },
+            "issued_at": ISSUED,
+            "expires_at": EXPIRES,
             "evidence": items,
         }
 
@@ -198,6 +207,7 @@ def wired(world, monkeypatch):
     monkeypatch.setattr(gate, "SIGNERS_PATH", world.signers)
     monkeypatch.setattr(gate, "REVOKED_PATH", world.revoked)
     monkeypatch.setattr(gate, "REPO_ROOT", world.repo)
+    monkeypatch.setattr(gate, "_utcnow", lambda: NOW)
     world.signers.write_text(world.signers_line)
     world.revoked.write_text("")
     return world
@@ -455,8 +465,11 @@ def test_a_correct_manifest_is_accepted_and_writes_the_three_outputs(
         "signature_sha256",
         "signer_fingerprint",
         "e3_baseline_sha256",
+        "issued_at",
+        "expires_at",
         "evidence",
     }
+    assert record["issued_at"] == ISSUED and record["expires_at"] == EXPIRES
     assert record["gate"] == "gate2_evidence"
     assert record["manifest_sha256"] == "sha256:" + hashlib.sha256(manifest).hexdigest()
     assert record["e3_baseline_sha256"] == wired.baseline_digest(wired.good)
@@ -617,7 +630,7 @@ def test_waived_is_refused_on_every_id_but_dr3_dr5(
     document = wired.manifest()
     item = next(i for i in document["evidence"] if i["id"] == identifier)
     item["status"] = "WAIVED"
-    item["waiver"] = {"register_ref": WAIVER_REF, "condition": gate.WAIVER_CONDITION}
+    item["waiver"] = dict(WAIVER)
     _refused(
         _verify(wired, monkeypatch, capsys, tmp_path, document),
         "gate2_manifest.item.waiver_not_allowed",
@@ -631,10 +644,7 @@ def test_recovery_marked_waived_is_refused_and_e3_cannot_be_waived(
         document = wired.manifest()
         item = next(i for i in document["evidence"] if i["id"] == identifier)
         item["status"] = "WAIVED"
-        item["waiver"] = {
-            "register_ref": WAIVER_REF,
-            "condition": gate.WAIVER_CONDITION,
-        }
+        item["waiver"] = dict(WAIVER)
         _refused(
             _verify(wired, monkeypatch, capsys, tmp_path, document),
             "gate2_manifest.item.waiver_not_allowed",
@@ -655,15 +665,17 @@ def test_the_manifest_cannot_extend_the_waivable_list(
 @pytest.mark.parametrize(
     "waiver",
     [
-        {"condition": gate.WAIVER_CONDITION},
-        {"register_ref": "", "condition": gate.WAIVER_CONDITION},
+        {"condition_id": COND_ID},
+        {"register_ref": "", "condition_id": COND_ID},
+        {"register_ref": "2155", "condition_id": COND_ID},
+        {"register_ref": 2154, "condition_id": COND_ID},
         {"register_ref": WAIVER_REF},
-        {"register_ref": WAIVER_REF, "condition": "later"},
-        {"register_ref": WAIVER_REF, "condition": ""},
+        {"register_ref": WAIVER_REF, "condition_id": "OTHER_CONDITION"},
+        {"register_ref": WAIVER_REF, "condition_id": ""},
+        {"register_ref": WAIVER_REF, "condition_id": COND_ID, "extra": "x"},
         {
             "register_ref": WAIVER_REF,
-            "condition": gate.WAIVER_CONDITION,
-            "extra": "x",
+            "condition": "seabone 3-fault staging drill",
         },
     ],
 )
@@ -694,10 +706,7 @@ def test_a_non_waived_item_carrying_a_waiver_refuses(
     wired, monkeypatch, capsys, tmp_path
 ):
     document = wired.manifest()
-    document["evidence"][0]["waiver"] = {
-        "register_ref": WAIVER_REF,
-        "condition": gate.WAIVER_CONDITION,
-    }
+    document["evidence"][0]["waiver"] = dict(WAIVER)
     _refused(
         _verify(wired, monkeypatch, capsys, tmp_path, document),
         "gate2_manifest.item.schema",
@@ -920,6 +929,16 @@ def test_the_gate2_revision_binding_has_no_runner_revision_parameter():
 # ── the release record ──────────────────────────────────────────────────────
 
 
+def _gate_json_item(identifier: str, policy) -> dict:
+    item = {"id": identifier, "sha256": "sha256:" + "4" * 64, "status": "PASS"}
+    if identifier in policy.subject_evidence:
+        item["subject_sha256"] = "sha256:" + "5" * 64
+    if identifier == "DR3_DR5":
+        item["status"] = "WAIVED"
+        item["waiver"] = dict(WAIVER)
+    return item
+
+
 def _record_inputs(tmp_path, monkeypatch, wired):
     import write_release_record as record
 
@@ -935,10 +954,9 @@ def _record_inputs(tmp_path, monkeypatch, wired):
         "signature_sha256": "sha256:" + "2" * 64,
         "signer_fingerprint": "SHA256:" + "A" * 43,
         "e3_baseline_sha256": "sha256:" + "3" * 64,
-        "evidence": [
-            {"id": i, "sha256": "sha256:" + "4" * 64, "status": "PASS"}
-            for i in policy.required_evidence
-        ],
+        "issued_at": ISSUED,
+        "expires_at": EXPIRES,
+        "evidence": [_gate_json_item(i, policy) for i in policy.required_evidence],
     }
     path = tmp_path / "gate.json"
     path.write_text(json.dumps(gate_json))
@@ -966,6 +984,24 @@ def test_the_release_record_carries_the_gate_and_the_cited_receipts(
     assert row["e3_baseline_sha256"] == gate_json["e3_baseline_sha256"]
     assert row["ruling"] == {"register": "dotmac-debt-register", "version": 2155}
     assert row["evidence"] == gate_json["evidence"]
+    assert row["issued_at"] == ISSUED and row["expires_at"] == EXPIRES
+    # F-1: the FULL adoption condition and the waiver's register ref are kept.
+    assert row["adoption_conditions"] == [
+        {
+            "id": COND_ID,
+            "waives": "DR3_DR5",
+            "blocks": "production_governed_deploy",
+            "environment": "seabone-staging",
+            "required_faults": [
+                "db_outage_at_migrate",
+                "network_loss",
+                "timeout_sigterm",
+            ],
+            "register_ref": 2155,
+        }
+    ]
+    waived = next(i for i in row["evidence"] if i["id"] == "DR3_DR5")
+    assert waived["waiver"] == {"register_ref": 2155, "condition_id": COND_ID}
     # Idempotent; a disagreeing row refuses rather than overwriting.
     assert (
         record.write_publication_gate_record(
@@ -1082,11 +1118,14 @@ def test_the_gate_is_selected_before_either_oracle_runs():
     assert "inputs.gate2" not in run
 
 
-def test_gate2_runs_under_the_candidate_interpreter_and_only_via_env_inputs():
+def test_gate2_runs_under_the_runner_interpreter_and_only_via_env_inputs():
     steps = _steps("build")
     step = steps[_index(steps, "id", "gate2")]
     assert step["if"] == "steps.gate.outputs.gate == 'gate2_evidence'"
-    assert ".foundation-candidate/bin/python -E -P" in step["run"]
+    assert (
+        "python3 -I scripts/foundation_publication_gate.py verify-gate2" in step["run"]
+    )
+    assert ".foundation-candidate" not in step["run"]
     assert "verify-gate2" in step["run"]
     assert "steps.candidate.outputs.candidate_sha256" in step["run"]
     assert "steps.candidate.outputs.candidate_source_sha" in step["run"]
@@ -1287,3 +1326,346 @@ def test_no_foundation_package_source_is_part_of_this_change():
     """A static pin: the gate module never reads or writes package source."""
     source = (REPO / "scripts" / "foundation_publication_gate.py").read_text()
     assert "packages/dotmac-deployment-foundation/src" not in source
+
+
+# ── F-1: the DR3_DR5 adoption condition is structured policy data ───────────
+
+
+def _conditions(document: dict) -> list:
+    return document["exceptions"][0]["adoption_conditions"]
+
+
+def test_the_shipped_policy_carries_the_structured_adoption_condition():
+    found = gate.load_policy().exceptions[(FACILITY, VERSION)]
+    assert [c.as_record() for c in found.adoption_conditions] == [
+        {
+            "id": COND_ID,
+            "waives": "DR3_DR5",
+            "blocks": "production_governed_deploy",
+            "environment": "seabone-staging",
+            "required_faults": [
+                "db_outage_at_migrate",
+                "network_loss",
+                "timeout_sigterm",
+            ],
+            "register_ref": 2155,
+        }
+    ]
+    assert found.max_age_hours == 72
+    assert found.subject_evidence == ("RECOVERY", "S3")
+    assert not hasattr(gate, "WAIVER_CONDITION")
+
+
+def test_the_shipped_ruling_version_is_2155():
+    found = gate.load_policy().exceptions[(FACILITY, VERSION)]
+    assert found.ruling_register == "dotmac-debt-register"
+    assert found.ruling_version == 2155
+    assert type(found.ruling_version) is int
+
+
+def _mutate(path_edit):
+    document = _policy_doc()
+    path_edit(document)
+    return document
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: _conditions(d).clear(),
+        lambda d: _conditions(d).append(copy.deepcopy(_conditions(d)[0])),
+        lambda d: _conditions(d)[0].update(id="lower_case"),
+        lambda d: _conditions(d)[0].update(waives="R6"),
+        lambda d: _conditions(d)[0].update(blocks="anything"),
+        lambda d: _conditions(d)[0].update(environment="production"),
+        lambda d: _conditions(d)[0].update(required_faults=["network_loss"]),
+        lambda d: _conditions(d)[0].update(required_faults=[]),
+        lambda d: _conditions(d)[0].update(
+            required_faults=["db_outage_at_migrate", "network_loss", "other"]
+        ),
+        lambda d: _conditions(d)[0].update(
+            required_faults=["network_loss", "network_loss", "timeout_sigterm"]
+        ),
+        lambda d: _conditions(d)[0].update(register_ref="2155"),
+        lambda d: _conditions(d)[0].update(register_ref=2154),
+        lambda d: _conditions(d)[0].update(extra=1),
+        lambda d: _conditions(d)[0].pop("environment"),
+        lambda d: d["exceptions"][0].pop("adoption_conditions"),
+        lambda d: d["exceptions"][0].update(adoption_conditions={}),
+        lambda d: d["exceptions"][0].update(max_age_hours=0),
+        lambda d: d["exceptions"][0].update(max_age_hours="72"),
+        lambda d: d["exceptions"][0].update(max_age_hours=True),
+        lambda d: d["exceptions"][0].update(max_age_hours=100000),
+        lambda d: d["exceptions"][0].pop("max_age_hours"),
+        lambda d: d["exceptions"][0].update(subject_evidence=["NOT_REQUIRED"]),
+        lambda d: d["exceptions"][0].update(subject_evidence=["S3", "S3"]),
+        lambda d: d["exceptions"][0].pop("subject_evidence"),
+    ],
+)
+def test_the_policy_parser_refuses_a_malformed_condition_or_freshness_entry(edit):
+    with pytest.raises(gate.PolicyInvalid):
+        gate.parse_policy(_policy_bytes(_mutate(edit)))
+
+
+def test_a_waiver_naming_an_unknown_condition_is_refused(
+    wired, monkeypatch, capsys, tmp_path
+):
+    document = wired.manifest()
+    item = next(i for i in document["evidence"] if i["id"] == "DR3_DR5")
+    item["waiver"]["condition_id"] = "SOMETHING_ELSE"
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.waiver_condition",
+    )
+
+
+def test_a_waiver_without_a_condition_reference_is_refused(
+    wired, monkeypatch, capsys, tmp_path
+):
+    document = wired.manifest()
+    item = next(i for i in document["evidence"] if i["id"] == "DR3_DR5")
+    item["waiver"] = {"register_ref": WAIVER_REF}
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.waiver",
+    )
+
+
+def test_a_waiver_register_ref_that_differs_from_the_condition_is_refused(
+    wired, monkeypatch, capsys, tmp_path
+):
+    document = wired.manifest()
+    item = next(i for i in document["evidence"] if i["id"] == "DR3_DR5")
+    item["waiver"]["register_ref"] = 2154
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.waiver",
+    )
+
+
+def test_the_verify_record_keeps_the_waiver_reference(
+    wired, monkeypatch, capsys, tmp_path
+):
+    code, err, _, outdir = _verify(
+        wired, monkeypatch, capsys, tmp_path, wired.manifest()
+    )
+    assert code == 0, err
+    items = {
+        i["id"]: i for i in json.loads((outdir / "gate.json").read_text())["evidence"]
+    }
+    assert items["DR3_DR5"]["waiver"] == WAIVER
+    assert "waiver" not in items["R6"]
+    assert items["RECOVERY"]["subject_sha256"].startswith("sha256:")
+
+
+def test_the_release_record_refuses_a_waiver_that_does_not_match_the_policy(
+    tmp_path, monkeypatch, wired
+):
+    record, _, path, gate_json = _record_inputs(tmp_path, monkeypatch, wired)
+    item = next(i for i in gate_json["evidence"] if i["id"] == "DR3_DR5")
+    item["waiver"] = {"register_ref": 2155, "condition_id": "SOMETHING_ELSE"}
+    path.write_text(json.dumps(gate_json))
+    with pytest.raises(record.ReleaseRecordError):
+        record.write_publication_gate_record(
+            distribution=FACILITY,
+            version=VERSION,
+            tag=f"{FACILITY}-v{VERSION}",
+            publication_gate="gate2_evidence",
+            gate_record=str(path),
+        )
+
+
+# ── F-2: signed evidence expires ────────────────────────────────────────────
+
+
+def _recheck(wired, monkeypatch, capsys, document):
+    _recheck_env(wired, monkeypatch, document)
+    code = gate.main(["recheck-gate2", FACILITY, "--version", VERSION])
+    return code, capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("issued", "expires", "now", "reason"),
+    [
+        # expired: now is at or after expires_at
+        ("2026-11-23T11:00:00Z", "2026-11-23T11:30:00Z", NOW, "gate2_manifest.expired"),
+        ("2026-11-23T10:00:00Z", "2026-11-23T12:00:00Z", NOW, "gate2_manifest.expired"),
+        # not yet valid: issued in the future
+        (
+            "2026-11-23T13:00:00Z",
+            "2026-11-23T14:00:00Z",
+            NOW,
+            "gate2_manifest.not_yet_valid",
+        ),
+        # window longer than max_age_hours (72): 72 h + 1 s
+        (
+            "2026-11-23T11:00:00Z",
+            "2026-11-26T11:00:01Z",
+            NOW,
+            "gate2_manifest.over_max_age",
+        ),
+        # inverted or empty window
+        (
+            "2026-11-23T11:00:00Z",
+            "2026-11-23T11:00:00Z",
+            NOW,
+            "gate2_manifest.validity_window",
+        ),
+        (
+            "2026-11-23T11:00:00Z",
+            "2026-11-23T10:00:00Z",
+            NOW,
+            "gate2_manifest.validity_window",
+        ),
+    ],
+)
+def test_stale_future_or_overlong_evidence_is_refused_by_both_commands(
+    wired, monkeypatch, capsys, tmp_path, issued, expires, now, reason
+):
+    document = wired.manifest()
+    document["issued_at"], document["expires_at"] = issued, expires
+    monkeypatch.setattr(gate, "_utcnow", lambda: now)
+    _refused(_verify(wired, monkeypatch, capsys, tmp_path, document), reason)
+    code, err = _recheck(wired, monkeypatch, capsys, document)
+    assert code == 1 and reason in err, err
+
+
+def test_a_window_of_exactly_max_age_is_accepted_and_one_second_past_expiry_is_not(
+    wired, monkeypatch, capsys, tmp_path
+):
+    document = wired.manifest()
+    document["issued_at"], document["expires_at"] = (
+        "2026-11-23T11:00:00Z",
+        "2026-11-26T11:00:00Z",
+    )
+    code, err, _, _ = _verify(wired, monkeypatch, capsys, tmp_path, document)
+    assert code == 0, err
+    monkeypatch.setattr(gate, "_utcnow", lambda: datetime(2026, 11, 26, 11, 0, 0))
+    code, err = _recheck(wired, monkeypatch, capsys, document)
+    assert code == 1 and "gate2_manifest.expired" in err
+
+
+def test_recheck_refuses_evidence_that_expired_after_the_build_job(
+    wired, monkeypatch, capsys
+):
+    _recheck_env(wired, monkeypatch)
+    assert gate.main(["recheck-gate2", FACILITY, "--version", VERSION]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(gate, "_utcnow", lambda: datetime(2026, 11, 24, 11, 0, 0))
+    assert gate.main(["recheck-gate2", FACILITY, "--version", VERSION]) == 1
+    assert "gate2_manifest.expired" in capsys.readouterr().err
+
+
+def test_an_item_recorded_after_the_issue_time_is_refused(
+    wired, monkeypatch, capsys, tmp_path
+):
+    document = wired.manifest()
+    document["evidence"][0]["recorded_at"] = "2026-11-23T11:00:01Z"
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.recorded_after_issue",
+    )
+    document["evidence"][0]["recorded_at"] = ISSUED
+    code, err, _, _ = _verify(wired, monkeypatch, capsys, tmp_path, document)
+    assert code == 0, err
+
+
+@pytest.mark.parametrize("field", ["issued_at", "expires_at"])
+def test_a_manifest_missing_or_malforming_a_freshness_field_is_refused(
+    wired, monkeypatch, capsys, tmp_path, field
+):
+    document = wired.manifest()
+    del document[field]
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.schema",
+    )
+    document = wired.manifest()
+    document[field] = "2026-11-23"
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        f"gate2_manifest.{field}",
+    )
+
+
+# ── F-3: subject digest for the review items ────────────────────────────────
+
+
+@pytest.mark.parametrize("identifier", ["RECOVERY", "S3"])
+def test_a_review_item_needs_its_own_subject_digest(
+    wired, monkeypatch, capsys, tmp_path, identifier
+):
+    document = wired.manifest()
+    item = next(i for i in document["evidence"] if i["id"] == identifier)
+    del item["subject_sha256"]
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.schema",
+    )
+    item["subject_sha256"] = "sha256:abc"
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.subject_sha256",
+    )
+
+
+def test_a_subject_digest_on_any_other_item_is_refused(
+    wired, monkeypatch, capsys, tmp_path
+):
+    document = wired.manifest()
+    document["evidence"][0]["subject_sha256"] = "sha256:" + "7" * 64
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        "gate2_manifest.item.schema",
+    )
+
+
+# ── F-5: signer-file and signature refusals ─────────────────────────────────
+
+
+def test_a_valid_signature_by_a_key_that_is_not_enrolled_is_refused(
+    wired, monkeypatch, capsys, tmp_path
+):
+    other = tmp_path / "other"
+    _run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(other)])
+    manifest = gate.canonical_result_bytes(wired.manifest())
+    foreign = _run(
+        ["ssh-keygen", "-Y", "sign", "-f", str(other), "-n", gate.NAMESPACE],
+        data=manifest,
+    )
+    result = _verify(wired, monkeypatch, capsys, tmp_path, manifest, signature=foreign)
+    _refused(result, "gate2_signature_invalid")
+
+
+@pytest.mark.parametrize(
+    ("after", "before"),
+    [
+        ("20200101000000Z", "20210101000000Z"),  # expired key line
+        ("20900101000000Z", "20990101000000Z"),  # future-dated key line
+    ],
+)
+def test_an_expired_or_future_dated_key_line_is_refused(
+    wired, monkeypatch, capsys, tmp_path, after, before
+):
+    wired.signers.write_text(
+        wired.signers_line.replace("20200101000000Z", after).replace(
+            "20990101000000Z", before
+        )
+    )
+    result = _verify(wired, monkeypatch, capsys, tmp_path, wired.manifest())
+    _refused(result, "gate2_signature_invalid")
+
+
+@pytest.mark.parametrize(
+    "key_type", ["ecdsa-sha2-nistp256", "sk-ssh-ed25519@openssh.com", "ssh-rsa"]
+)
+def test_non_ed25519_key_types_are_refused(world, key_type):
+    line = world.signers_line.replace("ssh-ed25519", key_type)
+    with pytest.raises(gate.GateRefused, match="gate2_signer.schema"):
+        gate.parse_signer(line.encode())
+
+
+def test_a_multi_line_signer_file_is_refused(wired, monkeypatch, capsys, tmp_path):
+    wired.signers.write_text(wired.signers_line * 2)
+    result = _verify(wired, monkeypatch, capsys, tmp_path, wired.manifest())
+    _refused(result, "gate2_signer.schema")

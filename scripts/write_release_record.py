@@ -1940,6 +1940,8 @@ def _gate2_row(gate_record: str, distribution: str, version: str) -> dict:
         "signature_sha256",
         "signer_fingerprint",
         "e3_baseline_sha256",
+        "issued_at",
+        "expires_at",
         "evidence",
     }
     if (
@@ -1957,28 +1959,72 @@ def _gate2_row(gate_record: str, distribution: str, version: str) -> dict:
         r"SHA256:[A-Za-z0-9+/]{43}", document["signer_fingerprint"]
     ):
         raise ReleaseRecordError("the gate-2 record's signer_fingerprint is malformed")
+    for name in ("issued_at", "expires_at"):
+        if type(document[name]) is not str or not re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", document[name]
+        ):
+            raise ReleaseRecordError(f"the gate-2 record's {name} is malformed")
     evidence = document["evidence"]
-    if (
-        type(evidence) is not list
-        or [item.get("id") if type(item) is dict else None for item in evidence]
-        != list(selected.required_evidence)
-        or any(
-            set(item) != {"id", "sha256", "status"}
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(item["sha256"]))
-            or item["status"] not in gate.STATUSES
-            for item in evidence
-        )
-    ):
+    digest = r"sha256:[0-9a-f]{64}"
+    if type(evidence) is not list or [
+        item.get("id") if type(item) is dict else None for item in evidence
+    ] != list(selected.required_evidence):
         raise ReleaseRecordError("the gate-2 record's evidence does not match policy")
+    used: list[str] = []
+    for item in evidence:
+        keys = {"id", "sha256", "status"}
+        if item["id"] in selected.subject_evidence:
+            keys.add("subject_sha256")
+        if item["status"] == "WAIVED":
+            keys.add("waiver")
+        if (
+            set(item) != keys
+            or not re.fullmatch(digest, str(item["sha256"]))
+            or item["status"] not in gate.STATUSES
+            or (
+                "subject_sha256" in keys
+                and not re.fullmatch(digest, str(item["subject_sha256"]))
+            )
+        ):
+            raise ReleaseRecordError(
+                "the gate-2 record's evidence does not match policy"
+            )
+        if item["status"] == "WAIVED":
+            waiver = item["waiver"]
+            condition = (
+                selected.condition(waiver.get("condition_id"))
+                if type(waiver) is dict
+                and set(waiver) == {"register_ref", "condition_id"}
+                else None
+            )
+            if (
+                condition is None
+                or condition.waives != item["id"]
+                or waiver["register_ref"] != condition.register_ref
+                or type(waiver["register_ref"]) is not int
+            ):
+                raise ReleaseRecordError(
+                    "the gate-2 record's waiver does not match the policy condition"
+                )
+            used.append(condition.id)
     return {
         "gate2_manifest_sha256": document["manifest_sha256"],
         "gate2_signature_sha256": document["signature_sha256"],
         "gate2_signer_fingerprint": document["signer_fingerprint"],
         "e3_baseline_sha256": document["e3_baseline_sha256"],
+        "issued_at": document["issued_at"],
+        "expires_at": document["expires_at"],
         "ruling": {
             "register": selected.ruling_register,
             "version": selected.ruling_version,
         },
+        # The FULL condition travels with the permanent record, so a later
+        # production deploy gate can read what clears the waiver.
+        "adoption_conditions": [
+            condition.as_record()
+            for condition in selected.adoption_conditions
+            if condition.id in used
+        ],
         "evidence": evidence,
     }
 
