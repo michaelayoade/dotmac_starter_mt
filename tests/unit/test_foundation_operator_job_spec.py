@@ -11,11 +11,11 @@ from dotmac_deployment_foundation.render.compose import render_compose
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
 from tests.unit.foundation_operator_job_support import (
-    DESCRIPTOR,
     JOB_TOML,
     make_document,
     make_spec,
 )
+from tests.unit.test_deployment_foundation_compose_topology import DESCRIPTOR
 from tests.unit.test_deployment_foundation_material_readiness import (
     descriptor as material_readiness_descriptor,
 )
