@@ -149,7 +149,7 @@
     },
     "dotmac-money-flows": {
       "declared": "0.1.0a2",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-money-flows-v0.1.0a1). 0.1.0a2 adds the receivables reader on top of published a1, and it requires dotmac-collections 0.1.0a3, so it is released only after collections 0.1.0a3 is published and the release allowlist is widened (dotmac-collections in allowed_requires, receivables.py in the required wheel files) under its own review. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-money-flows-v0.1.0a1). 0.1.0a2 adds the receivables reader on top of published a1, and it requires dotmac-collections 0.1.0a3, so it is released only after collections 0.1.0a3 is published. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
       "state": "declared-unpublished"
     },
     "dotmac-payables": {
