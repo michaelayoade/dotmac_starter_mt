@@ -2516,7 +2516,11 @@ class ComposeJob:
     verify_stdout: str
     root_justification: str
     root_approved_by: str
-    operator: OperatorJob | None = None
+    #: Operator-job declaration. Deliberately outside the descriptor identity
+    #: (`compare=False`, so excluded from the canonical document, the render
+    #: and the configuration digest): a descriptor without the table is
+    #: byte-identical to every pre-0.4.0a2 one, and T13 asserts it.
+    operator: OperatorJob | None = field(default=None, compare=False)
 
     @classmethod
     def parse(cls, table: _Table) -> ComposeJob:

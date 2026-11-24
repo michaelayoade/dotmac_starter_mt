@@ -402,7 +402,7 @@ def plan_operator_job(
         )
     params_digest = dispatched.get(contract.JOB_PARAMS_ENV_DIGEST, "")
     if not isinstance(params_digest, str):
-        raise OperatorJobRefusal("job_context_invalid", "params_env_digest")
+        raise OperatorJobRefusal("job_context_invalid", contract.JOB_PARAMS_ENV_DIGEST)
     timeout = dispatched.get(contract.JOB_TIMEOUT_SECONDS)
     if (
         not isinstance(timeout, int)
@@ -976,6 +976,10 @@ def cmd_run_job(args: Any) -> int:
     try:
         target, path = _require_execution_arguments(args, contract.OPERATION_RUN_JOB)
         bindings = _load_bindings(args)
+        if bindings is None:
+            raise OperatorJobRefusal(
+                "job_authority_absent", "no installed execution bindings"
+            )
         provider = _authority(bindings)
         from pathlib import Path
 

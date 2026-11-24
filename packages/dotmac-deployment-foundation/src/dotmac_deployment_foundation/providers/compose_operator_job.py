@@ -187,11 +187,9 @@ def verify_container_shape(
     if list(config.get("Cmd") or []) != list(plan.argv):
         raise _refuse("cmd differs from the dispatched argv")
     ref = str(config.get("Image", ""))
-    resolved = str(container.get("Image", ""))
-    repo_digests = [str(r) for r in (image.get("RepoDigests") or [])]
-    if ref != plan.image_ref and not (
-        resolved == str(image.get("Id", "-")) and plan.image_ref in repo_digests
-    ):
+    # `docker create` is given exactly `plan.image_ref`, so the container's
+    # recorded image reference must be that digest reference, no other.
+    if ref != plan.image_ref:
         raise _refuse("image is not the planned digest")
     networks = set((container.get("NetworkSettings") or {}).get("Networks") or {})
     if networks != set(plan.networks):
@@ -421,7 +419,7 @@ class ComposeOperatorJobEffects:
     @contextmanager
     def sigterm_trap(self) -> Iterator[None]:
         self._terminated.clear()
-        previous: dict[int, Any] = {}
+        previous: dict[signal.Signals, Any] = {}
         if threading.current_thread() is threading.main_thread():
             for number in TRAPPED_SIGNALS:
                 previous[number] = signal.signal(

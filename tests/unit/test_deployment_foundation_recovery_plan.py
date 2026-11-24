@@ -522,6 +522,11 @@ CANONICALIZING_MODULES: dict[str, int] = {
     "external_recovery.py": 1,
     "lease.py": 1,
     "observability_promotion.py": 1,
+    # Not a plan document: the operator-job receipt, the argv/material-set
+    # digests and the pair-material snapshot each own a small canonical form
+    # (sorted compact JSON) that is digested or written verbatim; none is a
+    # deployment plan.
+    "operator_job.py": 4,
     "provenance.py": 1,
     "recovery.py": 2,
     "rehearsal.py": 1,

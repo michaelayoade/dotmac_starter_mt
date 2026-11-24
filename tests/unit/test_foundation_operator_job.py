@@ -292,7 +292,7 @@ def test_t9_input_path_outside_job_in_is_refused(path: str) -> None:
     resolved = make_resolved()
     _job(resolved)[contract.JOB_INPUTS][0][contract.INPUT_PATH] = path
     with pytest.raises(OperatorJobRefusal) as excinfo:
-        plan_operator_job(make_spec(), resolved)
+        plan_operator_job(make_spec(), resolved, IDENTITY)
     assert excinfo.value.code == "job_input_refused"
 
 
@@ -609,10 +609,12 @@ def test_the_receipt_carries_names_digests_and_ids_only() -> None:
 def test_output_dir_must_be_the_fixed_job_out() -> None:
     resolved = make_resolved()
     _job(resolved)[contract.JOB_OUTPUT_DIR] = "/job/out"
-    assert plan_operator_job(make_spec(), resolved).outputs_target == "/job/out"
+    assert (
+        plan_operator_job(make_spec(), resolved, IDENTITY).outputs_target == "/job/out"
+    )
     _job(resolved)[contract.JOB_OUTPUT_DIR] = "/elsewhere"
     with pytest.raises(OperatorJobRefusal):
-        plan_operator_job(make_spec(), resolved)
+        plan_operator_job(make_spec(), resolved, IDENTITY)
 
 
 def test_n_the_pinned_uid_host_account_and_out_dir_owner() -> None:
