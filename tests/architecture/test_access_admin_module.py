@@ -60,9 +60,9 @@ def test_every_route_declares_a_permission_this_module_owns() -> None:
             for d in node.decorator_list
         ):
             text = ast.unparse(node)
-            assert "require_permission(" in text or "require_web_permission(" in text, (
-                f"route {node.name} has no declared-permission guard"
-            )
+            assert (
+                "require_permission(" in text or "require_web_permission(" in text
+            ), f"route {node.name} has no declared-permission guard"
             guarded += 1
     assert guarded >= 10
     referenced = {

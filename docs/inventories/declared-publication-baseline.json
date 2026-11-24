@@ -64,7 +64,7 @@
   "unpublished": {
     "dotmac-access-admin": {
       "declared": "0.1.0a1",
-      "reason": "TODO: state why this version has no verified publication",
+      "reason": "Unpublished stateless access-administration module (users, roles, grants, leaver revoke) awaiting architect review R3, the Wave 0 release train and the protected release lifecycle; source only, not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
       "state": "never-published"
     },
     "dotmac-ai-operations": {

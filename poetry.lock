@@ -515,7 +515,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a106"
+dotmac-kernel = ">=0.1.0a107"
 fastapi = ">=0.111,<0.116"
 pydantic = ">=2.7.4,<3.0"
 sqlalchemy = "^2.0"

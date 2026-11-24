@@ -286,6 +286,10 @@ CAPABILITY_RAISED_FLOORS = {
     # The tenant-audit prerequisite raises the highest consumed capability
     # again to published a106; a13 still records the namespace allocation.
     "dotmac-template-studio": ("0.1.0a106", "0.1.0a13"),
+    # Stateless (no namespace), so the second value is only the first tag that
+    # ships the `transactions` surface it consumes; the floor is a107, the first
+    # tag shipping `identity_storage`.
+    "dotmac-access-admin": ("0.1.0a107", "0.1.0a98"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
@@ -799,6 +803,10 @@ def test_engine_free_transaction_import_floor_is_the_first_tag_that_ships_it(
 #: kernel surface raises. Each entry is a path whose first published tag is
 #: derived from the tags themselves.
 LATER_SURFACES_RAISING_THE_FLOOR: dict[str, tuple[str, ...]] = {
+    # `identity_storage` (grant removal, session revocation) first ships in a107.
+    "dotmac-access-admin": (
+        "packages/dotmac-kernel/src/dotmac_kernel/identity_storage.py",
+    ),
     # The manifest's `database_catalog=` imports
     # `dotmac_kernel.product_database_catalog` (first published in a100).
     "dotmac-approvals": (

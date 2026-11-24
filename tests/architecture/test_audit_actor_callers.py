@@ -157,7 +157,10 @@ def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     # that names the authenticated Party as both party and id.
     # The relay transport's unknown-outcome record (K-8) adds one literal-`system`
     # caller (the relay, not a person, decided).
-    assert len(calls) == 31, "the ratchet must change when the caller set changes"
+    # dotmac-access-admin adds two literal-`user` callers: the service's
+    # `_audit` helper and the credential-provisioned port, each naming the
+    # authenticated Party as both party and id.
+    assert len(calls) == 33, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"

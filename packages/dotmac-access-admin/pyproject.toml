@@ -14,11 +14,12 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# Kernel floor: contract-v2 surfaces plus the identity storage and credential
-# lifecycle primitives this module composes. Never an assembly, never another
+# Kernel floor a107: the first tag shipping `identity_storage` (the grant and
+# session primitives), on top of contract-v2 surfaces, `transactions` (a98) and
+# the credential lifecycle (a99). Never an assembly, never another
 # module, never `dotmac-ui` (the screens consume `--dmui-*` custom properties
 # the assembly already loads).
-dotmac-kernel = ">=0.1.0a106"
+dotmac-kernel = ">=0.1.0a107"
 fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 pydantic = ">=2.7.4,<3.0"

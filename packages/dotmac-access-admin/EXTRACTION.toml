@@ -38,3 +38,17 @@ first_cutover = "ERP v2 adopts the packaged users, roles and grants surface thro
 shadow_and_drift = "No shadow or side-by-side run. Parity is proved by saved tests against the reference feature's behaviour and by real-record preview on a restored copy, rolled out per tenant behind the surface selection."
 local_copy_retirement = "Delete app/features/rbac in the reference app once the audit viewer owns the audit screen and setting domain; ERP v2 keeps access_cli as cutover tooling only."
 next_action = "Persisting a role's permission composition needs a kernel role-to-permission store and an evaluator that reads it (programme section 1.2); until then the composition check validates only. Reference-app cutover and the kernel surface_selection adoption follow lanes A and I."
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "623c6d588c9b6df4ed9a162d5b0f07155c0f7314"
+evidence_paths = ["app/services/rbac.py", "app/api/rbac.py"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "1a3edf0eb567fe02665606d368f8f342536f548c"
+evidence_paths = ["app/services/rbac_catalog.py"]

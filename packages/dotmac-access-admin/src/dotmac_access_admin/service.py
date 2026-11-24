@@ -217,13 +217,13 @@ def list_roles(db: Session, tenant: Tenant) -> list[RoleRow]:
     its row id and holder count.
     """
     declared = {role.slug: role for role in code_roles()}
-    holders = dict(
-        db.execute(
-            select(PartyRoleGrant.role_id, func.count())
-            .where(PartyRoleGrant.tenant_id == tenant.id)
-            .group_by(PartyRoleGrant.role_id)
-        ).all()
-    )
+    holders: dict[UUID, int] = {}
+    for role_id, count in db.execute(
+        select(PartyRoleGrant.role_id, func.count())
+        .where(PartyRoleGrant.tenant_id == tenant.id)
+        .group_by(PartyRoleGrant.role_id)
+    ).all():
+        holders[role_id] = int(count)
     stored = list(
         db.scalars(
             select(Role).where(Role.tenant_id == tenant.id).order_by(Role.slug)
@@ -395,6 +395,15 @@ def _locked_person(db: Session, tenant: Tenant, party_id: UUID) -> PartyFact:
     return found[0]
 
 
+def _loaded_party(db: Session, party_id: UUID) -> Party:
+    # A real check, not an `assert`: asserts vanish under `python -O`, and this
+    # is the row whose flag is about to change.
+    party = db.get(Party, party_id)
+    if party is None:
+        raise NotFoundError("User not found")
+    return party
+
+
 def _refuse_self(actor: Party, party_id: UUID, what: str) -> None:
     if actor.id == party_id:
         raise ConflictError(f"You cannot {what} your own account")
@@ -425,8 +434,7 @@ def deactivate_user(
             session_ids=None,
             revoked_at=datetime.now(UTC),
         )
-        party = db.get(Party, party_id)
-        assert party is not None
+        party = _loaded_party(db, party_id)
         party.is_active = False
         db.flush()
         _audit(
@@ -449,8 +457,7 @@ def reactivate_user(
         fact = _locked_person(db, tenant, party_id)
         if fact.is_active:
             raise ConflictError("User is already active")
-        party = db.get(Party, party_id)
-        assert party is not None
+        party = _loaded_party(db, party_id)
         party.is_active = True
         db.flush()
         _audit(
@@ -497,11 +504,11 @@ def leaver_revoke(
             .order_by(AuthSession.id)
             .with_for_update()
         ).all()
-        role_slugs = dict(
-            db.execute(
-                select(Role.id, Role.slug).where(Role.tenant_id == tenant.id)
-            ).all()  # type: ignore[arg-type]
-        )
+        role_slugs: dict[UUID, str] = {}
+        for rid, slug in db.execute(
+            select(Role.id, Role.slug).where(Role.tenant_id == tenant.id)
+        ).all():
+            role_slugs[rid] = slug
         removed = remove_grants(
             db, tenant_id=tenant.id, party_id=party_id, expected=grants
         )
@@ -513,8 +520,7 @@ def leaver_revoke(
             revoked_at=datetime.now(UTC),
         )
         if deactivate:
-            party = db.get(Party, party_id)
-            assert party is not None
+            party = _loaded_party(db, party_id)
             party.is_active = False
             db.flush()
         for grant in removed:
