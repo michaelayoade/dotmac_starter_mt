@@ -17,3 +17,16 @@ package exports typed lifecycle/read ports and does not export its ORM models.
 
 All business instants are explicit inputs. The module reads no wall clock and
 never commits or rolls back the caller's transaction.
+
+## Job runner (0.1.0a3)
+
+Modules declare recurring work as `JobSpec`s on `ModuleManifest.jobs`. This
+module runs them: `python -m dotmac_durable_timers.run --assembly module:attr`
+is a second process from the same image. It uses two credentials, the
+`outbox_dispatcher` role for claim and settle only and `app_user` for every
+tenant read and every handler (inside the event tenant's RLS session). A job
+is a timer stream; its generation is the idempotency key. A handler is
+`handler(session, scope, run_context) -> JobOutcome` and must be idempotent.
+Failures retry with the job's backoff, then dead-letter through the relay with
+an audit row and a health observation (the assembly binds a `JobHealthSink`
+under `providers["durable_timers.health_sink"]`). There is no staff queue.

@@ -1,18 +1,23 @@
 [tool.poetry]
 name = "dotmac-durable-timers"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
 authors = ["DotMac"]
 readme = "README.md"
 packages = [{ include = "dotmac_durable_timers", from = "src" }]
 include = [
     { path = "src/dotmac_durable_timers/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_durable_timers/templates/**/*", format = ["sdist", "wheel"] },
     { path = "src/dotmac_durable_timers/migrations/**/*", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a72"
+# Floor note: JobSpec / ModuleManifest.jobs (dotmac_kernel.jobs) ship in the next
+# kernel allocation after a110; raise this floor to that exact version in the
+# release change that publishes this module (it cannot name an unpublished one).
+dotmac-kernel = ">=0.1.0a110"
+fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 
 [build-system]

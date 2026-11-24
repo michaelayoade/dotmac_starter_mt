@@ -21,11 +21,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-durable-timers"
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/dt_0001_durable_timers.py"
+JOB_STATES_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0002_job_states.py"
+
+# The composition roots, named so the canary below can state EXACTLY what each
+# may do that the rest of the module may not:
+#  - dispatch.py is a relay transport; like the kernel's own transports it
+#    commits the failure record inside `deliver` before telling the relay to
+#    retry, because the worker rolls back on raise;
+#  - run.py is the process entrypoint: it alone reads the ambient clock;
+#  - runtime.py holds the staff surface's single request clock read.
+COMMIT_ALLOWED = frozenset({"dispatch.py"})
+CLOCK_ALLOWED = frozenset({"run.py", "runtime.py"})
 
 
-def _module_source() -> str:
+def _module_source(exclude: frozenset[str] = frozenset()) -> str:
     return "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted(MODULE_ROOT.rglob("*.py"))
+        path.read_text(encoding="utf-8")
+        for path in sorted(MODULE_ROOT.rglob("*.py"))
+        if path.name not in exclude
     )
 
 
@@ -62,7 +75,10 @@ def test_manifest_declares_both_selectable_planes_and_the_relay_prerequisite() -
     assert module.tables == models.TENANT_TABLES
     assert module.platform_tables == models.PLATFORM_TABLES
     assert module.requires == ("module_database_roles.v1", "outbox_relay.v1")
-    assert module.tenant_requires == ("tenant_scope_catalog.v1",)
+    assert module.tenant_requires == (
+        "tenant_scope_catalog.v1",
+        "tenant_audit_log.v1",
+    )
     assert {frozenset(planes) for planes in module.supported_plane_sets} == {
         frozenset((ModulePlane.TENANT,)),
         frozenset((ModulePlane.PLATFORM,)),
@@ -70,23 +86,38 @@ def test_manifest_declares_both_selectable_planes_and_the_relay_prerequisite() -
     }
 
 
-def test_migration_declares_exactly_the_manifest_prerequisites() -> None:
-    tree = ast.parse(MIGRATION.read_text(encoding="utf-8"))
-    assignments: dict[str, tuple[str, ...]] = {}
+def _declared_requires(path: Path) -> dict[str, tuple[str, ...]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: dict[str, tuple[str, ...]] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or not isinstance(
-            node.targets[0], ast.Name
-        ):
-            continue
-        if node.targets[0].id in {
+        target = (
+            node.target
+            if isinstance(node, ast.AnnAssign)
+            else node.targets[0]
+            if isinstance(node, ast.Assign)
+            else None
+        )
+        if isinstance(target, ast.Name) and target.id in {
             "COMMON_REQUIRES",
             "TENANT_REQUIRES",
             "PLATFORM_REQUIRES",
         }:
-            assignments[node.targets[0].id] = tuple(ast.literal_eval(node.value))
-    assert assignments["COMMON_REQUIRES"] == module.requires
-    assert assignments["TENANT_REQUIRES"] == module.tenant_requires
-    assert assignments["PLATFORM_REQUIRES"] == module.platform_requires
+            assert node.value is not None
+            found[target.id] = tuple(ast.literal_eval(node.value))
+    return found
+
+
+def test_migrations_declare_exactly_the_manifest_prerequisites() -> None:
+    first = _declared_requires(MIGRATION)
+    second = _declared_requires(JOB_STATES_MIGRATION)
+    assert first["COMMON_REQUIRES"] + second["COMMON_REQUIRES"] == module.requires
+    assert (
+        first["TENANT_REQUIRES"] + second["TENANT_REQUIRES"] == module.tenant_requires
+    )
+    assert (
+        first["PLATFORM_REQUIRES"] + second["PLATFORM_REQUIRES"]
+        == module.platform_requires
+    )
 
 
 def test_planes_are_declared_disjoint_and_never_cross_linked() -> None:
@@ -109,8 +140,9 @@ def test_planes_are_declared_disjoint_and_never_cross_linked() -> None:
 
 
 def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> None:
-    source = _module_source()
-    assert _clock_reads(source) == set()
+    assert _clock_reads(_module_source(CLOCK_ALLOWED)) == set()
+    assert _module_source(CLOCK_ALLOWED) != _module_source()
+    source = _module_source(COMMIT_ALLOWED)
     for forbidden in (
         "claim_outbox_batch",
         "claim_platform_outbox_batch",
@@ -122,6 +154,19 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
         ".rollback(",
     ):
         assert forbidden not in source
+    # The exemptions are narrow: the transports still never claim or build a
+    # session, and the entrypoint never builds one directly either (it goes
+    # through the kernel's DatabaseRuntime).
+    for forbidden in (
+        "claim_outbox_batch",
+        "claim_platform_outbox_batch",
+        "SKIP LOCKED",
+        "SessionLocal(",
+        "sessionmaker(",
+        "create_engine(",
+        ".rollback(",
+    ):
+        assert forbidden not in _module_source()
 
 
 def test_clock_guard_has_a_sensitivity_proof() -> None:
