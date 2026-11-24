@@ -5,6 +5,7 @@ from reference-app composition, release and deployment.
 
 ## Documentation
 
+- [ ] Reviewed any automatically drafted README text, added accurate usage/setup details and removed its pending-review marker.
 - [ ] Updated root README.md for feature/runtime changes, with relevant usage/setup details and a link to deeper documentation.
 - [ ] Updated authoritative architecture/ADR documentation where contracts change.
 - [ ] For docs/test/workflow-only changes, explained why the README gate is exempt.

@@ -18,9 +18,11 @@ class ReadmePolicyTests(unittest.TestCase):
             root = Path(directory)
 
             def git(*args: str) -> str:
-                return subprocess.check_output(
-                    ["git", *args], cwd=root, text=True
-                ).strip()  # noqa: S603,S607
+                return subprocess.check_output(  # noqa: S603
+                    ["git", *args],
+                    cwd=root,
+                    text=True,  # noqa: S607
+                ).strip()
 
             git("init", "-q")
             git("config", "user.name", "README policy fixture")

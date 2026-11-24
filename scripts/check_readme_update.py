@@ -7,6 +7,8 @@ import re
 import subprocess
 from pathlib import PurePosixPath
 
+DRAFT_MARKER = "<!-- readme-draft: pending-human-review -->"
+
 RUNTIME_ROOTS = frozenset(
     {
         "app",
@@ -54,6 +56,8 @@ def requires_readme(paths: tuple[str, ...]) -> bool:
 
 def validate_update(*, paths: tuple[str, ...], before: str, after: str) -> bool:
     """Whitespace-only edits and README deletion do not satisfy the rule."""
+    if DRAFT_MARKER in after:
+        return False
     if not requires_readme(paths):
         return True
     return (

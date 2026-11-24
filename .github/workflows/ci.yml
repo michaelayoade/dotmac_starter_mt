@@ -30,6 +30,8 @@ jobs:
           python-version: "3.12"
       - name: Test README policy and sensitivity fixtures
         run: python -m unittest discover -s tests/unit -p test_readme_policy.py
+      - name: Test automatic README drafting
+        run: python -m unittest discover -s tests/unit -p test_readme_draft.py
       - name: Require README updates for runtime changes
         if: github.event_name == 'pull_request'
         env:

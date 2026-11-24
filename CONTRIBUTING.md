@@ -107,3 +107,30 @@ Local work is limited to inspection, editing, formatting and permitted static
 checks. Reviewers must verify semantic relevance; the gate proves a text change,
 not that prose is accurate. A changed policy/workflow also requires review.
 
+
+### Automatic draft with human review
+
+Once this workflow lands on main, a new CI request on a same-repository PR can
+trigger `Draft README for review`. Trusted default-branch code reads PR prose
+and paths as API data, and appends a proposed section to README.md. It never runs
+PR code with a write token. It only writes README.md, preserves any existing
+README change, skips forks and refuses non-fast-forward branch updates.
+
+Drafting quotes the author's first description paragraph and lists changed
+implementation areas. It is templated, not AI analysis; no inference API key is
+needed. A person must add accurate usage/setup details and place the text in the
+appropriate README section. Drafting does not establish release, deployment or
+adoption.
+
+The bot includes a pending-human-review marker. The README check rejects that
+marker even though the file changed. A human reviews, edits, removes the marker
+and commits; that human commit triggers ordinary CI on the final source.
+GITHUB_TOKEN commits do not trigger ordinary PR CI, so the bot's commit alone is
+not merge evidence. There is no auto-approval or auto-merge.
+
+Repository rules must permit the workflow token to write the PR branch; branch
+protections are never bypassed. Fork PRs, PRs already editing README, stale runs,
+missing PR associations and CI reruns without a new requested event need manual
+documentation. Hosted tests cover quoting, review-marker refusal, exact one-file
+publication, preservation, stale heads, forks and non-force ref publication.
+
