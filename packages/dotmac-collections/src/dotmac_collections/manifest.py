@@ -13,7 +13,7 @@ from dotmac_collections.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="collections",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     short_code="coll",
     migration_prefix="cl",
@@ -29,6 +29,9 @@ module = ModuleManifest(
         "collections.case.step_due.v1",
         "collections.action.requested.v1",
         "collections.notice.requested.v1",
+        "collections.exposure.due.v1",
+        "collections.case.access_hold_due.v1",
+        "collections.subject.access_hold.v1",
     ),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
     supported_plane_sets=(

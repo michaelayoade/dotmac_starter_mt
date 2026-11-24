@@ -77,6 +77,11 @@
       "reason": "SOURCE PREPARATION ONLY; UNPUBLISHED AND UNALLOCATED. The previously released 0.1.0a1 remains immutable. This local PEP 440 development marker prevents source preparation from allocating a bare successor identity while the approved tagline addition is completed. Remove this row only after a separately authorized successor allocation and verified publication record; this entry grants no release, adoption, deployment, or flip authority.",
       "state": "declared-unpublished"
     },
+    "dotmac-collections": {
+      "declared": "0.1.0a3",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a2 IS published and tagged (dotmac-collections-v0.1.0a2). 0.1.0a3 adds the GAP-4 per-account access-hold ladder (cl_0002: holds, reminder attempts including skipped steps, subject-locked assess and transition-resume) over a neutral receivable-observation input, so it cannot be folded into a2 in place. It has no dependency on dotmac-money-flows; money-flows 0.1.0a2 consumes it, so a3 is released first. Remove this row only after an authorized 0.1.0a3 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
@@ -142,9 +147,9 @@
       "reason": "Unpublished source successor to verified 0.1.0a110. It publishes the email.send.v1 command contract (EMAIL_SEND_COMMAND_SCHEMA) for the delivery domain; definition only, no allocation. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently reviewed release record that publishes the next kernel version.",
       "state": "declared-unpublished"
     },
-    "dotmac-payables": {
-      "declared": "0.1.0a7",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a6 is published and tagged and its migration bytes remain unchanged. 0.1.0a7 makes separation of duties on supplier payments an optional per-tenant policy (D-9, Michael's no-compulsory-two-person ruling) through a keyword-only separation_of_duties parameter (default false, never compulsory) on prepare, approve, record and reverse, a per-row separation_enforced stamp and the additive pa_0007 migration. It relaxes the owner rule and the ck_supplier_payments_sod CHECK per row, only when the stamp is false. Publication happens only through the release lane after review and Michael's separate release go; ERP adoption must wait for hosted qualification and verified publication of this exact version; remove this row only when the publication tag exists.",
+    "dotmac-money-flows": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-money-flows-v0.1.0a1). 0.1.0a2 adds the receivables reader on top of published a1, and it requires dotmac-collections 0.1.0a3, so it is released only after collections 0.1.0a3 is published. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {
