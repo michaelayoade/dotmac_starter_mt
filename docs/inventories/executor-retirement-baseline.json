@@ -140,7 +140,7 @@
           "not_an_executor": 5
         },
         "workflow": {
-          "non_production_executor": 9,
+          "non_production_executor": 10,
           "not_an_executor": 16
         }
       },
@@ -163,7 +163,7 @@
         "workflow",
         "script"
       ],
-      "inventory_digest": "sha256:4125a03a508516733247f228a5c4b37e72fbeb64de66c74af1d4dd1cfd3eb677",
+      "inventory_digest": "sha256:a9f9cf9895239498ae71d1bd15008fbd315fe0081bdebc0f5a9d1c21828f212f",
       "measured_from": "working tree",
       "retired_total": 0,
       "revision": "4568b79048b266af370a84ca0da96fcd573a0ec0",

@@ -80,3 +80,57 @@ pass. A deliberate exception takes an inline marker with a reason:
 - Breaking changes are called out in the PR body and CHANGELOG entry.
 - Docs move with the code: update `docs/ARCHITECTURE.md`'s tables and any
   affected ADR (dated amendment, never rewritten history) in the same PR.
+
+## README policy
+
+Every feature or runtime-behaviour PR updates root `README.md` in the same diff;
+a package README or a page under `docs/` alone does not satisfy the rule.
+Summarise the capability, relevant usage/setup changes and link to detailed docs.
+Do not imply a package is composed, released or deployed without evidence.
+
+The conservative gate covers `app/`, `templates/`, `static/`, `content/`,
+`alembic/`, `deploy/`, `scripts/`, `native/` and `tools/`; package `src/`,
+`migrations/` and `native/` trees; dependency manifests/locks; Dockerfile and
+docker-compose files. Fixes and removals on those surfaces count too. Changes
+limited to docs, tests or workflows are exempt, as are package docs-only edits.
+Whitespace-only changes and README deletion fail.
+
+`scripts/check_readme_update.py` owns this repository-local diff policy.
+The CI `readme-policy` job compares immutable PR base/head SHAs at their merge
+base, disables rename detection so removals cannot disappear, and runs the
+sensitivity tests in `tests/unit/test_readme_policy.py`. The existing quality
+matrix depends on this job. Keep the existing quality checks required for merge;
+this change does not rewrite repository protection or the pinned fleet standards.
+
+Tests run only on Git-hosted CI, including the gate's disposable Git fixtures.
+Local work is limited to inspection, editing, formatting and permitted static
+checks. Reviewers must verify semantic relevance; the gate proves a text change,
+not that prose is accurate. A changed policy/workflow also requires review.
+
+
+### Automatic draft with human review
+
+Once this workflow lands on main, a new CI request on a same-repository PR can
+trigger `Draft README for review`. Trusted default-branch code reads PR prose
+and paths as API data, and appends a proposed section to README.md. It never runs
+PR code with a write token. It only writes README.md, preserves any existing
+README change, skips forks and refuses non-fast-forward branch updates.
+
+Drafting quotes the author's first description paragraph and lists changed
+implementation areas. It is templated, not AI analysis; no inference API key is
+needed. A person must add accurate usage/setup details and place the text in the
+appropriate README section. Drafting does not establish release, deployment or
+adoption.
+
+The bot includes a pending-human-review marker. The README check rejects that
+marker even though the file changed. A human reviews, edits, removes the marker
+and commits; that human commit triggers ordinary CI on the final source.
+GITHUB_TOKEN commits do not trigger ordinary PR CI, so the bot's commit alone is
+not merge evidence. There is no auto-approval or auto-merge.
+
+Repository rules must permit the workflow token to write the PR branch; branch
+protections are never bypassed. Fork PRs, PRs already editing README, stale runs,
+missing PR associations and CI reruns without a new requested event need manual
+documentation. Hosted tests cover quoting, review-marker refusal, exact one-file
+publication, preservation, stale heads, forks and non-force ref publication.
+
