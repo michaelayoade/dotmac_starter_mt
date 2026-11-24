@@ -255,7 +255,9 @@ def test_a_standing_that_does_not_name_the_expired_dispatch_refuses(
     tmp_path: Path,
 ) -> None:
     rig, double, _ = expired_rig(tmp_path)
-    # An expired standing that names no dispatch (null) cannot be reconciled.
+    # An expired standing that names no dispatch (null) cannot be reconciled. Control's
+    # standing vectors call that body malformed, so it is refused at the wire check,
+    # before any reconcile or acquire.
     rig.cp.handlers["lease/standing"] = lambda _p: {
         "standing": "expired_unreleased",
         "dispatch_run": None,
@@ -264,7 +266,7 @@ def test_a_standing_that_does_not_name_the_expired_dispatch_refuses(
     [observation] = rig.cp.observations
     assert (observation["dispatch_id"], observation["reason"]) == (
         "dispatch-1",
-        "reconcile_unavailable",
+        "response_malformed",
     )
     assert [n for n, _ in double.log if n == "lease/acquire"] == [
         "lease/acquire"
