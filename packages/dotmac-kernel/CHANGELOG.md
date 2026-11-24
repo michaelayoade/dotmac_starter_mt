@@ -18,6 +18,28 @@ allocation (this ships with the next allocated release).
   that does not import or accept `(session, scope, run_context)`; it exposes
   `jobs()` for the runner. Declaration only: the runner lands in
   `dotmac-durable-timers`. Additive; contract-1 manifests are unchanged.
+- `ProductAssemblySpec.surface_selection` (`dotmac_kernel.surface_selection`:
+  `SurfaceSelection`, `SELECT_ALL`, `SurfaceSelectionError`). An assembly lists
+  the `(module, surface)` pairs and the module API-router sets it serves;
+  anything unlisted is not mounted, and an entry naming an absent module,
+  surface or router set refuses the boot. `None` (default) keeps today's
+  behaviour and logs a warning; `SELECT_ALL` states "everything" explicitly. The
+  reference assembly selects `SELECT_ALL`.
+- `create_app` now mounts contract-2 surfaces of a facet whose `url_prefix` is
+  `/` (previously FastAPI refused the `/` include prefix at boot).
+- `dotmac_kernel.testing.surface_conformance`: the module-author conformance kit
+  (two-prefix boot, guard on every route, CSRF on mutations, named-route
+  navigation, no absolute template URLs, template namespace isolation), run over
+  Template Studio in the reference tests.
+- Ledger rows (allocation only, no source) for the Wave 0 / D3 stateful modules
+  `staff_loans`, `leave`, `leases`, `attendance`, `hr_lifecycle`, `performance`,
+  `recruitment`, `employee_relations`, `calendar`, `fleet`, `help_centre` and
+  `webhooks`; `MIGRATION_OWNER_LEDGER_DIGEST` restamped.
+- `public_exports.json` regenerated with `derive_public_exports`: adds
+  `dotmac_kernel.jobs`, `dotmac_kernel.surface_selection` and
+  `dotmac_kernel.testing.surface_conformance`, and the top-level names
+  `JobSpec`, `JobSpecError`, `SELECT_ALL`, `SurfaceSelection`,
+  `SurfaceSelectionError`.
 - `dotmac_kernel.delivery_providers` publishes the `email.send.v1` payload
   contract for the delivery domain: `EMAIL_SEND_CAPABILITY_ID` and
   `EMAIL_SEND_COMMAND_SCHEMA` (one rendered message: `dispatch_id`, `address`,

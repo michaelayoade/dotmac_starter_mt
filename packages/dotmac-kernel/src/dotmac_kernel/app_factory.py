@@ -597,6 +597,25 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     registry = ModuleRegistry(spec.modules)
     manifests = list(registry.startup_order())
     enabled_manifests = list(registry.enabled_order(disabled))
+    # Assembly surface selection (fail-closed). Validated against every
+    # INSTALLED manifest so an entry naming an absent module/surface refuses
+    # the boot; applied to the enabled set so an unselected API router set or
+    # web surface is never mounted. None = pre-selection compatibility mode.
+    if spec.surface_selection is not None:
+        spec.surface_selection.validate_against(manifests)
+        not_selected = spec.surface_selection.unselected(enabled_manifests)
+        if not_selected:
+            logger.info(
+                "Surfaces declared but not selected: %s", ", ".join(not_selected)
+            )
+        enabled_manifests = spec.surface_selection.apply(enabled_manifests)
+    else:
+        logger.warning(
+            "ProductAssemblySpec %r sets no surface_selection: every enabled "
+            "module's API routers and web surfaces are mounted (compatibility "
+            "mode). Declare an explicit selection.",
+            spec.name,
+        )
     logger.info(
         "Module startup order (%d of %d enabled): %s",
         len(enabled_manifests),
