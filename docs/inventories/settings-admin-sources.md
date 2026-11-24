@@ -21,3 +21,11 @@ surface, the actor/reason/audit rule, restore, export/import and maker-checker.
 carried it (its own header says so). Its AR prerequisite keys
 (`src/erp_v2/ar/settings.py`, domain `ar_producer`) are the composition proof: the
 package must make all seven required keys settable without per-module code.
+
+## Sub and ERP legacy writers
+
+Both settings stores are inventoried at the pins in `EXTRACTION.toml`
+(`dotmac_sub` `app/models/domain_settings.py`, `domain_setting_history.py`;
+`dotmac_erp` `app/models/domain_settings.py`, `app/services/domain_settings.py`,
+`app/services/admin/settings_web.py`). Each is a `legacy_writer` that retires
+when its product composes this module on the kernel settings tables.

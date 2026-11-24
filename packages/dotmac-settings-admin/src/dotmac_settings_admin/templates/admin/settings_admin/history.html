@@ -9,7 +9,7 @@
   <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
     {% for e in entries %}
     <tr style="border-bottom:1px solid var(--dmui-border-default);">
-      <td style="padding:var(--dmui-space-sm);">{{ e.changed_at }}<br>{{ ui.badge(e.action) }}</td>
+      <td style="padding:var(--dmui-space-sm);">{{ e.changed_at | local_datetime }}<br>{{ ui.badge(e.action) }}</td>
       <td style="padding:var(--dmui-space-sm);">
         {% if e.secret_changed %}<em>secret changed (value not recorded)</em>
         {% else %}<code>{{ e.value_before }}</code> &rarr; <code>{{ e.value_after }}</code>{% endif %}

@@ -5,17 +5,25 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Generic administration of declared settings: edit, history, restore, export/import, branding, organisation profile and the optional maker-checker. Stateless: it owns no table"
 contract = "Render and write every SettingSpec of every installed module with no per-module code: an actor and a reason on every write, an audit event, restore as a new audited write, secrets only ever set or unset, undeclared keys refused. Not a settings store: the kernel owns the rows, the resolver and the history."
-source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
-source_revisions = ["dotmac_starter_mt:9c016f99"]
+source_repositories = ["dotmac_erp", "dotmac_sub"]
+source_revisions = [
+  "dotmac_sub:457882482cc938bfe70f48ca2fb282dab98beee6",
+  "dotmac_erp:0dc07e4b6dd36260c9510a7115dbdc656e2a19a5",
+]
 source_paths = [
-  "dotmac_starter_mt:app/features/settings",
+  "dotmac_sub:app/models/domain_settings.py",
+  "dotmac_sub:app/models/domain_setting_history.py",
+  "dotmac_erp:app/models/domain_settings.py",
+  "dotmac_erp:app/services/domain_settings.py",
+  "dotmac_erp:app/services/admin/settings_web.py",
+  "dotmac_starter_mt:packages/dotmac-settings-admin/src/dotmac_settings_admin",
 ]
 preserved_tests = [
-  "dotmac_starter_mt:tests/unit/test_settings_web.py",
-  "dotmac_starter_mt:tests/unit/test_settings_api.py",
   "dotmac_starter_mt:tests/unit/test_display_settings.py",
+  "dotmac_starter_mt:tests/unit/test_branding.py",
   "dotmac_starter_mt:tests/architecture/test_settings_admin_module.py",
   "dotmac_starter_mt:tests/unit/test_settings_admin.py",
+  "dotmac_starter_mt:tests/unit/test_settings_admin_web.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_erp_v2", "dotmac_sub_thin"]
@@ -29,8 +37,15 @@ local_copy_retirement = "app/features/settings is deleted in the same change; ER
 next_action = "Compose it in ERP v2 and Sub thin; add surface_selection and run the conformance kit when lane A lands."
 
 [[product_writers]]
-product = "dotmac_starter_mt"
-writer_state = "qualifying_source"
+product = "dotmac_sub"
+writer_state = "legacy_writer"
 retirement_required = true
-revision = "9c016f99"
-evidence_paths = ["app/features/settings"]
+revision = "457882482cc938bfe70f48ca2fb282dab98beee6"
+evidence_paths = ["app/models/domain_settings.py", "app/models/domain_setting_history.py"]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "0dc07e4b6dd36260c9510a7115dbdc656e2a19a5"
+evidence_paths = ["app/models/domain_settings.py", "app/services/domain_settings.py", "app/services/admin/settings_web.py"]

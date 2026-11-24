@@ -20,6 +20,8 @@ Stateless: no table, no migration lineage, no namespace allocation.
 
 from __future__ import annotations
 
+__version__ = "0.1.0a1"
+
 from importlib import import_module
 from typing import TYPE_CHECKING
 

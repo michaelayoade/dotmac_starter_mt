@@ -20,6 +20,9 @@ EXPECTED_STARTER_ADMIN_PERMISSIONS = frozenset(
         "comms_operations.suppressions.read",
         "comms_operations.receipts.read",
         "comms_operations.suppressions.manage",
+        "settings_admin.read",
+        "settings_admin.manage",
+        "settings_admin.approve",
     }
 )
 
