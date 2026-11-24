@@ -1017,6 +1017,52 @@
         ]
       }
     },
+    "dotmac-settings-admin": {
+      "$comment": [
+        "Generic, stateless administration of declared settings (Starter parity",
+        "Wave 0 lane C). Owns no tables and no migration lineage: it administers the",
+        "kernel's domain_settings and domain_setting_history rows and writes kernel",
+        "audit events through an assembly-bound writer seam. db_schema null is an",
+        "asserted release shape, as for dotmac-document-rendering. kernel_floor a110",
+        "equals the package's declared dependency. This row means MAY BE PUBLISHED",
+        "(ADR-0057/ADR-0017) and lands only with the module's own gates; it claims",
+        "no adopter and moves no authority."
+      ],
+      "db_schema": null,
+      "import_name": "dotmac_settings_admin",
+      "kernel_floor": "0.1.0a110",
+      "manifest_attr": "module",
+      "package_dir": "packages/dotmac-settings-admin",
+      "tag_prefix": "dotmac-settings-admin-v",
+      "wheel_contents": {
+        "allowed_requires": [
+          "dotmac-kernel",
+          "fastapi",
+          "pydantic",
+          "sqlalchemy",
+          "python"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "required": [
+          "dotmac_settings_admin/py.typed",
+          "dotmac_settings_admin/__init__.py",
+          "dotmac_settings_admin/audit_seam.py",
+          "dotmac_settings_admin/manifest.py",
+          "dotmac_settings_admin/router.py",
+          "dotmac_settings_admin/schemas.py",
+          "dotmac_settings_admin/seed.py",
+          "dotmac_settings_admin/service.py",
+          "dotmac_settings_admin/specs.py",
+          "dotmac_settings_admin/transfer.py",
+          "dotmac_settings_admin/web.py"
+        ]
+      }
+    },
     "dotmac-durable-timers": {
       "$comment": [
         "Generation-safe due work on separately selectable tenant and platform",
