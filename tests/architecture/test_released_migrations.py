@@ -8243,6 +8243,33 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-payables ──
+    "dotmac-payables-v0.1.0a7": (
+        "dotmac-payables",
+        "18914caa6fa34abf79f341840c279723ad610435",
+        {
+            "pa_0001_payables.py": (
+                "ea7e28ec2fe9d424b629f2435cfbf8741afa92e8a139227ad8432bf66ba66c05"
+            ),
+            "pa_0002_optional_supplier_doc.py": (
+                "e64cf83e3dea7a68d9420f7ad10f3d06db488690f29ff21db46dded8110de78b"
+            ),
+            "pa_0003_historical_invoice.py": (
+                "2c158a89a4d100c044e804b9d9bf7499c4af66c04059cdee819525f8f076ac98"
+            ),
+            "pa_0004_supplier_payments.py": (
+                "1228dca6a16fda7c3ab458d4144e0f3d74838029355213c3fb61c174a8af772b"
+            ),
+            "pa_0005_reversal_settled_history.py": (
+                "1cf9e92760e2a8406f5e7bceb2dd81bd774a03795bde7abc537989f7031ab4cf"
+            ),
+            "pa_0006_tax_release_hist_credit.py": (
+                "89fb1ac4850a4c774db4c8cddbf160ddb0c4ae688bd3cef0f96a5fdef9e6bc26"
+            ),
+            "pa_0007_separation_policy.py": (
+                "9644eac7d5560e9a25cce3232b99a30645e24834199628b209f40e1ad1e270fb"
+            ),
+        },
+    ),
     "dotmac-payables-v0.1.0a6": (
         "dotmac-payables",
         "cd9f72b0874312d9217e481f359ccaa5376603b3",
@@ -9145,7 +9172,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `pa_0007` stamps the optional separation-of-duties policy on each supplier
     # payment (D-9); still editable until `dotmac-payables` 0.1.0a7 is tagged.
     # `pa_0001` to `pa_0006` stay byte-frozen by the 0.1.0a6 entry.
-    "dotmac-payables": frozenset({"pa_0007_separation_policy.py"}),
+    "dotmac-payables": frozenset(),
     # `py_0004` adds audited liability adjustments; editable until
     # `dotmac-payroll` 0.1.0a6 is tagged.
     "dotmac-payroll": frozenset(),
