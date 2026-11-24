@@ -8513,6 +8513,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-release-catalog ──
+    "dotmac-release-catalog-v0.1.0a6": (
+        "dotmac-release-catalog",
+        "0cc8351bd64d4a186d3a99794d7d1221ede7fb91",
+        {
+            "rl_0001_release_artifacts.py": (
+                "f8a8d7167e2e37aeb5878cd12c8afeb023cee86355aefae8933f60c35a91a70e"
+            ),
+            "rl_0002_db_catalog_attestations.py": (
+                "e05f9ec0f7cced74f184b0fdbdc30997f0f9aa83b7384856c6250db2f1ca46ce"
+            ),
+        },
+    ),
     "dotmac-release-catalog-v0.1.0a4": (
         "dotmac-release-catalog",
         "7556b96e8751d46a8bf3cb014b95a9a64eb03b0c",
