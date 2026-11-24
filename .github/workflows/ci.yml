@@ -41,6 +41,8 @@ jobs:
 
   quality:
     needs: readme-policy
+    # A failed dependency must fail required checks, not merely skip them.
+    if: always()
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -85,6 +87,10 @@ jobs:
             format-check,
           ]
     steps:
+      - name: Require a successful README policy check
+        env:
+          README_POLICY_RESULT: ${{ needs.readme-policy.result }}
+        run: test "$README_POLICY_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -1047,4 +1053,3 @@ jobs:
             curl -sf http://localhost:${{ env.APP_PORT }}/health && exit 0; sleep 2;
           done
           docker logs ${{ env.SMOKE_CONTAINER }}; exit 1
-
