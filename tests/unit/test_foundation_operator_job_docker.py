@@ -50,6 +50,32 @@ def test_s12_material_set_vectors(names, expected) -> None:
     assert material_set_id([n.upper() for n in names]) == expected
 
 
+# Argv digest vectors, shared byte for byte with the deploy agent:
+# sha256 over compact canonical JSON (sort_keys, (",", ":"), ensure_ascii).
+_ARGV_VECTORS = {
+    (
+        "python",
+        "-m",
+        "importer",
+        "execute",
+        "--manifest",
+        "/job/in/manifest.json",
+    ): "sha256:ec19a528282f3ba70df7dae70043b46f44b86c4b5cff8770cf3bd77af6422891",
+    (): "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    ("a b", "\u00e9"): (
+        "sha256:c3f7935fe57d02ff72e85b32b933a39cf98b4071e90ae9bf2025c13c01df454f"
+    ),
+    ("x",): "sha256:cd65ea2c2ad99e94a85b1b6df72efef9cb2ed0ae933a60c32ce16317f7d7d6aa",
+}
+
+
+@pytest.mark.parametrize(("argv", "expected"), list(_ARGV_VECTORS.items()))
+def test_s12_argv_digest_vectors(argv, expected) -> None:
+    from dotmac_deployment_foundation.operator_job import argv_digest
+
+    assert argv_digest(list(argv)) == expected
+
+
 def test_s12_spaced_json_is_not_produced() -> None:
     spaced = json.dumps(["legacy_database_url", "migration_database_url"])
     assert hashlib.sha256(spaced.encode()).hexdigest()[:12] == "a50fd593917c"
@@ -481,17 +507,3 @@ def test_t16_a_real_privileged_or_restarting_container_is_refused(env) -> None:
     with pytest.raises(OperatorJobRefusal) as excinfo:
         verify_container_shape(plan, container, effects.inspect_image(plan.image_ref))
     assert excinfo.value.code == "job_shape_refused"
-
-
-@needs_docker
-def test_t16_label_scoped_removal_removes_only_that_dispatch(env) -> None:
-    image = env.image()
-    one = env.plan(["sh", "-c", "exit 0"], image, name="e")
-    two = env.plan(["sh", "-c", "exit 0"], image, name="f")
-    for plan in (one, two):
-        _docker("volume", "create", plan.volume_name)
-        assert env.effects(plan).create_container(plan, env_file=None).ok
-    effects = env.effects(one)
-    removed = effects.remove_dispatch_containers(one.dispatch_id)
-    assert len(removed) == 1
-    assert env.leftovers(one) == "" and env.leftovers(two) != ""

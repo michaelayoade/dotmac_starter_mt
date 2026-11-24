@@ -85,7 +85,7 @@ def test_t14_spec_py_existing_definitions_are_unchanged() -> None:
     )
 
 
-def test_t14_cli_py_only_build_parser_registrations_and_two_handlers() -> None:
+def test_t14_cli_py_only_build_parser_registration_and_one_handler() -> None:
     current = ast_guard.fingerprint_tree(SRC)["cli_py"]
     baseline = BASELINE["cli_py"]
     assert current["nodes"] == baseline["nodes"], (
@@ -146,6 +146,29 @@ def test_the_guard_accepts_only_the_operator_additions_to_compose_job() -> None:
     assert tampered["compose_job"] != base
 
 
+_SPEC = (
+    "class ProductDeploymentSpec:\n"
+    "    def __post_init__(self):\n"
+    "        check()\n"
+    "{gate}"
+    "        done()\n"
+)
+_GATE = (
+    "        if self.schema != 'v5' and any(j.operator for j in self.jobs):\n"
+    "            raise SpecError('gate')\n"
+)
+
+
+def test_the_guard_accepts_only_the_operator_schema_gate_in_the_spec_class() -> None:
+    base = ast_guard.spec_fingerprint(_SPEC.format(gate=""))["nodes"]
+    gated = ast_guard.spec_fingerprint(_SPEC.format(gate=_GATE))["nodes"]
+    assert gated == base
+    other = _GATE.replace("j.operator", "j.other")
+    assert ast_guard.spec_fingerprint(_SPEC.format(gate=other))["nodes"] != base
+    extra = _GATE + "        sneaky()\n"
+    assert ast_guard.spec_fingerprint(_SPEC.format(gate=extra))["nodes"] != base
+
+
 def test_the_guard_bites_a_changed_existing_spec_definition() -> None:
     one = ast_guard.spec_fingerprint("def f():\n    return 1\n")
     two = ast_guard.spec_fingerprint("def f():\n    return 2\n")
@@ -172,7 +195,7 @@ def _cli(*, registration: bool = False, extra_fn: str = "", edit: bool = False) 
     return source.replace("return 1", "return 2") if edit else source
 
 
-def test_the_guard_accepts_only_the_two_cli_additions() -> None:
+def test_the_guard_accepts_only_the_one_cli_addition() -> None:
     base = ast_guard.cli_fingerprint(_cli())
     added = ast_guard.cli_fingerprint(
         _cli(registration=True, extra_fn="def cmd_run_job(args):\n    return 0\n")

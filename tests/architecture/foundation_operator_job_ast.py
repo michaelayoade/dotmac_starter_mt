@@ -16,12 +16,14 @@ hashed EXCEPT the three files that must change, and a new module is refused
 unless it is in `NEW_MODULES`. The three files get structured checks:
 
 * **plan.py** - one `StepKind` member (`OPERATOR_JOB`) may be added.
-* **spec.py** - every top-level node except `ComposeJob` is unchanged;
+* **spec.py** - every top-level node except `ComposeJob` is unchanged
+  (`ProductDeploymentSpec` is compared after removing the `if` statements whose
+  test reads an `.operator` attribute: the one schema-gate refusal);
   `ComposeJob` is compared after removing the additive operator pieces; only
   the allow-listed new nodes may appear.
 * **cli.py** - every top-level definition except `build_parser` is unchanged;
   `build_parser` is compared after removing the statements that mention
-  `run_job` / `remove_job`; only `cmd_run_job` and `cmd_remove_job` may be added.
+  `run_job`; only `cmd_run_job` may be added.
 """
 
 from __future__ import annotations
@@ -51,10 +53,10 @@ ADDED_STEP_KIND = "OPERATOR_JOB"
 _OPERATOR_PREFIX = "operator"
 
 #: In cli.py: the only function that may change, the statement-level names that
-#: mark its two registrations, and the only functions that may be added.
+#: mark its one registration, and the only functions that may be added.
 CLI_CHANGED_FUNCTION = "build_parser"
-CLI_REGISTRATION_NAMES: frozenset[str] = frozenset({"run_job", "remove_job"})
-CLI_NEW_FUNCTIONS: frozenset[str] = frozenset({"cmd_run_job", "cmd_remove_job"})
+CLI_REGISTRATION_NAMES: frozenset[str] = frozenset({"run_job"})
+CLI_NEW_FUNCTIONS: frozenset[str] = frozenset({"cmd_run_job"})
 
 
 def _digest(node: ast.AST) -> str:
@@ -155,8 +157,23 @@ def _node_hashes(tree: ast.Module, *, skip: frozenset[str]) -> dict[str, str]:
     return nodes
 
 
+class _StripOperatorGates(ast.NodeTransformer):
+    """Remove `if <test reading .operator>:` statements (the schema gate)."""
+
+    def visit_If(self, node: ast.If) -> ast.AST | None:
+        if any(
+            isinstance(inner, ast.Attribute) and inner.attr == _OPERATOR_PREFIX
+            for inner in ast.walk(node.test)
+        ):
+            return None
+        return self.generic_visit(node)
+
+
 def spec_fingerprint(source: str) -> dict[str, object]:
     tree = ast.parse(source)
+    for index, node in enumerate(tree.body):
+        if isinstance(node, ast.ClassDef) and node.name == "ProductDeploymentSpec":
+            tree.body[index] = _StripOperatorGates().visit(node)
     compose_job = ""
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "ComposeJob":
@@ -175,7 +192,7 @@ def _mentions_registration(stmt: ast.stmt) -> bool:
 
 
 def build_parser_hash(node: ast.FunctionDef) -> str:
-    """build_parser with only the two registration blocks removed."""
+    """build_parser with only the one registration block removed."""
     node = copy.deepcopy(node)
     node.body = [s for s in node.body if not _mentions_registration(s)]
     return _digest(node)

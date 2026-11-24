@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import tomllib
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -24,7 +25,9 @@ from dotmac_deployment_foundation.providers.compose_operator_job import (
 )
 from dotmac_deployment_foundation.spec import ProductDeploymentSpec
 
-from tests.unit.test_deployment_foundation_compose_topology import DESCRIPTOR
+from tests.unit.test_deployment_foundation_live_instance import (
+    document as v5_document,
+)
 
 JOB_TOML = """
 [[compose_topology.jobs]]
@@ -60,8 +63,20 @@ IDENTITY = {
 ARGV = ["python", "-m", "importer", "execute", "--manifest", "/job/in/manifest.json"]
 
 
+def make_document(job_toml: str = JOB_TOML) -> dict[str, Any]:
+    """A complete ProductDeploymentSpec.v5 document plus the given job tables.
+
+    The operator table is v5-gated (inside the approved digest), so every
+    operator fixture is a v5 descriptor.
+    """
+    doc = v5_document()
+    jobs = tomllib.loads(job_toml)["compose_topology"]["jobs"]
+    doc["compose_topology"]["jobs"] = [*doc["compose_topology"]["jobs"], *jobs]
+    return doc
+
+
 def make_spec(job_toml: str = JOB_TOML) -> ProductDeploymentSpec:
-    return ProductDeploymentSpec.loads(DESCRIPTOR + job_toml)
+    return ProductDeploymentSpec.from_document(make_document(job_toml))
 
 
 def make_resolved(**overrides: Any) -> dict[str, Any]:
@@ -93,6 +108,9 @@ def make_resolved(**overrides: Any) -> dict[str, Any]:
             "MIGRATION_DATABASE_URL",
         ],
         contract.RESOLVED_SECRETS_NAMESPACE: "appns",
+        contract.RESOLVED_DESCRIPTOR_DIGEST: make_spec()
+        .to_canonical_document()
+        .sha256_digest(),
     }
     resolved.update(overrides)
     return resolved
@@ -326,14 +344,6 @@ class FakeEffects:
 
     def network_labels(self, name: str) -> Mapping[str, str] | None:
         return self.net_labels.get(name)
-
-    def list_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
-        self.calls.append(f"list_dispatch:{dispatch_id}")
-        return ("abc",)
-
-    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
-        self.calls.append(f"remove_dispatch:{dispatch_id}")
-        return ()
 
     @contextmanager
     def sigterm_trap(self) -> Iterator[None]:

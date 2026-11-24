@@ -25,6 +25,7 @@ from dotmac_deployment_foundation.providers.compose_operator_job import (
 from tests.unit.foundation_operator_job_support import (
     IDENTITY,
     INVOCATION,
+    JOB_TOML,
     PAIR,
     FakeAuthority,
     FakeEffects,
@@ -231,6 +232,8 @@ def _break(effects: FakeEffects, how: str) -> None:
         c["Config"]["Cmd"] = [*plan.argv, "--extra"]
     elif how == "image":
         c["Config"]["Image"] = "registry.example.invalid/app@sha256:" + "0" * 64
+    elif how == "image_id":
+        c["Image"] = "sha256:" + "2" * 64
     else:  # pragma: no cover
         raise AssertionError(how)
 
@@ -258,6 +261,7 @@ def _break(effects: FakeEffects, how: str) -> None:
         "root_user",
         "cmd",
         "image",
+        "image_id",
     ],
 )
 def test_t5_t8_inspect_readback_refuses_and_removes(how: str) -> None:
@@ -650,37 +654,6 @@ def test_o_removal_is_scoped_to_this_dispatch_and_both_labels_are_set() -> None:
     assert "dotmac.dispatch_id=disp-0001" in argv and "dotmac.role_job=1" in argv
 
 
-def test_r_label_scoped_removal_never_creates_or_starts() -> None:
-    from dotmac_deployment_foundation.operator_job import remove_dispatch
-
-    effects = FakeEffects(make_plan())
-    assert remove_dispatch(effects, "disp-0001") == ()
-    assert effects.calls == ["remove_dispatch:disp-0001"]
-    with pytest.raises(OperatorJobRefusal):
-        remove_dispatch(effects, "bad id; rm")
-
-
-def test_r_real_removal_filters_on_both_labels_and_only_removes() -> None:
-    commands: list[list[str]] = []
-
-    def runner(argv, **_):
-        commands.append(list(argv))
-        if argv[1] == "ps":
-            return CommandResult(0, "abc123\ndef456\n")
-        return CommandResult(0)
-
-    effects = ComposeOperatorJobEffects(
-        docker_bin="/usr/bin/docker", environ={}, runner=runner
-    )
-    assert effects.remove_dispatch_containers("disp-0001") == ("abc123", "def456")
-    ps = commands[0]
-    assert (
-        "label=dotmac.dispatch_id=disp-0001" in ps and "label=dotmac.role_job=1" in ps
-    )
-    assert {c[1] for c in commands[1:]} == {"rm"}
-    assert not any(c[1] in ("create", "start", "run") for c in commands)
-
-
 def test_remove_container_refuses_another_dispatchs_container() -> None:
     commands: list[list[str]] = []
 
@@ -832,24 +805,6 @@ def test_f_f_no_assert_in_the_operator_job_production_modules() -> None:
     assert not [n for n in ast.walk(function) if isinstance(n, ast.Assert)]
 
 
-# F-G: remove-job requires --execute (and the signed pair for THIS dispatch)
-def test_f_g_remove_job_offers_execute_and_authorization_and_lists_without_it() -> None:
-    from dotmac_deployment_foundation.cli import build_parser
-
-    parser = build_parser()
-    args = parser.parse_args(["remove-job", "--dispatch-id", "disp-0001"])
-    assert args.execute is False and args.authorization == ""
-    args = parser.parse_args(
-        ["remove-job", "--dispatch-id", "d", "--execute", "--target", "t"]
-    )
-    assert args.execute is True
-
-    plan = make_plan()
-    effects = FakeEffects(plan)
-    assert effects.list_dispatch_containers("disp-0001") == ("abc",)
-    assert not any(c.startswith("remove") for c in effects.calls)
-
-
 # CP does not supply uid/user/render unit/path materials: the root-owned file does
 def _identity_file(tmp_path, body: str, mode: int = 0o644):
     path = tmp_path / "job-identity.toml"
@@ -920,3 +875,40 @@ def test_input_host_paths_come_from_the_identity_inputs_root_not_cp() -> None:
     with pytest.raises(OperatorJobRefusal) as excinfo:
         make_plan(identity={k: v for k, v in IDENTITY.items() if k != "inputs_root"})
     assert excinfo.value.code == "job_input_refused"
+
+
+# F2-H1 (ii): the loaded descriptor must be the one the authorization approved
+def test_descriptor_digest_match_plans() -> None:
+    assert make_plan().name == "import_execute"
+
+
+@pytest.mark.parametrize(
+    "tampered",
+    [
+        pytest.param(
+            JOB_TOML.replace('"/run/secrets/dotmac"', '"/run/secrets/evil"'),
+            id="operator_table",
+        ),
+        pytest.param(
+            JOB_TOML + '[compose_topology.jobs.security]\nuser = "10002:10002"\n',
+            id="security_user",
+        ),
+    ],
+)
+def test_descriptor_digest_mismatch_refuses_before_anything_else(tampered) -> None:
+    resolved = make_resolved()  # signed over the UNTAMPERED descriptor
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        plan_operator_job(make_spec(tampered), resolved, IDENTITY)
+    assert excinfo.value.code == "job_descriptor_mismatch"
+
+
+@pytest.mark.parametrize("value", [None, "", "not-a-digest", "sha256:" + "0" * 64])
+def test_descriptor_digest_absent_malformed_or_wrong_refuses(value) -> None:
+    resolved = make_resolved()
+    if value is None:
+        del resolved[contract.RESOLVED_DESCRIPTOR_DIGEST]
+    else:
+        resolved[contract.RESOLVED_DESCRIPTOR_DIGEST] = value
+    with pytest.raises(OperatorJobRefusal) as excinfo:
+        plan_operator_job(make_spec(), resolved, IDENTITY)
+    assert excinfo.value.code == "job_descriptor_mismatch"

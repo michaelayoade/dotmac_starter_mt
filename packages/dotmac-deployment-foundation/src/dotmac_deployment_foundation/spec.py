@@ -2516,11 +2516,13 @@ class ComposeJob:
     verify_stdout: str
     root_justification: str
     root_approved_by: str
-    #: Operator-job declaration. Deliberately outside the descriptor identity
-    #: (`compare=False`, so excluded from the canonical document, the render
-    #: and the configuration digest): a descriptor without the table is
-    #: byte-identical to every pre-0.4.0a2 one, and T13 asserts it.
-    operator: OperatorJob | None = field(default=None, compare=False)
+    #: Operator-job declaration. INSIDE the approved descriptor digest, gated
+    #: by schema: ProductDeploymentSpec.v5 (the first unpublished schema) and
+    #: later carry it; v1-v4 canonical bytes, render and configuration digest
+    #: never contain the key, and an `[operator]` table on them is refused.
+    operator: OperatorJob | None = field(
+        default=None, metadata={"descriptor_since": SCHEMA_V5}
+    )
 
     @classmethod
     def parse(cls, table: _Table) -> ComposeJob:
@@ -3043,6 +3045,14 @@ class ProductDeploymentSpec:
             self.startup_config.require_profile(self)
         elif self.startup_config is not None:
             raise SpecError("startup_config requires ProductDeploymentSpec.v5")
+        if (
+            self.descriptor_schema != SCHEMA_V5
+            and self.compose_topology is not None
+            and any(job.operator is not None for job in self.compose_topology.jobs)
+        ):
+            raise SpecError(
+                "a compose job [operator] table requires ProductDeploymentSpec.v5"
+            )
         catalogs = self.database.catalogs if self.database is not None else ()
         if self.descriptor_schema == SCHEMA_V1 and catalogs:
             raise SpecError(

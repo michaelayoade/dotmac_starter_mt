@@ -6,15 +6,20 @@
 
 `dotmac-deploy run-job --execute --target <ref> --authorization <pair>` runs ONE
 Control-dispatched operator job. Additive: a new optional
-`[compose_topology.jobs.operator]` table (absent means `ComposeJob.operator is
-None` and every existing descriptor parses and renders byte-identically), new
+`[compose_topology.jobs.operator]` table, accepted ONLY on
+`ProductDeploymentSpec.v5` (the first unpublished schema; v1-v4 refuse it and
+keep byte-identical canonical documents, renders and configuration digests;
+on v5 the table is inside the approved descriptor digest), new
 modules `operator_job.py`, `operator_job_contract.py` and
 `providers/compose_operator_job.py`, one `StepKind.OPERATOR_JOB` member and the
 subcommand registration. The dispatch is resolved and consumed through the
-installed bindings before any container exists; a `409 already_consumed` is the
+installed bindings before any container exists; the resolved context must carry
+`descriptor_digest` (from the verified authorization) equal to the loaded
+descriptor's canonical digest or the run refuses `job_descriptor_mismatch`
+before consume; a `409 already_consumed` is the
 refusal `job_already_consumed`. The container is created from the declared shape
 only, read back with `docker inspect` before start, stopped at min(timeout, agent deadline - grace) or on SIGTERM/SIGINT/SIGHUP, and always
-removed; `remove-job --dispatch-id` removes one dispatch only. Never root, never a secret value, no secrets
+removed (the deploy agent removes its own dispatch containers; Foundation ships no removal subcommand). Never root, never a secret value, no secrets
 directory listing.
 
 The deploy, rollback, recovery, support-job, render and existing spec-parse

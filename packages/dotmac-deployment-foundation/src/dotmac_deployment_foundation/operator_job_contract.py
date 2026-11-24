@@ -33,6 +33,9 @@ RESOLVED_DISPATCHED_JOB: Final = "dispatched_job"
 RESOLVED_IMAGE: Final = "image"
 RESOLVED_JOB_BINDING_NAMES: Final = "job_binding_names"
 RESOLVED_SECRETS_NAMESPACE: Final = "secrets_namespace"
+#: The Foundation canonical descriptor digest (`sha256:<hex>`) taken from the
+#: VERIFIED authorization, never from the agent. MANDATORY: absent refuses.
+RESOLVED_DESCRIPTOR_DIGEST: Final = "descriptor_digest"
 
 # ── PROVISIONAL: Control v2 ``dispatched_job`` ──────────────────────────────
 JOB_NAME: Final = "name"
@@ -103,6 +106,7 @@ PROVISIONAL_KEYS: Final[tuple[str, ...]] = (
     "RESOLVED_IMAGE",
     "RESOLVED_JOB_BINDING_NAMES",
     "RESOLVED_SECRETS_NAMESPACE",
+    "RESOLVED_DESCRIPTOR_DIGEST",
     "JOB_NAME",
     "JOB_ARGV",
     "JOB_ROLE",

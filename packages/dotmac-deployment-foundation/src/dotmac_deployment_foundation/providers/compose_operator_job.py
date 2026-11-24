@@ -191,6 +191,12 @@ def verify_container_shape(
     # recorded image reference must be that digest reference, no other.
     if ref != plan.image_ref:
         raise _refuse("image is not the planned digest")
+    # The container must also be running the planned image's own ID, not a
+    # same-named image that was replaced between create and inspect.
+    resolved_id = str(container.get("Image", ""))
+    planned_id = str(image.get("Id", ""))
+    if not planned_id or resolved_id != planned_id:
+        raise _refuse("container image id is not the planned image id")
     networks = set((container.get("NetworkSettings") or {}).get("Networks") or {})
     if networks != set(plan.networks):
         raise _refuse("networks differ from the spec")
@@ -591,28 +597,3 @@ class ComposeOperatorJobEffects:
         if label != dispatch_id:
             return False
         return self._docker_run("rm", "-f", name).ok
-
-    def list_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
-        """Containers carrying BOTH labels for this dispatch. Read-only."""
-        listed = self._docker_run(
-            "ps",
-            "-a",
-            "--no-trunc",
-            "--filter",
-            f"label={contract.LABEL_DISPATCH_ID}={dispatch_id}",
-            "--filter",
-            f"label={contract.LABEL_ROLE_JOB}=1",
-            "--format",
-            "{{.ID}}",
-        )
-        if not listed.ok:
-            raise OperatorJobRefusal("job_remove_failed", "docker ps refused")
-        return tuple(listed.stdout.split())
-
-    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]:
-        """Label-scoped removal: BOTH labels must match. Never creates or starts."""
-        removed: list[str] = []
-        for identifier in self.list_dispatch_containers(dispatch_id):
-            if self._docker_run("rm", "-f", identifier).ok:
-                removed.append(identifier)
-        return tuple(removed)

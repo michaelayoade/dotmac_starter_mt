@@ -196,10 +196,6 @@ class OperatorJobEffects(Protocol):
 
     def remove_container(self, name: str, *, dispatch_id: str) -> bool: ...
 
-    def list_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]: ...
-
-    def remove_dispatch_containers(self, dispatch_id: str) -> tuple[str, ...]: ...
-
 
 # ── the plan (pure) ─────────────────────────────────────────────────────────
 
@@ -334,6 +330,31 @@ def _select_job(spec: ProductDeploymentSpec, name: str) -> ComposeJob:
     return found[0]
 
 
+def _require_signed_descriptor(
+    spec: ProductDeploymentSpec, resolved: Mapping[str, Any]
+) -> None:
+    """The loaded descriptor must be the one the verified authorization names.
+
+    Every spec field this entry point acts on (user, networks, entrypoint,
+    tmpfs, materials and the operator table) is covered by the canonical
+    document digest. An absent or malformed signed digest refuses, so a
+    resolve context that omits it can never skip the binding.
+    """
+    signed = resolved.get(contract.RESOLVED_DESCRIPTOR_DIGEST)
+    if not isinstance(signed, str) or not _SHA256.match(
+        "sha256:" + _norm_digest(signed)
+    ):
+        raise OperatorJobRefusal(
+            "job_descriptor_mismatch", "the authorization carries no descriptor digest"
+        )
+    actual = spec.to_canonical_document().sha256_digest()
+    if _norm_digest(signed) != _norm_digest(actual):
+        raise OperatorJobRefusal(
+            "job_descriptor_mismatch",
+            "the loaded descriptor is not the one the authorization approved",
+        )
+
+
 def plan_operator_job(
     spec: ProductDeploymentSpec,
     resolved: Mapping[str, Any],
@@ -349,6 +370,7 @@ def plan_operator_job(
         raise OperatorJobRefusal(
             "job_operation_refused", "the resolved operation is not run_job"
         )
+    _require_signed_descriptor(spec, resolved)
     dispatched = resolved.get(contract.RESOLVED_DISPATCHED_JOB)
     if not isinstance(dispatched, Mapping) or not dispatched:
         raise OperatorJobRefusal(
@@ -801,13 +823,6 @@ def _effective_timeout(
     return min(plan.timeout_seconds, remaining)
 
 
-def remove_dispatch(effects: OperatorJobEffects, dispatch_id: str) -> tuple[str, ...]:
-    """Label-scoped removal of ONE dispatch's containers. Never creates or starts."""
-    if not _DISPATCH_ID.match(dispatch_id):
-        raise OperatorJobRefusal("job_context_invalid", "dispatch_id shape")
-    return effects.remove_dispatch_containers(dispatch_id)
-
-
 def _check_networks(plan: OperatorJobPlan, effects: OperatorJobEffects) -> None:
     """Each network must be the compose project's own (review ruling 5)."""
     for code, name in zip(plan.network_codes, plan.networks, strict=True):
@@ -1020,63 +1035,6 @@ def cmd_run_job(args: Any) -> int:
     receipt = run_operator_job(plan, effects, bindings, pair=pair, target=target)
     sys.stdout.write(receipt.to_json() + "\n")
     return receipt.exit_status
-
-
-def cmd_remove_job(args: Any) -> int:
-    """``dotmac-deploy remove-job --dispatch-id ID [--execute ...]``.
-
-    Label-scoped: only containers carrying BOTH ``dotmac.dispatch_id=<id>`` and
-    the job marker. It never creates or starts a container. Without
-    ``--execute`` it lists the matches and removes nothing. With it, the signed
-    pair passed in ``--authorization`` must resolve to THIS dispatch id.
-    """
-    from .cli import _load_bindings, _require_execution_arguments
-    from .providers.compose_operator_job import ComposeOperatorJobEffects
-    from .toolchain import DEFAULT_TOOLS, resolve_tool
-
-    try:
-        effects = ComposeOperatorJobEffects(
-            docker_bin=resolve_tool(
-                getattr(args, "docker_bin", "") or DEFAULT_TOOLS["docker"],
-                what="docker_bin",
-            )
-        )
-        if not _DISPATCH_ID.match(args.dispatch_id):
-            raise OperatorJobRefusal("job_context_invalid", "dispatch_id shape")
-        if not args.execute:
-            document: dict[str, Any] = {
-                "dispatch_id": args.dispatch_id,
-                "matches": sorted(effects.list_dispatch_containers(args.dispatch_id)),
-                "removed": [],
-            }
-        else:
-            target, path = _require_execution_arguments(
-                args, contract.OPERATION_RUN_JOB
-            )
-            provider = _authority(_load_bindings(args))
-            from pathlib import Path
-
-            pair = json.loads(Path(path).read_text(encoding="utf-8"))
-            resolved = getattr(provider, contract.PROVIDER_RESOLVE_METHOD)(
-                authorization_material=pair["authorization_material"],
-                dispatch_material=pair["dispatch_material"],
-                target=target,
-            )
-            if resolved.get(contract.RESOLVED_DISPATCH_ID) != args.dispatch_id:
-                raise OperatorJobRefusal(
-                    "job_context_invalid", "the signed pair is for another dispatch"
-                )
-            document = {
-                "dispatch_id": args.dispatch_id,
-                "matches": [],
-                "removed": sorted(remove_dispatch(effects, args.dispatch_id)),
-            }
-    except (DeploymentFoundationError, OSError, ValueError, KeyError, TypeError) as exc:
-        code = exc.code if isinstance(exc, OperatorJobRefusal) else "job_refused"
-        sys.stdout.write(_refusal_receipt(code) + "\n")
-        return EXIT_REFUSED
-    sys.stdout.write(json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n")
-    return EXIT_SUCCEEDED
 
 
 def _preflight_steps() -> tuple[OperatorJobStep, ...]:
