@@ -19,9 +19,9 @@ class ReadmePolicyTests(unittest.TestCase):
 
             def git(*args: str) -> str:
                 return subprocess.check_output(  # noqa: S603
-                    ["git", *args],
+                    ["git", *args],  # noqa: S607
                     cwd=root,
-                    text=True,  # noqa: S607
+                    text=True,
                 ).strip()
 
             git("init", "-q")

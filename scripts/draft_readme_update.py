@@ -7,12 +7,12 @@ import html
 import json
 import os
 import re
+from http.client import HTTPSConnection
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 from scripts.check_readme_update import DRAFT_MARKER, requires_readme
 
@@ -61,7 +61,7 @@ def render_draft(*, readme: str, change: DraftInput) -> str:
     return (
         readme.rstrip() + "\n\n" + DRAFT_MARKER + "\n"
         "## Proposed change for review\n\n"
-        f"**{title}** — [PR #{change.number}]({url}).\n\n"
+        f"**{title}** â€” [PR #{change.number}]({url}).\n\n"
         f"Author's description:\n\n<blockquote>{html.escape(summary)}</blockquote>\n\n"
         f"Implementation areas: <code>{paths}</code>.\n\n"
         "Review this draft, place the explanation in the appropriate README "
@@ -80,20 +80,27 @@ class GitHub:
     def call(
         self, method: str, path: str, payload: Mapping[str, object] | None = None
     ) -> object:
-        request = Request(
-            f"https://api.github.com/repos/{self.repository}/{path}",
-            data=json.dumps(payload).encode() if payload is not None else None,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Accept": "application/vnd.github+json",
-                "Content-Type": "application/json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            method=method,
-        )
-        with urlopen(request, timeout=30) as response:  # nosec B310 - fixed HTTPS host
-            result: object = json.load(response)
-        return result
+        connection = HTTPSConnection("api.github.com", timeout=30)
+        try:
+            connection.request(
+                method,
+                f"/repos/{self.repository}/{path}",
+                body=json.dumps(payload).encode() if payload is not None else None,
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": "application/vnd.github+json",
+                    "Content-Type": "application/json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "User-Agent": "dotmac-starter-readme-draft",
+                },
+            )
+            response = connection.getresponse()
+            if not 200 <= response.status < 300:
+                raise RuntimeError(f"GitHub request refused: HTTP {response.status}")
+            result: object = json.loads(response.read())
+            return result
+        finally:
+            connection.close()
 
 
 def publish(*, github: GitHub, number: int, expected_sha: str) -> bool:
