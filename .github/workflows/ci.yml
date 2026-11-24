@@ -304,8 +304,14 @@ jobs:
           if-no-files-found: error
 
   unit:
+    needs: documentation
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require successful documentation checks
+        env:
+          DOCS_RESULT: ${{ needs.documentation.result }}
+        run: test "$DOCS_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # TAG EVIDENCE, not convenience. `tests/architecture/
@@ -1023,3 +1029,23 @@ jobs:
             curl -sf http://localhost:${{ env.APP_PORT }}/health && exit 0; sleep 2;
           done
           docker logs ${{ env.SMOKE_CONTAINER }}; exit 1
+
+  documentation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Test documentation checker sensitivity
+        run: python -m unittest discover -s tests/unit -p test_documentation_checks.py
+      - name: Check changed documentation
+        env:
+          DOCS_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || inputs.allocation_base_sha }}
+          DOCS_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python scripts/check_documentation.py --base "$DOCS_BASE_SHA" --head "$DOCS_HEAD_SHA"
