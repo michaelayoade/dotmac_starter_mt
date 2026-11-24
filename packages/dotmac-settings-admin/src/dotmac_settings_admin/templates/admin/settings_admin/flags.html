@@ -1,4 +1,4 @@
-{# Declared feature flags and what each resolves to for this tenant (read-only). #}
+{# Declared feature flags and their defaults (read-only). #}
 {% extends surface.shell or "layouts/admin.html" %}
 {% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
 
@@ -10,8 +10,8 @@
     <tr style="border-bottom:1px solid var(--dmui-border-default);">
       <td style="padding:var(--dmui-space-sm);"><code>{{ r.spec.code }}</code><br>
         <span style="color:var(--dmui-text-muted);">{{ r.spec.description }}</span></td>
-      <td style="padding:var(--dmui-space-sm);">{{ r.value }}</td>
-      <td style="padding:var(--dmui-space-sm);">{{ ui.badge(r.source) }}</td>
+      <td style="padding:var(--dmui-space-sm);">default: {{ r.spec.default }}</td>
+      <td style="padding:var(--dmui-space-sm);">{{ ui.badge(r.spec.owner) }}</td>
     </tr>
     {% endfor %}
   </table>

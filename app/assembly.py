@@ -43,6 +43,7 @@ import dotmac_ticketing
 import dotmac_ui
 from dotmac_kernel.api_documentation import environment_api_documentation_policy
 from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
 from dotmac_kernel.permission_provisioning import (
@@ -66,6 +67,7 @@ from dotmac_kernel.web_surfaces import (
     WebFacetMount,
     WebRouteRef,
 )
+from dotmac_settings_admin.audit_seam import configure_audit_writer
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
@@ -118,6 +120,10 @@ dotmac_template_studio.register_contexts(
         description="Values any send path in the reference assembly can supply.",
     )
 )
+
+# Stateless settings-admin owns no audit storage and cannot declare the audit
+# prerequisite, so the assembly (which runs the kernel lineage) binds the writer.
+configure_audit_writer(write_audit_event)
 
 _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
 

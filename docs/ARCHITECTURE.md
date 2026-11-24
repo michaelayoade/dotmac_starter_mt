@@ -1588,8 +1588,8 @@ app/                             the reference assembly
                    + /admin/parties/* web screens (list/detail/create/edit)
     rbac/          roles, role grants, audit-event read endpoint
                    + /admin/roles, /admin/role-grants, /admin/audit web screens
-    settings/      tenant settings admin API (spec declarations, seed, router)
-                   + /admin/settings web screens (generic editor + branding editor)
+    (settings admin moved to the installable module `dotmac-settings-admin`:
+     spec declarations, seed, /settings API and /admin/settings screens)
     presentation/  stateless assembly adapter: resolved kernel brand data ->
                    dotmac-ui token CSS at GET /branding/theme.css
     custom_fields/ field definitions CRUD + values on a registered entity's
@@ -1750,9 +1750,9 @@ organization), with profile data on the subtype tables. `DomainSetting`
 (`dotmac_kernel/settings_resolver.py`) live in core for the same reason, one
 level removed: the `custom_fields` feature must call `resolve_value`
 directly (the per-entity field limit), and features may never import each
-other, so the shared mechanics sit in core while the `settings` feature
-keeps only what nothing else needs (spec declarations, seed, router,
-schemas). `CustomFieldDefinition` stays feature-local
+other, so the shared mechanics sit in core while the `dotmac-settings-admin`
+module (which replaced the `settings` feature) keeps only what nothing else
+needs (spec declarations, seed, router, schemas). `CustomFieldDefinition` stays feature-local
 (`app/features/custom_fields/models.py`) — nothing outside `custom_fields`
 touches it. Everything not needed outside its own feature stays
 feature-local: `UserCredential` (password hashes) lives in

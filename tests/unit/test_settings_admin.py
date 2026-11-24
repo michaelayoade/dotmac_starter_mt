@@ -687,3 +687,14 @@ def test_the_staff_surface_is_contract_two_and_stateless():
         "settings_admin.manage",
         "settings_admin.approve",
     } == {p.code for p in module.permissions}
+
+
+def test_without_a_bound_audit_writer_every_write_refuses_and_stores_nothing(
+    db, tenant_row, actor
+):
+    from dotmac_settings_admin import audit_seam
+
+    audit_seam.configure_audit_writer(None)
+    with pytest.raises(audit_seam.AuditWriterNotConfiguredError):
+        _write(db, tenant_row, actor, "display", "timezone", "Asia/Tokyo")
+    assert not db.scalars(select(DomainSettingHistory)).all()

@@ -310,7 +310,7 @@ def test_a_real_feature_action_is_declared_by_its_own_module() -> None:
     assert reg.owner("identity.history_imported") == "kernel"
     assert reg.owner("credential.password.assigned") == "kernel"
     assert reg.owner("role.grant") == "rbac"
-    assert reg.owner("settings.update") == "settings"
+    assert reg.owner("settings_admin.setting.update") == "settings_admin"
     assert reg.owner("platform.tenant.create") == "tenants"
     assert reg.owner("licence.rejected") == "licensing"
 

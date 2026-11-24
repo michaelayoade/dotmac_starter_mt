@@ -30,7 +30,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.branding import reject_retired_brand_keys
 from dotmac_kernel.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from dotmac_kernel.setting_domains import (
@@ -60,6 +59,7 @@ from dotmac_kernel.settings_resolver import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dotmac_settings_admin.audit_seam import require_audit_writer
 from dotmac_settings_admin.specs import ADMIN_DOMAIN, INTERNAL_KEYS
 
 MAX_REASON_LENGTH = 500
@@ -167,6 +167,7 @@ def clean_reason(reason: object) -> str:
 def _require_actor(actor: Actor | None) -> Actor:
     if actor is None or actor.party_id is None:
         raise BadRequestError("An actor is required for every settings change.")
+    require_audit_writer()  # fail closed before anything is stored
     return actor
 
 
@@ -268,7 +269,7 @@ def _audit(
 ) -> None:
     # The value is NEVER in `details`: the history row holds it (redacted for a
     # secret), and an audit trail must not become a second copy of a credential.
-    write_audit_event(
+    require_audit_writer()(
         db,
         tenant_id=tenant_id,
         actor_party_id=actor.party_id,

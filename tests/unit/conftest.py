@@ -154,6 +154,15 @@ def _all_manifests():
 
 
 @pytest.fixture(autouse=True)
+def _settings_admin_audit_writer():
+    """The assembly binds the audit writer at import; bare-app tests need it too."""
+    from dotmac_kernel.audit import write_audit_event
+
+    settings_admin.configure_audit_writer(write_audit_event)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _default_declaration_catalogues():
     """Install the process-active permission catalogue + audit-action registry.
 

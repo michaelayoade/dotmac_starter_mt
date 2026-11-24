@@ -184,7 +184,7 @@
     },
     "dotmac-settings-admin": {
       "declared": "0.1.0a1",
-      "reason": "TODO: state why this version has no verified publication",
+      "reason": "Unpublished source for the Wave 0 release train (stateless settings-admin module, lane C); no release requested. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
       "state": "never-published"
     },
     "dotmac-subscriptions": {

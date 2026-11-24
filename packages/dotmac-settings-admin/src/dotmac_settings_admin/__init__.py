@@ -9,6 +9,8 @@ view of declared feature flags, and an optional maker-checker (default OFF).
 ## Public surface
 
 - `module`: the `ModuleManifest` an assembly puts in `ProductAssemblySpec.modules`.
+- `configure_audit_writer(write_audit_event)`: the assembly binds the kernel audit
+  writer once (a stateless module cannot declare the audit-storage prerequisite).
 - `template_dir()`: the packaged Jinja directory (declared by the manifest).
 - `service` / `transfer`: the write path, for a product that must change a
   setting from its own code with the same actor/reason/audit guarantees.
@@ -28,9 +30,13 @@ if TYPE_CHECKING:
 
 _LAZY = {
     "module": ("dotmac_settings_admin.manifest", "module"),
+    "configure_audit_writer": (
+        "dotmac_settings_admin.audit_seam",
+        "configure_audit_writer",
+    ),
     "template_dir": ("dotmac_settings_admin.web", "template_dir"),
 }
-__all__ = ["module", "service", "template_dir", "transfer"]
+__all__ = ["configure_audit_writer", "module", "service", "template_dir", "transfer"]
 
 
 def __getattr__(name: str) -> object:

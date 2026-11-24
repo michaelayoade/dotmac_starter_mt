@@ -31,7 +31,6 @@ from dotmac_kernel.exceptions import (
     ConflictError,
     ForbiddenError,
 )
-from dotmac_kernel.flag_models import resolve_flag
 from dotmac_kernel.flags import active_flags
 from dotmac_kernel.models import Party, Tenant
 from dotmac_kernel.templating import render
@@ -382,12 +381,9 @@ def flags(
     tenant: Tenant = Depends(require_tenant),
     party: Party = Depends(require_web_permission(READ)),
 ) -> HTMLResponse:
-    rows = []
-    for spec in active_flags().specs():
-        evaluation = resolve_flag(db, spec.code, tenant_id=tenant.id)
-        rows.append(
-            {"spec": spec, "value": evaluation.value, "source": evaluation.source}
-        )
+    # Declared flags and their defaults only: evaluation against tenant overrides
+    # goes through a frozen kernel facility this stateless module must not call.
+    rows = [{"spec": spec} for spec in active_flags().specs()]
     return _page(request, "flags.html", {"page_title": "Feature flags", "rows": rows})
 
 
