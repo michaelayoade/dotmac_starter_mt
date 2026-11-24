@@ -121,6 +121,23 @@ follows from memory or from a chat message remains unobservable by any walk.
 # ── workflow ────────────────────────────────────────────────────────────────
 
 [[entrypoint]]
+name = "workflow:readme-draft"
+family = "workflow"
+path = ".github/workflows/readme-draft.yml"
+trigger = "workflow_run: CI requested for pull_request"
+credential = "GITHUB_TOKEN(contents:write, pull-requests:read); no user-provisioned repository secret"
+disposition = "non_production_executor"
+targets = ["github-hosted-runner"]
+premise = """
+Runs trusted default-branch code on an ephemeral GitHub-hosted runner to draft
+README changes on eligible same-repository PR branches. PR source is API data,
+never executable input. The writer refuses stale heads, forks and existing
+README edits, and updates the branch without force. Human review remains
+required. It reaches no declared production target and has no deployment or
+package-publication credential or authority.
+"""
+
+[[entrypoint]]
 name = "workflow:control-runner-diagnostic"
 family = "workflow"
 path = ".github/workflows/control-runner-diagnostic.yml"

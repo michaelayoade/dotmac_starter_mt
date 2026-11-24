@@ -6,6 +6,9 @@ on:
 permissions:
   contents: write
   pull-requests: read
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
 concurrency:
   group: readme-draft-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
