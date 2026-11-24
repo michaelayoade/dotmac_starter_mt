@@ -798,6 +798,28 @@ jobs:
       - uses: ./.github/actions/setup-poetry
       - run: bash scripts/consumer_boot_check.sh
 
+  erp-like-composition-boot:
+    runs-on: ubuntu-latest
+    # Wave-end composition proof (Starter parity programme 4.3 item 3). Boots an
+    # assembly composed like ERP v2 (staff_admin facet at `/`, the ERP module
+    # set, explicit surface_selection) and runs the surface conformance kit over
+    # a packaged surface inside it, so a composition defect is found on the
+    # integration branch before tagging or a branch-to-main squash. Hermetic:
+    # no database, no network. The same file also runs inside `unit`.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pypoetry/artifacts
+          key: poetry-artifacts-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      - run: '[ -d .venv ] || python -m venv .venv'
+      - run: poetry install
+      - run: poetry run pytest tests/architecture/test_erp_like_composition_boot.py -q
+
   ui-artifact:
     runs-on: ubuntu-latest
     # The dotmac-ui counterpart of `consumer-boot`, and it exists because the
