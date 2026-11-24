@@ -75,6 +75,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-content`](../packages/dotmac-content/README.md) | optional module | [`audit-complete`](../packages/dotmac-content/EXTRACTION.toml) | [tenant · `mod_content`](../packages/dotmac-content/src/dotmac_content/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
 | [`dotmac-customers`](../packages/dotmac-customers/README.md) | optional module | [`audit-complete`](../packages/dotmac-customers/EXTRACTION.toml) | [tenant · `mod_customers`](../packages/dotmac-customers/src/dotmac_customers/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a98` | — | `dotmac_sub` |
 | [`dotmac-delivery-resend`](../packages/dotmac-delivery-resend/README.md) | optional module | [`audit-complete`](../packages/dotmac-delivery-resend/EXTRACTION.toml) | [stateless](../packages/dotmac-delivery-resend/src/dotmac_delivery_resend/manifest.py) | — | — | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a105` | — | `dotmac_academy_v2` |
+| [`dotmac-deploy-agent`](../packages/dotmac-deploy-agent/README.md) | universal facility | [`audit-complete`](../packages/dotmac-deploy-agent/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_vendor_control_plane` |
 | [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`adopted`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a77` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-deployment-foundation`](../packages/dotmac-deployment-foundation/README.md) | universal facility | [`adopted`](../packages/dotmac-deployment-foundation/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.4.0a1` | — | `dotmac_erp` | `dotmac_integrator`, `dotmac_starter_mt`, `dotmac_sub` |
 | [`dotmac-device-cli`](../packages/dotmac-device-cli/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-device-cli/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | — | `dotmac_sub` |
@@ -402,6 +403,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-delivery-resend/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_academy_v2`.
+
+### [`dotmac-deploy-agent`](../packages/dotmac-deploy-agent/README.md)
+
+- **Owner:** The host-side launcher of a governed deployment: it fetches signed materials from Control over the one all-HTTPS target API, takes and releases the host lease, moves an image through a loopback-only transient registry by digest, renders the canonical non-secret params.env, delivers wrapped secret_ids and OpenBao Agent configuration, applies the M11 legacy env bridge, launches Foundation and returns an observation.
+- **Contract:** Launch only: decide nothing and run nothing in Foundation's place. Refuse, before Foundation starts and with a closed refusal code, any params digest that is not the plan's, any secret-shaped or typed-secret value, any `.env` or Compose override, any legacy file whose sha, names, path or expiry differ from the policy Control bound, any lease refusal, any image whose digest or repository differs from the release, and any CP response that is unsigned, mis-bound or outside the 60 s clock window. Hold no CP database credential or reach, no lease DSN and no registry pull credential. NOT desired state, approvals or plans (dotmac-deployment-control); NOT the fence, backup, migrate, start, health or exposure sequence (dotmac-deployment-foundation and the CP bindings); NOT secret values (OpenBao).
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-deploy-agent/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_vendor_control_plane`.
 
 ### [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md)
 

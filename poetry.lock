@@ -1063,6 +1063,23 @@ type = "directory"
 url = "packages/dotmac-delivery-resend"
 
 [[package]]
+name = "dotmac-deploy-agent"
+version = "0.1.0a1"
+description = "Product-neutral outbound deploy launcher: signed fetch, lease, governed image transfer, params and secret_id delivery, then launch Foundation and return an observation. Launch only; it decides nothing."
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+cryptography = ">=42"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-deploy-agent"
+
+[[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a2"
 description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0057 § 3)"
@@ -4600,4 +4617,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9ce10a3a0d7b9e5c62fb0491cbc51e35b76cd3a816a5abe911e66d27ac071b9d"
+content-hash = "533d129cb4d5bb97bd0849932cf145b37841823de5ddf73aedd3f9fedcb13863"
