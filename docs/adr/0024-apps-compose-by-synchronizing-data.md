@@ -974,7 +974,7 @@ tests, a one-shot real-record preview, and a guarded enable of one binding with 
 target cap and a disable-binding kill switch. The incumbent writer is sealed
 before a binding becomes writable.
 
-**15.7 S11 clarification.** `dotmac-delivery-smtp` stays in-product. The recorded
+**15.7 S11 clarification.** (Superseded 2026-11-22: `dotmac-delivery-smtp` was retired in favour of `dotmac-connector-smtp` in one net-zero transfer, approved by Michael; the text below is the original record.) `dotmac-delivery-smtp` stays in-product. The recorded
 transfer of the `outbound_transport` baseline from 0 to 1 retires to
 `dotmac-connector-smtp`, read as hosted in Academy's companion Integrator, and
 the baseline then returns to 0 with cutover evidence. Academy A4 (the transport switch onto `dotmac-delivery-smtp`) lowers Academy's `outbound_transport` count in the same change, with cutover evidence; that is the paired half of this transfer. The Starter S1 condition is not met until the

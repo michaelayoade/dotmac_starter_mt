@@ -86,3 +86,47 @@ neutral wake-up vocabulary is `collections.case.step_due.v1`. Assemblies may
 omit the port only for explicit command-driven operation; a production Cloud,
 Sub or Vendor Control Plane binding must adapt this port to
 `dotmac-durable-timers` without moving the policy decision into the adapter.
+
+## The per-account access hold and R10 holds (0.1.0a3, GAP-4)
+
+An overdue postpaid invoice opens a case at its due date (the assembly routes
+`collections.exposure.due.v1` back to `assess`), runs the notice ladder, and turns
+the account's service off at `access_hold_from`, which the assembly's reader
+computes (`due_at` plus the account's grace) and carries on
+`ReceivableObservationV1`. Collections owns the decision and the per-account state;
+it never touches service access. It emits `collections.subject.access_hold.v1` when
+a subject enters or leaves `held`, and the product writes the access signal
+(COLLECTIONS_HOLD) from it.
+
+- A subject is `held` when some active case has `access_hold_from <= now` and no
+  live collection hold; with a live hold it is `suppressed` (service on, reminders
+  paused); otherwise `clear`. `get_collection_subject_state` reads it.
+- `CollectionHoldService.place` / `.lift` write insert-only holds keyed by an opaque
+  `external_ref` (`<kind>:<id>`, at most 255 characters). The same live reference on
+  the same subject returns the existing hold; on another subject it is refused. A
+  lift of a hold that is not live is a quiet `HoldNotLive`, because the caller's
+  event can be redelivered. Pass the `CollectionsTimer` to `lift` so the ladder is
+  re-armed.
+- Subject convention: `subject_ref = "billing-account:{uuid}"` everywhere.
+- Approval of staff-placed holds is optional and off by default; Collections stores
+  only the `approval_ref` the caller obtained.
+
+Duties of the caller (the assembly / Sub-thin):
+
+1. Route `billing.receivable.exposure.v1/v2` and `collections.exposure.due.v1` to
+   `assess` (the timer entity id is `{source_owner}:{exposure_ref}`), each in its own
+   transaction, with one policy per `collection_timing` (reason `invoice_overdue`).
+2. Route `collections.case.access_hold_due.v1`: read the case with
+   `get_collection_case(case_id)`, run the money-flows balance pass
+   (`apply_balance_on_invoice_issued` for its invoice) in its own earlier
+   transaction, then call `process_access_hold_due`. Only that command engages the
+   hold, so no other command can cut service before the balance pass. Pass the fired
+   `collections.exposure.due.v1` trigger to `assess(exposure_wake=...)`. A technical failure raises and is
+   redelivered; there is no staff queue.
+3. Consume `collections.subject.access_hold.v1`: write COLLECTIONS_HOLD on every
+   postpaid service of the account; on service activation or transfer call
+   `republish_subject_state` and apply the event it emits (a fresh version, so SAP does
+   not drop it as STALE),
+   drop a STALE reply and park a CONFLICT with an ops alert.
+4. Place and lift R10 holds for approved payment arrangements and service
+   extensions.

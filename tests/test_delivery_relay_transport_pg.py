@@ -15,7 +15,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from dotmac_delivery_smtp import SmtpOutcomeUnknown
 from dotmac_kernel.delivery import DeliveryDeferred, DeliveryOutcomeUnknown
 from dotmac_kernel.delivery_providers import AttachmentRef
 from dotmac_kernel.delivery_relay import (
@@ -255,7 +254,7 @@ def test_a_final_negative_verdict_fails_the_dispatch_and_stops(
     "unknown",
     [
         DeliveryOutcomeUnknown("reply lost"),
-        SmtpOutcomeUnknown("reply lost after DATA (TimeoutError)"),
+        DeliveryOutcomeUnknown("reply lost after DATA (TimeoutError)"),
     ],
 )
 def test_unknown_outcome_is_terminal_audited_and_never_retried(

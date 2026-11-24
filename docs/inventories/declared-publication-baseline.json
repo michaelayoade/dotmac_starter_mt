@@ -102,6 +102,11 @@
       "reason": "DECLARED BY THE RRR ISSUANCE SLICE, NOT YET RELEASED. a1 IS published (peeled tag dotmac-connector-remita-v0.1.0a1 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.reference.issuance.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a1 in place. The exact a1 manifest is preserved as POLL_ONLY_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a2, and never merge an ERP shadow cutover before that tag exists.",
       "state": "declared-unpublished"
     },
+    "dotmac-connector-smtp": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED AND MECHANICALLY HELD BACK. The SMTP delivery connector (Academy companion work package B4) has no published tag and release_enabled is false, so it is available only to development composition and both release resolves refuse it. Release needs its own approval after the Integrator delivers engine-owned network targets to DELIVERY handlers (dispatch.prepare does not today, so the connector fails closed) and the outbound pump exists. Remove this row only in the same change that satisfies those gates, enables the reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source conformance is not adoption and must not be used to bypass the hold or edit the declaration down.",
+      "state": "never-published"
+    },
     "dotmac-connector-sub-accounting": {
       "declared": "0.1.0a1",
       "reason": "INTENDED AND MECHANICALLY HELD BACK. The greenfield Sub invoices/accounting-sync/v2 POLL connector has no published tag and holds no release-connectors.json allowlist row, so it is available only to development composition and both release resolves refuse it. ERP's own ProductPort descriptor v3 (invoices.accounting_sync.observation.v1) that this connector's claims_contract_digest pins against stays configured_disabled, an isolated ERP Integrator instance is templated but not deployed, and no production binding, scope, or activation has been authorized. Remove this row only in the same change that authorizes and lands a reviewed release policy, installs the artifact back, and tags exact 0.1.0a1. Source and cross-repo fixture conformance are not adoption and must not be used to bypass the hold or edit the declaration down.",
@@ -111,11 +116,6 @@
       "declared": "0.1.0a4",
       "reason": "DECLARED BY THE APPROVED-TEMPLATE CATALOGUE SLICE, NOT YET RELEASED. a3 IS published (peeled tag dotmac-connector-whatsapp-v0.1.0a3 -> 70459efd468dd2dcc9e31693b9910b04fec21447), so the catalogue capability, the required waba_id on messaging.send.v1 and the attachment gates could not be added to a3 in place without one version number naming two contracts; the exact a3 manifest is preserved as DELIVERY_MANIFEST for adoption. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a4, and never merge an Integrator pin before that tag exists.",
       "state": "declared-unpublished"
-    },
-    "dotmac-delivery-smtp": {
-      "declared": "0.1.0a1",
-      "reason": "Unpublished SMTP delivery adapter (S11, P-1): source and tests only, extracted product-first from Academy. No release is authorized and the package is not allowlisted. This row records source only and is not publication or adoption evidence. Remove it only through the independently verified release record, never by editing the declared version down.",
-      "state": "never-published"
     },
     "dotmac-deployment-foundation": {
       "declared": "0.4.0a1",
@@ -140,6 +140,16 @@
     "dotmac-integration": {
       "declared": "0.1.0a22",
       "reason": "ALLOCATED SUCCESSOR, NOT YET PUBLISHED. 0.1.0a22 carries the DELIVERY crash-safety, terminal-state retention and DELIVERY network-target fixes; published 0.1.0a21 (tag dotmac-integration-v0.1.0a21) remains immutable. This gap is NOT to be repaired by editing the version down. Remove this row in the a22 release-record change after the protected release-module run tags dotmac-integration-v0.1.0a22 from the exact merged revision and records its verification; allocation is not publication.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a110+dev",
+      "reason": "Unpublished source successor to verified 0.1.0a110. It publishes the email.send.v1 command contract (EMAIL_SEND_COMMAND_SCHEMA) for the delivery domain; definition only, no allocation. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently reviewed release record that publishes the next kernel version.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-money-flows": {
+      "declared": "0.1.0a2",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-money-flows-v0.1.0a1). 0.1.0a2 adds the receivables reader on top of published a1, and it requires dotmac-collections 0.1.0a3, so it is released only after collections 0.1.0a3 is published. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
       "state": "declared-unpublished"
     },
     "dotmac-positioning": {

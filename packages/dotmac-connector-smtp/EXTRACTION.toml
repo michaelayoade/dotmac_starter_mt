@@ -1,0 +1,53 @@
+schema_version = 1
+package = "dotmac-connector-smtp"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "SMTP submission transport for the Dotmac Integrator: required STARTTLS with certificate and hostname verification (TLS 1.2 minimum), MIME construction from one rendered message, Message-ID derivation from the dispatch id, classification of SMTP replies into engine outcomes, and refusal of any endpoint outside the installation's operator-bound network targets before any I/O"
+contract = "Implement dotmac-integration SPI >=1.7,<2.0 for connector key smtp. Serve email.send.v1 in DELIVERY: given one rendered message, operator-bound destination configuration (host, pinned address, port, username, from address) and a materialised smtp_password secret, submit it and return one Outcome. The endpoint is checked with require_network_target before any I/O and the connection goes to that pinned address; STARTTLS is always required and the certificate hostname verified. Every failure after the DATA payload left, including an explicit non-250 final reply, is RECONCILIATION_REQUIRED and never retried; pre-DATA bounces and rejections are TERMINAL; connection, TLS, 4xx and soft 5.2/5.4 before DATA are RETRYABLE. Own no table, queue, retry, consent, rendering, attachment storage or secret path, and import no kernel type."
+source_repositories = ["dotmac_academy_app", "dotmac_erp", "dotmac_starter_mt", "dotmac_sub"]
+source_revisions = [
+  "dotmac_academy_app:fc8d15b686f6a60905c88ee6fc709fee0b7cf6b9",
+  "dotmac_erp:74fa788ae562905e4c8a1fcd46616585e4bf7694",
+  "dotmac_starter_mt:4746829764e6b15ba9f733fb217246b43bf365f2",
+  "dotmac_sub:c7707880232c9298ef89c24a1aea66d35bd3a1e6",
+]
+source_paths = [
+  "dotmac_academy_app:app/services/email.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:packages/dotmac-connector-smtp/tests/test_classification.py",
+  "dotmac_starter_mt:packages/dotmac-connector-smtp/tests/test_transport.py",
+  "dotmac_starter_mt:packages/dotmac-connector-smtp/tests/test_handler.py",
+  "dotmac_starter_mt:packages/dotmac-connector-smtp/tests/test_connector.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator", "dotmac_academy_app"]
+inventory_evidence = [
+  "docs/inventories/delivery-smtp-sources.md",
+]
+first_cutover = "The Academy companion Integrator (Integrator topology ruling D10): after a separately authorized release and an exact pin in dotmac_integrator, and after the Integrator outbound pump exists, the operator binds the SMTP destination as a network target, enters the password once as runtime material, and Academy flips mail kinds one at a time while its legacy sender stays live. This dossier authorizes none of that."
+shadow_and_drift = "Not applicable: adoption is proven by the package's SMTP-sink tests, a recorded-row MIME backtest and a real-record preview (connection check, no DATA), not by side-by-side sending."
+local_copy_retirement = "Starter: dotmac-delivery-smtp (the never-released source of the moved provider, classify and config modules, at dotmac_starter_mt revision 4746829764e6b15ba9f733fb217246b43bf365f2) is deleted in the same change that introduces this package, together with its tests and the conserved test exclusion; the outbound_transport baseline goes from 1 to 0 (net-zero Governance ADR 0011 transfer, approved by Michael). Academy deletes its smtplib sender (dotmac_academy_app:app/services/email.py) at the per-kind cutover."
+next_action = "Review, then a separately authorized release of 0.1.0a1 once the Integrator delivers engine-owned network targets to DELIVERY handlers (see CHANGELOG) and the pump exists."
+
+[[product_writers]]
+product = "dotmac_academy_app"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "fc8d15b686f6a60905c88ee6fc709fee0b7cf6b9"
+evidence_paths = ["app/services/email.py"]
+
+[[product_writers]]
+product = "dotmac_erp"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "74fa788ae562905e4c8a1fcd46616585e4bf7694"
+evidence_paths = ["app/services/email.py"]
+
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "inventory_only"
+retirement_required = false
+revision = "c7707880232c9298ef89c24a1aea66d35bd3a1e6"
+evidence_paths = ["app/services/email.py"]

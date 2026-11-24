@@ -256,3 +256,34 @@ Duties of the caller (Sub-thin):
 - Migrated accounts: the first Starter charge is due at the legacy paid-through end;
   nothing is realigned or prorated at cutover. Count weekly subscriptions and accounts
   with more than one cycle in the dry-run census (the terms have no weekly value).
+
+## The X1 reader and the access hold (GAP-4)
+
+`BillingReceivablesReader(db)` is the one place Billing's exposure becomes
+Collections' observation. Build it per transaction over the caller's session and pass
+it to `CollectionCaseService.assess` / `process_step_due` / `process_access_hold_due`.
+It reads the grace at the due date, so Collections stores a fixed `access_hold_from`
+when it opens the case.
+
+Duties of the caller (Sub-thin) beyond the Collections README:
+
+1. Hold the tenant `postpaid_grace` default and the per-account overrides in Billing's
+   account terms, effective from the flip. The grace is the whole time from the due
+   date to service off (Sub's grace plus the suspend-step offset, carried literally).
+   The invoice due date is frozen at issue from the tenant `postpaid_payment_due_days`
+   setting (default 30).
+2. On `collections.case.access_hold_due.v1` run
+   `apply_balance_on_invoice_issued(InvoiceIssuedV1(document_id))` for the invoice in
+   its own transaction first (it takes the Billing account lock), then
+   `process_access_hold_due` in another. No Billing lock and Collections lock are ever
+   held together.
+3. Give the reader the flip as `terms_floor_at` (a typed input entered at ship time, not
+   hard-coded). Account terms cannot be back-dated, so an item issued or due before the
+   flip has no terms at those instants; the reader reads terms at the later of the
+   instant and the floor. If none exist even then it returns
+   `PositionUnavailable("account_terms_missing")` and Collections blocks the exposure
+   (no case, no retry): record the terms and the next Billing event re-assesses it.
+   Treat any other raised failure as redelivery, not as a queue item.
+4. An open prepaid exposure is an anomaly: the reader refuses it (`not_postpaid`) and
+   it goes to the manual exceptions review, not a script.
+

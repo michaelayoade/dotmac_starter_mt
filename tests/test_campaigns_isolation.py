@@ -88,9 +88,8 @@ def migrated_scratch(request: pytest.FixtureRequest) -> Iterator[tuple[str, str]
     setup.dispose()
     admin_url = _url_for(superuser, name, user="app_admin")
     try:
-        from alembic.config import Config
-
         from alembic import command
+        from alembic.config import Config
 
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
@@ -270,7 +269,8 @@ def test_dated_deadline_is_tenant_scoped_and_immutable_after_scheduling(
         with pytest.raises(DBAPIError, match="campaign snapshot is immutable"):
             db.execute(
                 text(
-                    "UPDATE mod_campaigns.campaign_revisions SET delivery_expires_at=:later WHERE campaign_id=:id"
+                    "UPDATE mod_campaigns.campaign_revisions "
+                    "SET delivery_expires_at=:later WHERE campaign_id=:id"
                 ),
                 {"later": deadline + timedelta(days=1), "id": campaign_id},
             )
@@ -287,9 +287,8 @@ def test_dated_deadline_is_tenant_scoped_and_immutable_after_scheduling(
 def test_deadline_upgrade_preserves_existing_unbounded_revisions(
     migrated_scratch: tuple[str, str],
 ) -> None:
-    from alembic.config import Config
-
     from alembic import command
+    from alembic.config import Config
 
     admin_url, app_url = migrated_scratch
     tenant, _ = _seed_tenants(admin_url)
@@ -300,8 +299,10 @@ def test_deadline_upgrade_preserves_existing_unbounded_revisions(
             conn.execute(
                 text(
                     "INSERT INTO mod_campaigns.campaigns "
-                    "(id,tenant_id,code,name,status,scheduled_at,evidence_expires_at,pii_expires_at) "
-                    "VALUES (:id,:tenant,'legacy','Legacy','draft',:now,:retention,:retention)"
+                    "(id,tenant_id,code,name,status,scheduled_at,"
+                    "evidence_expires_at,pii_expires_at) "
+                    "VALUES (:id,:tenant,'legacy','Legacy','draft',"
+                    ":now,:retention,:retention)"
                 ),
                 {
                     "id": campaign_id,
@@ -313,8 +314,10 @@ def test_deadline_upgrade_preserves_existing_unbounded_revisions(
             conn.execute(
                 text(
                     "INSERT INTO mod_campaigns.campaign_revisions "
-                    "(id,tenant_id,campaign_id,revision_number,kind,channel,timezone,send_window_start,send_window_end,sender_key) "
-                    "VALUES (:id,:tenant,:campaign,1,'one_time','email','UTC',:clock,:clock,'support')"
+                    "(id,tenant_id,campaign_id,revision_number,kind,channel,"
+                    "timezone,send_window_start,send_window_end,sender_key) "
+                    "VALUES (:id,:tenant,:campaign,1,'one_time','email','UTC',"
+                    ":clock,:clock,'support')"
                 ),
                 {
                     "id": revision_id,
@@ -332,13 +335,81 @@ def test_deadline_upgrade_preserves_existing_unbounded_revisions(
         with _tenant_session(app_url, tenant) as db:
             row = db.execute(
                 text(
-                    "SELECT id,delivery_expires_at FROM mod_campaigns.campaign_revisions WHERE id=:id"
+                    "SELECT id,delivery_expires_at "
+                    "FROM mod_campaigns.campaign_revisions WHERE id=:id"
                 ),
                 {"id": revision_id},
             ).one()
             assert row.id == revision_id and row.delivery_expires_at is None
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE mod_campaigns.campaigns SET status='scheduled' WHERE id=:id"
+                ),
+                {"id": campaign_id},
+            )
+        with _tenant_session(app_url, tenant) as db:
+            with pytest.raises(DBAPIError, match="campaign snapshot is immutable"):
+                db.execute(
+                    text(
+                        "UPDATE mod_campaigns.campaign_revisions "
+                        "SET sender_key='changed' WHERE id=:id"
+                    ),
+                    {"id": revision_id},
+                )
+            db.rollback()
     finally:
         engine.dispose()
+
+
+def test_snapshot_guard_rejects_each_snapshot_shape_but_allows_privacy_scrub(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    admin_url, app_url = migrated_scratch
+    tenant, _ = _seed_tenants(admin_url)
+    with _tenant_session(app_url, tenant) as db:
+        campaign = _seed_campaign(db, tenant)
+        schedule_campaign(
+            db,
+            tenant_id=tenant,
+            campaign_id=campaign.id,
+            timers=FakeTimerPort(),
+            idempotency_key="snapshot-schedule",
+            idempotency_expires_at=NOW + timedelta(days=7),
+            recorded_at=NOW,
+        )
+        campaign_id = campaign.id
+        db.commit()
+    statements = (
+        "UPDATE mod_campaigns.campaign_revisions "
+        "SET sender_key='changed' WHERE campaign_id=:id",
+        "UPDATE mod_campaigns.campaign_steps "
+        "SET template_slug='changed' WHERE campaign_id=:id",
+        "UPDATE mod_campaigns.campaign_audiences "
+        "SET eligibility_reason='changed' WHERE campaign_id=:id",
+        "UPDATE mod_campaigns.campaign_recipients "
+        "SET address='changed@example.test' WHERE campaign_id=:id",
+        "DELETE FROM mod_campaigns.campaign_revisions WHERE campaign_id=:id",
+        "DELETE FROM mod_campaigns.campaign_steps WHERE campaign_id=:id",
+        "DELETE FROM mod_campaigns.campaign_audiences WHERE campaign_id=:id",
+        "DELETE FROM mod_campaigns.campaign_recipients WHERE campaign_id=:id",
+    )
+    for statement in statements:
+        with _tenant_session(app_url, tenant) as db:
+            with pytest.raises(DBAPIError, match="campaign snapshot is immutable"):
+                db.execute(text(statement), {"id": campaign_id})
+            db.rollback()
+    with _tenant_session(app_url, tenant) as db:
+        changed = db.execute(
+            text(
+                "UPDATE mod_campaigns.campaign_recipients "
+                "SET address=NULL,context='{}'::jsonb,scrubbed_at=:now "
+                "WHERE campaign_id=:id"
+            ),
+            {"id": campaign_id, "now": NOW},
+        )
+        assert changed.rowcount == 1
+        db.commit()
 
 
 def test_live_catalog_proves_forced_rls_and_composite_tenant_contract(

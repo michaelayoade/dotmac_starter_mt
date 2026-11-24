@@ -375,6 +375,10 @@ def test_empty_historical_receipt_migration_can_downgrade(
     with engine.begin() as conn:
         with Operations.context(MigrationContext.configure(conn)):
             # pa_0005's historical_settlements depends on the receipts table.
+            # pa_0007's stamp sits on supplier_payments, so it rolls back first.
+            import_module(
+                "dotmac_payables.migrations.versions.pa_0007_separation_policy"
+            ).downgrade()
             import_module(
                 "dotmac_payables.migrations.versions.pa_0005_reversal_settled_history"
             ).downgrade()
@@ -862,10 +866,14 @@ def test_supplier_payment_migration_downgrade_refuses_once_populated(
     later = import_module(
         "dotmac_payables.migrations.versions.pa_0006_tax_release_hist_credit"
     )
+    stamp = import_module(
+        "dotmac_payables.migrations.versions.pa_0007_separation_policy"
+    )
     engine = create_engine(admin_url)
     with engine.connect() as conn:
         transaction = conn.begin()
         with Operations.context(MigrationContext.configure(conn)):
+            stamp.downgrade()
             later.downgrade()
             migration.downgrade()  # empty: allowed
         assert (
@@ -877,6 +885,7 @@ def test_supplier_payment_migration_downgrade_refuses_once_populated(
     with engine.connect() as conn:
         transaction = conn.begin()
         with Operations.context(MigrationContext.configure(conn)):
+            stamp.downgrade()
             later.downgrade()
             with pytest.raises(RuntimeError, match="forward correction"):
                 migration.downgrade()
@@ -1107,6 +1116,7 @@ def test_concurrent_creates_on_one_obligation_allow_exactly_one(
             idempotency_key=f"k:{number}",
             idempotency_expires_at=None,
             prepared_at=now,
+            separation_of_duties=True,
         ).id
 
     first, second = _run_pair(admin_url, make("SPAY-A"), make("SPAY-B"))
@@ -1141,6 +1151,7 @@ def _approved_payment(admin_url: str, tenant, obligation, number="SPAY-R"):
             idempotency_key=f"k:{number}",
             idempotency_expires_at=None,
             prepared_at=now,
+            separation_of_duties=True,
         )
         pid = payment.id
         approve_supplier_payment(
@@ -1235,6 +1246,7 @@ def test_approve_racing_cancel_leaves_a_consistent_reservation(
             idempotency_key="k:x",
             idempotency_expires_at=None,
             prepared_at=now,
+            separation_of_duties=True,
         ).id
         db.commit()
     engine.dispose()
@@ -1661,10 +1673,14 @@ def test_reversal_lifecycle_and_downgrade_policy_in_the_database(
     migration = import_module(
         "dotmac_payables.migrations.versions.pa_0005_reversal_settled_history"
     )
+    stamp = import_module(
+        "dotmac_payables.migrations.versions.pa_0007_separation_policy"
+    )
     # Downgrade is allowed while nothing a5-specific exists ...
     with engine.connect() as conn:
         transaction = conn.begin()
         with Operations.context(MigrationContext.configure(conn)):
+            stamp.downgrade()
             migration.downgrade()
         assert (
             conn.scalar(text("SELECT to_regclass('mod_payables.invoice_recognitions')"))

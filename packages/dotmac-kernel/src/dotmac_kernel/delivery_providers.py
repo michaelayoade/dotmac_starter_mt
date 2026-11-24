@@ -821,7 +821,108 @@ def send(
     return Sent(receipt=receipt)
 
 
+#: The capability id of the email send contract a delivery connector serves
+#: (ADR-0024 10: the owning domain publishes the payload contract; a connector
+#: only claims its digest). `.v1` is part of the identity: a schema change is a
+#: new id, never an edit of this one.
+EMAIL_SEND_CAPABILITY_ID = "email.send.v1"
+
+#: The command payload of `email.send.v1`: one already-rendered, already
+#: addressed message. It mirrors `OutboundMessage` for the email channel, with
+#: the dispatch id as a string and attachments by reference only (never bytes).
+#: A DELIVERY capability publishes a command schema and no result schema: the
+#: effect is the outcome.
+#:
+#: The digest of this schema depends on the kernel constants it embeds
+#: (`MAX_PART_BYTES`, `ALLOWED_HEADERS`, the attachment limits and content
+#: types). Changing ANY of them changes the published contract: that is
+#: `email.send.v2`, never an edit of v1 (the digest pin in
+#: `tests/unit/test_email_send_contract.py` is the guard).
+EMAIL_SEND_COMMAND_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["dispatch_id", "address"],
+    "description": (
+        "At least one of text/html must be a string. text and html are limited "
+        "in UTF-8 BYTES (MAX_PART_BYTES), which JSON Schema cannot count: "
+        "maxLength bounds characters only, and the producer and the connector "
+        "enforce the byte limit. Each header value is limited in CHARACTERS "
+        "(MAX_HEADER_VALUE_LENGTH) and may not contain CR or LF."
+    ),
+    "anyOf": [
+        {"required": ["text"], "properties": {"text": {"type": "string"}}},
+        {"required": ["html"], "properties": {"html": {"type": "string"}}},
+    ],
+    "properties": {
+        "dispatch_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            # Python's `$` also matches before a final newline.
+            "not": {"type": "string", "pattern": "[\\r\\n]"},
+        },
+        "address": {
+            "type": "string",
+            "pattern": (
+                '^[^\\s<>"@,;:()\\[\\]\\\\]{1,64}@' '[^\\s<>"@,;:()\\[\\]\\\\]{1,255}$'
+            ),
+            "not": {"type": "string", "pattern": "[\\r\\n]"},
+        },
+        "subject": {
+            "type": ["string", "null"],
+            "maxLength": 998,
+            "not": {"type": "string", "pattern": "[\\r\\n]"},
+        },
+        "text": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
+        "html": {"type": ["string", "null"], "maxLength": MAX_PART_BYTES},
+        "headers": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                name: {
+                    "type": "string",
+                    "maxLength": MAX_HEADER_VALUE_LENGTH,
+                    "not": {"pattern": "[\\r\\n]"},
+                }
+                for name in ALLOWED_HEADERS
+            },
+        },
+        "attachments": {
+            "type": "array",
+            "maxItems": MAX_ATTACHMENTS,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["kind", "ref", "filename", "content_type"],
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_.-]*$",
+                        "maxLength": MAX_ATTACHMENT_KIND_LENGTH,
+                    },
+                    "ref": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": MAX_ATTACHMENT_REF_LENGTH,
+                    },
+                    "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": MAX_ATTACHMENT_FILENAME_LENGTH,
+                    },
+                    "content_type": {
+                        "type": "string",
+                        "enum": sorted(ALLOWED_ATTACHMENT_CONTENT_TYPES),
+                    },
+                },
+            },
+        },
+    },
+}
+
+
 __all__ = [
+    "EMAIL_SEND_CAPABILITY_ID",
+    "EMAIL_SEND_COMMAND_SCHEMA",
     "ALLOWED_ATTACHMENT_CONTENT_TYPES",
     "ALLOWED_HEADERS",
     "MAX_PART_BYTES",

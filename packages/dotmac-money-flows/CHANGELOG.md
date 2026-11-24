@@ -1,5 +1,29 @@
 # Changelog — dotmac-money-flows
 
+## 0.1.0a2 — unreleased (GAP-4: the X1 receivables reader)
+
+Source only. a1 is being published; this adds one stateless module on top of it.
+
+- `receivables.BillingReceivablesReader` (X1): implements Collections'
+  `ReceivablesReader` over Billing's sealed document exposure (native V1 and imported
+  V2) and one caller session. No table, migration, event, lock or clock. It maps the
+  exposure to `ReceivableObservationV1` with `subject_ref = "billing-account:{uuid}"`
+  and adds `access_hold_from` = `due_at` + the account's `postpaid_grace` read at the
+  due date (a terms change that takes effect later cannot move it). A prepaid
+  account's open exposure is `PositionUnavailable("not_postpaid")`; an unverified due
+  date carries no due or hold instant; an unknown document is `PositionUnknown`; a
+  source owner other than Billing is an authority mismatch. Any other Billing refusal
+  raises, so the caller's event delivery retries.
+- `BillingReceivablesReader.terms_floor_at` (typed input, the flip instant entered at
+  ship time): terms are read at the later of the instant and the floor, because Billing
+  refuses back-dated terms and an item issued or due before the flip has none. If none
+  exist even then the reader returns `PositionUnavailable("account_terms_missing")`
+  (no poison message, no queue); any other Billing refusal still raises.
+- Depends on `dotmac-collections >=0.1.0a3` (contract classes only; no Collections
+  function is imported). Own-commit allowlist widening: `receivables.py` may read
+  `get_effective_account_terms`, `ReceivableExposureV1/V2` and `DueDateBasisStatus`.
+- Version surfaces move to `0.1.0a2` (pyproject, manifest, package, lock).
+
 ## 0.1.0a1 — unreleased
 
 Source only; not published, not composed into any assembly.

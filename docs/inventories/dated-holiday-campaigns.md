@@ -57,11 +57,19 @@ greeting. The product UI must not silently mutate a confirmed snapshot.
 
 ## Migration and verification plan
 
-`ca_0002_delivery_deadline` expands only `campaign_revisions` with a nullable
+`ca_0002_delivery_deadline` expands `campaign_revisions` with a nullable
 timestamp. Existing rows stay unbounded (NULL); no deadline is invented and no
 data is deleted. Existing revision immutability and forced RLS apply to the
 new column. Downgrade is refused because removing an admitted deadline would
 silently widen delivery permission.
+
+The same unpublished migration replaces the shared snapshot trigger function
+to isolate recipient-only fields inside the recipient UPDATE branch. This
+repairs the PostgreSQL undefined-column failure when frozen revisions, steps
+or audiences are changed. All frozen snapshots still reject updates/deletes;
+only the existing recipient privacy-scrub transition remains permitted.
+The published ca_0001 migration bytes are unchanged. The predecessor upgrade
+test checks both NULL preservation and the repaired immutability guard.
 
 Canaries cover local-day UTC boundaries, DST ambiguity/gaps, malformed or
 inconsistent deadlines, legacy fingerprint compatibility, late due work,

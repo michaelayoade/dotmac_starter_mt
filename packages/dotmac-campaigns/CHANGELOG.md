@@ -7,6 +7,8 @@
 - Deadline checks before intent publication and immediately before transport;
   expiry cannot overwrite earlier terminal delivery observations.
 - Nullable ca_0002 expansion preserves existing unbounded campaigns.
+- ca_0002 also repairs the shared snapshot trigger's table-specific field
+  access while preserving frozen snapshots and recipient privacy scrubbing.
 
 This is not a bare successor allocation, package release, product adoption or
 Selfcare deployment. Git-hosted CI and product cutover evidence remain required.

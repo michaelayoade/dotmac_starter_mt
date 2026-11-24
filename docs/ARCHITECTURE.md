@@ -1,5 +1,9 @@
 # Architecture
 
+- **New to Starter?** Read the [plain-language overview](concepts/overview.md) first.
+- **Want to run it?** Follow [Your first tenant](tutorials/first-tenant.md).
+- This document remains the authoritative architecture reference.
+
 ## Native domain computation candidates (2026-10-15)
 
 The Rust implementation branch introduces private `_native` extensions owned by
