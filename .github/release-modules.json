@@ -1042,8 +1042,21 @@
           "dotmac_durable_timers/manifest.py",
           "dotmac_durable_timers/models.py",
           "dotmac_durable_timers/service.py",
+          "dotmac_durable_timers/admin.py",
+          "dotmac_durable_timers/builtin.py",
+          "dotmac_durable_timers/cadence.py",
+          "dotmac_durable_timers/dispatch.py",
+          "dotmac_durable_timers/health.py",
+          "dotmac_durable_timers/jobs.py",
+          "dotmac_durable_timers/router.py",
+          "dotmac_durable_timers/run.py",
+          "dotmac_durable_timers/runner.py",
+          "dotmac_durable_timers/runtime.py",
+          "dotmac_durable_timers/web.py",
+          "dotmac_durable_timers/templates/admin/durable_timers/index.html",
           "dotmac_durable_timers/migrations/__init__.py",
-          "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py"
+          "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py",
+          "dotmac_durable_timers/migrations/versions/dt_0002_job_states.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -1053,6 +1066,7 @@
         ],
         "allowed_requires": [
           "dotmac-kernel",
+          "fastapi",
           "sqlalchemy",
           "python"
         ]
