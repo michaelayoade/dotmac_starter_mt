@@ -77,6 +77,11 @@
       "reason": "SOURCE PREPARATION ONLY; UNPUBLISHED AND UNALLOCATED. The previously released 0.1.0a1 remains immutable. This local PEP 440 development marker prevents source preparation from allocating a bare successor identity while the approved tagline addition is completed. Remove this row only after a separately authorized successor allocation and verified publication record; this entry grants no release, adoption, deployment, or flip authority.",
       "state": "declared-unpublished"
     },
+    "dotmac-campaigns": {
+      "declared": "0.1.0a1+dev",
+      "reason": "SOURCE PREPARATION ONLY; UNPUBLISHED AND UNALLOCATED. Published 0.1.0a1 remains immutable. The local development marker separates the dated-occurrence and delivery-deadline proposal from released bytes without allocating a bare successor. The ca_0002 expansion, typed contracts and adoption notes require Git-hosted CI and review. This row authorizes no package publication, consumer adoption, authority switch or deployment; remove it only with a separately authorized successor allocation and verified publication record.",
+      "state": "declared-unpublished"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a3",
       "reason": "DECLARED BY THE v4 OUTBOUND SLICE, NOT YET RELEASED. a2 IS published (peeled tag dotmac-connector-flutterwave-v0.1.0a2 -> 656ecebb05f24c11acda69a069d6fbe60d319f56), and payments.intent.v1, payments.refund.v1, the per-capability modes and the SPI 1.4 floor are all inside the manifest digest an installation adopts by, so they could not be added to a2 in place without one version naming two contracts. The exact a2 manifest is preserved as INGRESS_POLL_MANIFEST and its digest is recorded in docs/inventories/released-manifest-digests.json. It is NOT to be repaired by editing the version down: remove this row only when the connector release workflow installs, verifies and tags 0.1.0a3, and never merge an Integrator pin before that tag exists.",
