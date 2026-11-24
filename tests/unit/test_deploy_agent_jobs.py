@@ -2609,6 +2609,21 @@ def test_r6m1_a_busy_role_job_lock_is_a_lease_refusal_with_no_page_and_no_rm(
     assert rig.cp.lease_log == [] and rig.bao.paths == []  # nothing started
 
 
+def test_r7l2_a_busy_role_job_lock_defers_the_whole_purge(tmp_path: Path) -> None:
+    rig = job_rig(tmp_path)
+    purged: list[str] = []
+    rig.launcher.purge_job_role = lambda role: purged.append(role) or 0  # type: ignore[method-assign]
+    rig.launcher.job_accessors.roles = lambda: ["app"]  # type: ignore[method-assign]
+    held = rig.launcher._lock_role_job()
+    try:
+        rig.launcher.purge_stale_jobs()
+    finally:
+        os.close(held)
+    assert purged == []  # a live job's secrets are never purged under it
+    rig.launcher.purge_stale_jobs()
+    assert purged == ["app"]
+
+
 # -- R5-H2: the full receipt fits Control's depth limit --------------------------
 def test_r5h2_a_full_foundation_receipt_is_not_dropped_by_the_v2_depth_rule(
     tmp_path: Path,

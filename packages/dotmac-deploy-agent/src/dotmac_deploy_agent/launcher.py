@@ -163,9 +163,11 @@ class Launcher:
         cleared = self._clear_orphans()
         if cleared is None:
             # The role-job lock is busy: a role job may be running. Nothing is
-            # removed and nothing is an anomaly; the preflight refuses the lease.
+            # removed and nothing is an anomaly; the preflight refuses the lease. No
+            # purge either (R7-L2): that job's secrets are in use. Next cycle.
             LOG.info("role-job lock busy at agent start: orphan check deferred")
-        found, remains, foreign, _removed = cleared or (False, False, False, False)
+            return
+        found, remains, foreign, _removed = cleared
         if found:
             # P-SEC rev7: files and accessors are STILL purged (a surviving
             # container is no reason to leave DSNs on tmpfs). This agent's own orphan
