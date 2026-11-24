@@ -79,7 +79,7 @@
     },
     "dotmac-collections": {
       "declared": "0.1.0a3",
-      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a2 IS published and tagged (dotmac-collections-v0.1.0a2). 0.1.0a3 adds the GAP-4 per-account access-hold ladder (cl_0002: holds, reminder attempts including skipped steps, subject-locked assess and transition-resume), which reads money-flows receivables, so it is released only after the published dotmac-money-flows 0.1.0a1 it depends on and never folded into a2 in place. Remove this row only after an authorized 0.1.0a3 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
+      "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a2 IS published and tagged (dotmac-collections-v0.1.0a2). 0.1.0a3 adds the GAP-4 per-account access-hold ladder (cl_0002: holds, reminder attempts including skipped steps, subject-locked assess and transition-resume) over a neutral receivable-observation input, so it cannot be folded into a2 in place. It has no dependency on dotmac-money-flows; money-flows 0.1.0a2 consumes it, so a3 is released first. Remove this row only after an authorized 0.1.0a3 publication is tagged from the exact protected revision; allocation is not publication, and the declared version is never edited down.",
       "state": "declared-unpublished"
     },
     "dotmac-connector-flutterwave": {
