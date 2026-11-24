@@ -395,6 +395,7 @@ def test_d_lease_expired_before_the_run_then_reconcile_heals(tmp_path: Path) -> 
         double.acquire({"dispatch_run": "dispatch-1", "ttl_seconds": 900})
     # ...so the next cycle observes (read-only), posts it, and is refused at acquire.
     rig.cp.observations.clear()
+    rig.transfer.calls.clear()  # this cycle's own calls are what is asserted below
     del rig.transfer.transfer_all  # back to the plain fake
     rig.commands.script[("image", "inspect")] = CommandResult(
         0, b'["127.0.0.1:5000/org/app@' + IMAGE_DIGEST.encode() + b'"]\n'
@@ -525,7 +526,6 @@ def test_budget_refuses_a_spent_lease_and_never_extends(tmp_path: Path) -> None:
     with pytest.raises(Refusal) as caught:
         client.run_budget(lease, configured_seconds=10_000)
     assert caught.value.code == "lease_exhausted"
-    assert not hasattr(LeaseClient, "renew")  # s2.6.2 has no renew endpoint
 
 
 def test_the_runner_never_outlasts_the_lease_budget() -> None:

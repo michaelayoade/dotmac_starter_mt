@@ -42,9 +42,6 @@ class RunSpec:
     #: Upper bound on this run, set from what is left of the host lease (WP3B).
     #: The runner uses the smaller of this and its configured timeout.
     timeout_seconds: int | None = None
-    #: Upper bound on this run, set from what is left of the host lease (WP3B).
-    #: The runner uses the smaller of this and its configured timeout.
-    timeout_seconds: int | None = None
     #: Foundation mounts ONLY these files (per file, read-only), not the directory.
     job_secret_files: tuple[str, ...] = ()
     #: The render unit's InvocationID (32 hex): Foundation re-reads the unit and

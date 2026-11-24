@@ -169,7 +169,7 @@ class DeployLeaseDouble:
 
     def _superseded(self, payload: dict[str, object]) -> None:
         row = self.history.get(str(payload.get("lease_id")))
-        if row is not None and row is not self.row:
+        if row is not None and self.row is not None and row is not self.row:
             raise LeaseRefused(409, "lease_superseded")
 
     def covers(self, payload: dict[str, object]) -> dict[str, object]:

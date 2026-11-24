@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 from .client import Reply, TargetClient
 from .refusal import Refusal
@@ -92,10 +92,14 @@ def check_body(route: str, direction: str, body: object) -> None:
             raise Refusal("response_malformed", "body_type")
         if kind is str and not value:
             raise Refusal("response_malformed", "body_value")
-    if "ttl_seconds" in shape and body["ttl_seconds"] <= 0:  # type: ignore[operator]
+    if "ttl_seconds" in shape and cast("int", body["ttl_seconds"]) <= 0:
         raise Refusal("response_malformed", "body_value")
     if route == "lease/standing" and direction == "response":
-        if body["standing"] not in STANDING_VALUES:
+        standing, run = body["standing"], body["dispatch_run"]
+        if standing not in STANDING_VALUES:
+            raise Refusal("response_malformed", "body_value")
+        # An expired, unreleased row names its dispatch; every other standing is null.
+        if (standing == EXPIRED_UNRELEASED) != (run is not None):
             raise Refusal("response_malformed", "body_value")
 
 
@@ -263,14 +267,15 @@ class LeaseClient:
             "acquire", {"dispatch_run": dispatch_id, "ttl_seconds": ttl_seconds}
         )
         answer = _answer(reply, "lease/acquire")
-        lease_id, granted = answer["lease_id"], answer["ttl_seconds"]
-        if len(lease_id) > 128:  # type: ignore[arg-type]
+        lease_id = cast("str", answer["lease_id"])
+        granted = cast("int", answer["ttl_seconds"])
+        if len(lease_id) > 128:
             raise Refusal("lease_refused")
         # The plan bound this TTL; CP may not grant a longer one.
-        if not 0 < granted <= ttl_seconds:  # type: ignore[operator]
+        if not 0 < granted <= ttl_seconds:
             # CP holds a lease the plan did not bind: give it straight back.
             try:
-                self.release(Lease(lease_id, ttl_seconds), host_mutated=False)  # type: ignore[arg-type]
+                self.release(Lease(lease_id, ttl_seconds), host_mutated=False)
             except Refusal:
                 pass
             raise Refusal("lease_ttl_invalid")
@@ -282,9 +287,7 @@ class LeaseClient:
             # given: the whole hold is what this grant covers, measured from receipt.
             total = min(total, granted)
         # Deadline from the ttl RETURNED, counted from before the request left.
-        return Lease(  # type: ignore[arg-type]
-            lease_id, granted, sent + granted, sent, total, ttl_seconds
-        )
+        return Lease(lease_id, granted, sent + granted, sent, total, ttl_seconds)
 
     def covers(self, lease: Lease, *, dispatch_id: str) -> bool:
         try:
@@ -305,15 +308,21 @@ class LeaseClient:
             "renew", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}
         )
         answer = _answer(reply, "lease/renew")
-        granted = answer["ttl_seconds"]
-        if (
-            answer["lease_id"] != lease.lease_id or granted > lease.ttl_seconds  # type: ignore[operator]
+        granted = cast("int", answer["ttl_seconds"])
+        # A grant is never longer than the ttl the plan asked for (`cap`); the
+        # current ttl may be shorter (a replayed acquire returns what is left).
+        if answer["lease_id"] != lease.lease_id or granted > (
+            lease.cap or lease.ttl_seconds
         ):
             raise Refusal("lease_refused", "renew_malformed")
         return Lease(
-            lease.lease_id, granted, sent + granted, lease.started,  # type: ignore[arg-type]
-            lease.max_seconds, lease.cap,
-        )  # fmt: skip
+            lease.lease_id,
+            granted,
+            sent + granted,
+            lease.started,
+            lease.max_seconds,
+            lease.cap,
+        )
 
     def keeper(self, lease: Lease, *, dispatch_id: str) -> LeaseKeeper:
         self.last_keeper = LeaseKeeper(self, lease, dispatch_id=dispatch_id)
