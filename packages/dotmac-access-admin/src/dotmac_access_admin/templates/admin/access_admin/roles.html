@@ -1,0 +1,29 @@
+{# Roles. Code roles are assembly-declared and read-only. #}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-lg);">Roles</h1>
+{% if error %}<div role="alert" style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md); border:1px solid var(--dmui-status-negative-border); background:var(--dmui-status-negative-surface); color:var(--dmui-status-negative-foreground); border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">{{ error }}</div>{% endif %}
+<table style="width:100%; font-size:var(--dmui-font-size-sm);">
+  <thead><tr><th align="left">Slug</th><th align="left">Name</th><th align="left">Kind</th><th align="left">Holders</th><th align="left">Permissions</th></tr></thead>
+  <tbody>
+  {% for r in roles %}
+    <tr>
+      <td>{{ r.slug }}</td><td>{{ r.name }}</td>
+      <td>{% if r.read_only %}Declared in code (read-only){% else %}Tenant{% endif %}</td>
+      <td>{{ r.holders }}</td>
+      <td>{{ r.permission_codes | join(', ') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<h2 style="margin-top:var(--dmui-space-lg);">New tenant role</h2>
+<form method="post" action="{{ surface_url('role_create') }}"
+      style="display:flex; gap:var(--dmui-space-sm);">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="text" name="slug" value="{{ form.get('slug', '') }}" placeholder="slug" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+  <input type="text" name="name" value="{{ form.get('name', '') }}" placeholder="Name" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Create</button>
+</form>
+<p style="font-size:var(--dmui-font-size-xs);"><a href="{{ surface_url('list') }}">Back to users</a></p>
+{% endblock %}

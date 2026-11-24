@@ -1,0 +1,30 @@
+{# User list. Context: users, q, page, total_pages. #}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-lg);">Users and access</h1>
+<p style="font-size:var(--dmui-font-size-sm);">
+  <a href="{{ surface_url('create_form') }}">New user</a> ·
+  <a href="{{ surface_url('roles') }}">Roles</a>
+</p>
+<form method="get" action="{{ surface_url('list') }}" style="margin:var(--dmui-space-md) 0;">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search name or email" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Search</button>
+</form>
+<table style="width:100%; font-size:var(--dmui-font-size-sm);">
+  <thead><tr><th align="left">Name</th><th align="left">Email</th><th align="left">Roles</th><th align="left">Status</th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td><a href="{{ surface_url('detail', party_id=u.id) }}">{{ u.display_name }}</a></td>
+      <td>{{ u.email or '' }}</td>
+      <td>{{ u.roles | join(', ') }}</td>
+      <td>{% if u.is_active %}Active{% else %}Inactive{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">No users.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p style="font-size:var(--dmui-font-size-xs);">Page {{ page }} of {{ total_pages }}</p>
+{% endblock %}

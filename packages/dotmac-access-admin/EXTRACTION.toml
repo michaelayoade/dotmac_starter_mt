@@ -1,0 +1,40 @@
+schema_version = 1
+package = "dotmac-access-admin"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Tenant access administration over the kernel identity tables: users, role administration, grants and leaver revoke. It owns no table, schema, lineage, credential material or authorization decision"
+contract = "Create a person through CredentialLifecycle.provision (no password material accepted, generated-and-returned or logged; a refs-only recovery intent is enqueued on the kernel outbox); deactivate and reactivate; revoke every grant and every session of a person in one transaction with one audit event per grant plus a summary; administer tenant roles while showing assembly-declared code roles read-only; grant and revoke roles with an audit event each and separation-of-duties pair warnings only. A role composition may reference only declared PermissionSpecs. Enforcement of separation of duties stays the tenant dual-control policy, default off."
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_starter_mt",
+]
+source_revisions = [
+  "dotmac_sub:1a3edf0eb567fe02665606d368f8f342536f548c",
+  "dotmac_erp:623c6d588c9b6df4ed9a162d5b0f07155c0f7314",
+]
+source_paths = [
+  "dotmac_starter_mt:app/features/rbac/service.py",
+  "dotmac_starter_mt:app/features/rbac/router.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/identity_storage.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/credential_lifecycle.py",
+  "dotmac_sub:app/services/rbac_catalog.py",
+  "dotmac_erp:app/services/rbac.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/test_rbac_audit_isolation.py",
+  "dotmac_starter_mt:tests/architecture/test_access_admin_module.py",
+  "dotmac_starter_mt:tests/test_access_admin_pg.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp", "dotmac_sub"]
+composition_boundary = "The reference app composes it beside app/features/rbac until the audit viewer owns /admin/audit and the audit setting domain; only then is the feature copy deleted. ERP v2 keeps its access_cli as cutover tooling and adopts this surface through an explicit surface selection."
+inventory_evidence = [
+  "docs/inventories/permission-provisioning-sources.md",
+  "docs/inventories/access-admin-sources.md",
+]
+first_cutover = "ERP v2 adopts the packaged users, roles and grants surface through an explicit assembly surface selection after the kernel surface_selection lands; its access_cli remains cutover tooling only. Proved on the ADR-0006 2026-11-16 verification rails."
+shadow_and_drift = "No shadow or side-by-side run. Parity is proved by saved tests against the reference feature's behaviour and by real-record preview on a restored copy, rolled out per tenant behind the surface selection."
+local_copy_retirement = "Delete app/features/rbac in the reference app once the audit viewer owns the audit screen and setting domain; ERP v2 keeps access_cli as cutover tooling only."
+next_action = "Persisting a role's permission composition needs a kernel role-to-permission store and an evaluator that reads it (programme section 1.2); until then the composition check validates only. Reference-app cutover and the kernel surface_selection adoption follow lanes A and I."

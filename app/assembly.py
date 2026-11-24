@@ -37,6 +37,7 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import dotmac_access_admin
 import dotmac_template_studio
 import dotmac_ticketing
 import dotmac_ui
@@ -135,6 +136,7 @@ assembly = ProductAssemblySpec(
         *load_manifests(FEATURE_MODULES),
         dotmac_template_studio.module,
         dotmac_ticketing.module,
+        dotmac_access_admin.module,
     ],
     role_definitions=(RoleDefinition("admin"),),
     # Exact compatibility shadow of today's PermissionSpec.default_roles
@@ -152,6 +154,12 @@ assembly = ProductAssemblySpec(
                 RoleGrant("admin", "rbac.roles.manage"),
                 RoleGrant("admin", "rbac.grants.manage"),
                 RoleGrant("admin", "rbac.audit.read"),
+                RoleGrant("admin", "access_admin.users.read"),
+                RoleGrant("admin", "access_admin.users.manage"),
+                RoleGrant("admin", "access_admin.users.revoke"),
+                RoleGrant("admin", "access_admin.roles.read"),
+                RoleGrant("admin", "access_admin.roles.manage"),
+                RoleGrant("admin", "access_admin.grants.manage"),
                 RoleGrant("admin", "template_studio.templates.read"),
                 RoleGrant("admin", "template_studio.templates.manage"),
                 RoleGrant("admin", "template_studio.templates.publish"),

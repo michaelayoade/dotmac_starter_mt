@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "dotmac-access-admin"
+version = "0.1.0a1"
+description = "DotMac access administration: users, roles, grants and leaver revoke over the kernel identity tables (stateless; contract-2 surfaces)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_access_admin", from = "src" }]
+include = [
+    { path = "src/dotmac_access_admin/py.typed", format = ["sdist", "wheel"] },
+    # The admin screens are package data, composed through the manifest's
+    # namespaced `TemplatePackage` (never through an assembly template root).
+    { path = "src/dotmac_access_admin/templates/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# Kernel floor: contract-v2 surfaces plus the identity storage and credential
+# lifecycle primitives this module composes. Never an assembly, never another
+# module, never `dotmac-ui` (the screens consume `--dmui-*` custom properties
+# the assembly already loads).
+dotmac-kernel = ">=0.1.0a106"
+fastapi = ">=0.111,<0.116"
+sqlalchemy = "^2.0"
+pydantic = ">=2.7.4,<3.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
