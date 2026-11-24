@@ -342,6 +342,11 @@ from dotmac_kernel.source_applications import (
     install_source_applications,
     validate_source_application,
 )
+from dotmac_kernel.surface_selection import (
+    SELECT_ALL,
+    SurfaceSelection,
+    SurfaceSelectionError,
+)
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
     BrowserAuthenticationProvider,
@@ -479,6 +484,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.settings_shadow",
         "dotmac_kernel.secret_sources",
         "dotmac_kernel.source_applications",
+        "dotmac_kernel.surface_selection",
         "dotmac_kernel.templating",
         "dotmac_kernel.tenancy",
         "dotmac_kernel.testing",
@@ -486,6 +492,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.harness",
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
+        "dotmac_kernel.testing.surface_conformance",
         "dotmac_kernel.transactions",
         "dotmac_kernel.web_deps",
         "dotmac_kernel.web_surfaces",
@@ -618,6 +625,9 @@ __all__ = [
     "ModuleManifest",
     "JobSpec",
     "JobSpecError",
+    "SELECT_ALL",
+    "SurfaceSelection",
+    "SurfaceSelectionError",
     "ModuleRegistry",
     "ModuleInventoryEntry",
     "AnyManifest",
