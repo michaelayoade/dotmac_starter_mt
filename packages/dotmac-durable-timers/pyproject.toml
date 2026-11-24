@@ -13,10 +13,10 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# Floor note: JobSpec / ModuleManifest.jobs (dotmac_kernel.jobs) ship in the next
-# kernel allocation after a110; raise this floor to that exact version in the
-# release change that publishes this module (it cannot name an unpublished one).
-dotmac-kernel = ">=0.1.0a110"
+# Floor note: JobSpec / ModuleManifest.jobs (dotmac_kernel.jobs) ship in the
+# kernel allocation after a110. This floor stays at the ledger allocation (a72)
+# until that kernel is published; the release change then raises it to it.
+dotmac-kernel = ">=0.1.0a72"
 fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 

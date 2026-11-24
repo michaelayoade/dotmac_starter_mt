@@ -72,6 +72,8 @@ TOKEN_NATIVE_PREFIXES: Final[tuple[str, ...]] = (
     "packages/dotmac-kernel/src/dotmac_kernel/templates/platform/",
     "packages/dotmac-kernel/src/dotmac_kernel/templates/layouts/platform.html",
     "packages/dotmac-template-studio/src/dotmac_template_studio/templates/",
+    # The job runner's staff page is styled with `var(--dmui-*)` tokens only.
+    "packages/dotmac-durable-timers/src/dotmac_durable_timers/templates/",
     # `dotmac-ui`'s published components. Zero is not merely their current
     # state, it is their CONTRACT: a consumer does not compile this package's
     # templates, so a utility class would render unstyled from site-packages.
@@ -261,6 +263,7 @@ def test_template_roots_are_discovered_and_pinned() -> None:
     assert discovered == {
         "packages/dotmac-kernel/src/dotmac_kernel/templates",
         "packages/dotmac-template-studio/src/dotmac_template_studio/templates",
+        "packages/dotmac-durable-timers/src/dotmac_durable_timers/templates",
         # The design system's own component templates. Added deliberately when
         # `empty_state` shipped -- this assertion firing on that change is the
         # gate working, not an obstacle to route around.

@@ -110,7 +110,8 @@ def next_due(spec: JobSpec, *, after: datetime, tz: ZoneInfo) -> datetime:
         raise JobSpecError("after must be timezone-aware")
     if spec.interval_seconds is not None:
         return after.astimezone(UTC) + timedelta(seconds=spec.interval_seconds)
-    assert spec.cron is not None
+    if spec.cron is None:
+        raise JobSpecError("job declares neither interval nor cron")
     return CronSchedule(spec.cron).next_after(after, tz)
 
 

@@ -110,7 +110,7 @@ class JobCatalogue:
             if entry.spec.plane != ModulePlane.TENANT:
                 raise JobPlaneUnsupported(
                     f"job {entry.module_code}.{entry.spec.code} declares plane "
-                    f"{entry.spec.plane.value!r}; this runner serves only the "
+                    f"{ModulePlane(entry.spec.plane).value!r}; this runner serves only the "
                     "tenant plane (platform-plane jobs need a platform runner)"
                 )
             by_key[entry.key] = entry

@@ -19,6 +19,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Protocol
 
@@ -40,9 +41,9 @@ class TenantRuntime(Protocol):
     @property
     def session_factory(self) -> SessionFactory: ...
 
-    def resolver_session(self): ...  # context manager yielding an unscoped Session
+    def resolver_session(self) -> AbstractContextManager[Session]: ...
 
-    def tenant_session(self, tenant_id: object): ...  # context manager yielding Session
+    def tenant_session(self, tenant_id: object) -> AbstractContextManager[Session]: ...
 
 
 class JobRunner:

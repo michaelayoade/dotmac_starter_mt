@@ -134,7 +134,7 @@
     },
     "dotmac-durable-timers": {
       "declared": "0.1.0a3",
-      "reason": "TODO: state why this version has no verified publication",
+      "reason": "dotmac-durable-timers 0.1.0a3 is source preparation only (a2 is published and immutable); it adds the Wave 0 job runner and is not to be built or published until the Wave 0 train.",
       "state": "declared-unpublished"
     },
     "dotmac-files": {

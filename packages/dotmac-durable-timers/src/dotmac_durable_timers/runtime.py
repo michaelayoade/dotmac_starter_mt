@@ -23,8 +23,8 @@ def request_catalogue(request: Request) -> JobCatalogue:
     """The enabled tenant-plane jobs of the running app, built once per app."""
     cached = getattr(request.app.state, "durable_timers_catalogue", None)
     if cached is not None:
-        assert isinstance(cached, JobCatalogue)
-        return cached
+        if isinstance(cached, JobCatalogue):
+            return cached
     registry = request.app.state.module_registry
     disabled = {e.code for e in request.app.state.module_inventory if not e.enabled}
     catalogue = JobCatalogue(

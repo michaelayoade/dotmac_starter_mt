@@ -30,6 +30,9 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import dotmac_durable_timers.jobs as jobs_module
+import dotmac_kernel.audit_actions as audit_actions_module
+import dotmac_kernel.outbox_event_types as outbox_types_module
+import dotmac_kernel.source_applications as source_applications_module
 import pytest
 from dotmac_durable_timers import admin
 from dotmac_durable_timers.builtin import purge_published_outbox, purge_timer_history
@@ -57,10 +60,7 @@ from dotmac_kernel.outbox_event_types import (
     install_outbox_event_types,
 )
 from dotmac_kernel.session_runtime import DatabaseRuntime
-from dotmac_kernel.source_applications import (
-    clear_host_application,
-    install_host_application,
-)
+from dotmac_kernel.source_applications import install_host_application
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -140,6 +140,13 @@ class _Sink:
 
 @pytest.fixture(autouse=True)
 def _process_vocabularies() -> Iterator[None]:
+    # Process-wide registries: put back whatever was installed, or every later
+    # test in the session would see only this module's vocabulary.
+    previous = (
+        audit_actions_module._active_registry,
+        outbox_types_module._active_registry,
+        source_applications_module._host_application,
+    )
     install_outbox_event_types(OutboxEventTypeRegistry.from_manifests([timers_module]))
     install_audit_actions(AuditActionRegistry.from_manifests([timers_module]))
     install_host_application("dotmac_starter_mt")
@@ -147,7 +154,9 @@ def _process_vocabularies() -> Iterator[None]:
     PROBE.visible_tenants.clear()
     PROBE.fail = False
     yield
-    clear_host_application()
+    audit_actions_module._active_registry = previous[0]
+    outbox_types_module._active_registry = previous[1]
+    source_applications_module._host_application = previous[2]
 
 
 @pytest.fixture

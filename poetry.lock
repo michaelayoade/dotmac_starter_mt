@@ -1172,7 +1172,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a110"
+dotmac-kernel = ">=0.1.0a72"
 fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 
