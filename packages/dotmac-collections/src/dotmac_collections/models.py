@@ -16,6 +16,7 @@ from dotmac_kernel.models import Base, Tenant, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -53,6 +54,9 @@ TENANT_TABLES: tuple[str, ...] = (
     "collection_action_requests",
     "collection_action_receipts",
     "collection_reconciliations",
+    "collection_holds",
+    "collection_hold_lifts",
+    "collection_subject_access",
 )
 PLATFORM_TABLES: tuple[str, ...] = (
     "platform_collection_policies",
@@ -72,6 +76,9 @@ PLATFORM_TABLES: tuple[str, ...] = (
     "platform_collection_action_requests",
     "platform_collection_action_receipts",
     "platform_collection_reconciliations",
+    "platform_collection_holds",
+    "platform_collection_hold_lifts",
+    "platform_collection_subject_access",
 )
 
 
@@ -256,6 +263,15 @@ class _CollectionCaseColumns(_Fact):
     position_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # a3: the instant the subject's access hold is demanded; None never demands one.
+    access_hold_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set only by process_access_hold_due: the hold counts once it is engaged, so the
+    # balance pass always runs before the service is cut.
+    access_hold_engaged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    # The exposure's verified due date; reminders anchored on exposure_at count from it.
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CollectionCase(Base, _TenantRow, _CollectionCaseColumns):
@@ -949,6 +965,112 @@ class PlatformCollectionReconciliation(Base, _CollectionReconciliationColumns):
     )
 
 
+class _CollectionHoldColumns(_Fact):
+    subject_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Holds are insert-only, so "live" is "has no lift row". The ordinal counts
+    # the placements of one external_ref and is unique, so two racing placements
+    # of the same reference cannot both succeed even without the advisory lock.
+    placement_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    approval_ref: Mapped[str | None] = mapped_column(String(255))
+    placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollectionHold(Base, _TenantRow, _CollectionHoldColumns):
+    __tablename__ = "collection_holds"
+    __table_args__ = (
+        _identity(__tablename__),
+        UniqueConstraint(
+            "tenant_id",
+            "external_ref",
+            "placement_ordinal",
+            name="uq_collection_holds_placement",
+        ),
+        Index("ix_collection_holds_subject", "tenant_id", "subject_ref"),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformCollectionHold(Base, _CollectionHoldColumns):
+    __tablename__ = "platform_collection_holds"
+    __table_args__ = (
+        UniqueConstraint(
+            "external_ref",
+            "placement_ordinal",
+            name="uq_platform_collection_holds_placement",
+        ),
+        Index("ix_platform_collection_holds_subject", "subject_ref"),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _CollectionHoldLiftColumns(_Fact):
+    hold_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    approval_ref: Mapped[str | None] = mapped_column(String(255))
+    lifted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CollectionHoldLift(Base, _TenantRow, _CollectionHoldLiftColumns):
+    __tablename__ = "collection_hold_lifts"
+    __table_args__ = (
+        _identity(__tablename__),
+        ForeignKeyConstraint(
+            ["tenant_id", "hold_id"],
+            [f"{SCHEMA}.collection_holds.tenant_id", f"{SCHEMA}.collection_holds.id"],
+        ),
+        UniqueConstraint("tenant_id", "hold_id", name="uq_collection_hold_lifts_hold"),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformCollectionHoldLift(Base, _CollectionHoldLiftColumns):
+    __tablename__ = "platform_collection_hold_lifts"
+    __table_args__ = (
+        ForeignKeyConstraint(["hold_id"], [f"{SCHEMA}.platform_collection_holds.id"]),
+        UniqueConstraint("hold_id", name="uq_platform_collection_hold_lifts_hold"),
+        schema_table_args(SCHEMA),
+    )
+
+
+class _CollectionSubjectAccessColumns(_Fact):
+    subject_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Allocated from one per-plane sequence when the subject enters or leaves
+    # ``held``; None until the subject has been held once.
+    version: Mapped[int | None] = mapped_column(BigInteger)
+    reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class CollectionSubjectAccess(Base, _TenantRow, _CollectionSubjectAccessColumns):
+    __tablename__ = "collection_subject_access"
+    __table_args__ = (
+        _identity(__tablename__),
+        UniqueConstraint(
+            "tenant_id", "subject_ref", name="uq_collection_subject_access_subject"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class PlatformCollectionSubjectAccess(Base, _CollectionSubjectAccessColumns):
+    __tablename__ = "platform_collection_subject_access"
+    __table_args__ = (
+        UniqueConstraint(
+            "subject_ref", name="uq_platform_collection_subject_access_subject"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
 __all__ = [
     "CollectionActionReceipt",
     "CollectionActionRequest",
@@ -956,6 +1078,8 @@ __all__ = [
     "CollectionCaseExposure",
     "CollectionCaseTransition",
     "CollectionGraceGrant",
+    "CollectionHold",
+    "CollectionHoldLift",
     "CollectionNoticeReceipt",
     "CollectionNoticeRequest",
     "CollectionPolicy",
@@ -963,6 +1087,7 @@ __all__ = [
     "CollectionPolicyVersion",
     "CollectionReconciliation",
     "CollectionStepAttempt",
+    "CollectionSubjectAccess",
     "PaymentArrangement",
     "PaymentArrangementExposure",
     "PaymentArrangementInstallment",
@@ -973,6 +1098,8 @@ __all__ = [
     "PlatformCollectionCaseExposure",
     "PlatformCollectionCaseTransition",
     "PlatformCollectionGraceGrant",
+    "PlatformCollectionHold",
+    "PlatformCollectionHoldLift",
     "PlatformCollectionNoticeReceipt",
     "PlatformCollectionNoticeRequest",
     "PlatformCollectionPolicy",
@@ -980,6 +1107,7 @@ __all__ = [
     "PlatformCollectionPolicyVersion",
     "PlatformCollectionReconciliation",
     "PlatformCollectionStepAttempt",
+    "PlatformCollectionSubjectAccess",
     "PlatformPaymentArrangement",
     "PlatformPaymentArrangementExposure",
     "PlatformPaymentArrangementInstallment",

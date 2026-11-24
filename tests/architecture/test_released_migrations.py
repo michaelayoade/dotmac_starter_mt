@@ -9112,7 +9112,8 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
     # two-person policy) are a13's, editable until a13 is tagged.
     "dotmac-billing": frozenset(),
-    "dotmac-collections": frozenset(),
+    # `cl_0002` adds the per-account access hold (a3); editable until a3 is tagged.
+    "dotmac-collections": frozenset({"cl_0002_collection_holds.py"}),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
     "dotmac-service-catalog": frozenset(),

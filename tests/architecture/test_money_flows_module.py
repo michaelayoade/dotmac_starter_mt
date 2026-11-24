@@ -117,6 +117,12 @@ FUNDED_CHARGE_ONLY = frozenset({"funded_charge.py"})
 # the account terms and the balance to pay a new postpaid invoice. Read-only
 # names; the single widening beyond FundedCharge.
 FUNDED_CHARGE_AND_SETTLE = frozenset({"funded_charge.py", "settle.py"})
+# GAP-4: the stateless X1 reader (``receivables.py``) maps Billing's sealed document
+# exposure to Collections' observation. It reads the account terms (the contract type
+# at issue, the grace at the due date) and the two exposure types, read-only; Billing
+# stays a default-deny owner. Own commit, for architect sign-off.
+RECEIVABLES_ONLY = frozenset({"receivables.py"})
+FUNDED_CHARGE_SETTLE_AND_RECEIVABLES = FUNDED_CHARGE_AND_SETTLE | RECEIVABLES_ONLY
 # GAP-3 / GAP-L1 dating: only the private ``_credit_dating.py`` reads the account
 # statement (read-only, one account, no lock) to find the newest credit that
 # reached the account; Settle and FundedCharge call it and never read the
@@ -145,8 +151,11 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "AccessSignal": FUNDED_CHARGE_ONLY,
     # F2 FundedCharge (D2) reads these and nothing else beyond the restricted
     # commands below. Each is a deliberate, single-module entry.
-    "get_effective_account_terms": FUNDED_CHARGE_AND_SETTLE,
+    "get_effective_account_terms": FUNDED_CHARGE_SETTLE_AND_RECEIVABLES,
     "AccountTermsV1": FUNDED_CHARGE_AND_SETTLE,
+    "ReceivableExposureV1": RECEIVABLES_ONLY,
+    "ReceivableExposureV2": RECEIVABLES_ONLY,
+    "DueDateBasisStatus": RECEIVABLES_ONLY,
     "get_funding_availability": FUNDED_CHARGE_AND_SETTLE,
     "GetFundingAvailabilityV1": FUNDED_CHARGE_AND_SETTLE,
     "get_account_statement": CREDIT_DATING_ONLY,
@@ -740,7 +749,7 @@ def test_package_version_surfaces_agree() -> None:
     version = pyproject["tool"]["poetry"]["version"]
     import dotmac_money_flows
 
-    assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a1"
+    assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a2"
 
 
 def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
@@ -762,6 +771,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "AccountTermsChangedV1",
         "BalanceAppliedOutcomeV1",
         "BalancePassFailed",
+        "BillingReceivablesReader",
         "CreditRecheckOutcomeV1",
         "DepositApplication",
         "FundedChargeCursorV1",
@@ -812,6 +822,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "retry_settle",
         "settle_confirmation",
         "start_funded_charge",
+        "subject_ref_for",
         "versions_dir",
     }
     assert sorted(
@@ -1312,6 +1323,43 @@ def test_terms_and_availability_reads_are_settle_and_funded_charge_only() -> Non
         assert forbidden_call_violations(source, "settle.py") == [], name
         assert forbidden_call_violations(source, "funded_charge.py") == [], name
         assert forbidden_call_violations(source, "adjust.py"), name
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["ReceivableExposureV1", "ReceivableExposureV2", "DueDateBasisStatus"],
+)
+def test_exposure_types_are_readable_only_from_the_x1_reader(name: str) -> None:
+    source = f"from dotmac_billing import {name}\n"
+    assert forbidden_call_violations(source, "receivables.py") == [], name
+    for other in ("settle.py", "funded_charge.py", "adjust.py"):
+        assert forbidden_call_violations(source, other), (name, other)
+
+
+def test_the_x1_reader_may_read_terms_but_not_availability_or_commands() -> None:
+    allowed = "from dotmac_billing import get_effective_account_terms\n"
+    assert forbidden_call_violations(allowed, "receivables.py") == []
+    for name in (
+        "get_funding_availability",
+        "apply_available_credit",
+        "issue_rated_invoice",
+    ):
+        source = f"from dotmac_billing import {name}\n"
+        assert forbidden_call_violations(source, "receivables.py"), name
+
+
+def test_the_x1_reader_imports_only_collections_contracts() -> None:
+    real = (MODULE_ROOT / "receivables.py").read_text("utf-8")
+    assert "dotmac_collections" in real
+    assert import_violations(real) == []
+    planted = real + "\nfrom dotmac_collections import evaluate_grace\n"
+    assert any("contracts only" in p for p in import_violations(planted))
+    assert any(
+        "contracts only" in p
+        for p in import_violations(
+            "from dotmac_collections import publish_policy_version"
+        )
+    )
 
 
 #: The only modules that may use the dating module (and so the statement read).
