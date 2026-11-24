@@ -124,7 +124,7 @@ def test_no_other_function_names_a_container_removal_verb() -> None:
 
 
 def test_the_scan_sees_wrapped_docker_path_argv(monkeypatch, tmp_path: Path) -> None:
-    """R7-L1: wrapped first elements are still docker argv, and the new verbs are banned."""
+    """R7-L1: wrapped first elements are still docker argv; new verbs banned."""
     source = (
         "import os\n"
         "def f(cfg):\n"
