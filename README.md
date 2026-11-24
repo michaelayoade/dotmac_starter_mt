@@ -30,6 +30,14 @@ customer workspaces, shared services and an optional admin portal.
   shared packages and thin product assemblies. A package release alone does
   not establish that a product has adopted it.
 
+## Documentation quality
+
+Feature guides have a reusable [template](docs/templates/feature.md).
+CI checks local links in changed Markdown and executes selected documented
+examples against the real package APIs. See
+[documentation maintenance](docs/guides/documentation.md) for scope, limits and
+the hosted-only validation policy.
+
 ## Reference and contribution
 
 - [Detailed project reference](docs/reference/project-guide.md): setup details,

@@ -59,3 +59,8 @@
 - Link to the next step and the authoritative reference.
 - Use real screenshots when available; do not present mockups as product screenshots.
 - Update guides with behavior changes. Keep rules and generated catalogs in their owners.
+
+## Maintain these docs
+
+- [Documentation checks and executable examples](guides/documentation.md).
+- [Feature guide template](templates/feature.md).

@@ -80,3 +80,15 @@ pass. A deliberate exception takes an inline marker with a reason:
 - Breaking changes are called out in the PR body and CHANGELOG entry.
 - Docs move with the code: update `docs/ARCHITECTURE.md`'s tables and any
   affected ADR (dated amendment, never rewritten history) in the same PR.
+
+## Documentation quality
+
+Use [the feature guide template](docs/templates/feature.md) for new feature
+guides and complete its owner, availability, setup, usage, permission, recovery,
+validation and compatibility sections. Keep the README as an onboarding summary;
+link detailed guides rather than growing it into a complete product manual.
+
+[Documentation maintenance](docs/guides/documentation.md) defines the offline
+link-check scope and selected executable examples. Add regression canaries for
+new checker behaviour. Tests run only on Git-hosted CI. The required unit job
+explicitly fails when its documentation prerequisite fails.
