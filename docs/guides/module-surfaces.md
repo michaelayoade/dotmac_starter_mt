@@ -87,7 +87,7 @@ The kit boots the module under a `/admin` facet and a `/` facet and checks:
 - every `WebNavItem` names a route the surface owns;
 - template namespace isolation: every package template resolves only through `<namespace>/` and does not reference its own files un-namespaced.
 
-It never reads a database or issues a request. Pass `extra_modules=` for dependencies and `capability_provisions=` when a surface needs browser capabilities with security requirements.
+It never reads a database or issues a request. Pass `extra_modules=` for dependencies `capability_provisions=` when a surface needs browser capabilities with security requirements, or `spec_for_prefix=` to run every check inside a whole product-shaped assembly (its module set, authentication profile and admission permission).
 
 ## New stateful modules
 

@@ -34,7 +34,7 @@ app.  Checks that could pass over an empty set assert the set first.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -169,8 +169,16 @@ def check_surface_conformance(
     prefixes: Sequence[str] = DEFAULT_PREFIXES,
     extra_modules: Iterable[ModuleManifest] = (),
     capability_provisions: Sequence[BrowserCapabilityProvision] | None = None,
+    spec_for_prefix: Callable[[str], ProductAssemblySpec] | None = None,
 ) -> ConformanceReport:
-    """Return the report; ``violations`` is empty when the module conforms."""
+    """Return the report; ``violations`` is empty when the module conforms.
+
+    ``spec_for_prefix`` lets a caller supply the WHOLE assembly for each facet
+    prefix (for example a composition shaped like a real product: its module
+    set, auth profile and admission permission).  It must install ``manifest``
+    and mount its facets at the given prefix; the kit then runs every check
+    against that composition instead of its minimal one.
+    """
     extras = tuple(extra_modules)
     violations: list[str] = []
     surfaces = tuple(surface.code for surface in manifest.web_surfaces)
@@ -185,7 +193,11 @@ def check_surface_conformance(
 
     for prefix in prefixes:
         try:
-            spec = _build_spec(manifest, extras, prefix, capability_provisions)
+            spec = (
+                spec_for_prefix(prefix)
+                if spec_for_prefix is not None
+                else _build_spec(manifest, extras, prefix, capability_provisions)
+            )
             app = create_app(spec)
         except Exception as exc:
             violations.append(f"[{prefix}] boot refused: {type(exc).__name__}: {exc}")
@@ -344,6 +356,7 @@ def assert_surface_conformance(
     prefixes: Sequence[str] = DEFAULT_PREFIXES,
     extra_modules: Iterable[ModuleManifest] = (),
     capability_provisions: Sequence[BrowserCapabilityProvision] | None = None,
+    spec_for_prefix: Callable[[str], ProductAssemblySpec] | None = None,
 ) -> ConformanceReport:
     """Raise :class:`SurfaceConformanceError` listing every violation."""
     report = check_surface_conformance(
@@ -351,6 +364,7 @@ def assert_surface_conformance(
         prefixes=prefixes,
         extra_modules=extra_modules,
         capability_provisions=capability_provisions,
+        spec_for_prefix=spec_for_prefix,
     )
     if report.violations:
         raise SurfaceConformanceError(
