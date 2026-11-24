@@ -2341,6 +2341,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-collections ──
+    "dotmac-collections-v0.1.0a3": (
+        "dotmac-collections",
+        "55efe2112a97993474fde20d7b32b8577f55bec6",
+        {
+            "cl_0001_collections.py": (
+                "f718c94d4044bb925da92aa9e186ee1c0765d4e5d67b1bbc6bc66ccf161d86f4"
+            ),
+            "cl_0002_collection_holds.py": (
+                "f2e68d13f5eedac9c77599682904bc7e21afa78e42cdf0416973746210629009"
+            ),
+        },
+    ),
     "dotmac-collections-v0.1.0a2": (
         "dotmac-collections",
         "e1bfa54e23bd8184c20beb2dc1d9f0938fa336f6",
@@ -9113,7 +9125,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # two-person policy) are a13's, editable until a13 is tagged.
     "dotmac-billing": frozenset(),
     # `cl_0002` adds the per-account access hold (a3); editable until a3 is tagged.
-    "dotmac-collections": frozenset({"cl_0002_collection_holds.py"}),
+    "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
     "dotmac-service-catalog": frozenset(),
