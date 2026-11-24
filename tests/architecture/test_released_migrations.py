@@ -2341,6 +2341,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-collections ──
+    "dotmac-collections-v0.1.0a3": (
+        "dotmac-collections",
+        "55efe2112a97993474fde20d7b32b8577f55bec6",
+        {
+            "cl_0001_collections.py": (
+                "f718c94d4044bb925da92aa9e186ee1c0765d4e5d67b1bbc6bc66ccf161d86f4"
+            ),
+            "cl_0002_collection_holds.py": (
+                "f2e68d13f5eedac9c77599682904bc7e21afa78e42cdf0416973746210629009"
+            ),
+        },
+    ),
     "dotmac-collections-v0.1.0a2": (
         "dotmac-collections",
         "e1bfa54e23bd8184c20beb2dc1d9f0938fa336f6",
@@ -8926,6 +8938,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-money-flows ──
+    "dotmac-money-flows-v0.1.0a2": (
+        "dotmac-money-flows",
+        "d26951c1452567767fc977e0f76929818efc1ceb",
+        {
+            "mf_0001_settle_instances.py": (
+                "fa10195f884f7e6d7404e03af52d90003d24b91b7813f6c93ee1ea0c2f3ea03e"
+            ),
+            "mf_0002_funded_charge_instances.py": (
+                "f33b75e1ce84a3cfea69bd535067ea640dc614da4d61a575eb6c89c2f327842e"
+            ),
+        },
+    ),
     "dotmac-money-flows-v0.1.0a1": (
         "dotmac-money-flows",
         "2cac7c246b9a36580b9cd22360eb2d74ff8e0829",
@@ -9113,7 +9137,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # two-person policy) are a13's, editable until a13 is tagged.
     "dotmac-billing": frozenset(),
     # `cl_0002` adds the per-account access hold (a3); editable until a3 is tagged.
-    "dotmac-collections": frozenset({"cl_0002_collection_holds.py"}),
+    "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
     "dotmac-tax": frozenset(),
     "dotmac-service-catalog": frozenset(),
