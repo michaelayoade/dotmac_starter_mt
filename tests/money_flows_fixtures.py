@@ -90,6 +90,9 @@ FLOWS = ROOT / "packages/dotmac-money-flows/src/dotmac_money_flows/migrations/ve
 VERSIONS = FLOWS
 
 NOW = b.NOW
+COLLECTIONS = (
+    ROOT / "packages/dotmac-collections/src/dotmac_collections/migrations/versions"
+)
 SERVICE_ACCESS = (
     ROOT
     / "packages/dotmac-service-access-policy/src/dotmac_service_access_policy"
@@ -103,11 +106,14 @@ BASE = datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)
 
 
 @contextmanager
-def scratch_database(*, with_access_policy: bool = False) -> Iterator[tuple[str, str]]:
+def scratch_database(
+    *, with_access_policy: bool = False, with_collections: bool = False
+) -> Iterator[tuple[str, str]]:
     """Yield ``(admin_url, app_url)`` for a migrated scratch database.
 
     ``with_access_policy`` adds the Service Access Policy lineage, so a proof can
-    show that no F2 call writes its tables.
+    show that no F2 call writes its tables. ``with_collections`` adds the
+    Collections lineage (tenant plane) for the GAP-4 assembly conformance proof.
     """
     superuser = b._superuser_url()
     name = f"mflowsx_{uuid.uuid4().hex[:12]}"
@@ -135,6 +141,9 @@ def scratch_database(*, with_access_policy: bool = False) -> Iterator[tuple[str,
         if with_access_policy:
             locations += f" {SERVICE_ACCESS}"
             modules.append("service_access_policy")
+        if with_collections:
+            locations += f" {COLLECTIONS}"
+            modules.append("collections")
         config.set_main_option("version_locations", locations)
         config.attributes["module_plane_selections"] = tuple(
             ModulePlaneSelection(module=module, planes=(ModulePlane.TENANT,))

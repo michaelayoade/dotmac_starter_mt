@@ -986,3 +986,46 @@ def test_a_launcher_release_refused_as_superseded_is_reported_not_success(
     details = rig.cp.observations[0]["details"]  # type: ignore[index]
     assert details["lease_released"] is False  # ...but the release did not succeed
     assert details["lease_release_refusal"] == "lease_superseded"
+
+
+def reconciles(rig: Rig) -> list[dict[str, object]]:
+    return [o for o in rig.cp.observations if o["kind"] == "reconcile"]
+
+
+def test_r5m2_a_down_daemon_is_not_an_absent_container(tmp_path: Path) -> None:
+    """`docker inspect` fails both for a missing container and for a dead daemon; only a
+    successful, empty `docker ps -a` proves absence."""
+    rig, _, _ = expired_rig(tmp_path)
+    rig.commands.script[("inspect",)] = CommandResult(1, b"")
+    rig.commands.script[("ps",)] = CommandResult(1, b"")  # the listing fails too
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = reconciles(rig)
+    assert (observation["outcome"], observation["reason"]) == (
+        "failed",
+        "reconcile_unavailable",
+    )
+
+
+def test_r5m2_an_inspect_failure_with_the_container_listed_is_not_absence(
+    tmp_path: Path,
+) -> None:
+    rig, _, _ = expired_rig(tmp_path)
+    rig.commands.script[("inspect",)] = CommandResult(1, b"")
+    rig.commands.script[("ps",)] = CommandResult(0, b"3f2a9c1b7d44\n")  # it IS there
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = reconciles(rig)
+    assert observation["outcome"] == "failed"
+
+
+def test_r5m2_only_a_proven_absent_container_is_a_clean_observation(
+    tmp_path: Path,
+) -> None:
+    rig, _, _ = expired_rig(tmp_path)
+    rig.commands.script[("inspect",)] = CommandResult(1, b"")
+    rig.commands.script[("ps",)] = CommandResult(0, b"")  # listing succeeded, empty
+    assert rig.launcher.run_once().outcome == "refused"
+    [observation] = reconciles(rig)
+    assert (
+        observation["outcome"] == "reconciled"
+        and observation["details"]["containers"] == []
+    )  # type: ignore[index]

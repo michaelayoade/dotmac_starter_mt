@@ -724,7 +724,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane collections policy and case owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1516,7 +1516,7 @@ url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-money-flows"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1526,6 +1526,7 @@ develop = true
 
 [package.dependencies]
 dotmac-billing = ">=0.1.0a13"
+dotmac-collections = ">=0.1.0a3"
 dotmac-kernel = ">=0.1.0a110"
 dotmac-payments = ">=0.1.0a4"
 dotmac-service-access-policy = ">=0.1.0a2"
@@ -1933,7 +1934,7 @@ url = "packages/dotmac-referrals"
 
 [[package]]
 name = "dotmac-release-catalog"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 optional = false
 python-versions = ">=3.11,<3.14"

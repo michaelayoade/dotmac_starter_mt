@@ -56,10 +56,12 @@ def kind_for_operation(operation: str | None) -> str:
 
 
 def _json_safe(value: object, depth: int) -> bool:
-    if depth > MAX_DETAILS_DEPTH:
-        return False
+    # Control's rule: a scalar is fine at any level; only a CONTAINER nested deeper
+    # than MAX_DETAILS_DEPTH is refused (a reconcile's repo_digests strings sit at 5).
     if value is None or isinstance(value, bool | int | str):
         return True
+    if depth > MAX_DETAILS_DEPTH:
+        return False
     if isinstance(value, list):
         return all(_json_safe(v, depth + 1) for v in value)
     if isinstance(value, dict):

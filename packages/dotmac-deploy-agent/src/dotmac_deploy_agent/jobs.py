@@ -40,8 +40,8 @@ LEASE_MARGIN: Final = 120
 #: R6-1: after Foundation's own deadline it needs time to stop and remove the job
 #: container and write its receipt; only then does the agent send SIGTERM, and it
 #: waits `JOB_TERM_GRACE` more before any SIGKILL. Both fit inside the lease margin.
-JOB_STOP_MARGIN: Final = 45
-JOB_TERM_GRACE: Final = 15
+JOB_STOP_MARGIN: Final = 0  # the deadline already contains Foundation's own headroom
+JOB_TERM_GRACE: Final = 60  # SIGTERM first; SIGKILL only after Foundation's stop+rm
 #: Seconds kept at the end of the lease for the purge, the accessor destroy and the
 #: receipt. The deadline always binds: Foundation is stopped no later than
 #: `lease end - (stop margin + grace + reserve)`, whatever `timeout_seconds` says.
@@ -388,6 +388,30 @@ def check_apply_class(
         raise Refusal("job_apply_class_mismatch")
 
 
+RECEIPT_SCHEMA: Final = "dotmac.foundation.operator-job-receipt/1"
+
+
+def foundation_receipt_matches(
+    receipt: Mapping[str, object],
+    *,
+    dispatch_id: str,
+    job: str,
+    render_invocation: str | None,
+) -> bool:
+    """R5-L1: Foundation's receipt names THIS run: schema, dispatch id, job and (for a
+    role job) the render invocation the agent handed it. A receipt of another run, or
+    a refusal that names none of them, is never taken as this job's result."""
+    return (
+        receipt.get("schema") == RECEIPT_SCHEMA
+        and receipt.get("dispatch_id") == dispatch_id
+        and receipt.get("job") == job
+        and (
+            render_invocation is None
+            or receipt.get("render_invocation") == render_invocation
+        )
+    )
+
+
 def check_job_paths(secrets_root: Path, job: DispatchedJob) -> None:
     """RQ-2: no argv path sits under the secrets root (`/run/dotmac`): job work and
     secrets do not share a tree."""
@@ -420,7 +444,7 @@ def check_job_inputs(
                 raise Refusal("job_input_mismatch")
             hasher = hashlib.sha256()
             with os.fdopen(descriptor, "rb", closefd=False) as stream:
-                for chunk in iter(lambda stream=stream: stream.read(1 << 20), b""):
+                while chunk := stream.read(1 << 20):
                     hasher.update(chunk)
         finally:
             os.close(descriptor)

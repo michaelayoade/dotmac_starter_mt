@@ -25,7 +25,7 @@ from dotmac_kernel.idempotency import (
 )
 from dotmac_kernel.messaging import enqueue_event, enqueue_platform_event
 from dotmac_kernel.money import Money
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
 from dotmac_collections import models
@@ -41,6 +41,20 @@ from dotmac_collections.actions import (
 from dotmac_collections.arrangements import PaymentArrangementDraftV1
 from dotmac_collections.contracts import AssessCollectionExposureV1
 from dotmac_collections.grace import GraceGrantV1
+from dotmac_collections.holds import (
+    SUBJECT_ACCESS_POLICY_VERSION,
+    CollectionCaseViewV1,
+    CollectionSubjectStateV1,
+    HoldLifted,
+    HoldNotLive,
+    HoldPlaced,
+    LiftCollectionHoldV1,
+    PlaceCollectionHoldV1,
+    RepublishSubjectStateV1,
+    SubjectAccessState,
+    SubjectStateRepublished,
+    decide_subject_access,
+)
 from dotmac_collections.notices import (
     CollectionNoticeRequestedV1,
     NoticeAccepted,
@@ -62,6 +76,8 @@ from dotmac_collections.receivables import (
     ReceivablesReader,
 )
 from dotmac_collections.timers import (
+    ACCESS_HOLD_DUE_EVENT_TYPE,
+    EXPOSURE_DUE_EVENT_TYPE,
     STEP_DUE_EVENT_TYPE,
     AlreadyFired,
     Canceled,
@@ -91,6 +107,12 @@ _NoticeRequestRow = (
 )
 _ArrangementRow = models.PaymentArrangement | models.PlatformPaymentArrangement
 
+# One sequence per plane, so a service that moves between accounts never sees a
+# subject-access version regress (versions are compared per service, not per
+# account).
+_TENANT_ACCESS_SEQUENCE = "mod_coll.collection_subject_access_version_seq"
+_PLATFORM_ACCESS_SEQUENCE = "mod_coll.platform_collection_subject_access_version_seq"
+
 
 @dataclass(frozen=True, slots=True)
 class _PlaneModels:
@@ -113,6 +135,9 @@ class _PlaneModels:
     action_request: Any
     action_receipt: Any
     reconciliation: Any
+    hold: Any
+    hold_lift: Any
+    subject_access: Any
 
 
 _TENANT = _PlaneModels(
@@ -133,6 +158,9 @@ _TENANT = _PlaneModels(
     models.CollectionActionRequest,
     models.CollectionActionReceipt,
     models.CollectionReconciliation,
+    models.CollectionHold,
+    models.CollectionHoldLift,
+    models.CollectionSubjectAccess,
 )
 _PLATFORM = _PlaneModels(
     models.PlatformCollectionPolicy,
@@ -152,6 +180,9 @@ _PLATFORM = _PlaneModels(
     models.PlatformCollectionActionRequest,
     models.PlatformCollectionActionReceipt,
     models.PlatformCollectionReconciliation,
+    models.PlatformCollectionHold,
+    models.PlatformCollectionHoldLift,
+    models.PlatformCollectionSubjectAccess,
 )
 
 
@@ -361,6 +392,56 @@ class StepCaseResolved:
 
 
 StepDueResult = StepDueIgnored | StepDueBlocked | StepRequestWritten | StepCaseResolved
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessCollectionAccessHoldDueV1:
+    scope: Scope
+    trigger: TimerTriggerV1
+    processed_at: datetime
+
+    def __post_init__(self) -> None:
+        require_aware("processed_at", self.processed_at)
+        identity = self.trigger.identity
+        if identity.scope != self.scope:
+            raise ValueError("timer trigger belongs to another scope")
+        if (
+            identity.owner != "collections.case"
+            or identity.entity_kind != "collection_case"
+            or identity.purpose != "access_hold"
+            or self.trigger.output_event_type != ACCESS_HOLD_DUE_EVENT_TYPE
+        ):
+            raise ValueError("timer trigger is not a Collections access-hold wake-up")
+
+
+@dataclass(frozen=True, slots=True)
+class AccessHoldIgnored:
+    case_id: UUID
+    reason_code: str
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AccessHoldBlocked:
+    case_id: UUID
+    reason_code: str
+    retry_at: datetime | None
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AccessHoldEvaluated:
+    """The case was reread and its subject's access state recomputed."""
+
+    case_id: UUID
+    subject_ref: str
+    lifecycle: CaseLifecycle
+    subject_state: SubjectAccessState
+    source_version: int
+    replayed: bool
+
+
+AccessHoldDueResult = AccessHoldIgnored | AccessHoldBlocked | AccessHoldEvaluated
 
 
 @dataclass(frozen=True, slots=True)
@@ -1013,6 +1094,436 @@ def _step_due_from_result(
     )
 
 
+def _hold_from(position: ReceivableObservationV1) -> datetime | None:
+    value = position.access_hold_from
+    return None if value is None else value.astimezone(UTC)
+
+
+def _due_at(position: ReceivableObservationV1) -> datetime | None:
+    return None if position.due_at is None else position.due_at.astimezone(UTC)
+
+
+def _apply_hold_evidence(row: _CaseRow, position: ReceivableObservationV1) -> None:
+    """Store the due and hold instants; a hold instant that moved later disengages."""
+
+    hold_from = _hold_from(position)
+    row.access_hold_from = hold_from
+    row.due_at = _due_at(position)
+    engaged = row.access_hold_engaged_at
+    if hold_from is None or (engaged is not None and _stored_utc(engaged) < hold_from):
+        row.access_hold_engaged_at = None
+
+
+def _exposure_wake_at(
+    position: ReceivableObservationV1, blocker: str
+) -> datetime | None:
+    """The instant a not-yet-actionable exposure becomes assessable, if known."""
+
+    if blocker == "receivable_not_due":
+        return position.due_at
+    if blocker == "service_period_not_started":
+        return position.service_period_starts_at
+    return None
+
+
+def _exposure_timer_identity(
+    scope: Scope, source_owner: str, exposure_ref: str
+) -> TimerIdentityV1:
+    return TimerIdentityV1(
+        scope=scope,
+        owner="collections.exposure",
+        entity_kind="exposure",
+        entity_id=f"{source_owner}:{exposure_ref}",
+        purpose="due",
+    )
+
+
+def _hold_timer_identity(scope: Scope, case_id: UUID) -> TimerIdentityV1:
+    return TimerIdentityV1(
+        scope=scope,
+        owner="collections.case",
+        entity_kind="collection_case",
+        entity_id=str(case_id),
+        purpose="access_hold",
+    )
+
+
+def _arm_timer(
+    db: Session,
+    *,
+    timer: CollectionsTimer,
+    identity: TimerIdentityV1,
+    due_at: datetime,
+    recorded_at: datetime,
+    event_type: str,
+    expected_source_version: int,
+) -> None:
+    """Arm one wake; an identical current generation is left as it is."""
+
+    current = timer.current(db, identity)
+    if (
+        current is not None
+        and current.due_at == due_at
+        and current.expected_source_version == expected_source_version
+    ):
+        return
+    timer.schedule(
+        db,
+        TimerRequestV1(
+            identity=identity,
+            due_at=due_at,
+            recorded_at=recorded_at,
+            output_event_type=event_type,
+            expected_source_version=expected_source_version,
+        ),
+    )
+
+
+def _cancel_identity(
+    db: Session,
+    *,
+    timer: CollectionsTimer,
+    identity: TimerIdentityV1,
+    recorded_at: datetime,
+) -> None:
+    current = timer.current(db, identity)
+    if current is None:
+        return
+    decision = timer.cancel(
+        db,
+        CancelTimerV1(
+            identity=identity,
+            observed_generation=current.generation,
+            recorded_at=recorded_at,
+        ),
+    )
+    if isinstance(decision, Stale):
+        raise CollectionsConflict(
+            "timer_generation_conflict",
+            "A collection timer changed during cancellation.",
+        )
+
+
+def _sync_hold_timer(
+    db: Session,
+    *,
+    timer: CollectionsTimer,
+    scope: Scope,
+    case_row: _CaseRow,
+    now: datetime,
+) -> None:
+    """Arm the access-hold wake until the hold is engaged, otherwise clear it.
+
+    The wake is due at the later of the hold instant and now, so a case that opens
+    past its instant still gets the balance pass before the hold engages.
+    """
+
+    identity = _hold_timer_identity(scope, case_row.id)
+    hold_from = case_row.access_hold_from
+    if (
+        case_row.lifecycle == "active"
+        and hold_from is not None
+        and case_row.access_hold_engaged_at is None
+    ):
+        due_at = max(_stored_utc(hold_from), now.astimezone(UTC))
+        current = timer.current(db, identity)
+        if (
+            current is not None
+            and current.due_at <= due_at
+            and current.expected_source_version == case_row.source_version
+        ):
+            return
+        _arm_timer(
+            db,
+            timer=timer,
+            identity=identity,
+            due_at=due_at,
+            recorded_at=now,
+            event_type=ACCESS_HOLD_DUE_EVENT_TYPE,
+            expected_source_version=case_row.source_version,
+        )
+    else:
+        _cancel_identity(db, timer=timer, identity=identity, recorded_at=now)
+
+
+def _live_hold_refs(db: Session, scope: Scope, subject_ref: str) -> tuple[str, ...]:
+    plane = _models(scope)
+    lifted = exists().where(
+        plane.hold_lift.hold_id == plane.hold.id,
+    )
+    statement = _where_scope(
+        select(plane.hold.external_ref).where(
+            plane.hold.subject_ref == subject_ref, ~lifted
+        ),
+        scope,
+        plane.hold,
+    ).order_by(plane.hold.external_ref)
+    return tuple(db.scalars(statement))
+
+
+def _live_hold_by_ref(db: Session, scope: Scope, external_ref: str) -> Any | None:
+    plane = _models(scope)
+    lifted = exists().where(plane.hold_lift.hold_id == plane.hold.id)
+    return db.scalar(
+        _where_scope(
+            select(plane.hold).where(plane.hold.external_ref == external_ref, ~lifted),
+            scope,
+            plane.hold,
+        )
+    )
+
+
+def _next_access_version(db: Session, scope: Scope) -> int:
+    if db.get_bind().dialect.name == "postgresql":
+        sequence = (
+            _TENANT_ACCESS_SEQUENCE
+            if isinstance(scope, TenantScope)
+            else _PLATFORM_ACCESS_SEQUENCE
+        )
+        return int(db.scalar(text(f"SELECT nextval('{sequence}')")) or 0)
+    # SQLite has no sequence; the unit lane only needs a rising value.
+    model = _models(scope).subject_access
+    highest = db.scalar(
+        _where_scope(select(func.coalesce(func.max(model.version), 0)), scope, model)
+    )
+    return int(highest or 0) + 1
+
+
+def _recompute_subject(
+    db: Session,
+    *,
+    scope: Scope,
+    subject_ref: str,
+    at: datetime,
+    reason_code: str,
+) -> SubjectAccessState:
+    """Recompute one subject under its lock; emit once per change of ``held``.
+
+    Lock order: a caller that holds a case lock takes it BEFORE this subject lock,
+    never after, so two cases of one subject serialize here and cannot deadlock.
+    """
+
+    plane = _models(scope)
+    _serialize_identity(db, scope, "subject", subject_ref)
+    db.flush()
+    demanded = (
+        db.scalar(
+            _where_scope(
+                select(func.count())
+                .select_from(plane.case)
+                .where(
+                    plane.case.subject_ref == subject_ref,
+                    plane.case.lifecycle == "active",
+                    plane.case.access_hold_from.is_not(None),
+                    plane.case.access_hold_engaged_at.is_not(None),
+                ),
+                scope,
+                plane.case,
+            )
+        )
+        or 0
+    ) > 0
+    suppressed = bool(_live_hold_refs(db, scope, subject_ref))
+    state = decide_subject_access(demanded=demanded, suppressed=suppressed)
+    row = db.execute(
+        _where_scope(
+            select(plane.subject_access)
+            .where(plane.subject_access.subject_ref == subject_ref)
+            .with_for_update(),
+            scope,
+            plane.subject_access,
+        )
+    ).scalar_one_or_none()
+    previous: SubjectAccessState = (
+        "clear" if row is None else cast(SubjectAccessState, row.state)
+    )
+    if state == previous:
+        return state
+    version = None if row is None else row.version
+    flipped = (previous == "held") != (state == "held")
+    if flipped:
+        version = _next_access_version(db, scope)
+    if row is None:
+        row = plane.subject_access(
+            **_values(
+                scope,
+                {
+                    "id": uuid4(),
+                    "subject_ref": subject_ref,
+                    "state": state,
+                    "version": version,
+                    "reason_code": reason_code,
+                    "changed_at": at,
+                },
+            )
+        )
+        db.add(row)
+    else:
+        row.state = state
+        row.version = version
+        row.reason_code = reason_code
+        row.changed_at = at
+    db.flush()
+    if flipped:
+        _emit(
+            db,
+            scope=scope,
+            event_type="collections.subject.access_hold.v1",
+            payload=_access_event_payload(
+                subject_ref, state == "held", version, at, reason_code
+            ),
+        )
+    return state
+
+
+def _access_event_payload(
+    subject_ref: str,
+    active: bool,
+    version: int | None,
+    at: datetime,
+    reason_code: str,
+) -> dict[str, object]:
+    return {
+        "subject_ref": subject_ref,
+        "active": active,
+        "source_version": version,
+        "source_reference": f"collections:subject-access:{subject_ref}:{version}",
+        "observed_at": at.isoformat(),
+        "policy_version": SUBJECT_ACCESS_POLICY_VERSION,
+        "reason_code": reason_code,
+    }
+
+
+def republish_subject_state(
+    db: Session, command: RepublishSubjectStateV1
+) -> SubjectStateRepublished:
+    """Re-emit the subject's current state under the next version (idempotent).
+
+    Takes only the subject lock. Use it when the product must apply the current
+    state itself and the last flip's version could be stale for that service.
+    """
+
+    plane = _models(command.scope)
+    fingerprint = fingerprint_of(asdict(command))
+
+    def operation(session: Session) -> Mapping[str, object]:
+        _serialize_identity(session, command.scope, "subject", command.subject_ref)
+        row = session.execute(
+            _where_scope(
+                select(plane.subject_access)
+                .where(plane.subject_access.subject_ref == command.subject_ref)
+                .with_for_update(),
+                command.scope,
+                plane.subject_access,
+            )
+        ).scalar_one_or_none()
+        state: SubjectAccessState = (
+            "clear" if row is None else cast(SubjectAccessState, row.state)
+        )
+        version = _next_access_version(session, command.scope)
+        if row is None:
+            session.add(
+                plane.subject_access(
+                    **_values(
+                        command.scope,
+                        {
+                            "id": uuid4(),
+                            "subject_ref": command.subject_ref,
+                            "state": state,
+                            "version": version,
+                            "reason_code": command.reason_code,
+                            "changed_at": command.requested_at,
+                        },
+                    )
+                )
+            )
+        else:
+            row.version = version
+        session.flush()
+        _emit(
+            session,
+            scope=command.scope,
+            event_type="collections.subject.access_hold.v1",
+            payload=_access_event_payload(
+                command.subject_ref,
+                state == "held",
+                version,
+                command.requested_at,
+                command.reason_code,
+            ),
+        )
+        return {"state": state, "version": version}
+
+    outcome = _idempotent(
+        db,
+        scope=command.scope,
+        operation_scope="collections.republish_subject_state",
+        key=command.idempotency_key,
+        fingerprint=fingerprint,
+        operation=operation,
+    )
+    return SubjectStateRepublished(
+        command.subject_ref,
+        cast(SubjectAccessState, str(outcome.result["state"])),
+        int(str(outcome.result["version"])),
+        outcome.replayed,
+    )
+
+
+def get_collection_case(
+    db: Session, *, scope: Scope, case_id: UUID
+) -> CollectionCaseViewV1:
+    """Read one case's identity and hold evidence (read-only, no money)."""
+
+    row = _case(db, scope, case_id)
+    return CollectionCaseViewV1(
+        case_id=row.id,
+        subject_ref=row.subject_ref,
+        source_owner=row.source_owner,
+        exposure_ref=row.exposure_ref,
+        service_ref=row.service_ref,
+        lifecycle=row.lifecycle,
+        source_version=row.source_version,
+        due_at=None if row.due_at is None else _stored_utc(row.due_at),
+        access_hold_from=(
+            None if row.access_hold_from is None else _stored_utc(row.access_hold_from)
+        ),
+        access_hold_engaged_at=(
+            None
+            if row.access_hold_engaged_at is None
+            else _stored_utc(row.access_hold_engaged_at)
+        ),
+    )
+
+
+def get_collection_subject_state(
+    db: Session, *, scope: Scope, subject_ref: str
+) -> CollectionSubjectStateV1:
+    """Read one subject's access state and its live holds (read-only)."""
+
+    require_text("subject_ref", subject_ref)
+    plane = _models(scope)
+    row = db.execute(
+        _where_scope(
+            select(plane.subject_access).where(
+                plane.subject_access.subject_ref == subject_ref
+            ),
+            scope,
+            plane.subject_access,
+        )
+    ).scalar_one_or_none()
+    refs = _live_hold_refs(db, scope, subject_ref)
+    if row is None:
+        return CollectionSubjectStateV1(subject_ref, "clear", None, refs, None)
+    return CollectionSubjectStateV1(
+        subject_ref,
+        cast(SubjectAccessState, row.state),
+        row.version,
+        refs,
+        _stored_utc(row.changed_at),
+    )
+
+
 class CollectionCaseService:
     """Sole writer for case membership and lifecycle transitions."""
 
@@ -1025,14 +1536,30 @@ class CollectionCaseService:
         reader: ReceivablesReader,
         timer: CollectionsTimer | None = None,
         assessed_at: datetime,
+        exposure_wake: TimerTriggerV1 | None = None,
     ) -> CaseAssessmentResult:
+        """Assess one exposure; pass the fired exposure-due wake to accept it.
+
+        An accepted or superseded wake is consumed here, and once the exposure is
+        actionable any pending exposure wake is cancelled, so no scheduled timer row
+        outlives its purpose.
+        """
+
         require_aware("assessed_at", assessed_at)
+        if exposure_wake is not None and exposure_wake.identity != (
+            _exposure_timer_identity(
+                command.scope, command.source_owner, command.exposure_ref
+            )
+        ):
+            raise ValueError("the wake is not this exposure's due wake")
         plane = _models(command.scope)
         fingerprint = fingerprint_of(
             {"command": asdict(command), "policy_version_id": policy_version_id}
         )
 
         def operation(session: Session) -> Mapping[str, object]:
+            if timer is not None and exposure_wake is not None:
+                timer.accept_trigger(session, exposure_wake, accepted_at=assessed_at)
             read = reader.read(
                 scope=command.scope,
                 source_owner=command.source_owner,
@@ -1058,11 +1585,40 @@ class CollectionCaseService:
             closed = closed or position.collectible_receivable.is_zero
             blocker = position.automated_collection_blocker(as_of=assessed_at)
             if blocker is not None and not closed:
+                wake_at = _exposure_wake_at(position, blocker)
+                if timer is not None and wake_at is not None:
+                    _serialize_identity(
+                        session,
+                        command.scope,
+                        "case",
+                        command.source_owner,
+                        command.exposure_ref,
+                    )
+                    _arm_timer(
+                        session,
+                        timer=timer,
+                        identity=_exposure_timer_identity(
+                            command.scope, command.source_owner, command.exposure_ref
+                        ),
+                        due_at=wake_at,
+                        recorded_at=assessed_at,
+                        event_type=EXPOSURE_DUE_EVENT_TYPE,
+                        expected_source_version=position.source_version,
+                    )
                 return {
                     "kind": "blocked",
                     "reason_code": blocker,
                     "retry_after": None,
                 }
+            if timer is not None:
+                _cancel_identity(
+                    session,
+                    timer=timer,
+                    identity=_exposure_timer_identity(
+                        command.scope, command.source_owner, command.exposure_ref
+                    ),
+                    recorded_at=assessed_at,
+                )
             policy = _policy_version(session, command.scope, policy_version_id)
             if (
                 policy.reason_code != command.reason_code
@@ -1124,6 +1680,9 @@ class CollectionCaseService:
                             "position_fingerprint": position.state_fingerprint,
                             "opened_at": assessed_at,
                             "resolved_at": None,
+                            "access_hold_from": _hold_from(position),
+                            "access_hold_engaged_at": None,
+                            "due_at": _due_at(position),
                         },
                     )
                 )
@@ -1158,6 +1717,8 @@ class CollectionCaseService:
                 )
             row.source_version = position.source_version
             row.position_fingerprint = position.state_fingerprint
+            if source_advanced:
+                _apply_hold_evidence(row, position)
             if closed:
                 previous = row.lifecycle
                 row.lifecycle = "resolved"
@@ -1182,14 +1743,43 @@ class CollectionCaseService:
                         case_id=row.id,
                         recorded_at=assessed_at,
                     )
+                    _cancel_identity(
+                        session,
+                        timer=timer,
+                        identity=_hold_timer_identity(command.scope, row.id),
+                        recorded_at=assessed_at,
+                    )
                 elif source_advanced:
-                    _schedule_next_policy_step(
+                    # A live collection hold suppresses the ladder; lift re-arms it.
+                    # Decide under the subject lock (case lock already held), so a
+                    # concurrent last lift either finishes first or sees this case.
+                    _serialize_identity(
+                        session, command.scope, "subject", row.subject_ref
+                    )
+                    if not _live_hold_refs(session, command.scope, row.subject_ref):
+                        _schedule_next_policy_step(
+                            session,
+                            timer=timer,
+                            scope=command.scope,
+                            case_row=row,
+                            recorded_at=assessed_at,
+                            skip_past_due=opened,
+                        )
+                    _sync_hold_timer(
                         session,
                         timer=timer,
                         scope=command.scope,
                         case_row=row,
-                        recorded_at=assessed_at,
+                        now=assessed_at,
                     )
+            if closed or source_advanced:
+                _recompute_subject(
+                    session,
+                    scope=command.scope,
+                    subject_ref=row.subject_ref,
+                    at=assessed_at,
+                    reason_code="receivable_resolved" if closed else "case_assessed",
+                )
             return {
                 "kind": "case",
                 "case_id": str(row.id),
@@ -1243,6 +1833,8 @@ class CollectionCaseService:
                     f"Collection case cannot transition from {current} to {to_state}.",
                 )
             row.lifecycle = to_state
+            if to_state != "active":
+                row.access_hold_engaged_at = None
             row.resolved_at = (
                 command.occurred_at if to_state in {"resolved", "cancelled"} else None
             )
@@ -1259,13 +1851,18 @@ class CollectionCaseService:
             session.flush()
             if timer is not None:
                 if to_state == "active":
-                    _schedule_next_policy_step(
-                        session,
-                        timer=timer,
-                        scope=command.scope,
-                        case_row=row,
-                        recorded_at=command.occurred_at,
+                    _serialize_identity(
+                        session, command.scope, "subject", row.subject_ref
                     )
+                    if not _live_hold_refs(session, command.scope, row.subject_ref):
+                        _schedule_next_policy_step(
+                            session,
+                            timer=timer,
+                            scope=command.scope,
+                            case_row=row,
+                            recorded_at=command.occurred_at,
+                            skip_past_due=True,
+                        )
                 else:
                     _cancel_case_timer(
                         session,
@@ -1274,6 +1871,20 @@ class CollectionCaseService:
                         case_id=row.id,
                         recorded_at=command.occurred_at,
                     )
+                _sync_hold_timer(
+                    session,
+                    timer=timer,
+                    scope=command.scope,
+                    case_row=row,
+                    now=command.occurred_at,
+                )
+            _recompute_subject(
+                session,
+                scope=command.scope,
+                subject_ref=row.subject_ref,
+                at=command.occurred_at,
+                reason_code=f"case_{to_state}",
+            )
             return {
                 "case_id": str(row.id),
                 "lifecycle": row.lifecycle,
@@ -1435,6 +2046,21 @@ class CollectionCaseService:
                 )
                 row.source_version = position.source_version
                 row.position_fingerprint = position.state_fingerprint
+                _apply_hold_evidence(row, position)
+                _sync_hold_timer(
+                    session,
+                    timer=timer,
+                    scope=command.scope,
+                    case_row=row,
+                    now=command.processed_at,
+                )
+                _recompute_subject(
+                    session,
+                    scope=command.scope,
+                    subject_ref=row.subject_ref,
+                    at=command.processed_at,
+                    reason_code="case_assessed",
+                )
             closed = position.financial_state in {"resolved", "cancelled"}
             closed = closed or position.collectible_receivable.is_zero
             if closed:
@@ -1452,6 +2078,19 @@ class CollectionCaseService:
                     transitioned_at=command.processed_at,
                 )
                 session.flush()
+                _cancel_identity(
+                    session,
+                    timer=timer,
+                    identity=_hold_timer_identity(command.scope, row.id),
+                    recorded_at=command.processed_at,
+                )
+                _recompute_subject(
+                    session,
+                    scope=command.scope,
+                    subject_ref=row.subject_ref,
+                    at=command.processed_at,
+                    reason_code="receivable_resolved",
+                )
                 return {
                     "kind": "resolved",
                     "case_id": str(case_id),
@@ -1465,6 +2104,14 @@ class CollectionCaseService:
                     "kind": "blocked",
                     "case_id": str(case_id),
                     "reason_code": blocker,
+                    "retry_at": None,
+                }
+            if _live_hold_refs(session, command.scope, row.subject_ref):
+                # The fired wake is consumed and not re-armed; lift re-arms it.
+                return {
+                    "kind": "blocked",
+                    "case_id": str(case_id),
+                    "reason_code": "collection_hold_active",
                     "retry_at": None,
                 }
             progress = _step_progress(session, command.scope, row)
@@ -1583,6 +2230,251 @@ class CollectionCaseService:
         )
         return _step_due_from_result(outcome.result, replayed=outcome.replayed)
 
+    @staticmethod
+    def process_access_hold_due(
+        db: Session,
+        *,
+        command: ProcessCollectionAccessHoldDueV1,
+        reader: ReceivablesReader,
+        timer: CollectionsTimer,
+    ) -> AccessHoldDueResult:
+        """Reread the case at its hold instant and recompute its subject.
+
+        The assembly runs the balance pass (its own earlier transaction) before
+        calling this, so a customer whose credit can pay the invoice is not cut.
+        """
+
+        if command.processed_at < command.trigger.due_at:
+            raise CollectionsConflict(
+                "timer_fired_early", "A collection timer cannot fire before due_at."
+            )
+        try:
+            case_id = UUID(command.trigger.identity.entity_id)
+        except ValueError as exc:
+            raise CollectionsServiceError(
+                "invalid_timer_case", "The timer entity is not a collection case UUID."
+            ) from exc
+        fingerprint = fingerprint_of(asdict(command))
+
+        def operation(session: Session) -> Mapping[str, object]:
+            _serialize_identity(session, command.scope, "case", case_id)
+            row = _case(session, command.scope, case_id, lock=True)
+            accepted = timer.accept_trigger(
+                session,
+                command.trigger,
+                accepted_at=command.processed_at,
+            )
+            if isinstance(accepted, Stale | Canceled | AlreadyFired | NothingScheduled):
+                return {
+                    "kind": "ignored",
+                    "case_id": str(case_id),
+                    "reason_code": type(accepted).__name__,
+                }
+            if not isinstance(accepted, Current):
+                raise CollectionsServiceError(
+                    "unsupported_timer_decision",
+                    "The timer returned an unsupported acceptance decision.",
+                )
+            if row.lifecycle != "active":
+                return {
+                    "kind": "ignored",
+                    "case_id": str(case_id),
+                    "reason_code": "case_not_active",
+                }
+            expected = command.trigger.expected_source_version
+            if expected is not None and expected != row.source_version:
+                raise CollectionsConflict(
+                    "timer_source_version_conflict",
+                    "The current timer was scheduled for different case evidence.",
+                )
+            read = reader.read(
+                scope=command.scope,
+                source_owner=row.source_owner,
+                exposure_ref=row.exposure_ref,
+                as_of=command.processed_at,
+            )
+            blocked = _blocked(read)
+            if blocked is not None:
+                if blocked.retry_after is not None:
+                    _arm_timer(
+                        session,
+                        timer=timer,
+                        identity=_hold_timer_identity(command.scope, case_id),
+                        due_at=blocked.retry_after,
+                        recorded_at=command.processed_at,
+                        event_type=ACCESS_HOLD_DUE_EVENT_TYPE,
+                        expected_source_version=row.source_version,
+                    )
+                return {
+                    "kind": "blocked",
+                    "case_id": str(case_id),
+                    "reason_code": blocked.reason_code,
+                    "retry_at": (
+                        blocked.retry_after.isoformat()
+                        if blocked.retry_after is not None
+                        else None
+                    ),
+                }
+            if not isinstance(read, PositionReadOk):
+                raise CollectionsServiceError(
+                    "unsupported_read_result", "The receivables result is unsupported."
+                )
+            position = read.position
+            if (
+                position.scope != command.scope
+                or position.source_owner != row.source_owner
+                or position.exposure_ref != row.exposure_ref
+                or position.subject_ref != row.subject_ref
+                or position.service_ref != row.service_ref
+                or position.collection_timing != row.collection_timing
+                or position.reason_code != row.reason_code
+            ):
+                raise CollectionsConflict(
+                    "position_identity_conflict",
+                    "The current receivable does not match the locked case.",
+                )
+            if position.source_version < row.source_version:
+                raise CollectionsConflict(
+                    "stale_position", "The receivable position version regressed."
+                )
+            if (
+                position.source_version == row.source_version
+                and position.state_fingerprint != row.position_fingerprint
+            ):
+                raise CollectionsConflict(
+                    "position_fingerprint_conflict",
+                    "One receivable version has different fingerprints.",
+                )
+            if position.source_version > row.source_version:
+                session.add(
+                    _models(command.scope).case_exposure(
+                        **_values(
+                            command.scope,
+                            {
+                                "id": uuid4(),
+                                "case_id": row.id,
+                                "source_owner": position.source_owner,
+                                "exposure_ref": position.exposure_ref,
+                                "source_version": position.source_version,
+                                "position_fingerprint": position.state_fingerprint,
+                                "position_snapshot": _position_document(position),
+                                "observed_at": position.observed_at,
+                            },
+                        )
+                    )
+                )
+                row.source_version = position.source_version
+                row.position_fingerprint = position.state_fingerprint
+                _apply_hold_evidence(row, position)
+            closed = position.financial_state in {"resolved", "cancelled"}
+            closed = closed or position.collectible_receivable.is_zero
+            reason_code = "access_hold_due"
+            if closed:
+                previous = row.lifecycle
+                row.lifecycle = "resolved"
+                row.resolved_at = command.processed_at
+                _append_transition(
+                    session,
+                    scope=command.scope,
+                    row=row,
+                    from_state=previous,
+                    to_state="resolved",
+                    reason_code="receivable_resolved",
+                    actor_ref=f"timer:{command.trigger.timer_id}",
+                    transitioned_at=command.processed_at,
+                )
+                reason_code = "receivable_resolved"
+                _cancel_case_timer(
+                    session,
+                    timer=timer,
+                    scope=command.scope,
+                    case_id=case_id,
+                    recorded_at=command.processed_at,
+                )
+            else:
+                blocker = position.automated_collection_blocker(
+                    as_of=command.processed_at
+                )
+                if blocker is not None:
+                    session.flush()
+                    return {
+                        "kind": "blocked",
+                        "case_id": str(case_id),
+                        "reason_code": blocker,
+                        "retry_at": None,
+                    }
+                hold_from = row.access_hold_from
+                if (
+                    hold_from is not None
+                    and row.access_hold_engaged_at is None
+                    and _stored_utc(hold_from) <= command.processed_at.astimezone(UTC)
+                ):
+                    # Only this command engages the hold, after the balance pass.
+                    row.access_hold_engaged_at = command.processed_at
+            session.flush()
+            _sync_hold_timer(
+                session,
+                timer=timer,
+                scope=command.scope,
+                case_row=row,
+                now=command.processed_at,
+            )
+            state = _recompute_subject(
+                session,
+                scope=command.scope,
+                subject_ref=row.subject_ref,
+                at=command.processed_at,
+                reason_code=reason_code,
+            )
+            return {
+                "kind": "evaluated",
+                "case_id": str(case_id),
+                "subject_ref": row.subject_ref,
+                "lifecycle": row.lifecycle,
+                "subject_state": state,
+                "source_version": row.source_version,
+            }
+
+        outcome = _idempotent(
+            db,
+            scope=command.scope,
+            operation_scope="collections.process_access_hold_due",
+            key=(
+                f"timer:{command.trigger.timer_id}:"
+                f"generation:{command.trigger.generation}"
+            ),
+            fingerprint=fingerprint,
+            correlation_id=str(command.trigger.timer_id),
+            operation=operation,
+        )
+        result = outcome.result
+        case_uuid = UUID(str(result["case_id"]))
+        kind = str(result.get("kind"))
+        if kind == "ignored":
+            return AccessHoldIgnored(
+                case_uuid, str(result["reason_code"]), outcome.replayed
+            )
+        if kind == "blocked":
+            retry_at = result.get("retry_at")
+            return AccessHoldBlocked(
+                case_uuid,
+                str(result["reason_code"]),
+                datetime.fromisoformat(str(retry_at)) if retry_at else None,
+                outcome.replayed,
+            )
+        if kind == "evaluated":
+            return AccessHoldEvaluated(
+                case_id=case_uuid,
+                subject_ref=str(result["subject_ref"]),
+                lifecycle=cast(CaseLifecycle, str(result["lifecycle"])),
+                subject_state=cast(SubjectAccessState, str(result["subject_state"])),
+                source_version=int(str(result["source_version"])),
+                replayed=outcome.replayed,
+            )
+        raise CollectionsServiceError(
+            "invalid_replay", "The stored access-hold result is invalid."
+        )
+
 
 def _step(
     db: Session,
@@ -1631,6 +2523,7 @@ class _StepProgress:
     request_pending: bool
     request_at: datetime | None
     accepted_notice_receipt_at: datetime | None
+    skipped: bool = False
 
 
 def _latest_step_request(
@@ -1678,6 +2571,7 @@ def _request_receipt(
 def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgress:
     request_at: datetime | None = None
     accepted_notice_receipt_at: datetime | None = None
+    skipped = False
     for step in _policy_steps(db, scope, case_row.policy_version_id):
         request = _latest_step_request(
             db,
@@ -1686,7 +2580,16 @@ def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgre
             step=step,
         )
         if request is None:
-            return _StepProgress(step, False, request_at, accepted_notice_receipt_at)
+            skipped_at = _step_skipped_at(db, scope, case_row.id, step.step_code)
+            if skipped_at is not None:
+                # Passed over, never sent; its scheduled instant still anchors the
+                # step counted from its request.
+                request_at = skipped_at
+                skipped = True
+                continue
+            return _StepProgress(
+                step, False, request_at, accepted_notice_receipt_at, skipped
+            )
         if not step.receipt_required:
             request_at = _stored_utc(request.requested_at)
             continue
@@ -1700,11 +2603,93 @@ def _step_progress(db: Session, scope: Scope, case_row: _CaseRow) -> _StepProgre
             "ActionApplied" if step.request_kind == "action" else "NoticeAccepted"
         )
         if receipt is None or receipt.receipt_kind != accepted_kind:
-            return _StepProgress(step, True, request_at, accepted_notice_receipt_at)
+            return _StepProgress(
+                step, True, request_at, accepted_notice_receipt_at, skipped
+            )
         request_at = _stored_utc(request.requested_at)
         if step.request_kind == "notice":
             accepted_notice_receipt_at = _stored_utc(receipt.observed_at)
-    return _StepProgress(None, False, request_at, accepted_notice_receipt_at)
+    return _StepProgress(None, False, request_at, accepted_notice_receipt_at, skipped)
+
+
+def _step_skipped_at(
+    db: Session, scope: Scope, case_id: UUID, step_code: str
+) -> datetime | None:
+    """The scheduled instant of a skipped step (stored as its attempt instant)."""
+
+    model = _models(scope).step_attempt
+    value = db.scalar(
+        _where_scope(
+            select(model.attempted_at)
+            .where(
+                model.case_id == case_id,
+                model.policy_step_code == step_code,
+                model.request_kind == "skipped",
+            )
+            .limit(1),
+            scope,
+            model,
+        )
+    )
+    return None if value is None else _stored_utc(value)
+
+
+def _step_anchor(case_row: _CaseRow, progress: _StepProgress) -> datetime | None:
+    step = progress.step
+    if step is None:
+        return None
+    if step.offset_anchor == "exposure_at":
+        # Reminders count from the due date, not from when the case happened to open.
+        return _stored_utc(case_row.due_at or case_row.opened_at)
+    if step.offset_anchor == "request_at":
+        return progress.request_at
+    return progress.accepted_notice_receipt_at
+
+
+def _skip_past_due_steps(
+    db: Session, *, scope: Scope, case_row: _CaseRow, now: datetime
+) -> None:
+    """On open or resume, pass over reminders already due before ``now``.
+
+    Walks the ladder: a notice step whose instant is already before ``now`` is
+    recorded as a ``skipped`` attempt (never sent) whose attempt instant is the moment
+    it was scheduled, and that instant anchors a successor counted from its request,
+    so the walk continues. It stops, without error, at the first step that is not
+    due yet, is not a notice, or has no anchor (counted from a receipt, which a skip
+    cannot supply).
+    """
+
+    # Each pass records one skip, so at most one pass per policy step.
+    for _ in _policy_steps(db, scope, case_row.policy_version_id):
+        progress = _step_progress(db, scope, case_row)
+        step = progress.step
+        if step is None or progress.request_pending or step.request_kind != "notice":
+            return
+        anchor = _step_anchor(case_row, progress)
+        if anchor is None:
+            return
+        due = anchor + timedelta(seconds=step.offset_seconds)
+        if due >= now.astimezone(UTC):
+            return
+        key = (
+            f"collections:{scope_segment(scope)}:{case_row.id}:{step.step_code}:skipped"
+        )
+        _append_attempt(
+            db,
+            scope=scope,
+            case_id=case_row.id,
+            policy_step_code=step.step_code,
+            attempt_ordinal=_next_attempt_ordinal(
+                db, scope=scope, case_id=case_row.id, step_code=step.step_code
+            ),
+            request_kind="skipped",
+            request_id=uuid5(NAMESPACE_URL, key),
+            fingerprint=fingerprint_of(
+                {"reason": "past_due_on_open", "step_due_at": due.isoformat()}
+            ),
+            attempted_at=due,
+        )
+        db.flush()
 
 
 def _step_due_at(case_row: _CaseRow, progress: _StepProgress) -> datetime:
@@ -1713,13 +2698,7 @@ def _step_due_at(case_row: _CaseRow, progress: _StepProgress) -> datetime:
         raise CollectionsServiceError(
             "policy_ladder_complete", "The collection policy ladder is complete."
         )
-    anchor: datetime | None
-    if step.offset_anchor == "exposure_at":
-        anchor = _stored_utc(case_row.opened_at)
-    elif step.offset_anchor == "request_at":
-        anchor = progress.request_at
-    else:
-        anchor = progress.accepted_notice_receipt_at
+    anchor = _step_anchor(case_row, progress)
     if anchor is None:
         raise CollectionsConflict(
             "policy_anchor_unavailable",
@@ -1735,9 +2714,16 @@ def _schedule_next_policy_step(
     scope: Scope,
     case_row: _CaseRow,
     recorded_at: datetime,
+    skip_past_due: bool = False,
 ) -> None:
+    if skip_past_due:
+        _skip_past_due_steps(db, scope=scope, case_row=case_row, now=recorded_at)
     progress = _step_progress(db, scope, case_row)
     if progress.step is None or progress.request_pending:
+        return
+    if progress.skipped and _step_anchor(case_row, progress) is None:
+        # The successor counts from evidence a skipped step cannot supply: the
+        # ladder stops here rather than raising and redelivering for ever.
         return
     _schedule_case_timer(
         db,
@@ -1843,7 +2829,7 @@ def _append_attempt(
     case_id: UUID,
     policy_step_code: str,
     attempt_ordinal: int,
-    request_kind: Literal["notice", "action"],
+    request_kind: Literal["notice", "action", "skipped"],
     request_id: UUID,
     fingerprint: str,
     attempted_at: datetime,
@@ -2664,7 +3650,209 @@ class CollectionReconciliationService:
         return ReconciliationWriteResult(command.reconciliation_id, outcome, False)
 
 
+class CollectionHoldService:
+    """Sole writer for per-account collection holds (R10).
+
+    A hold is an insert-only fact; it is live until a lift row names it. Placing
+    and lifting take the hold-reference lock and then the subject lock, and
+    ``lift`` takes the locks of the subject's active cases before the subject
+    lock, so the order is always case, hold reference, subject.
+    """
+
+    @staticmethod
+    def place(db: Session, command: PlaceCollectionHoldV1) -> HoldPlaced:
+        plane = _models(command.scope)
+        fingerprint = fingerprint_of(asdict(command))
+
+        def operation(session: Session) -> Mapping[str, object]:
+            _serialize_identity(session, command.scope, "hold", command.external_ref)
+            live = _live_hold_by_ref(session, command.scope, command.external_ref)
+            if live is not None:
+                if live.subject_ref != command.subject_ref:
+                    raise CollectionsConflict(
+                        "hold_subject_conflict",
+                        "The external reference is live on another subject.",
+                    )
+                return {
+                    "kind": "placed",
+                    "hold_id": str(live.id),
+                    "existing": True,
+                }
+            highest = session.scalar(
+                _where_scope(
+                    select(func.max(plane.hold.placement_ordinal)).where(
+                        plane.hold.external_ref == command.external_ref
+                    ),
+                    command.scope,
+                    plane.hold,
+                )
+            )
+            session.add(
+                plane.hold(
+                    **_values(
+                        command.scope,
+                        {
+                            "id": command.command_id,
+                            "subject_ref": command.subject_ref,
+                            "external_ref": command.external_ref,
+                            "placement_ordinal": int(highest or 0) + 1,
+                            "reason_code": command.reason_code,
+                            "evidence_ref": command.evidence_ref,
+                            "actor_ref": command.actor_ref,
+                            "approval_ref": command.approval_ref,
+                            "placed_at": command.placed_at,
+                        },
+                    )
+                )
+            )
+            session.flush()
+            _recompute_subject(
+                session,
+                scope=command.scope,
+                subject_ref=command.subject_ref,
+                at=command.placed_at,
+                reason_code="collection_hold_placed",
+            )
+            return {
+                "kind": "placed",
+                "hold_id": str(command.command_id),
+                "existing": False,
+            }
+
+        outcome = _idempotent(
+            db,
+            scope=command.scope,
+            operation_scope="collections.place_hold",
+            key=command.idempotency_key,
+            fingerprint=fingerprint,
+            operation=operation,
+        )
+        return HoldPlaced(
+            hold_id=UUID(str(outcome.result["hold_id"])),
+            subject_ref=command.subject_ref,
+            external_ref=command.external_ref,
+            replayed=outcome.replayed or bool(outcome.result["existing"]),
+        )
+
+    @staticmethod
+    def lift(
+        db: Session,
+        command: LiftCollectionHoldV1,
+        timer: CollectionsTimer,
+    ) -> HoldLifted | HoldNotLive:
+        """Lift one hold; the last lift re-arms the ladder of every active case.
+
+        Order: hold reference, then the subject's active cases by id, then the
+        subject. Whether this is the last live hold is decided only after the
+        subject lock, and a case that became active meanwhile is refused so the
+        event is redelivered, so two simultaneous last lifts cannot both skip the
+        re-arm.
+        """
+
+        plane = _models(command.scope)
+        fingerprint = fingerprint_of(asdict(command))
+
+        def active_case_ids(session: Session) -> tuple[UUID, ...]:
+            return tuple(
+                session.scalars(
+                    _where_scope(
+                        select(plane.case.id)
+                        .where(
+                            plane.case.subject_ref == command.subject_ref,
+                            plane.case.lifecycle == "active",
+                        )
+                        .order_by(plane.case.id),
+                        command.scope,
+                        plane.case,
+                    )
+                ).all()
+            )
+
+        def operation(session: Session) -> Mapping[str, object]:
+            _serialize_identity(session, command.scope, "hold", command.external_ref)
+            live = _live_hold_by_ref(session, command.scope, command.external_ref)
+            if live is None:
+                return {"kind": "not_live"}
+            if live.subject_ref != command.subject_ref:
+                raise CollectionsConflict(
+                    "hold_subject_conflict",
+                    "The external reference is live on another subject.",
+                )
+            locked = active_case_ids(session)
+            for case_id in locked:
+                # Case locks come before the subject lock.
+                _serialize_identity(session, command.scope, "case", case_id)
+                _case(session, command.scope, case_id, lock=True)
+            _serialize_identity(session, command.scope, "subject", command.subject_ref)
+            if active_case_ids(session) != locked:
+                raise CollectionsConflict(
+                    "subject_cases_changed",
+                    "An active case appeared while lifting; the lift is retried.",
+                )
+            others = [
+                ref
+                for ref in _live_hold_refs(session, command.scope, command.subject_ref)
+                if ref != command.external_ref
+            ]
+            session.add(
+                plane.hold_lift(
+                    **_values(
+                        command.scope,
+                        {
+                            "id": command.command_id,
+                            "hold_id": live.id,
+                            "reason_code": command.reason_code,
+                            "evidence_ref": command.evidence_ref,
+                            "actor_ref": command.actor_ref,
+                            "approval_ref": command.approval_ref,
+                            "lifted_at": command.lifted_at,
+                        },
+                    )
+                )
+            )
+            session.flush()
+            if not others:
+                for case_id in locked:
+                    _schedule_next_policy_step(
+                        session,
+                        timer=timer,
+                        scope=command.scope,
+                        case_row=_case(session, command.scope, case_id),
+                        recorded_at=command.lifted_at,
+                        skip_past_due=True,
+                    )
+            _recompute_subject(
+                session,
+                scope=command.scope,
+                subject_ref=command.subject_ref,
+                at=command.lifted_at,
+                reason_code="collection_hold_lifted",
+            )
+            return {"kind": "lifted", "hold_id": str(live.id)}
+
+        outcome = _idempotent(
+            db,
+            scope=command.scope,
+            operation_scope="collections.lift_hold",
+            key=command.idempotency_key,
+            fingerprint=fingerprint,
+            operation=operation,
+        )
+        if outcome.result["kind"] == "not_live":
+            return HoldNotLive(command.external_ref, outcome.replayed)
+        return HoldLifted(
+            hold_id=UUID(str(outcome.result["hold_id"])),
+            subject_ref=command.subject_ref,
+            external_ref=command.external_ref,
+            replayed=outcome.replayed,
+        )
+
+
 __all__ = [
+    "AccessHoldBlocked",
+    "AccessHoldDueResult",
+    "AccessHoldEvaluated",
+    "AccessHoldIgnored",
     "ArrangementLifecycleCommandV1",
     "ArrangementSettlementReceiptV1",
     "ArrangementWriteResult",
@@ -2678,6 +3866,7 @@ __all__ = [
     "CollectionNoticeService",
     "CollectionPolicyService",
     "CollectionGraceService",
+    "CollectionHoldService",
     "CollectionReconciliationService",
     "CollectionsConflict",
     "CollectionsNotFound",
@@ -2687,6 +3876,7 @@ __all__ = [
     "GraceWriteResult",
     "PaymentArrangementService",
     "PersistGraceV1",
+    "ProcessCollectionAccessHoldDueV1",
     "ProcessCollectionStepDueV1",
     "PolicyVersionWriteResult",
     "PolicyWriteResult",
@@ -2699,4 +3889,7 @@ __all__ = [
     "StepDueIgnored",
     "StepDueResult",
     "StepRequestWritten",
+    "get_collection_case",
+    "get_collection_subject_state",
+    "republish_subject_state",
 ]

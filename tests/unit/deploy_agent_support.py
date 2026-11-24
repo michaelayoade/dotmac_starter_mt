@@ -521,6 +521,30 @@ class FakeBaoTransport:
         return Response(200, {}, json.dumps(document).encode())
 
 
+AUTO = object()  # FakeRunner.receipt: build Foundation's receipt for this very run
+
+
+def foundation_receipt(spec: RunSpec, **extra: object) -> dict[str, object]:
+    """A receipt shaped like Foundation #1149's `OperatorJobReceipt.to_document()`."""
+    document: dict[str, object] = {
+        "schema": "dotmac.foundation.operator-job-receipt/1",
+        "dispatch_id": spec.dispatch_id,
+        "job": spec.job_name,
+        "role": "import",
+        "exit_code": 0,
+        "outcome": "succeeded",
+        "reason": "",
+        "started_at": "2027-01-06T12:00:00Z",
+        "finished_at": "2027-01-06T12:05:00Z",
+        "inputs": [{"flag": "--manifest", "sha256": "sha256:" + "7" * 64}],
+        "output_volume": "dotmac-job-out-" + spec.dispatch_id,
+        "render_invocation": spec.job_render_invocation,
+        "container_removed": True,
+    }
+    document.update(extra)
+    return document
+
+
 class FakeRunner:
     job_entry_available = True  # the real runner says False until Foundation ships it
 
@@ -536,6 +560,10 @@ class FakeRunner:
         self.effect = effect
         self.seen_params: bytes | None = None
         self.seen_mode: int | None = None
+        #: What Foundation's stdout tail holds for a `run_job`: None (nothing), a dict,
+        #: or AUTO (a receipt shaped like Foundation's own, naming THIS run).
+        self.receipt: dict[str, object] | None | object = AUTO
+        self.receipt_error: str | None = None
 
     def run(self, spec: RunSpec) -> RunResult:
         self.specs.append(spec)
@@ -543,7 +571,14 @@ class FakeRunner:
         self.seen_mode = spec.params_env.stat().st_mode & 0o777
         if self.effect is not None:
             self.effect(spec)
-        return RunResult(None if self.timed_out else self.exit_code, self.timed_out)
+        job = spec.job_name is not None
+        receipt = foundation_receipt(spec) if self.receipt is AUTO else self.receipt
+        return RunResult(
+            None if self.timed_out else self.exit_code,
+            self.timed_out,
+            receipt if job else None,  # type: ignore[arg-type]
+            (self.receipt_error or "missing") if job and receipt is None else None,
+        )
 
 
 class FakeTransfer:

@@ -11,6 +11,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from collections.abc import Callable, Mapping
@@ -49,6 +50,7 @@ from .jobs import (
     JOB_TERM_GRACE,
     check_apply_class,
     check_job_inputs,
+    foundation_receipt_matches,
     job_env,
 )
 from .journal import AccessorStore, ExecutedDispatches
@@ -87,6 +89,7 @@ from .transport import Transport
 from .wire import utc_stamp
 
 LOG = logging.getLogger("dotmac.deploy_agent")
+_CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}")
 JOB_PARAMS_FILE = "job-params.env"
 
 
@@ -157,11 +160,22 @@ class Launcher:
         """A7, at agent start: a crash mid-job leaves a `secret_id` file and maybe
         a live accessor. Files go first; accessors are destroyed when OpenBao is
         reachable and stay tracked (retried next cycle) when it is not."""
-        if self._orphan_preflight():
+        cleared = self._clear_orphans()
+        if cleared is None:
+            # The role-job lock is busy: a role job may be running. Nothing is
+            # removed and nothing is an anomaly; the preflight refuses the lease.
+            LOG.info("role-job lock busy at agent start: orphan check deferred")
+        found, remains, foreign, _removed = cleared or (False, False, False, False)
+        if found:
             # P-SEC rev7: files and accessors are STILL purged (a surviving
-            # container is no reason to leave DSNs on tmpfs); the preflight blocks
-            # every later lease instead.
-            LOG.error("a job container survives from an earlier run: leases blocked")
+            # container is no reason to leave DSNs on tmpfs). This agent's own orphan
+            # was removed by label (r5 ruling b); a foreign or stubborn one keeps the
+            # preflight blocking every lease.
+            LOG.error(
+                "a job container survived an earlier run: remains=%s foreign=%s",
+                remains,
+                foreign,
+            )
         for role in self.job_accessors.roles():
             try:
                 self.purge_job_role(role)
@@ -360,22 +374,37 @@ class Launcher:
             stopped = self._reconcile(materials.dispatch_id, standing)
             if stopped is not None:
                 return stopped
-        if self._orphan_preflight():
-            # Before ANY lease, job or serving: a labelled job container (stopped
-            # ones included) from an earlier run blocks everything until a human
-            # has dealt with it.
+        cleared = self._clear_orphans()
+        if cleared is None:
+            # A busy role-job lock means a job is legitimately running (r6 R6-M1):
+            # refuse the lease, no page, nothing removed (never an orphan finding).
+            busy = Refusal("lease_refused", "role_job_running")
             self._report(
                 self._observation(
                     materials.dispatch_id,
                     "refused",
-                    "job_container_orphaned",
-                    {"page": True},
+                    busy.code,
+                    _detail(busy),
                     kind=kind_for_operation(materials.operation),
                 )
             )
-            return CycleResult(
-                "refused", "job_container_orphaned", materials.dispatch_id
+            return CycleResult("refused", busy.code, materials.dispatch_id)
+        found, remains, foreign, removed = cleared
+        if found or foreign:
+            # Before ANY lease, job or serving: this agent's own labelled container
+            # (stopped ones included) is removed by label and re-proved, another
+            # dispatch's is never touched, and the cycle is refused and paged either
+            # way (a leftover is an anomaly). The next poll proceeds if none remains.
+            self._report(
+                self._observation(
+                    materials.dispatch_id,
+                    "refused",
+                    "orphan_job_container",
+                    {"page": True, "removed": removed, "foreign": foreign},
+                    kind=kind_for_operation(materials.operation),
+                )
             )
+            return CycleResult("refused", "orphan_job_container", materials.dispatch_id)
         if materials.dispatched_job is not None:
             return self._execute_job(materials)
         return self._execute(materials, reply)
@@ -713,6 +742,24 @@ class Launcher:
                 )
             )
             receipt["exit_code"] = result.exit_code
+            # Foundation's own receipt (the last JSON line of its stdout), or why not.
+            # (details.foundation, not details.job.foundation: nested one level less,
+            # so its `inputs` items stay inside Control's depth limit; R5-H2.)
+            receipt_ok = False
+            if result.receipt is not None:
+                details["foundation"] = result.receipt
+                receipt_ok = foundation_receipt_matches(
+                    result.receipt,
+                    dispatch_id=materials.dispatch_id,
+                    job=job.name,
+                    render_invocation=invocation,
+                )
+                if not receipt_ok:
+                    receipt["foundation_receipt"] = (
+                        "mismatch"  # another run's, or a refusal
+                    )
+            else:
+                receipt["foundation_receipt"] = result.receipt_error or "missing"
             details["runner"] = {
                 "exit_code": result.exit_code,
                 "timed_out": result.timed_out,
@@ -721,6 +768,9 @@ class Launcher:
                 outcome, reason = "failed", "runner_timeout"
             elif result.exit_code != 0:
                 outcome = "failed"
+            elif not receipt_ok:
+                # exit 0 with no readable receipt of THIS run cannot be trusted
+                outcome, reason = "failed", "job_receipt_invalid"
         except Refusal as refusal:
             outcome = "failed" if ran else "refused"
             reason = refusal.code
@@ -731,11 +781,21 @@ class Launcher:
             # files go and the accessor is destroyed regardless. It only HOLDS the
             # lease (never released: it expires unreleased) and pages. The receipt
             # says `orphan_container` and never claims the container was contained.
-            orphaned = ran and self._job_container_present(materials.dispatch_id)
-            if orphaned:
-                outcome, reason = "failed", "job_container_orphaned"
-                receipt["orphan_container"] = True
-                details["page"] = True
+            orphaned = False
+            if ran:
+                # Remove THIS dispatch's own container (label-scoped `docker rm -f`;
+                # it is recorded in the journal) and prove it again. A container that
+                # was there means the run failed and pages; the lease is released only
+                # if nothing REMAINS, and held otherwise.
+                found, orphaned, _foreign, _removed = self._remove_owned_containers(
+                    materials.dispatch_id
+                )
+                if found:
+                    outcome, reason = "failed", "orphan_job_container"
+                    receipt["orphan_removed"] = not orphaned
+                    details["page"] = True
+                    if orphaned:
+                        receipt["orphan_container"] = True
             if job.role is not None:
                 # Purge first (the agent's secret_id, the purge unit, the accessor),
                 # whatever happened above; the receipt is written only after.
@@ -762,28 +822,84 @@ class Launcher:
         )
         return CycleResult(outcome, reason, materials.dispatch_id)
 
-    def _orphan_preflight(self) -> bool:
-        """True if ANY container carries both job labels (`docker ps -a` lists the
-        stopped ones too), or the listing cannot be read: fail closed."""
-        return self._ps_present(
-            (f"label={JOB_DISPATCH_LABEL}", f"label={JOB_MARKER_LABEL}")
-        )
-
-    def _ps_present(self, filters: tuple[str, ...]) -> bool:
+    # -- orphaned job containers (architect r5 ruling, option b) ---------------------
+    def _labelled(self, dispatch_id: str | None) -> list[tuple[str, str]] | None:
+        """`(container id, dispatch label)` for every container carrying BOTH job
+        labels (`docker ps -a` lists the stopped ones too), restricted to one dispatch
+        when given. None when the listing cannot be read or any id/label is malformed:
+        fail closed, and nothing is then ever removed."""
         argv = [str(self.config.docker_path), "ps", "-a"]
-        for expression in filters:
+        dispatch_filter = JOB_DISPATCH_LABEL + (
+            f"={dispatch_id}" if dispatch_id else ""
+        )
+        for expression in (f"label={dispatch_filter}", f"label={JOB_MARKER_LABEL}"):
             argv += ["--filter", expression]
-        argv += ["--format", "{{.ID}}"]
+        argv += ["--format", '{{.ID}} {{.Label "' + JOB_DISPATCH_LABEL + '"}}']
         try:
             result = self.read_only.run(tuple(argv), timeout=15.0)
         except Refusal:
-            return True
-        return result.exit_code != 0 or bool(result.stdout.strip())
+            return None
+        if result.exit_code != 0:
+            return None
+        found: list[tuple[str, str]] = []
+        for line in result.stdout.decode("ascii", errors="replace").splitlines():
+            parts = line.split()
+            if (
+                len(parts) != 2
+                or not _CONTAINER_ID.fullmatch(parts[0])
+                or safe_id(parts[1]) != parts[1]
+            ):
+                return None
+            found.append((parts[0], parts[1]))
+        return found
 
-    def _job_container_present(self, dispatch_id: str) -> bool:
-        """True unless it is PROVEN that no container labelled with this dispatch
-        remains. An unreadable answer counts as present: fail closed."""
-        return self._ps_present((f"label={JOB_DISPATCH_LABEL}={dispatch_id}",))
+    def _is_mine(self, dispatch_label: str) -> bool:
+        """Only a dispatch this agent recorded itself (executed journal, or the
+        inflight record) is ever cleaned up: other products' agents share the daemon."""
+        return (
+            self.executed.seen(dispatch_label)
+            or read_inflight(self.config.state_dir) == dispatch_label
+        )
+
+    def _remove_owned_containers(
+        self, dispatch_id: str | None = None
+    ) -> tuple[bool, bool, bool, bool]:
+        """`(found, remains, foreign, removed)`. THE one place that removes a container:
+        `docker rm -f <ids>` (an argument list, no shell, no `-v`). The ids come only
+        from the label listing AND only for a dispatch this agent recorded itself; any
+        other labelled container is left alone and reported as `foreign`. An unreadable
+        listing is found and remaining. It then lists again to PROVE what is left."""
+        listing = self._labelled(dispatch_id)
+        if listing is None:
+            return True, True, False, False
+        if not listing:
+            return False, False, False, False
+        mine = [cid for cid, label in listing if self._is_mine(label)]
+        if mine:
+            try:
+                self.commands.run(
+                    (str(self.config.docker_path), "rm", "-f", *mine), timeout=60.0
+                )
+            except Refusal:
+                pass  # re-proved below
+        again = self._labelled(dispatch_id)
+        remains = again is None or any(self._is_mine(label) for _, label in again)
+        foreign = any(not self._is_mine(label) for _, label in listing)
+        return True, remains, foreign, bool(mine) and not remains
+
+    def _clear_orphans(self) -> tuple[bool, bool, bool, bool] | None:
+        """Agent start and before every lease: remove this agent's own orphans, and ONLY
+        while holding the role-job lock. Returns None (the distinct BUSY state) when the
+        lock is held: a role job may be running, so nothing is removed and nothing is
+        reported as an orphan."""
+        try:
+            descriptor = self._lock_role_job()
+        except Refusal:
+            return None
+        try:
+            return self._remove_owned_containers()
+        finally:
+            os.close(descriptor)
 
     def _mint_job_role(self, materials: Materials, role: str) -> str:
         # The authored config was checked by `job_config_stem` before anything.
