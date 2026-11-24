@@ -2198,6 +2198,7 @@
           "dotmac_money_flows/events.py",
           "dotmac_money_flows/settle.py",
           "dotmac_money_flows/funded_charge.py",
+          "dotmac_money_flows/receivables.py",
           "dotmac_money_flows/migrations/__init__.py",
           "dotmac_money_flows/migrations/versions/mf_0001_settle_instances.py",
           "dotmac_money_flows/migrations/versions/mf_0002_funded_charge_instances.py"
@@ -2212,6 +2213,7 @@
           "dotmac-kernel",
           "dotmac-billing",
           "dotmac-payments",
+          "dotmac-collections",
           "dotmac-service-access-policy",
           "sqlalchemy",
           "python"
