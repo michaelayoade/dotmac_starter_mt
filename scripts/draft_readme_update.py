@@ -7,9 +7,9 @@ import html
 import json
 import os
 import re
-from http.client import HTTPSConnection
 from collections.abc import Mapping
 from dataclasses import dataclass
+from http.client import HTTPSConnection
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
