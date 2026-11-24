@@ -659,9 +659,11 @@
           "dotmac_collections/arrangements.py",
           "dotmac_collections/contracts.py",
           "dotmac_collections/grace.py",
+          "dotmac_collections/holds.py",
           "dotmac_collections/manifest.py",
           "dotmac_collections/migrations/__init__.py",
           "dotmac_collections/migrations/versions/cl_0001_collections.py",
+          "dotmac_collections/migrations/versions/cl_0002_collection_holds.py",
           "dotmac_collections/models.py",
           "dotmac_collections/notices.py",
           "dotmac_collections/policies.py",
@@ -2175,8 +2177,9 @@
       "$comment": [
         "Tenant-plane composition of money flows over published owners: instance",
         "state only (settle and funded-charge instance tables, no money facts).",
-        "Composes Billing, Payments and Service Access Policy through their top-level",
-        "public exports, so those three are allowed wheel requirements.",
+        "Composes Billing, Payments, Service Access Policy and Collections (its",
+        "receivable-observation contract, read by receivables.py) through their",
+        "top-level public exports, so those four are allowed wheel requirements.",
         "kernel_floor is a110: the first published kernel that allocates mod_mflows /",
         "mf / money_flows and ships communication-dispatch migration 0032 and the",
         "0033/0034 append-only receipts the composition relies on."
@@ -2196,6 +2199,7 @@
           "dotmac_money_flows/events.py",
           "dotmac_money_flows/settle.py",
           "dotmac_money_flows/funded_charge.py",
+          "dotmac_money_flows/receivables.py",
           "dotmac_money_flows/migrations/__init__.py",
           "dotmac_money_flows/migrations/versions/mf_0001_settle_instances.py",
           "dotmac_money_flows/migrations/versions/mf_0002_funded_charge_instances.py"
@@ -2210,6 +2214,7 @@
           "dotmac-kernel",
           "dotmac-billing",
           "dotmac-payments",
+          "dotmac-collections",
           "dotmac-service-access-policy",
           "sqlalchemy",
           "python"

@@ -30,6 +30,20 @@ from dotmac_collections.grace import (
     GraceGrantV1,
     evaluate_grace,
 )
+from dotmac_collections.holds import (
+    SUBJECT_ACCESS_HOLD_EVENT_TYPE,
+    CollectionCaseViewV1,
+    CollectionSubjectStateV1,
+    HoldLifted,
+    HoldNotLive,
+    HoldPlaced,
+    LiftCollectionHoldV1,
+    PlaceCollectionHoldV1,
+    RepublishSubjectStateV1,
+    SubjectAccessState,
+    SubjectStateRepublished,
+    decide_subject_access,
+)
 from dotmac_collections.manifest import module
 from dotmac_collections.migrations import versions_dir
 from dotmac_collections.notices import (
@@ -69,6 +83,10 @@ from dotmac_collections.receivables import (
     ReceivablesReadResult,
 )
 from dotmac_collections.service import (
+    AccessHoldBlocked,
+    AccessHoldDueResult,
+    AccessHoldEvaluated,
+    AccessHoldIgnored,
     ArrangementLifecycleCommandV1,
     ArrangementSettlementReceiptV1,
     ArrangementWriteResult,
@@ -80,6 +98,7 @@ from dotmac_collections.service import (
     CollectionActionService,
     CollectionCaseService,
     CollectionGraceService,
+    CollectionHoldService,
     CollectionNoticeService,
     CollectionPolicyService,
     CollectionReconciliationService,
@@ -93,6 +112,7 @@ from dotmac_collections.service import (
     PersistGraceV1,
     PolicyVersionWriteResult,
     PolicyWriteResult,
+    ProcessCollectionAccessHoldDueV1,
     ProcessCollectionStepDueV1,
     ReceiptWriteResult,
     ReconcileCollectionCaseV1,
@@ -103,8 +123,13 @@ from dotmac_collections.service import (
     StepDueIgnored,
     StepDueResult,
     StepRequestWritten,
+    get_collection_case,
+    get_collection_subject_state,
+    republish_subject_state,
 )
 from dotmac_collections.timers import (
+    ACCESS_HOLD_DUE_EVENT_TYPE,
+    EXPOSURE_DUE_EVENT_TYPE,
     STEP_DUE_EVENT_TYPE,
     AlreadyFired,
     Canceled,
@@ -122,9 +147,14 @@ from dotmac_collections.timers import (
     assert_collections_timer_conformance,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
+    "ACCESS_HOLD_DUE_EVENT_TYPE",
+    "AccessHoldBlocked",
+    "AccessHoldDueResult",
+    "AccessHoldEvaluated",
+    "AccessHoldIgnored",
     "ActionApplied",
     "ActionDeferred",
     "ActionFailed",
@@ -151,10 +181,13 @@ __all__ = [
     "CollectionActionService",
     "CollectionCaseService",
     "CollectionGraceService",
+    "CollectionHoldService",
     "CollectionNoticeRequestedV1",
     "CollectionNoticeService",
     "CollectionPolicyService",
     "CollectionReconciliationService",
+    "CollectionCaseViewV1",
+    "CollectionSubjectStateV1",
     "CollectionTiming",
     "CollectionsConflict",
     "CollectionsNotFound",
@@ -162,6 +195,7 @@ __all__ = [
     "CollectionsTimer",
     "CreateCollectionPolicyV1",
     "Current",
+    "EXPOSURE_DUE_EVENT_TYPE",
     "EffectScope",
     "FakeActionReceiptRecorder",
     "FakeCollectionsTimer",
@@ -173,8 +207,12 @@ __all__ = [
     "GraceRecordKind",
     "GraceRuleV1",
     "GraceWriteResult",
+    "HoldLifted",
+    "HoldNotLive",
+    "HoldPlaced",
     "InstallmentDraftV1",
     "LadderComplete",
+    "LiftCollectionHoldV1",
     "NothingScheduled",
     "NoticeAccepted",
     "NoticeFailed",
@@ -185,6 +223,9 @@ __all__ = [
     "PaymentArrangementDraftV1",
     "PaymentArrangementService",
     "PersistGraceV1",
+    "PlaceCollectionHoldV1",
+    "RepublishSubjectStateV1",
+    "ProcessCollectionAccessHoldDueV1",
     "ProcessCollectionStepDueV1",
     "PolicyAnchorSetV1",
     "PolicyDecision",
@@ -206,6 +247,7 @@ __all__ = [
     "ReconcileCollectionCaseV1",
     "ReconciliationWriteResult",
     "RequestWriteResult",
+    "SUBJECT_ACCESS_HOLD_EVENT_TYPE",
     "STEP_DUE_EVENT_TYPE",
     "Stale",
     "StepCaseResolved",
@@ -215,6 +257,8 @@ __all__ = [
     "StepDueResult",
     "StepRequestWritten",
     "StepWaiting",
+    "SubjectAccessState",
+    "SubjectStateRepublished",
     "TimerDecision",
     "TimerHandleV1",
     "TimerIdentityV1",
@@ -224,9 +268,13 @@ __all__ = [
     "__version__",
     "arrangement_protects_exposure",
     "assert_collections_timer_conformance",
+    "decide_subject_access",
     "evaluate_grace",
     "evaluate_policy_version",
+    "get_collection_case",
+    "get_collection_subject_state",
     "module",
     "publish_policy_version",
+    "republish_subject_state",
     "versions_dir",
 ]

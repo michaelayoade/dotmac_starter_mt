@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-money-flows"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 authors = ["DotMac"]
 readme = "README.md"
@@ -14,6 +14,7 @@ include = [
 python = ">=3.11,<3.14"
 dotmac-kernel = ">=0.1.0a110"
 dotmac-billing = ">=0.1.0a13"
+dotmac-collections = ">=0.1.0a3"
 dotmac-payments = ">=0.1.0a4"
 dotmac-service-access-policy = ">=0.1.0a2"
 sqlalchemy = "^2.0"
