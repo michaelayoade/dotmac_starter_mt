@@ -30,6 +30,18 @@ customer workspaces, shared services and an optional admin portal.
   shared packages and thin product assemblies. A package release alone does
   not establish that a product has adopted it.
 
+## README updates for feature changes
+
+Feature and runtime changes must include a meaningful update to this README
+in the same PR. Summarise the capability or changed behaviour and link to the
+relevant detailed documentation. Distinguish optional packages from reference-app
+composition and merged source from released or deployed availability.
+
+CI's `readme-policy` job checks the PR diff, including package source and native
+code. It rejects missing, deleted or whitespace-only README updates. It never
+generates documentation; reviewers check accuracy. See
+[the contributor policy](CONTRIBUTING.md#readme-policy) for scope and validation.
+
 ## Reference and contribution
 
 - [Detailed project reference](docs/reference/project-guide.md): setup details,
@@ -58,3 +70,4 @@ customer workspaces, shared services and an optional admin portal.
 ## License
 
 TBD.
+
