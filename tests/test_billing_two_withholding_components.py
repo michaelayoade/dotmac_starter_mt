@@ -49,7 +49,10 @@ def _scope(admin_url):
 
 def _two_component_evidence(scope):
     item = evidence_fixtures._evidence(
-        scope, purpose="expected_withholding", taxes=(AMOUNTS[WHT], AMOUNTS[STAMP])
+        scope,
+        purpose="expected_withholding",
+        rates=(None, None),
+        taxes=(AMOUNTS[WHT], AMOUNTS[STAMP]),
     )
     components = tuple(
         replace(
