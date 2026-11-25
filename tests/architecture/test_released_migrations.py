@@ -9164,7 +9164,15 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # editable until a verified published tag carries them and their digests
     # are recorded above.
     # (`0031_rate_limit_buckets` is released: see its digest above.)
-    "dotmac-kernel": frozenset(),
+    # `0035_outbox_typed_claim` (event-type-filtered claim function) and
+    # `0036_typed_claim_grant` (its one EXECUTE grant to `outbox_dispatcher`)
+    # are editable until a verified published tag carries them.
+    "dotmac-kernel": frozenset(
+        {
+            "20261125_0035_outbox_typed_claim.py",
+            "20261125_0036_typed_claim_grant.py",
+        }
+    ),
     "dotmac-accounting": frozenset(),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),

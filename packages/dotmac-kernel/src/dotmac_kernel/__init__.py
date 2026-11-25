@@ -414,6 +414,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.idempotency",
         "dotmac_kernel.idempotency_models",
         "dotmac_kernel.identity",
+        "dotmac_kernel.identity_admin",
         "dotmac_kernel.identity_storage",
         "dotmac_kernel.identity_provisioning",
         "dotmac_kernel.jobs",

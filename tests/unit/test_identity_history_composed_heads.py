@@ -173,7 +173,7 @@ def learning_graph(tmp_path, installed_graph):
     from dotmac_learning.migrations import versions_dir as learning_versions
 
     head, _ = installed_graph
-    assert head == "0034_receipts_platform_ro"
+    assert head == "0036_typed_claim_grant"
     assert set(module.requires) == {
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,

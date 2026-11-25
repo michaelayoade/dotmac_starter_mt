@@ -167,7 +167,9 @@ def test_the_real_repo_composes() -> None:
     # 41 -> 42 (unreleased): `0032_communication_dispatches` on the kernel lineage.
     # 42 -> 43 (unreleased): `0033_receipts_append_only` on the kernel lineage.
     # 43 -> 44 (unreleased): `0034_receipts_platform_ro` on the kernel lineage.
-    assert len(report.revisions) == 44
+    # 44 -> 45 (unreleased): `0035_outbox_typed_claim` on the kernel lineage.
+    # 45 -> 46 (unreleased): `0036_typed_claim_grant` on the kernel lineage.
+    assert len(report.revisions) == 46
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

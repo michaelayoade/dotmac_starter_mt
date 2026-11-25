@@ -33,6 +33,7 @@ TABLE = "communication_deliveries"
 REVISION = "0033_receipts_append_only"
 PREVIOUS = "0032_communication_dispatches"
 PLATFORM_REVISION = "0034_receipts_platform_ro"
+HEAD = "0036_typed_claim_grant"  # the kernel head those two sit beneath
 
 
 @pytest.fixture(scope="module")
@@ -241,9 +242,9 @@ def test_migration_up_down_up_restores_and_removes_the_grants(
     scratch_db: str,  # noqa: F811
 ) -> None:
     _upgrade(scratch_db, "heads")
-    # `alembic_version` holds heads, so while 0034 is the head 0033 is an
-    # ancestor: the live row is 0034, and 0033's effect is asserted below.
-    assert PLATFORM_REVISION in _versions(scratch_db)
+    # `alembic_version` holds heads, so while 0036 is the head 0033 is an
+    # ancestor: the live row is 0036, and 0033's effect is asserted below.
+    assert HEAD in _versions(scratch_db)
     eng = create_engine(scratch_db)
     sql = text(
         "SELECT has_table_privilege('app_user', :t, 'UPDATE'), "
@@ -291,7 +292,7 @@ def test_platform_api_lacks_update_and_delete_but_can_select_and_insert(
     restores the 0020 grant and up removes it again.
     """
     _upgrade(scratch_db, "heads")
-    assert PLATFORM_REVISION in _versions(scratch_db)
+    assert HEAD in _versions(scratch_db)
     eng = create_engine(scratch_db)
     sql = text(
         "SELECT has_table_privilege('platform_api', :t, 'SELECT'), "
