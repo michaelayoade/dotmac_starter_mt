@@ -14,7 +14,7 @@ from uuid import UUID
 from dotmac_kernel.models import Base, Tenant, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
-    ARRAY,
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -26,10 +26,15 @@ from sqlalchemy import (
     func,
     inspect,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 SCHEMA = module_schema("mflows")
 _TENANT_ID = inspect(Tenant).local_table.c.id
+
+#: An array of opaque references on PostgreSQL (the migration creates varchar(160)[]);
+#: JSON elsewhere, so the shared metadata still creates on SQLite in unit tests.
+_DISCHARGE_REFS = JSON().with_variant(postgresql.ARRAY(String(160)), "postgresql")
 
 SETTLE_TABLE = "settle_instances"
 SETTLE_STATES = ("settled", "refused", "unapplied", "resolved")
@@ -120,7 +125,7 @@ class SettleInstance(Base):
     #: Array of discharge references in acceptance order (mf_0003). The
     #: legacy column above keeps the first one.
     withholding_discharge_list_ref: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String(160)), nullable=True
+        _DISCHARGE_REFS, nullable=True
     )
 
 
