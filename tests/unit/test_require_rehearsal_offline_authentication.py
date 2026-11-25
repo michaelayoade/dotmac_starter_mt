@@ -310,7 +310,7 @@ assert not attempted
     assert completed.returncode == 0
 
 
-def test_publication_rechecks_after_install_and_before_first_write():
+def test_publication_rechecks_before_install_and_first_write():
     workflow = yaml.safe_load(
         (REPO / ".github" / "workflows" / "release-facility.yml").read_text()
     )

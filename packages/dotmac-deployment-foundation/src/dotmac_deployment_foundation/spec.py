@@ -2381,6 +2381,122 @@ class ComposePlacement:
         )
 
 
+_OPERATOR_COMMAND_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+OPERATOR_INPUTS_TARGET: Final = "/job/in"
+OPERATOR_OUTPUTS_TARGET: Final = "/job/out"
+OPERATOR_MAX_TIMEOUT_SECONDS: Final = 3600
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorJob:
+    """The optional operator-job table of a ComposeJob (Foundation 0.4.0a2).
+
+    Absent table means `ComposeJob.operator is None` and nothing about the
+    descriptor changes. Present, it declares which command prefixes a
+    dispatched operator job may run and where the container reads secrets,
+    inputs and outputs. It never widens the container: the shape checks live
+    in `operator_job.py` and read the SPEC's security, networks and entrypoint.
+    """
+
+    commands: tuple[tuple[str, tuple[str, ...]], ...]
+    """Closed map, job name -> command prefix, sorted by name."""
+    secrets_target: str
+    inputs_root_material: str
+    inputs_target: str = OPERATOR_INPUTS_TARGET
+    outputs_target: str = OPERATOR_OUTPUTS_TARGET
+
+    def command_for(self, name: str) -> tuple[str, ...] | None:
+        for key, command in self.commands:
+            if key == name:
+                return command
+        return None
+
+
+def _parse_operator_job(
+    table: _Table | None,
+    *,
+    code: str,
+    image_source: str,
+    command: tuple[str, ...],
+    entrypoint_declared: bool,
+    run_during_deploy: bool,
+    root_justification: str,
+    root_approved_by: str,
+    profiles: tuple[str, ...],
+    network_mode: str,
+    timeout_seconds: int,
+) -> OperatorJob | None:
+    if table is None:
+        return None
+    where = f"job {code!r} operator"
+    commands_table = table.table("commands")
+    if commands_table is None:
+        raise SpecError("operator commands are required", where=where)
+    parsed: list[tuple[str, tuple[str, ...]]] = []
+    for key in commands_table.keys():
+        if not _OPERATOR_COMMAND_NAME.match(key):
+            raise SpecError(
+                f"operator command name {key!r} does not match "
+                f"{_OPERATOR_COMMAND_NAME.pattern}",
+                where=where,
+            )
+        prefix = commands_table.str_list(key)
+        if not prefix or prefix[: len(command)] != command:
+            raise SpecError(
+                f"operator command {key!r} must start with the job command",
+                where=where,
+            )
+        parsed.append((key, prefix))
+    commands_table.done()
+    if not parsed:
+        raise SpecError("operator commands must not be empty", where=where)
+    secrets_target = table.str_("secrets_target")
+    inputs_root_material = table.str_("inputs_root_material", pattern=_MATERIAL_NAME)
+    inputs_target = table.str_("inputs_target", default=OPERATOR_INPUTS_TARGET)
+    outputs_target = table.str_("outputs_target", default=OPERATOR_OUTPUTS_TARGET)
+    table.done()
+    if run_during_deploy:
+        raise SpecError("an operator job cannot run during deploy", where=where)
+    if image_source != "product":
+        raise SpecError("an operator job needs image_source = product", where=where)
+    if root_justification or root_approved_by:
+        raise SpecError("an operator job never runs as root", where=where)
+    if not entrypoint_declared:
+        raise SpecError(
+            "an operator job must set entrypoint explicitly (it may be [])",
+            where=where,
+        )
+    if inputs_target != OPERATOR_INPUTS_TARGET:
+        raise SpecError(f"inputs_target must be {OPERATOR_INPUTS_TARGET}", where=where)
+    if outputs_target != OPERATOR_OUTPUTS_TARGET:
+        raise SpecError(
+            f"outputs_target must be {OPERATOR_OUTPUTS_TARGET}", where=where
+        )
+    if (
+        not secrets_target.startswith("/")
+        or ".." in PurePosixPath(secrets_target).parts
+    ):
+        raise SpecError("secrets_target must be absolute without '..'", where=where)
+    if not profiles:
+        raise SpecError("an operator job needs an explicit profile", where=where)
+    if network_mode:
+        raise SpecError(
+            "an operator job declares networks explicitly, not network_mode",
+            where=where,
+        )
+    if timeout_seconds > OPERATOR_MAX_TIMEOUT_SECONDS:
+        raise SpecError(
+            f"timeout_seconds must be <= {OPERATOR_MAX_TIMEOUT_SECONDS}", where=where
+        )
+    return OperatorJob(
+        commands=tuple(sorted(parsed)),
+        secrets_target=secrets_target,
+        inputs_root_material=inputs_root_material,
+        inputs_target=inputs_target,
+        outputs_target=outputs_target,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ComposeJob:
     """A profile-gated support job; never a parallel runtime role."""
@@ -2400,12 +2516,22 @@ class ComposeJob:
     verify_stdout: str
     root_justification: str
     root_approved_by: str
+    #: Operator-job declaration. Part of the descriptor identity (compare=True,
+    #: so inside the canonical document and every digest taken over it) but
+    #: OMITTED from the canonical bytes while None, so a descriptor without the
+    #: table is byte-identical to one written before the field existed. A
+    #: present table is fully specified (`_parse_operator_job` refuses empty and
+    #: partial tables), so "key absent" is the only spelling of "no table".
+    operator: OperatorJob | None = field(
+        default=None, metadata={"canonical_omit_when_none": True}
+    )
 
     @classmethod
     def parse(cls, table: _Table) -> ComposeJob:
         code = table.str_("code", pattern=_CODE)
         image_source = table.str_("image_source")
         command = table.str_list("command")
+        operator_entrypoint_declared = "entrypoint" in table.keys()
         entrypoint = table.str_list("entrypoint", default=())
         networks = table.str_list("networks", default=(), pattern=_CODE)
         network_mode = table.str_("network_mode", default="")
@@ -2425,6 +2551,7 @@ class ComposeJob:
         verify_stdout = table.str_("verify_stdout", default="")
         root_justification = table.str_("root_justification", default="")
         root_approved_by = table.str_("root_approved_by", default="")
+        operator_table = table.table("operator", optional=True)
         table.done()
         if not image_source == "product" and not image_source.startswith("dependency:"):
             raise SpecError("job image_source must be product or dependency:<code>")
@@ -2453,6 +2580,19 @@ class ComposeJob:
         _unique(networks, what="network", where=code)
         _unique(profiles, what="profile", where=code)
         _unique(depends_on, what="dependency", where=code)
+        operator = _parse_operator_job(
+            operator_table,
+            code=code,
+            image_source=image_source,
+            command=command,
+            entrypoint_declared=operator_entrypoint_declared,
+            run_during_deploy=run_during_deploy,
+            root_justification=root_justification,
+            root_approved_by=root_approved_by,
+            profiles=profiles,
+            network_mode=network_mode,
+            timeout_seconds=timeout_seconds,
+        )
         return cls(
             code=code,
             image_source=image_source,
@@ -2475,6 +2615,7 @@ class ComposeJob:
             verify_stdout=verify_stdout,
             root_justification=root_justification,
             root_approved_by=root_approved_by,
+            operator=operator,
         )
 
 
