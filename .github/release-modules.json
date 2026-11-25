@@ -2203,7 +2203,8 @@
           "dotmac_money_flows/receivables.py",
           "dotmac_money_flows/migrations/__init__.py",
           "dotmac_money_flows/migrations/versions/mf_0001_settle_instances.py",
-          "dotmac_money_flows/migrations/versions/mf_0002_funded_charge_instances.py"
+          "dotmac_money_flows/migrations/versions/mf_0002_funded_charge_instances.py",
+          "dotmac_money_flows/migrations/versions/mf_0003_settle_discharge_list.py"
         ],
         "forbidden_prefixes": [
           "app/",
