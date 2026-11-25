@@ -9184,7 +9184,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-documents": frozenset(),
     # `dt_0002` adds the per-tenant job state (pause flag, last outcome) for the
     # job runner; editable until `dotmac-durable-timers` 0.1.0a3 is tagged.
-    "dotmac-durable-timers": frozenset({"dt_0002_job_states.py"}),
+    "dotmac-durable-timers": frozenset(
+        {"dt_0002_job_states.py", "dt_0003_typed_claim.py"}
+    ),
     # `ex_0002` adds the claim liability lifecycle; editable until
     # `dotmac-expenses` 0.1.0a2 is tagged.
     "dotmac-expenses": frozenset(),

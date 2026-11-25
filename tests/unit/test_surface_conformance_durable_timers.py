@@ -23,6 +23,8 @@ from dotmac_kernel.web_surfaces import (
     WebFacetMount,
 )
 
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
 
 def _spec_for_prefix(prefix: str) -> ProductAssemblySpec:
     """The kit's own composition plus the explicit plane selection a dual-plane
@@ -50,6 +52,7 @@ def _spec_for_prefix(prefix: str) -> ProductAssemblySpec:
         ),
         browser_capabilities=(BrowserCapabilityProvision("htmx", 2),),
         surface_selection=SELECT_ALL,
+        prerequisite_bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
 
 

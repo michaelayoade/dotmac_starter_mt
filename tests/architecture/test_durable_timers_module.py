@@ -22,18 +22,17 @@ PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-durable-timers"
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/dt_0001_durable_timers.py"
 JOB_STATES_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0002_job_states.py"
+TYPED_CLAIM_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0003_typed_claim.py"
 
 # The composition roots, named so the canary below can state EXACTLY what each
 # may do that the rest of the module may not:
 #  - dispatch.py is a relay transport; like the kernel's own transports it
 #    commits the failure record inside `deliver` before telling the relay to
 #    retry, because the worker rolls back on raise;
-#  - runner.py commits the dispatcher claim so the lease is durable before
-#    delivery, exactly as the kernel relay worker does (it owns that session);
 #  - run.py is the process entrypoint: it alone reads the ambient clock;
 #  - runtime.py holds the staff surface's single request clock read;
 #  - probe.py is the health-probe command, which compares file ages to now.
-COMMIT_ALLOWED = frozenset({"dispatch.py", "runner.py"})
+COMMIT_ALLOWED = frozenset({"dispatch.py"})
 CLOCK_ALLOWED = frozenset({"run.py", "runtime.py", "probe.py"})
 
 
@@ -78,7 +77,11 @@ def test_manifest_matches_the_permanent_namespace_allocation() -> None:
 def test_manifest_declares_both_selectable_planes_and_the_relay_prerequisite() -> None:
     assert module.tables == models.TENANT_TABLES
     assert module.platform_tables == models.PLATFORM_TABLES
-    assert module.requires == ("module_database_roles.v1", "outbox_relay.v1")
+    assert module.requires == (
+        "module_database_roles.v1",
+        "outbox_relay.v1",
+        "outbox_typed_claim.v1",
+    )
     assert module.tenant_requires == (
         "tenant_scope_catalog.v1",
         "tenant_audit_log.v1",
@@ -112,16 +115,17 @@ def _declared_requires(path: Path) -> dict[str, tuple[str, ...]]:
 
 
 def test_migrations_declare_exactly_the_manifest_prerequisites() -> None:
-    first = _declared_requires(MIGRATION)
-    second = _declared_requires(JOB_STATES_MIGRATION)
-    assert first["COMMON_REQUIRES"] + second["COMMON_REQUIRES"] == module.requires
-    assert (
-        first["TENANT_REQUIRES"] + second["TENANT_REQUIRES"] == module.tenant_requires
-    )
-    assert (
-        first["PLATFORM_REQUIRES"] + second["PLATFORM_REQUIRES"]
-        == module.platform_requires
-    )
+    declared = [
+        _declared_requires(path)
+        for path in (MIGRATION, JOB_STATES_MIGRATION, TYPED_CLAIM_MIGRATION)
+    ]
+
+    def joined(key: str) -> tuple[str, ...]:
+        return tuple(item for one in declared for item in one[key])
+
+    assert joined("COMMON_REQUIRES") == module.requires
+    assert joined("TENANT_REQUIRES") == module.tenant_requires
+    assert joined("PLATFORM_REQUIRES") == module.platform_requires
 
 
 def test_planes_are_declared_disjoint_and_never_cross_linked() -> None:

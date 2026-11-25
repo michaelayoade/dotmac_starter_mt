@@ -1060,7 +1060,8 @@
           "dotmac_durable_timers/templates/admin/durable_timers/index.html",
           "dotmac_durable_timers/migrations/__init__.py",
           "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py",
-          "dotmac_durable_timers/migrations/versions/dt_0002_job_states.py"
+          "dotmac_durable_timers/migrations/versions/dt_0002_job_states.py",
+          "dotmac_durable_timers/migrations/versions/dt_0003_typed_claim.py"
         ],
         "forbidden_prefixes": [
           "app/",

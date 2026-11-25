@@ -23,8 +23,8 @@ from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Protocol
 
-from dotmac_kernel.messaging.relay import RelayPolicy, claim_batch
-from dotmac_kernel.messaging.worker import SessionFactory, _deliver_one
+from dotmac_kernel.messaging.relay import RelayPolicy
+from dotmac_kernel.messaging.worker import SessionFactory, run_once
 from dotmac_kernel.models import Tenant
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -105,38 +105,22 @@ class JobRunner:
     def drain_once(self) -> int:
         """Claim and deliver one batch. Returns the number claimed.
 
-        The claim is TYPE-SCOPED to ``durable_timers.job_due.v1``: a foreign
-        event (pending or stale-claimed) is never leased and stays for its own
-        relay. ``event_types`` is never ``None`` (that would claim every type)
-        and never empty (the kernel refuses it).
-
-        TODO(A2 review): name the database prerequisite that provides the typed
-        claim once it is ruled; the manifest and ``dt_0002`` will then require it.
-
-        The kernel's ``run_once`` cannot take ``event_types``, so this repeats its
-        two steps (claim, commit the lease, deliver each) with the kernel's own
-        per-event delivery. Delivery, settle, deferral and dead-letter stay with
-        the relay worker.
+        The claim is TYPE-SCOPED to ``durable_timers.job_due.v1`` (kernel
+        ``outbox_typed_claim.v1``): a foreign event, pending or stale-claimed,
+        is never leased and stays for its own relay. ``event_types`` is never
+        ``None`` (that would claim every type) and never empty (the kernel
+        refuses it).
         """
         dispatcher_db: Session = self._dispatcher_sessions()
         try:
-            claimed = claim_batch(
-                dispatcher_db,
+            return run_once(
+                dispatcher_db=dispatcher_db,
+                tenant_session_factory=self._runtime.session_factory,
+                transport=self._transport,
                 worker_id=self._worker_id,
                 policy=self._policy,
                 event_types=(JOB_DUE_EVENT,),
             )
-            dispatcher_db.commit()  # make the lease durable before delivering
-            for event in claimed:
-                _deliver_one(
-                    dispatcher_db=dispatcher_db,
-                    tenant_session_factory=self._runtime.session_factory,
-                    transport=self._transport,
-                    event=event,
-                    worker_id=self._worker_id,
-                    policy=self._policy,
-                )
-            return len(claimed)
         finally:
             dispatcher_db.close()
 

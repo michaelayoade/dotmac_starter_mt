@@ -13,6 +13,7 @@ from dotmac_kernel.planes import ModulePlane
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    OUTBOX_TYPED_CLAIM_V1,
     TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
@@ -41,7 +42,11 @@ module = ModuleManifest(
     migration_branch="durable_timers",
     tables=TENANT_TABLES,
     platform_tables=PLATFORM_TABLES,
-    requires=(MODULE_DATABASE_ROLES_V1.name, OUTBOX_RELAY_V1.name),
+    requires=(
+        MODULE_DATABASE_ROLES_V1.name,
+        OUTBOX_RELAY_V1.name,
+        OUTBOX_TYPED_CLAIM_V1.name,
+    ),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name, TENANT_AUDIT_LOG_V1.name),
     supported_plane_sets=(
         (ModulePlane.TENANT,),
