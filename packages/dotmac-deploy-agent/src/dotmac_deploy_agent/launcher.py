@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from .client import Reply, TargetClient
 from .commands import Commands
@@ -53,7 +54,7 @@ from .jobs import (
     job_env,
 )
 from .journal import AccessorStore, ExecutedDispatches
-from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient
+from .lease import EXPIRED_UNRELEASED, Lease, LeaseClient, LeaseKeeper
 from .legacy import prepare_legacy, remove_legacy_copy
 from .materials import Materials, parse_materials
 from .observation import (
@@ -147,12 +148,22 @@ class Launcher:
 
     def _clean_stale(self) -> None:
         """A file left by a crashed run is removed before anything else (s2.5.5)."""
-        remove_runtime_files(self.config.deploy_run_dir, (PARAMS_FILE,))
-        remove_legacy_copy(self.config.deploy_run_dir)
-        # A kill mid-copy leaves the loopback registry's storage on tmpfs (R5.6),
-        # and a kill mid-run leaves the per-run credentials directory.
-        shutil.rmtree(self.config.registry_dir, ignore_errors=True)
-        shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+        # R8-I3: only while holding the role-job lock. A busy lock means a role job
+        # may be running: its directories are not stale, so nothing is removed.
+        try:
+            descriptor = self._lock_role_job()
+        except Refusal:
+            LOG.info("role-job lock busy at agent start: stale cleanup deferred")
+            return
+        try:
+            remove_runtime_files(self.config.deploy_run_dir, (PARAMS_FILE,))
+            remove_legacy_copy(self.config.deploy_run_dir)
+            # A kill mid-copy leaves the loopback registry's storage on tmpfs (R5.6),
+            # and a kill mid-run leaves the per-run credentials directory.
+            shutil.rmtree(self.config.registry_dir, ignore_errors=True)
+            shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+        finally:
+            os.close(descriptor)  # purge_stale_jobs takes the lock itself
         self.purge_stale_jobs()
 
     def purge_stale_jobs(self) -> None:
@@ -162,9 +173,11 @@ class Launcher:
         cleared = self._clear_orphans()
         if cleared is None:
             # The role-job lock is busy: a role job may be running. Nothing is
-            # removed and nothing is an anomaly; the preflight refuses the lease.
+            # removed and nothing is an anomaly; the preflight refuses the lease. No
+            # purge either (R7-L2): that job's secrets are in use. Next cycle.
             LOG.info("role-job lock busy at agent start: orphan check deferred")
-        found, remains, foreign, _removed = cleared or (False, False, False, False)
+            return
+        found, remains, foreign, _removed = cleared
         if found:
             # P-SEC rev7: files and accessors are STILL purged (a surviving
             # container is no reason to leave DSNs on tmpfs). This agent's own orphan
@@ -467,6 +480,7 @@ class Launcher:
         outcome, reason = "completed", None
         deploy_run_dir = self.config.deploy_run_dir
         lease: Lease | None = None
+        keeper: LeaseKeeper | None = None
         try:
             # Before any lease, transfer or secret: CP can re-serve an old signed
             # dispatch, so one already taken to delivery or run is refused.
@@ -483,15 +497,25 @@ class Launcher:
             lease = self.lease.acquire(
                 dispatch_id=materials.dispatch_id,
                 ttl_seconds=materials.lease_ttl_seconds,
+                max_seconds=materials.lease_max_seconds,
             )
             details["lease"] = {
                 "lease_id": lease.lease_id,
                 "ttl_seconds": lease.ttl_seconds,
+                "max_seconds": lease.max_seconds,
             }
+            # Renewed every ttl/3 through transfer and the run; see LeaseKeeper.
+            keeper = self.lease.keeper(lease, dispatch_id=materials.dispatch_id)
+            keeper.start()
             transferred = self.transfer.transfer_all(
                 materials.images, ttl_seconds=lease.ttl_seconds
             )
             details["transfer"] = [t.as_details() for t in transferred]
+            # Transfer spends lease time. A lease with no room left for the run is
+            # refused here, before any file or secret_id is spent on it.
+            self.lease.run_budget(
+                lease, configured_seconds=self.config.foundation_timeout_seconds
+            )
             params_file = write_params_env(deploy_run_dir, planned)
 
             legacy_file: Path | None = None
@@ -529,6 +553,17 @@ class Launcher:
 
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
                 raise Refusal("lease_unavailable")
+            # R8-M1: CP can still hold the lease (so `covers` is true) while the
+            # keeper has stopped renewing it (crashed, or a renew reply was lost).
+            # The run budget counts on renewal, so nothing runs on a lost lease.
+            if keeper.lease_lost is not None:
+                raise Refusal("lease_unavailable", keeper.lease_lost)
+            # The run is clipped to what is left of the plan's total (renewal keeps
+            # the lease alive for that long).
+            run_budget = self.lease.run_budget(
+                lease, configured_seconds=self.config.foundation_timeout_seconds
+            )
+            details["run_budget_seconds"] = run_budget
             credentials_dir = self._prepare_run_credentials()
             mark_inflight(self.config.state_dir, materials.dispatch_id)
             ran = True
@@ -544,6 +579,7 @@ class Launcher:
                     credentials_directory=str(credentials_dir),
                     legacy_env=legacy_file,
                     lease_id=lease.lease_id,
+                    timeout_seconds=run_budget,
                 )
             )
             details["runner"] = {
@@ -569,8 +605,16 @@ class Launcher:
             remove_legacy_copy(deploy_run_dir)
             remove_single_use_files(self.config, materials.roles)
             shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+            if keeper is not None:
+                keeper.stop()  # before release: no renew may race the release
+                details["lease"] = {
+                    **cast("dict[str, object]", details["lease"]),
+                    **keeper.as_details(),
+                }
             if lease is not None:
-                details["lease_released"] = self._release(lease, host_mutated=ran)
+                details["lease_released"] = self._release(
+                    lease, host_mutated=ran, details=details
+                )
             if ran:
                 clear_inflight(self.config.state_dir)
         self._report(self._observation(materials.dispatch_id, outcome, reason, details))
@@ -649,11 +693,15 @@ class Launcher:
             # R2-C1: a job runs an image already on the host. No transfer.
             check_images_present(self.config, self.read_only, materials.images)
 
+            # R8-I2: the clock is read BEFORE the request, so the lease end is never
+            # overestimated by the round trip.
+            acquired_at = int(self.epoch())
             lease = self.lease.acquire(
                 dispatch_id=materials.dispatch_id,
                 ttl_seconds=materials.lease_ttl_seconds,
+                max_seconds=materials.lease_max_seconds,
+                serving=False,
             )
-            acquired_at = int(self.epoch())
             details["lease"] = {
                 "lease_id": lease.lease_id,
                 "ttl_seconds": lease.ttl_seconds,
@@ -888,11 +936,20 @@ class Launcher:
         finally:
             session.revoke()
 
-    def _release(self, lease: Lease, *, host_mutated: bool) -> bool:
-        """Best effort: a lease that is not released simply expires."""
+    def _release(
+        self,
+        lease: Lease,
+        *,
+        host_mutated: bool,
+        details: dict[str, object] | None = None,
+    ) -> bool:
+        """Best effort: a lease that is not released simply expires, and Control
+        then asks for a reconcile before the next acquire (EXPIRED_UNRELEASED)."""
         try:
             self.lease.release(lease, host_mutated=host_mutated)
-        except Refusal:
+        except Refusal as refusal:
+            if details is not None and refusal.detail is not None:
+                details["lease_release_refusal"] = refusal.detail
             return False
         return True
 
