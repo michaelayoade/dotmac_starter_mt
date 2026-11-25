@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.deps import get_db
 from dotmac_kernel.display import DisplaySettings
 from dotmac_kernel.errors import register_error_handlers
@@ -209,12 +210,12 @@ class TestLocalFilters:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end page test — grants page renders `created_at` through the
+# End-to-end page test — the audit page renders `created_at` through the
 # tenant's resolved display settings. App-builder pattern copied from
 # tests/unit/test_settings_web.py / test_rbac_web.py: bare FastAPI() +
 # register_error_handlers + the real auth web router (login) + rbac web
-# router (the grants page lives there, at GET/POST /admin/role-grants —
-# NOT /admin/rbac/grants, which doesn't exist; see app/features/rbac/web.py)
+# router (the audit page lives there, at GET /admin/audit; see
+# app/features/rbac/web.py)
 # + a thin `_inject_tenant` middleware standing in for
 # TenantResolverMiddleware + `get_db` overridden to the in-memory `db`
 # fixture. `require_web_auth` is not overridden — the real cookie-auth seam
@@ -227,9 +228,7 @@ class TestLocalFilters:
 def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
     """A provisioned admin — party + person + credential + "admin" role
     grant, built directly on core models; registration no longer grants any
-    role (Task 2). The grant row created here is also what the
-    grants page's recent-grants list renders, so no separate
-    rbac.assign_role call is needed.
+    role (Task 2).
     """
     party = Party(
         tenant_id=tenant_row.id,
@@ -284,8 +283,8 @@ def _login(client: TestClient, email: str) -> str:
     return resp.cookies["access_token"]
 
 
-class TestGrantsPageUsesTenantDisplay:
-    def test_grants_page_renders_created_at_in_tenant_timezone(
+class TestAuditPageUsesTenantDisplay:
+    def test_audit_page_renders_created_at_in_tenant_timezone(
         self,
         web_client: TestClient,
         db: Session,
@@ -306,17 +305,26 @@ class TestGrantsPageUsesTenantDisplay:
             "%d %b %Y %H:%M",
             tenant_id=tenant_row.id,
         )
+        db.add(
+            AuditEvent(
+                tenant_id=tenant_row.id,
+                action="display.probe",
+                entity_type="probe",
+                entity_id=None,
+                details={},
+            )
+        )
         db.commit()
         token = _login(web_client, provisioned_admin["email"])
-        resp = web_client.get("/admin/role-grants", cookies={"access_token": token})
+        resp = web_client.get("/admin/audit", cookies={"access_token": token})
         assert resp.status_code == 200
         # Test files may query directly (thin-wrapper rule scopes to app/).
-        grant_created = db.scalars(
-            select(PartyRoleGrant.created_at).order_by(PartyRoleGrant.created_at.desc())
+        event_created = db.scalars(
+            select(AuditEvent.created_at).order_by(AuditEvent.created_at.desc())
         ).first()
-        assert grant_created is not None
+        assert event_created is not None
         expected = (
-            grant_created.replace(tzinfo=UTC)
+            event_created.replace(tzinfo=UTC)
             .astimezone(ZoneInfo("America/New_York"))
             .strftime("%d %b %Y %H:%M")
         )

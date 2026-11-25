@@ -8,9 +8,9 @@ those codes via `Depends(require_permission(...))` and never invents one, and
 default) on every entry preserves the previous `require_role("admin")` behavior
 exactly — this change moves where the decision is DECLARED, not who passes it.
 
-`audit_actions` does the same for the trail: these are the two actions this
-feature's routes and screens write via `write_audit_event`, and the kernel
-rejects any other action written anywhere.
+Role and grant administration (and the `role.create`/`role.grant` audit
+actions) moved to `dotmac-access-admin`; this feature keeps only the audit
+read endpoint and screen, and the `audit` setting domain.
 """
 
 from dotmac_kernel.features import FeatureManifest, NavItem
@@ -27,27 +27,13 @@ feature = FeatureManifest(
     routers=[router],
     web_routers=[web_router],
     nav=[
-        NavItem("Roles", "/admin/roles"),
-        NavItem("Role Grants", "/admin/role-grants"),
         NavItem("Audit Log", "/admin/audit"),
     ],
     permissions=[
-        PermissionSpec(
-            code="rbac.roles.read",
-            description="List the tenant's roles.",
-        ),
-        PermissionSpec(
-            code="rbac.roles.manage",
-            description="Create and modify the tenant's roles.",
-        ),
-        PermissionSpec(
-            code="rbac.grants.manage",
-            description="Grant a role to a party.",
-        ),
         PermissionSpec(
             code="rbac.audit.read",
             description="Read the tenant's audit trail.",
         ),
     ],
-    audit_actions=["role.create", "role.grant"],
+    audit_actions=[],
 )

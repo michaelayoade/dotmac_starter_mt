@@ -1,4 +1,4 @@
-"""Pydantic schemas for the tenant-scoped RBAC and audit feature.
+"""Pydantic schemas for the remaining audit endpoint.
 
 Moved here from `router.py` (inline models) so `service.py` can take concrete
 payload types instead of `Any`. Field names, validation, and response shapes
@@ -10,24 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
-
-
-class RoleCreate(BaseModel):
-    slug: str = Field(min_length=1, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
-    name: str = Field(min_length=1, max_length=120)
-
-
-class RoleRead(BaseModel):
-    id: UUID
-    slug: str
-    name: str
-    model_config = {"from_attributes": True}
-
-
-class RoleGrantRequest(BaseModel):
-    party_id: UUID
-    role_id: UUID
+from pydantic import BaseModel
 
 
 class AuditEventRead(BaseModel):

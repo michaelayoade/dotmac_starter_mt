@@ -369,7 +369,7 @@ def test_orphan_scan_detects_a_planted_orphan() -> None:
     """Sensitivity check for the two scans above — a code nothing mentions must
     be reported (mirrors `test_contract_comparison_detects_drift`)."""
     assert _orphans({"nobody.reads.this.code"}) == {"nobody.reads.this.code"}
-    assert _orphans({"role.grant"}) == set()  # a genuinely consumed action
+    assert _orphans({"access_admin.grant.add"}) == set()  # a genuinely consumed action
 
 
 def test_orphan_allowlists_are_accurate() -> None:

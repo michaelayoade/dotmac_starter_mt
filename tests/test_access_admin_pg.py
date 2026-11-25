@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import pytest
 from dotmac_kernel.deps import authorize_party
 from dotmac_kernel.models import Party, PartyRoleGrant, Role
 from dotmac_kernel.permissions import (
@@ -232,11 +233,11 @@ def test_a_role_cannot_reference_an_undeclared_permission(
     ok = c.post(
         f"{BASE}/roles/composition-check",
         headers=_h(admin),
-        json={"permission_codes": ["access_admin.users.read", "rbac.roles.read"]},
+        json={"permission_codes": ["access_admin.users.read", "rbac.audit.read"]},
     )
     assert ok.status_code == 200
     assert ok.json() == {
-        "permission_codes": ["access_admin.users.read", "rbac.roles.read"],
+        "permission_codes": ["access_admin.users.read", "rbac.audit.read"],
         "persisted": False,
     }
 
@@ -391,20 +392,143 @@ def test_every_route_requires_its_permission(
         },
     )
     token = login.json()["access_token"]
-    for method, path, body in (
+    dummy = "00000000-0000-4000-8000-000000000001"
+    routes = (
         ("get", f"{BASE}/users", None),
         (
             "post",
             f"{BASE}/users",
             {"email": "a@b.co", "first_name": "A", "last_name": "B"},
         ),
+        ("post", f"{BASE}/users/{dummy}/deactivate", None),
+        ("post", f"{BASE}/users/{dummy}/reactivate", None),
+        ("post", f"{BASE}/users/{dummy}/leaver-revoke", None),
         ("get", f"{BASE}/roles", None),
         ("post", f"{BASE}/roles", {"slug": "zz", "name": "ZZ"}),
+        ("patch", f"{BASE}/roles/{dummy}", {"name": "ZZ"}),
         ("post", f"{BASE}/roles/composition-check", {"permission_codes": []}),
-    ):
-        response = getattr(c, method)(
-            path, headers=_h(token), **({"json": body} if body else {})
+        ("post", f"{BASE}/grants", {"party_id": dummy, "role_id": dummy}),
+        ("delete", f"{BASE}/grants/{dummy}/{dummy}", None),
+    )
+    assert len(routes) == 11
+    for method, path, body in routes:
+        response = c.request(
+            method.upper(), path, headers=_h(token), **({"json": body} if body else {})
         )
         assert response.status_code == 403, (method, path)
+        anonymous = c.request(method.upper(), path)
+        assert anonymous.status_code == 401, (method, path)
     unauthenticated = c.get(f"{BASE}/users")
     assert unauthenticated.status_code == 401
+
+
+def test_web_surface_needs_login_csrf_and_permission(
+    app_client: TestClient, admin_session: Session, tenant_a
+) -> None:
+    from dotmac_kernel.middleware.csrf import CSRF_HEADER
+
+    from tests.test_admin_portal_e2e import web_login
+
+    admin_email = "web-admin@tenant-a.example.com"
+    provision_owner(admin_session, tenant_a, admin_email)
+    admin = client_for(app_client, tenant_a.slug)
+
+    anonymous = client_for(TestClient(app_client.app), tenant_a.slug)
+    gone = anonymous.get("/admin/access", follow_redirects=False)
+    assert gone.status_code in (302, 303, 401), gone.status_code
+
+    csrf = web_login(admin, admin_email)
+    listing = admin.get("/admin/access")
+    assert listing.status_code == 200 and admin_email in listing.text
+    form = {
+        "email": "web.new@tenant-a.example.com",
+        "first_name": "W",
+        "last_name": "N",
+    }
+
+    # Unsafe POST without the CSRF proof is refused before the handler runs.
+    refused = admin.post("/admin/access", data=form, follow_redirects=False)
+    assert refused.status_code == 403
+    admin_session.rollback()
+    missing = admin_session.execute(
+        text("SELECT count(*) FROM parties WHERE email = :e"),
+        {"e": form["email"]},
+    ).scalar_one()
+    assert missing == 0
+
+    created = admin.post(
+        "/admin/access", data=form, headers={CSRF_HEADER: csrf}, follow_redirects=False
+    )
+    assert created.status_code == 303, created.text
+    assert "/admin/access/" in created.headers["location"]
+    page = admin.get(created.headers["location"])
+    assert page.status_code == 200 and "web.new@tenant-a.example.com" in page.text
+
+    # A signed-in user without the permission gets 403 on read and on write.
+    viewer_email = "web-viewer@tenant-a.example.com"
+    provision_owner(admin_session, tenant_a, viewer_email, role_slug="viewer")
+    viewer = client_for(TestClient(app_client.app), tenant_a.slug)
+    viewer_csrf = web_login(viewer, viewer_email, landing="/admin")
+    assert viewer.get("/admin/access").status_code == 403
+    denied = viewer.post(
+        "/admin/access",
+        data={**form, "email": "web.second@tenant-a.example.com"},
+        headers={CSRF_HEADER: viewer_csrf},
+        follow_redirects=False,
+    )
+    assert denied.status_code == 403
+
+
+def test_leaver_revoke_rolls_back_completely_when_an_audit_write_fails(
+    app_client: TestClient, admin_session: Session, tenant_a, monkeypatch
+) -> None:
+    from dotmac_access_admin import service as access_service
+
+    c = client_for(app_client, tenant_a.slug)
+    admin = provision_and_login(
+        admin_session, tenant_a, c, "admin@tenant-a.example.com"
+    )
+    leaver_email = "atomic@tenant-a.example.com"
+    leaver = provision_and_login(admin_session, tenant_a, c, leaver_email)
+    leaver_id = next(
+        u["id"]
+        for u in c.get(f"{BASE}/users?q=atomic", headers=_h(admin)).json()
+        if u["email"] == leaver_email
+    )
+
+    real = access_service.write_audit_event
+
+    def failing(db, **kwargs):
+        if kwargs["action"] == "access_admin.user.leaver_revoke":
+            raise RuntimeError("audit store unavailable")
+        return real(db, **kwargs)
+
+    monkeypatch.setattr(access_service, "write_audit_event", failing)
+    with pytest.raises(RuntimeError, match="audit store unavailable"):
+        c.post(f"{BASE}/users/{leaver_id}/leaver-revoke", headers=_h(admin))
+    monkeypatch.undo()
+
+    # Nothing was committed: grant, session and active flag are all intact, and
+    # no per-grant audit row survived either.
+    admin_session.rollback()
+    grants = admin_session.execute(
+        text("SELECT count(*) FROM party_role_grants WHERE party_id = :p"),
+        {"p": leaver_id},
+    ).scalar_one()
+    live_sessions = admin_session.execute(
+        text(
+            "SELECT count(*) FROM auth_sessions "
+            "WHERE party_id = :p AND revoked_at IS NULL"
+        ),
+        {"p": leaver_id},
+    ).scalar_one()
+    active = admin_session.execute(
+        text("SELECT is_active FROM parties WHERE id = :p"), {"p": leaver_id}
+    ).scalar_one()
+    assert (grants, active) == (1, True) and live_sessions >= 1
+    assert (
+        _actions(admin_session, tenant_a, leaver_id).count("access_admin.grant.revoke")
+        == 0
+    )
+    # ...and the leaver's token still works.
+    assert c.get(f"{BASE}/users", headers=_h(leaver)).status_code == 200

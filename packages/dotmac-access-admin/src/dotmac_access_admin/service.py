@@ -529,7 +529,7 @@ def leaver_revoke(
                 tenant,
                 actor,
                 "access_admin.grant.revoke",
-                "party_role_grant",
+                "party",
                 str(party_id),
                 {
                     "role_id": str(grant.role_id),
@@ -594,7 +594,7 @@ def grant_role(
             tenant,
             actor,
             "access_admin.grant.add",
-            "party_role_grant",
+            "party",
             str(party_id),
             {
                 "role_id": str(role_id),
@@ -624,7 +624,7 @@ def revoke_grant(
             tenant,
             actor,
             "access_admin.grant.revoke",
-            "party_role_grant",
+            "party",
             str(party_id),
             {"role_id": str(role_id), "role_slug": slug or "", "via": "revoke"},
         )

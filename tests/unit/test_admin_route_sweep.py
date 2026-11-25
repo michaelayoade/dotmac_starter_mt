@@ -300,8 +300,7 @@ def test_sweep_covers_at_least_one_route_per_admin_feature() -> None:
     routes = _admin_mutating_routes()
     prefixes = {
         "/admin/parties",
-        "/admin/roles",
-        "/admin/role-grants",
+        "/admin/access",
         "/admin/settings",
         "/admin/custom-fields",
         "/admin/templates",

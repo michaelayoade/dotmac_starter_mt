@@ -150,9 +150,6 @@ assembly = ProductAssemblySpec(
             version=1,
             grants=(
                 RoleGrant("admin", "web.portal.staff.access"),
-                RoleGrant("admin", "rbac.roles.read"),
-                RoleGrant("admin", "rbac.roles.manage"),
-                RoleGrant("admin", "rbac.grants.manage"),
                 RoleGrant("admin", "rbac.audit.read"),
                 RoleGrant("admin", "access_admin.users.read"),
                 RoleGrant("admin", "access_admin.users.manage"),

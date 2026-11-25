@@ -9,9 +9,6 @@ from app.assembly import assembly
 EXPECTED_STARTER_ADMIN_PERMISSIONS = frozenset(
     {
         "web.portal.staff.access",
-        "rbac.roles.read",
-        "rbac.roles.manage",
-        "rbac.grants.manage",
         "rbac.audit.read",
         "access_admin.users.read",
         "access_admin.users.manage",
