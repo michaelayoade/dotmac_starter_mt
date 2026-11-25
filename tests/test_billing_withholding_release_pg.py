@@ -135,20 +135,24 @@ def test_release_of_an_undischarged_component_frees_the_cash_requirement(scratch
             _draw(session, scope, account, invoice_id, "100.00", f"full-{invoice_id}")
         assert _code(refused) == "billing.credit_exceeds_non_withholding_room"
         cid = _component_id(session, invoice_id)
-        groups = _count(session, "posting_groups")
-        facts = _count(session, "accounting_facts")
         events_before = session.execute(
             text(
                 "SELECT count(*) FROM public.outbox_events "
                 "WHERE event_type = 'billing.withholding.released.v1'"
             )
         ).scalar_one()
+        groups = _count(session, "posting_groups")
+        facts = _count(session, "accounting_facts")
+        exposures = _count(session, "receivable_exposure_facts")
         released = release_withholding_component(
             session,
             scope=scope,
             command=_release(scope, account, invoice_id, cid),
             permissions=PERMS,
         )
+        assert _count(session, "posting_groups") == groups
+        assert _count(session, "accounting_facts") == facts
+        assert _count(session, "receivable_exposure_facts") == exposures
         assert released.amount_delta.amount == Decimal("5.00")
         assert released.recorded_at is not None
         (position,) = get_withholding_component_position(
@@ -158,8 +162,9 @@ def test_release_of_an_undischarged_component_frees_the_cash_requirement(scratch
         assert position.released.amount == Decimal("5.00")
         _draw(session, scope, account, invoice_id, "100.00", f"full2-{invoice_id}")
         # Nothing was posted for the release itself (only the draw added a group).
-        assert _count(session, "accounting_facts") == facts + 1
-        assert _count(session, "posting_groups") == groups + 1
+        # The release itself wrote nothing; the credit draw is a separate posting.
+        assert _count(session, "accounting_facts") >= facts
+        assert _count(session, "posting_groups") > groups
         events = session.execute(
             text(
                 "SELECT payload FROM public.outbox_events "
@@ -546,24 +551,39 @@ def test_database_append_only_rls_clock_and_cap(scratch):
                 session.execute(text(statement))
             session.rollback()
         # A direct insert past the frozen amount is refused by the trigger.
+        insert = (
+            "INSERT INTO mod_billing.withholding_releases "
+            "(id, tenant_id, billing_account_id, document_id, component_id, "
+            "command_id, actor_ref, reason, amount_delta, currency, minor_units, "
+            "reverses_release_id, recorded_at) VALUES (:i, :t, :a, :d, :c, :k, "
+            "'a', 'r', :amount, 'NGN', 2, :rev, '2001-01-01') RETURNING recorded_at"
+        )
+        base = {
+            "t": scope.tenant_id,
+            "a": account.id,
+            "d": invoice_id,
+            "c": cid,
+        }
         with pytest.raises(DBAPIError, match="leaves its frozen component"):
             session.execute(
-                text(
-                    "INSERT INTO mod_billing.withholding_releases "
-                    "(id, tenant_id, billing_account_id, document_id, component_id, "
-                    "command_id, actor_ref, reason, amount_delta, currency, "
-                    "minor_units, recorded_at) VALUES (:i, :t, :a, :d, :c, :k, 'a', "
-                    "'r', 1, 'NGN', 2, '2001-01-01')"
-                ),
-                {
-                    "i": uuid4(),
-                    "t": scope.tenant_id,
-                    "a": account.id,
-                    "d": invoice_id,
-                    "c": cid,
-                    "k": f"raw:{uuid4()}",
-                },
+                text(insert),
+                {**base, "i": uuid4(), "k": f"raw:{uuid4()}", "amount": 1, "rev": None},
             )
+        session.rollback()
+        # A raw undo satisfies the cap (net zero): the database, not the caller,
+        # stamps recorded_at.
+        stamped = session.execute(
+            text(insert),
+            {
+                **base,
+                "i": uuid4(),
+                "k": f"raw:{uuid4()}",
+                "amount": Decimal("-5.00"),
+                "rev": released.release_id,
+            },
+        ).scalar_one()
+        assert stamped.year >= 2026
+        assert stamped >= stored.recorded_at
         session.rollback()
     with billing._session(url, other_scope) as other:
         assert _count(other, "withholding_releases") == 0
@@ -596,3 +616,77 @@ def test_migration_and_model_agree_on_the_table_shape(scratch):
         live_constraints
     )
     engine.dispose()
+
+
+def _two_code_invoice(session, scope):
+    """An invoice of 100 with two frozen components: A = 5.00 and B = 3.00."""
+    from tests.billing_frozen_fixtures import withholding_command
+
+    account, invoice_id, _ = frozen._invoice(session, scope, elected=False)
+    withholding_command(session, account.id, invoice_id, scope=scope, claimed="5.00")
+    command_b = withholding_command(
+        session, account.id, invoice_id, scope=scope, claimed="3.00"
+    )
+    ids = dict(
+        session.execute(
+            text(
+                "SELECT tax_amount, id "
+                "FROM mod_billing.document_withholding_components "
+                "WHERE document_id = :d"
+            ),
+            {"d": invoice_id},
+        ).all()
+    )
+    return account, invoice_id, ids[Decimal("5.00")], ids[Decimal("3.00")], command_b
+
+
+def test_two_code_invoice_releasing_one_component_leaves_the_other_blocked(scratch):
+    scope, url = _world(scratch)
+    with billing._session(url, scope) as session:
+        account, invoice_id, a, b, _ = _two_code_invoice(session, scope)
+        frozen._fund_credit(session, scope, account, "100.00")
+        release_withholding_component(
+            session,
+            scope=scope,
+            command=_release(scope, account, invoice_id, a, amount="5.00"),
+            permissions=PERMS,
+        )
+        positions = {
+            p.component_id: p
+            for p in get_withholding_component_position(
+                session, scope=scope, document_id=invoice_id
+            )
+        }
+        assert positions[a].residual.amount == 0
+        assert positions[b].residual.amount == Decimal("3.00")
+        with pytest.raises(BillingRuleViolation) as refused:
+            _draw(session, scope, account, invoice_id, "100.00", f"all-{invoice_id}")
+        assert _code(refused) == "billing.credit_exceeds_non_withholding_room"
+        _draw(session, scope, account, invoice_id, "97.00", f"most-{invoice_id}")
+        session.rollback()
+
+
+def test_undo_is_refused_when_another_component_still_holds_the_room(scratch):
+    """A=5, B=3, A released, 94 paid, outstanding 6: undoing A would leave -2."""
+    scope, url = _world(scratch)
+    with billing._session(url, scope) as session:
+        account, invoice_id, a, b, command_b = _two_code_invoice(session, scope)
+        frozen._fund_credit(session, scope, account, "100.00")
+        released = release_withholding_component(
+            session,
+            scope=scope,
+            command=_release(scope, account, invoice_id, a, amount="5.00"),
+            permissions=PERMS,
+        )
+        _draw(session, scope, account, invoice_id, "94.00", f"p-{invoice_id}")
+        with pytest.raises(BillingRuleViolation) as refused:
+            reverse_withholding_release(
+                session,
+                scope=scope,
+                command=_undo(scope, released.release_id),
+                permissions=PERMS,
+            )
+        assert _code(refused) == "billing.withholding_release_undo_room_used"
+        # B's certificate can still be accepted.
+        accept_withholding_discharge(session, scope=scope, command=command_b)
+        session.rollback()

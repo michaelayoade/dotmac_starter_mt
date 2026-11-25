@@ -116,6 +116,16 @@ def test_after_a_release_the_pass_pays_the_invoice_whole_and_a_replay_pays_nothi
         assert _outstanding(db, scope, doc) == 0
         assert _credit(db, scope, account_id) == 0
         assert _allocations(db) == 1
+        # Dating: the application is never earlier than the decision.
+        occurred = db.scalar(
+            select(billing_models.PostingGroup.occurred_at).where(
+                billing_models.PostingGroup.source_ref.like(
+                    f"money-flows:settle:release:{release.release_id}:%"
+                )
+            )
+        )
+        assert occurred is not None
+        assert occurred >= release.recorded_at
     replay = run()
     assert replay.applied_document_ids == ()
     assert replay.reason_code == "invoice_not_open"

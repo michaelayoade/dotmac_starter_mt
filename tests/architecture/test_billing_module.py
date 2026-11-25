@@ -708,6 +708,15 @@ def test_every_billing_reference_is_database_enforced_on_both_planes() -> None:
     assert _model_internal_foreign_keys() == _expected_internal_foreign_keys()
 
 
+def test_every_tenant_only_relation_source_has_no_platform_twin() -> None:
+    """A tenant-only table is expected only by its tenant edges, never a twin's."""
+
+    for source, *_rest in _TENANT_ONLY_RELATIONS:
+        assert source in models.TENANT_TABLES
+        assert f"platform_{source}" not in models.PLATFORM_TABLES
+        assert f"{models.SCHEMA}.platform_{source}" not in models.Base.metadata.tables
+
+
 def test_internal_reference_guard_is_sensitive_to_one_missing_edge() -> None:
     expected = _expected_internal_foreign_keys()
     missing = next(iter(expected))

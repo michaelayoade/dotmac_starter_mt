@@ -440,6 +440,7 @@ from dotmac_billing.withholding_release import (
     get_withholding_component_position,
     get_withholding_release,
     release_withholding_component,
+    reverse_withholding_release,
 )
 
 __all__ = [
@@ -762,6 +763,7 @@ __all__ = [
     "get_withholding_component_position",
     "get_withholding_release",
     "release_withholding_component",
+    "reverse_withholding_release",
     "AccountingFactV2",
     "WithholdingTaxEvidenceV1",
     "WithholdingTaxLineV1",

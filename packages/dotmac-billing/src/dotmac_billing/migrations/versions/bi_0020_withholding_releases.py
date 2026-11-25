@@ -142,6 +142,10 @@ def upgrade() -> None:
         BEGIN
             -- Database time, never the caller's.
             NEW.recorded_at := clock_timestamp();
+            -- House lock order: the account first, then the document.
+            PERFORM 1 FROM mod_billing.billing_accounts a
+             WHERE a.id = NEW.billing_account_id AND a.tenant_id = NEW.tenant_id
+             FOR UPDATE;
             -- One writer per document at a time (as the discharge path).
             SELECT * INTO doc FROM mod_billing.documents x
              WHERE x.id = NEW.document_id AND x.tenant_id = NEW.tenant_id
@@ -152,6 +156,14 @@ def upgrade() -> None:
                OR NEW.amount_delta <> round(NEW.amount_delta, NEW.minor_units)
             THEN
                 RAISE EXCEPTION 'withholding release needs its issued invoice and exact money'
+                  USING ERRCODE = 'check_violation';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM mod_billing.document_events e
+                 WHERE e.document_id = NEW.document_id
+                   AND e.tenant_id = NEW.tenant_id AND e.event_kind = 'voided'
+            ) THEN
+                RAISE EXCEPTION 'a voided invoice cannot take a withholding release'
                   USING ERRCODE = 'check_violation';
             END IF;
             SELECT * INTO component FROM mod_billing.{_COMPONENTS} c

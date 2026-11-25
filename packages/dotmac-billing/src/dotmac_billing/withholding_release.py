@@ -398,9 +398,15 @@ def reverse_withholding_release(
                 "the release already has its undo",
             )
         service._require_live_invoice_issuance(session, scope=scope, document=document)
-        if service._document_outstanding(
+        # Room after the undo: outstanding less ALL still-undischarged frozen
+        # withholding of the invoice (every component), with this release's
+        # amount back among it.
+        room = service._document_outstanding(
             session, scope=scope, document=document
-        ) < Decimal(original.amount_delta):
+        ) - service._undischarged_frozen_withholding(
+            session, scope=scope, document_id=document.id
+        )
+        if room < Decimal(original.amount_delta):
             raise BillingRuleViolation(
                 "withholding_release_undo_room_used",
                 "the invoice no longer has the room: send it to the manual "
