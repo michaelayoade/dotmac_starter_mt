@@ -37,6 +37,7 @@ on:
         required: true
         type: choice
         options:
+          - dotmac-access-admin
           - dotmac-accounting
           - dotmac-ai-operations
           - dotmac-analytics

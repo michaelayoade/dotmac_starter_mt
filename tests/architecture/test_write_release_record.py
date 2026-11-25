@@ -1014,8 +1014,19 @@ def test_a_row_describing_a_different_version_is_refused(
     anchored = writer.anchored_distributions(
         writer.RELEASED_TAGS_MODULE.read_text(encoding="utf-8")
     )
+    # A governed (allowlisted) module owes `--artifact-dir`, which is a different
+    # refusal from the one under test, so it cannot be the row picked here.
+    allowlisted = set(
+        json.loads(
+            (PROJECT_ROOT / ".github" / "release-modules.json").read_text(
+                encoding="utf-8"
+            )
+        )["modules"]
+    )
     distribution, row = next(
-        (name, value) for name, value in sorted(ledger.items()) if name not in anchored
+        (name, value)
+        for name, value in sorted(ledger.items())
+        if name not in anchored and name not in allowlisted
     )
     wrong_version = row["declared"] + "-not-this-one"
     monkeypatch.setattr(writer, "tag_commit", lambda _tag: "a" * 40)
