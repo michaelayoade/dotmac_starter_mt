@@ -635,6 +635,8 @@ def test_manual_cash_with_withholding_discharges_the_invoice(scratch):
         assert _count(db, billing_models.WithholdingDischarge) == 1
         view = get_settle_instance(db, scope=scope, instance_id=outcome.instance_id)
         assert view.withholding_discharge_ref is not None
+        # V1 caller: one reference, mirrored in the new list view.
+        assert view.withholding_discharge_refs == (view.withholding_discharge_ref,)
 
 
 def test_withholding_on_a_non_manual_source_is_refused_before_any_write(scratch):
@@ -661,6 +663,210 @@ def test_withholding_on_a_non_manual_source_is_refused_before_any_write(scratch)
         assert _count(db, billing_models.WithholdingDischarge) == 0
         assert _count(db, billing_models.AllocationEffect) == 0
     assert targets.calls == []
+
+
+# --------------------------------------------------------------------------
+# C2b: several deductions on one MANUAL confirmation
+# --------------------------------------------------------------------------
+def _deduction(wht) -> SettleWithholdingV1:
+    return SettleWithholdingV1(
+        tax_evidence=wht.tax_evidence,
+        claim_ref=wht.claim_ref,
+        claimed=wht.claimed_amount,
+        accepted=wht.accepted_amount,
+        source_owner=wht.source_owner,
+        source_ref=wht.source_ref,
+        idempotency_key=wht.idempotency_key,
+        authorization_actor_ref=wht.authorization_actor_ref,
+        authorization_evidence_ref=wht.authorization_evidence_ref,
+    )
+
+
+def _manual_policy() -> SettlePolicyV1:
+    return SettlePolicyV1(
+        version="p1",
+        accepted_confirmation_sources=frozenset({"MANUAL", "PROVIDER_CALLBACK"}),
+    )
+
+
+def test_two_deductions_plus_cash_discharge_one_invoice(scratch):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        invoice = seed_invoice(db, scope, account)  # 120 with VAT
+        payment = seed_payment(
+            db,
+            scope,
+            purpose=INVOICE,
+            amount="90.00",
+            target_reference="target:1",
+            source=MANUAL,
+        )
+        tax = withholding_command(
+            db,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix="wht",
+            claimed="20.00",
+            accepted="20.00",
+        )
+        stamp = withholding_command(
+            db,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix="stamp",
+            claimed="10.00",
+            accepted="10.00",
+        )
+        db.commit()
+        account_id, doc = account.id, invoice.id
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id, doc)})
+    ports = make_ports(targets, _manual_policy())
+    command = payment.command_v2(deductions=(_deduction(tax), _deduction(stamp)))
+
+    outcome = assembly_settle(scratch, scope, command, ports)
+    replay = assembly_settle(scratch, scope, command, ports)
+
+    assert outcome.state is SettleState.SETTLED, outcome
+    assert outcome.applied_document_ids == (doc,)
+    assert replay.replayed
+    with session(scratch, scope) as db:
+        assert _collectible(db, scope, doc) == ("resolved", 0)
+        assert _count(db, billing_models.WithholdingDischarge) == 2
+        view = get_settle_instance(db, scope=scope, instance_id=outcome.instance_id)
+        assert len(view.withholding_discharge_refs) == 2
+        assert len(set(view.withholding_discharge_refs)) == 2
+        assert view.withholding_discharge_ref == view.withholding_discharge_refs[0]
+
+
+def test_a_duplicate_deduction_component_is_refused_before_any_write(scratch):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        invoice = seed_invoice(db, scope, account)
+        payment = seed_payment(
+            db,
+            scope,
+            purpose=INVOICE,
+            amount="90.00",
+            target_reference="target:1",
+            source=MANUAL,
+        )
+        tax = withholding_command(
+            db,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix="same",
+            claimed="30.00",
+            accepted="30.00",
+        )
+        db.commit()
+        account_id, doc = account.id, invoice.id
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id, doc)})
+    command = payment.command_v2(deductions=(_deduction(tax), _deduction(tax)))
+
+    outcome = assembly_settle(
+        scratch, scope, command, make_ports(targets, _manual_policy())
+    )
+
+    assert outcome.state is SettleState.REFUSED
+    assert outcome.reason_code == "duplicate_deduction_component"
+    with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 0
+        assert _count(db, billing_models.WithholdingDischarge) == 0
+        assert _count(db, billing_models.AllocationEffect) == 0
+        assert _collectible(db, scope, doc)[1] == 120
+    assert targets.calls == []
+
+
+def test_deductions_on_a_non_manual_confirmation_are_refused_before_any_write(
+    scratch,
+):
+    scope, account_id, (doc,), payment, targets = _bound(scratch, amount="90.00")
+    one = SettleWithholdingV1(
+        tax_evidence=SimpleNamespace(document_id=doc, component_ref="c1"),
+        claim_ref="c",
+        claimed=None,
+        accepted=None,
+        source_owner="o",
+        source_ref="s",
+        idempotency_key="k1",
+        authorization_actor_ref="a",
+        authorization_evidence_ref="e",
+    )
+    two = SettleWithholdingV1(
+        tax_evidence=SimpleNamespace(document_id=doc, component_ref="c2"),
+        claim_ref="c",
+        claimed=None,
+        accepted=None,
+        source_owner="o",
+        source_ref="s",
+        idempotency_key="k2",
+        authorization_actor_ref="a",
+        authorization_evidence_ref="e",
+    )
+    outcome = assembly_settle(
+        scratch,
+        scope,
+        payment.command_v2(deductions=(one, two)),
+        make_ports(targets),
+    )
+    assert outcome.state is SettleState.REFUSED
+    assert outcome.reason_code == "withholding_requires_manual_source"
+    with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 0
+        assert _count(db, billing_models.WithholdingDischarge) == 0
+    assert targets.calls == []
+
+
+def test_a_deduction_then_the_balance_pays_the_now_fitting_invoice(scratch):
+    """Cash already on the account pays the invoice once a deduction fits it.
+
+    The first payment (90.00) stays as balance: the invoice has 30.00 of
+    frozen withholding not yet discharged. The second, MANUAL, confirmation
+    brings the deduction and 1.00 more cash; the balance pass runs after the
+    deduction is accepted and pays the invoice whole.
+    """
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        invoice = seed_invoice(db, scope, account)
+        first = seed_payment(
+            db, scope, purpose=DEPOSIT, amount="90.00", target_reference="target:1"
+        )
+        second = seed_payment(
+            db,
+            scope,
+            purpose=DEPOSIT,
+            amount="1.00",
+            target_reference="target:1",
+            source=MANUAL,
+        )
+        tax = withholding_command(
+            db, account.id, invoice.id, scope=scope, claimed="30.00", accepted="30.00"
+        )
+        db.commit()
+        account_id, doc = account.id, invoice.id
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id)})
+    ports = make_ports(targets, _manual_policy())
+
+    before = assembly_settle(scratch, scope, first.command(), ports)
+    assert before.applied_document_ids == ()
+    with session(scratch, scope) as db:
+        assert _collectible(db, scope, doc)[1] == 120
+
+    outcome = assembly_settle(
+        scratch, scope, second.command_v2(deductions=(_deduction(tax),)), ports
+    )
+
+    assert outcome.state is SettleState.SETTLED, outcome
+    assert outcome.applied_document_ids == (doc,)
+    with session(scratch, scope) as db:
+        assert _collectible(db, scope, doc) == ("resolved", 0)
+        assert _credit(db, scope, account_id) == 1
 
 
 # --------------------------------------------------------------------------

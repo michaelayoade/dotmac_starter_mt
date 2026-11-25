@@ -50,6 +50,12 @@ Assembly order and permissions:
 * Withholding supplied with a source other than MANUAL is refused before any
   write and the instance stays ``refused``; the person fixes the evidence (or
   the source) and retries.
+* ``SettleConfirmationV2`` carries several deductions (C2b). Each is accepted
+  through Billing's withholding-discharge command, in order, before the
+  whole-invoice pass, so cash plus every accepted deduction decide whether an
+  invoice fits. The same component or retry key twice is refused before any
+  write (``duplicate_deduction_component``); the rule that deductions come only
+  from a MANUAL confirmation is unchanged.
 * ``retry_settle`` is a human-triggered command. The assembly must gate it with
   a permission at least as strong as the manual-cash and withholding
   permissions, and pass the actor as ``actor_ref``.
@@ -113,6 +119,7 @@ from dotmac_money_flows.contracts import (
     SettlePorts,
     SettleRefused,
     SettleState,
+    confirmation_deductions,
     settle_transition_allowed,
 )
 from dotmac_money_flows.events import (
@@ -226,7 +233,7 @@ class _Result:
     state: SettleState
     reason_code: str | None
     settlement_id: UUID
-    discharge_ref: str | None
+    discharge_refs: tuple[str, ...]
     applied: tuple[UUID, ...]
 
 
@@ -278,11 +285,21 @@ def _view(row: SettleInstance) -> SettleInstanceV1:
         billing_account_id=row.billing_account_id,
         settlement_id=row.settlement_id,
         withholding_discharge_ref=row.withholding_discharge_ref,
+        withholding_discharge_refs=_stored_refs(row),
         actor_ref=row.actor_ref,
         resolution_ref=row.resolution_ref,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _stored_refs(row: SettleInstance) -> tuple[str, ...]:
+    """Every stored discharge reference; a pre-list row has only the legacy one."""
+    if row.withholding_discharge_list_ref:
+        return tuple(str(ref) for ref in row.withholding_discharge_list_ref)
+    if row.withholding_discharge_ref:
+        return (row.withholding_discharge_ref,)
+    return ()
 
 
 def _text(value: UUID | None) -> str | None:
@@ -314,6 +331,18 @@ def _emit(db: Session, row: SettleInstance) -> None:
     )
 
 
+def _duplicate_deduction(deductions: tuple[Any, ...]) -> bool:
+    """True if two deductions name the same frozen component or retry key.
+
+    Billing cannot discharge one component twice under two keys, and one key
+    names one discharge, so either repeat is a caller error caught before any
+    write.
+    """
+    components = [getattr(d.tax_evidence, "component_ref", None) for d in deductions]
+    keys = [d.idempotency_key for d in deductions]
+    return len(set(components)) != len(components) or len(set(keys)) != len(keys)
+
+
 # --------------------------------------------------------------------------
 # Phase 1: decisions that need no owner write
 # --------------------------------------------------------------------------
@@ -343,8 +372,11 @@ def _prepare(
     source = cash.source.value
     if source not in policy.accepted_confirmation_sources or source not in _EVIDENCE:
         return refuse("source_not_accepted")
-    if command.withholding is not None and source != WITHHOLDING_SOURCE:
+    deductions = confirmation_deductions(command)
+    if deductions and source != WITHHOLDING_SOURCE:
         return refuse("withholding_requires_manual_source")
+    if len(deductions) > 1 and _duplicate_deduction(deductions):
+        return refuse("duplicate_deduction_component")
     purpose = intent.purpose.value
     if purpose not in _BOUND_PURPOSES and purpose != _DEPOSIT_PURPOSE:
         return refuse("purpose_not_settled_here")
@@ -484,9 +516,8 @@ def _execute(
 
     # Accepted deductions first: the whole-invoice test is made against what
     # remains owing after cash-equivalents (cash + accepted deductions).
-    discharge_ref: str | None = None
-    wht = command.withholding
-    if wht is not None:
+    discharge_refs: list[str] = []
+    for wht in confirmation_deductions(command):
         discharge = accept_withholding_discharge(
             db,
             scope=scope,
@@ -508,7 +539,7 @@ def _execute(
                 settlement_id=settlement.id,
             ),
         )
-        discharge_ref = str(discharge.id)
+        discharge_refs.append(str(discharge.id))
 
     def pay_whole(document_id: UUID, outstanding: Money) -> str | None:
         """Pay ``document_id`` whole from the balance, or leave it untouched.
@@ -569,7 +600,7 @@ def _execute(
                 lambda d: pay_whole(d.document_id, d.collectible_receivable),
                 skip=bound_id,
             )
-    return _Result(state, reason, settlement.id, discharge_ref, tuple(applied))
+    return _Result(state, reason, settlement.id, tuple(discharge_refs), tuple(applied))
 
 
 # --------------------------------------------------------------------------
@@ -587,7 +618,7 @@ def _insert(
     reason_code: str | None,
     account_id: UUID | None,
     settlement_id: UUID | None,
-    discharge_ref: str | None,
+    discharge_refs: tuple[str, ...],
     actor_ref: str | None,
 ) -> SettleInstance:
     row = SettleInstance(
@@ -603,7 +634,8 @@ def _insert(
         intent_id=intent_id,
         billing_account_id=account_id,
         settlement_id=settlement_id,
-        withholding_discharge_ref=discharge_ref,
+        withholding_discharge_ref=discharge_refs[0] if discharge_refs else None,
+        withholding_discharge_list_ref=list(discharge_refs) or None,
     )
     db.add(row)
     db.flush()
@@ -620,7 +652,7 @@ def _advance(
     reason_code: str | None,
     account_id: UUID | None,
     settlement_id: UUID | None,
-    discharge_ref: str | None,
+    discharge_refs: tuple[str, ...],
     actor_ref: str | None,
 ) -> None:
     if not settle_transition_allowed(SettleState(row.state), state):
@@ -630,7 +662,8 @@ def _advance(
     row.policy_version = policy_version
     row.billing_account_id = account_id
     row.settlement_id = settlement_id
-    row.withholding_discharge_ref = discharge_ref
+    row.withholding_discharge_ref = discharge_refs[0] if discharge_refs else None
+    row.withholding_discharge_list_ref = list(discharge_refs) or None
     row.actor_ref = actor_ref
     row.version = row.version + 1
     db.flush()
@@ -671,7 +704,7 @@ def settle_confirmation(
             reason_code=_check_code(prepared.code),
             account_id=None,
             settlement_id=None,
-            discharge_ref=None,
+            discharge_refs=(),
             actor_ref=None,
         )
         return _outcome(row, replayed=False)
@@ -689,7 +722,7 @@ def settle_confirmation(
         reason_code=result.reason_code,
         account_id=prepared.target.billing_account_id,
         settlement_id=result.settlement_id,
-        discharge_ref=result.discharge_ref,
+        discharge_refs=result.discharge_refs,
         actor_ref=None,
     )
     return _outcome(row, replayed=False, applied=result.applied)
@@ -724,7 +757,7 @@ def record_settle_refusal(
                 reason_code=code,
                 account_id=None,
                 settlement_id=None,
-                discharge_ref=None,
+                discharge_refs=(),
                 actor_ref=actor_ref or existing.actor_ref,
             )
             return _outcome(existing, replayed=False)
@@ -744,7 +777,7 @@ def record_settle_refusal(
         reason_code=code,
         account_id=None,
         settlement_id=None,
-        discharge_ref=None,
+        discharge_refs=(),
         actor_ref=actor_ref,
     )
     return _outcome(row, replayed=False)
@@ -795,7 +828,7 @@ def retry_settle(
             reason_code=_check_code(prepared.code),
             account_id=None,
             settlement_id=None,
-            discharge_ref=None,
+            discharge_refs=(),
             actor_ref=actor_ref,
         )
         return _outcome(row, replayed=False)
@@ -810,7 +843,7 @@ def retry_settle(
         reason_code=result.reason_code,
         account_id=prepared.target.billing_account_id,
         settlement_id=result.settlement_id,
-        discharge_ref=result.discharge_ref,
+        discharge_refs=result.discharge_refs,
         actor_ref=actor_ref,
     )
     return _outcome(row, replayed=False, applied=result.applied)

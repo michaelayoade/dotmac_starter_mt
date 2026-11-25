@@ -1,5 +1,25 @@
 # Changelog — dotmac-money-flows
 
+## 0.1.0a3 — unreleased (C2b: several deductions on one MANUAL confirmation)
+
+Source only; one additive migration. a2 is released.
+
+- `SettleConfirmationV2` (subclass of V1, so V1 callers are unchanged) carries a tuple
+  `deductions` of `SettleWithholdingV1`, for example withholding tax plus agency stamp
+  duty, each a different Billing frozen withholding component. Every deduction is
+  accepted, in order, through Billing's `accept_withholding_discharge` before the
+  whole-invoice pass, so an invoice is discharged by cash plus all accepted deductions
+  and the balance still pays whole invoices only, oldest first, skipping misfits.
+- The same component (or the same retry key) twice is refused before any owner write
+  as `duplicate_deduction_component`. Deductions stay MANUAL-only
+  (`withholding_requires_manual_source` otherwise); no source is widened.
+- `mf_0003_settle_discharge_list` adds nullable JSON `withholding_discharge_list_ref`
+  (every discharge reference, in order). `withholding_discharge_ref` keeps the first
+  one; no backfill. `SettleInstanceV1.withholding_discharge_refs` (new field with a
+  default) reads the list, or the single legacy reference for an older row.
+- No Billing change. MED-2 was checked and needs no code: every deduction is accepted
+  inside a cash confirmation and the balance pass already runs after it.
+
 ## 0.1.0a2 — unreleased (GAP-4: the X1 receivables reader)
 
 Source only. a1 is being published; this adds one stateless module on top of it.

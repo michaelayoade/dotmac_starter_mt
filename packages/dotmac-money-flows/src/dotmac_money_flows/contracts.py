@@ -149,6 +149,33 @@ class SettleConfirmationV1:
 
 
 @dataclass(frozen=True, slots=True)
+class SettleConfirmationV2(SettleConfirmationV1):
+    """One confirmed payment carrying several deductions (C2b).
+
+    ``deductions`` are accepted in the given order, each through Billing's
+    withholding-discharge command, before the whole-invoice pass. Each names a
+    different Billing frozen withholding component (its own tax code), for
+    example withholding tax and agency stamp duty. Like V1 withholding they are
+    accepted only on a MANUAL confirmation, and the same component twice is
+    refused before any write. ``withholding`` must stay unset: V2 callers name
+    every deduction in ``deductions``; a ``withholding`` set as well is read as
+    the first deduction, so the duplicate rule still covers it.
+    """
+
+    deductions: tuple[SettleWithholdingV1, ...] = ()
+
+
+def confirmation_deductions(
+    command: SettleConfirmationV1,
+) -> tuple[SettleWithholdingV1, ...]:
+    """The deductions a confirmation carries: V1's one claim or V2's tuple."""
+    first = () if command.withholding is None else (command.withholding,)
+    if isinstance(command, SettleConfirmationV2):
+        return first + tuple(command.deductions)
+    return first
+
+
+@dataclass(frozen=True, slots=True)
 class SettleOutcomeV1:
     """What a call decided. References only.
 
@@ -216,6 +243,9 @@ class SettleInstanceV1:
     resolution_ref: str | None
     created_at: datetime
     updated_at: datetime
+    #: Every discharge reference in acceptance order (C2b). A row written before
+    #: the list column existed reports its single legacy reference here.
+    withholding_discharge_refs: tuple[str, ...] = ()
 
 
 class SettleRefused(Exception):

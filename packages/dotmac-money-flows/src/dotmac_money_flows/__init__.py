@@ -32,6 +32,7 @@ from dotmac_money_flows.contracts import (
     RatedChargeV1,
     SettleAttentionCursorV1,
     SettleConfirmationV1,
+    SettleConfirmationV2,
     SettledFundsV1,
     SettleInstanceV1,
     SettlementTargetResolver,
@@ -82,7 +83,7 @@ from dotmac_money_flows.settle import (
     settle_confirmation,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "DEFAULT_ACCEPTED_SOURCES",
@@ -119,6 +120,7 @@ __all__ = [
     "SettledFundsV1",
     "SettleAttentionCursorV1",
     "SettleConfirmationV1",
+    "SettleConfirmationV2",
     "SettleInstanceV1",
     "SettleOutcomeV1",
     "SettlePolicyReader",

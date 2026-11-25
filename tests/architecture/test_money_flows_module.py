@@ -387,6 +387,48 @@ def migration_schema(source: str) -> dict[str, dict[str, str]]:
     return found
 
 
+def migration_added_columns(source: str) -> dict[str, dict[str, str]]:
+    """Columns an ``add_column`` call adds: table -> {column: type}."""
+    found: dict[str, dict[str, str]] = {}
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Call)
+            and _call_name(node) == "add_column"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Constant)
+        ):
+            column = node.args[1]
+            if (
+                isinstance(column, ast.Call)
+                and _call_name(column) == "Column"
+                and len(column.args) >= 2
+                and isinstance(column.args[0], ast.Constant)
+            ):
+                found.setdefault(node.args[0].value, {})[column.args[0].value] = (
+                    _type_name(column.args[1])
+                )
+    return found
+
+
+def added_column_violations(added: Mapping[str, Mapping[str, str]]) -> list[str]:
+    """An added column obeys the same vocabulary as a created one."""
+    problems: list[str] = []
+    for table, columns in added.items():
+        if table not in INSTANCE_TABLE_ALLOWLIST:
+            problems.append(f"table {table} is not in INSTANCE_TABLE_ALLOWLIST")
+        for column, type_name in columns.items():
+            for part in FORBIDDEN_NAME_PARTS:
+                if part in column.lower():
+                    problems.append(
+                        f"{table}.{column} contains forbidden word {part!r}"
+                    )
+            if not REF_COLUMN.match(column):
+                problems.append(f"{table}.{column} is not an _id/_ref column")
+            if type_name in FORBIDDEN_COLUMN_TYPES:
+                problems.append(f"{table}.{column} has money-capable type {type_name}")
+    return problems
+
+
 def foreign_key_violations(source: str) -> list[str]:
     """Only the kernel tenants table and this package's own schema may be targets."""
     problems: list[str] = []
@@ -790,6 +832,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "SettledFundsV1",
         "SettleAttentionCursorV1",
         "SettleConfirmationV1",
+        "SettleConfirmationV2",
         "SettleInstanceV1",
         "SettleOutcomeV1",
         "SettlePolicyReader",
@@ -830,6 +873,7 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
     ) == [
         "mf_0001_settle_instances.py",
         "mf_0002_funded_charge_instances.py",
+        "mf_0003_settle_discharge_list.py",
     ]
 
 
@@ -841,18 +885,27 @@ def test_real_imports_use_only_the_kernel_named_owners_and_persistence() -> None
 def test_real_tables_are_allowlisted_instance_tables() -> None:
     assert schema_violations(_orm_schema()) == []
     for path in sorted(MIGRATIONS.glob("mf_*.py")):
-        created = migration_schema(path.read_text("utf-8"))
-        assert created, f"{path.name} creates no table"
+        source = path.read_text("utf-8")
+        created = migration_schema(source)
+        added = migration_added_columns(source)
+        assert created or added, f"{path.name} creates no table and adds no column"
         assert schema_violations(created) == [], path
-        assert foreign_key_violations(path.read_text("utf-8")) == [], path
-        assert migration_security_violations(path.read_text("utf-8")) == [], path
+        assert added_column_violations(added) == [], path
+        assert foreign_key_violations(source) == [], path
+        if created:
+            assert migration_security_violations(source) == [], path
+    additive = migration_added_columns(
+        (MIGRATIONS / "mf_0003_settle_discharge_list.py").read_text("utf-8")
+    )
+    assert additive == {"settle_instances": {"withholding_discharge_list_ref": "JSON"}}
     for table, migration in (
         ("settle_instances", "mf_0001_settle_instances.py"),
         ("funded_charge_instances", "mf_0002_funded_charge_instances.py"),
     ):
-        assert set(_orm_schema()[table]) == set(
+        expected = set(
             migration_schema((MIGRATIONS / migration).read_text("utf-8"))[table]
-        )
+        ) | set(additive.get(table, {}))
+        assert set(_orm_schema()[table]) == expected
 
 
 def test_orm_foreign_keys_target_only_tenants_or_own_schema() -> None:
