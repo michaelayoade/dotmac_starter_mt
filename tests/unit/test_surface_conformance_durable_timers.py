@@ -3,29 +3,53 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import replace
 
 import pytest
 from dotmac_durable_timers.manifest import module
+from dotmac_kernel.api_documentation import api_documentation_policy
+from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.planes import (
     ModulePlane,
     ModulePlaneSelection,
     install_module_plane_selections,
     installed_module_plane_selections,
 )
-from dotmac_kernel.testing import surface_conformance as kit
+from dotmac_kernel.surface_selection import SELECT_ALL
 from dotmac_kernel.testing.surface_conformance import assert_surface_conformance
+from dotmac_kernel.web_surfaces import (
+    BrowserCapabilityProvision,
+    NavigationRegion,
+    TemplateRef,
+    WebFacetMount,
+)
 
 
-def _spec_for_prefix(prefix: str):
-    # The kit's own composition plus the explicit plane selection a dual-plane
-    # module requires; nothing else is added.
-    spec = kit._build_spec(module, (), prefix, None)
-    return replace(
-        spec,
+def _spec_for_prefix(prefix: str) -> ProductAssemblySpec:
+    """The kit's own composition plus the explicit plane selection a dual-plane
+    module requires (the kit's builder cannot take one); nothing else added."""
+    regions = {item.region for s in module.web_surfaces for item in s.navigation}
+    return ProductAssemblySpec(
+        name="surface-conformance:durable_timers",
+        modules=(module,),
         module_planes=(
             ModulePlaneSelection(module="durable_timers", planes=(ModulePlane.TENANT,)),
         ),
+        api_documentation=api_documentation_policy("development"),
+        platform_surface_enabled=False,
+        ui_contract_version=1,
+        web_facets=tuple(
+            WebFacetMount(
+                code=surface.facet,
+                url_prefix=prefix,
+                shell=TemplateRef("base.html"),
+                navigation_regions=tuple(
+                    NavigationRegion(region) for region in sorted(regions)
+                ),
+            )
+            for surface in module.web_surfaces
+        ),
+        browser_capabilities=(BrowserCapabilityProvision("htmx", 2),),
+        surface_selection=SELECT_ALL,
     )
 
 
