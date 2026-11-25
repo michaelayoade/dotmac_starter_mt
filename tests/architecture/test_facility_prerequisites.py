@@ -624,3 +624,38 @@ def test_identity_admin_is_mapped_and_the_storage_primitives_stay_frozen_empty()
     for name in commands:
         reason, callers = FROZEN[f"identity_storage:{name}"]
         assert callers == frozenset(), f"{name} must keep an EMPTY caller set"
+
+
+def test_typed_worker_entry_points_are_visible_to_the_gate() -> None:
+    """The worker module is no longer exempt wholesale: a caller of the typed
+    loop needs `outbox_typed_claim.v1`, and the all-types loop has no filter
+    parameter, so `None` cannot mean "every type" anywhere."""
+    mapped = {item.key: item.prerequisite for item in MAPPED}
+    for key in (
+        "messaging/worker:run_once_by_type",
+        "messaging/worker:run_forever_by_type",
+    ):
+        assert mapped[key] == "outbox_typed_claim.v1"
+        assert key in derive_persistence_backed()
+        assert key not in OUT_OF_SCOPE
+        assert key.split(":")[0] not in OUT_OF_SCOPE
+    assert "messaging/worker" not in OUT_OF_SCOPE
+    source = (
+        PACKAGES / "dotmac-kernel/src/dotmac_kernel/messaging/worker.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    for name in ("run_once", "run_forever"):
+        assert "event_types" not in {a.arg for a in functions[name].args.kwonlyargs}
+    for name in ("run_once_by_type", "run_forever_by_type"):
+        node = functions[name]
+        required = {
+            a.arg
+            for a, default in zip(
+                node.args.kwonlyargs, node.args.kw_defaults, strict=True
+            )
+            if default is None
+        }
+        assert "event_types" in required

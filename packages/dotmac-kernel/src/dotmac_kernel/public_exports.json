@@ -916,7 +916,9 @@
         "LoggingTransport",
         "SessionFactory",
         "run_forever",
-        "run_once"
+        "run_forever_by_type",
+        "run_once",
+        "run_once_by_type"
       ],
       "status": "declared"
     },

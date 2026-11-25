@@ -274,6 +274,16 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "outbox_relay.v1 (the function and its dispatcher grant arrive later)",
     ),
     Facility(
+        "messaging/worker:run_once_by_type",
+        "outbox_typed_claim.v1",
+        "claims through claim_batch_by_type; event_types is required",
+    ),
+    Facility(
+        "messaging/worker:run_forever_by_type",
+        "outbox_typed_claim.v1",
+        "claims through claim_batch_by_type; event_types is required",
+    ),
+    Facility(
         "audit:write_platform_audit_event",
         "platform_audit_log.v1",
         "writes the append-only public.platform_audit_events trail",
@@ -517,7 +527,11 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "settings_shadow": "settings storage; see the settings ruling in FROZEN",
     "settings_resolver": "settings storage; see the settings ruling in FROZEN",
     "flag_models": "flag storage; see the flags entry in FROZEN",
-    "messaging/worker": "the dispatcher process, not a module call path",
+    # Key-granular, NOT the whole module: the typed worker entry points are
+    # MAPPED to `outbox_typed_claim.v1` above, so a caller that names event types
+    # is visible to the gate. Only the all-types loop stays exempt.
+    "messaging/worker:run_once": "the dispatcher process, not a module call path",
+    "messaging/worker:run_forever": "the dispatcher process, not a module call path",
     "messaging/platform_worker": "the dispatcher process, not a module call path",
 }
 

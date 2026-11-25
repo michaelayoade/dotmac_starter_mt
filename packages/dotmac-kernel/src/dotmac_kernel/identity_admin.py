@@ -407,7 +407,17 @@ def set_party_active(
 
 
 def _code_role_slugs() -> frozenset[str]:
+    """Slugs a declared permission binds. FAILS CLOSED: outside `create_app` (a
+    CLI, a job runner, a script) the permission catalogue is not installed and
+    would read as "no code roles", letting a tenant role take over a code role's
+    permissions, so an empty catalogue is a refusal, not an empty set."""
     catalogue = active_permissions()
+    if not catalogue.codes():
+        raise IdentityAdminRefusal(
+            "the permission catalogue is not installed in this process, so code "
+            "roles cannot be told from tenant roles — install it (create_app "
+            "does) before creating or renaming a role"
+        )
     slugs: set[str] = set()
     for code in catalogue.codes():
         spec = catalogue.spec(code)
