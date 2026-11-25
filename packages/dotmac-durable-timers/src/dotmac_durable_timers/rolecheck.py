@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 #: Tables the dispatcher role must NOT be able to read (tenant and module data).
@@ -44,16 +45,21 @@ def read_role(factory: Callable[[], Session]) -> RoleFacts:
 
 
 def dispatcher_can_read_tenant_table(factory: Callable[[], Session]) -> bool:
-    with factory() as db:
-        return bool(
-            db.scalar(
-                text(
-                    "SELECT pg_catalog.has_table_privilege("
-                    "current_user, :table, 'SELECT')"
-                ),
-                {"table": TENANT_PROBE_TABLE},
+    try:
+        with factory() as db:
+            return bool(
+                db.scalar(
+                    text(
+                        "SELECT pg_catalog.has_table_privilege("
+                        "current_user, :table, 'SELECT')"
+                    ),
+                    {"table": TENANT_PROBE_TABLE},
+                )
             )
-        )
+    except DBAPIError:
+        # No USAGE on the schema: the name cannot even be resolved, which is
+        # the strongest form of "cannot read it".
+        return False
 
 
 def verify_role_split(

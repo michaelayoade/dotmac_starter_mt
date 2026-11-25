@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_PATH = "/tmp/dotmac-durable-timers.heartbeat"  # noqa: S108 - probe file, no secret
+DEFAULT_PATH = os.path.join(tempfile.gettempdir(), "dotmac-durable-timers.heartbeat")
 BEAT_SECONDS = 10.0
 
 

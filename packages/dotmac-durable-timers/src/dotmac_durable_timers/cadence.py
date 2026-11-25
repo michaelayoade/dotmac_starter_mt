@@ -53,6 +53,7 @@ class CronSchedule:
         "_dom_star",
         "_dow",
         "_dow_star",
+        "_hour_star",
         "_hours",
         "_minutes",
         "_months",
