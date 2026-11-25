@@ -262,7 +262,8 @@ def _verify(
 def _refused(result, reason: str) -> None:
     code, err, _, _ = result
     assert code == 1, (code, err)
-    assert reason in err, err
+    # Exact: a code that merely CONTAINS the expected one is a different refusal.
+    assert err.strip() == f"REFUSED: {reason}", err
 
 
 # ── policy ──────────────────────────────────────────────────────────────────
@@ -663,31 +664,47 @@ def test_the_manifest_cannot_extend_the_waivable_list(
 
 
 @pytest.mark.parametrize(
-    "waiver",
+    ("waiver", "reason"),
     [
-        {"condition_id": COND_ID},
-        {"register_ref": "", "condition_id": COND_ID},
-        {"register_ref": "2155", "condition_id": COND_ID},
-        {"register_ref": 2154, "condition_id": COND_ID},
-        {"register_ref": WAIVER_REF},
-        {"register_ref": WAIVER_REF, "condition_id": "OTHER_CONDITION"},
-        {"register_ref": WAIVER_REF, "condition_id": ""},
-        {"register_ref": WAIVER_REF, "condition_id": COND_ID, "extra": "x"},
-        {
-            "register_ref": WAIVER_REF,
-            "condition": "seabone 3-fault staging drill",
-        },
+        ({"condition_id": COND_ID}, "gate2_manifest.item.waiver.schema"),
+        (
+            {"register_ref": "", "condition_id": COND_ID},
+            "gate2_manifest.item.waiver_register_ref",
+        ),
+        (
+            {"register_ref": "2155", "condition_id": COND_ID},
+            "gate2_manifest.item.waiver_register_ref",
+        ),
+        (
+            {"register_ref": 2154, "condition_id": COND_ID},
+            "gate2_manifest.item.waiver_register_ref",
+        ),
+        ({"register_ref": WAIVER_REF}, "gate2_manifest.item.waiver.schema"),
+        (
+            {"register_ref": WAIVER_REF, "condition_id": "OTHER_CONDITION"},
+            "gate2_manifest.item.waiver_condition",
+        ),
+        (
+            {"register_ref": WAIVER_REF, "condition_id": ""},
+            "gate2_manifest.item.waiver_condition",
+        ),
+        (
+            {"register_ref": WAIVER_REF, "condition_id": COND_ID, "extra": "x"},
+            "gate2_manifest.item.waiver.schema",
+        ),
+        (
+            {"register_ref": WAIVER_REF, "condition": "seabone 3-fault staging drill"},
+            "gate2_manifest.item.waiver.schema",
+        ),
     ],
 )
 def test_a_waiver_without_the_register_line_and_exact_condition_refuses(
-    wired, monkeypatch, capsys, tmp_path, waiver
+    wired, monkeypatch, capsys, tmp_path, waiver, reason
 ):
     document = wired.manifest()
     item = next(i for i in document["evidence"] if i["id"] == "DR3_DR5")
     item["waiver"] = waiver
-    code, err, _, _ = _verify(wired, monkeypatch, capsys, tmp_path, document)
-    assert code == 1, err
-    assert "gate2_manifest.item.waiver" in err or "gate2_manifest.item.schema" in err
+    _refused(_verify(wired, monkeypatch, capsys, tmp_path, document), reason)
 
 
 def test_a_waived_item_without_a_waiver_object_refuses(
@@ -729,8 +746,10 @@ def test_a_malformed_item_field_refuses(
 ):
     document = wired.manifest()
     document["evidence"][0][key] = value
-    code, err, _, _ = _verify(wired, monkeypatch, capsys, tmp_path, document)
-    assert code == 1 and "gate2_manifest.item." in err, err
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, document),
+        f"gate2_manifest.item.{key}",
+    )
 
 
 def test_non_canonical_bytes_refuse_even_when_correctly_signed(
@@ -761,9 +780,10 @@ def test_a_float_or_nan_refuses(wired, monkeypatch, capsys, tmp_path):
 
 def test_more_than_64_kib_refuses(wired, monkeypatch, capsys, tmp_path):
     payload = b'{"x":"' + b"a" * gate.MAX_MANIFEST_BYTES + b'"}\n'
-    code, err, _, _ = _verify(wired, monkeypatch, capsys, tmp_path, payload)
-    assert code == 1, err
-    assert "too_large" in err or "size" in err
+    _refused(
+        _verify(wired, monkeypatch, capsys, tmp_path, payload),
+        "gate2_input.too_large",
+    )
 
 
 def test_missing_inputs_refuse(wired, monkeypatch, capsys, tmp_path):
@@ -784,7 +804,7 @@ def test_missing_inputs_refuse(wired, monkeypatch, capsys, tmp_path):
         ]
     )
     assert code == 1
-    assert "gate2_input.unavailable" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "REFUSED: gate2_input.unavailable"
 
 
 # ── E3: the machine re-check at the exact candidate source commit ───────────
@@ -879,14 +899,14 @@ def test_recheck_refuses_a_digest_that_is_not_the_build_jobs(
 ):
     _recheck_env(wired, monkeypatch, **override)
     assert gate.main(["recheck-gate2", FACILITY, "--version", VERSION]) == 1
-    assert reason in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == f"REFUSED: {reason}"
 
 
 def test_recheck_refuses_after_the_key_is_revoked(wired, monkeypatch, capsys):
     _recheck_env(wired, monkeypatch)
     wired.revoked.write_text(f"ssh-ed25519 {wired.blob}\n")
     assert gate.main(["recheck-gate2", FACILITY, "--version", VERSION]) == 1
-    assert "gate2_signer_revoked" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "REFUSED: gate2_signer_revoked"
 
 
 def test_recheck_refuses_a_version_the_policy_does_not_select(
@@ -894,7 +914,7 @@ def test_recheck_refuses_a_version_the_policy_does_not_select(
 ):
     _recheck_env(wired, monkeypatch)
     assert gate.main(["recheck-gate2", FACILITY, "--version", "0.4.0a3"]) == 1
-    assert "gate2_not_selected" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "REFUSED: gate2_not_selected"
 
 
 # ── release_facility.py: `--gate gate2_evidence` needs the same policy ──────
@@ -1243,6 +1263,14 @@ def test_the_publish_step_branches_only_on_the_gate_and_exits_one_otherwise():
     assert lane3 < gate2 < other < run.index("twine upload")
     assert "recheck_offline_result.py" in run[lane3:gate2]
     assert "recheck-gate2" in run[gate2:other]
+    assert (
+        "python3 -I scripts/foundation_publication_gate.py recheck-gate2"
+        in run[gate2:other]
+    )
+    # The unpinned twine install runs only after the gate (after `esac`).
+    assert run.count("pip install") == 1
+    assert run.index("pip install") > run.index("esac")
+    assert run.index("pip install") < run.index("twine upload")
     assert "exit 1" in run[other : run.index("esac")]
     assert (
         step["env"]["FOUNDATION_EXPECTED_GATE2_MANIFEST_SHA256"]
@@ -1427,7 +1455,7 @@ def test_a_waiver_without_a_condition_reference_is_refused(
     item["waiver"] = {"register_ref": WAIVER_REF}
     _refused(
         _verify(wired, monkeypatch, capsys, tmp_path, document),
-        "gate2_manifest.item.waiver",
+        "gate2_manifest.item.waiver.schema",
     )
 
 
@@ -1439,7 +1467,7 @@ def test_a_waiver_register_ref_that_differs_from_the_condition_is_refused(
     item["waiver"]["register_ref"] = 2154
     _refused(
         _verify(wired, monkeypatch, capsys, tmp_path, document),
-        "gate2_manifest.item.waiver",
+        "gate2_manifest.item.waiver_register_ref",
     )
 
 
@@ -1527,7 +1555,7 @@ def test_stale_future_or_overlong_evidence_is_refused_by_both_commands(
     monkeypatch.setattr(gate, "_utcnow", lambda: now)
     _refused(_verify(wired, monkeypatch, capsys, tmp_path, document), reason)
     code, err = _recheck(wired, monkeypatch, capsys, document)
-    assert code == 1 and reason in err, err
+    assert code == 1 and err.strip() == f"REFUSED: {reason}", err
 
 
 def test_a_window_of_exactly_max_age_is_accepted_and_one_second_past_expiry_is_not(
@@ -1542,7 +1570,7 @@ def test_a_window_of_exactly_max_age_is_accepted_and_one_second_past_expiry_is_n
     assert code == 0, err
     monkeypatch.setattr(gate, "_utcnow", lambda: datetime(2026, 11, 26, 11, 0, 0))
     code, err = _recheck(wired, monkeypatch, capsys, document)
-    assert code == 1 and "gate2_manifest.expired" in err
+    assert code == 1 and err.strip() == "REFUSED: gate2_manifest.expired", err
 
 
 def test_recheck_refuses_evidence_that_expired_after_the_build_job(
@@ -1553,7 +1581,7 @@ def test_recheck_refuses_evidence_that_expired_after_the_build_job(
     capsys.readouterr()
     monkeypatch.setattr(gate, "_utcnow", lambda: datetime(2026, 11, 24, 11, 0, 0))
     assert gate.main(["recheck-gate2", FACILITY, "--version", VERSION]) == 1
-    assert "gate2_manifest.expired" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "REFUSED: gate2_manifest.expired"
 
 
 def test_an_item_recorded_after_the_issue_time_is_refused(

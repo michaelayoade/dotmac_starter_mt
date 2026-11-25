@@ -642,7 +642,7 @@ def _check_items(manifest: dict, policy: GateException) -> dict[str, dict]:
                 type(waiver["register_ref"]) is not int
                 or waiver["register_ref"] != condition.register_ref
             ):
-                raise GateRefused("gate2_manifest.item.waiver")
+                raise GateRefused("gate2_manifest.item.waiver_register_ref")
     return by_id
 
 
