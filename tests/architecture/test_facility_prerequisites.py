@@ -616,7 +616,10 @@ def test_identity_admin_is_mapped_and_the_storage_primitives_stay_frozen_empty()
     mapped = {
         item.key: item for item in MAPPED if item.key.startswith("identity_admin:")
     }
-    assert set(mapped) == {f"identity_admin:{name}" for name in commands}
+    governed_only = {"set_party_active", "create_tenant_role", "rename_tenant_role"}
+    assert set(mapped) == {
+        f"identity_admin:{name}" for name in commands | governed_only
+    }
     assert {item.prerequisite for item in mapped.values()} == {"identity_admin.v1"}
     for name in commands:
         reason, callers = FROZEN[f"identity_storage:{name}"]

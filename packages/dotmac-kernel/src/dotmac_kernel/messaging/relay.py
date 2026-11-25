@@ -118,7 +118,7 @@ class FailureOutcome:
     retry_at: datetime | None
 
 
-def _claimed(rows: Iterable[Mapping[str, Any]]) -> list[ClaimedEvent]:
+def _claimed(rows: Iterable[Mapping[Any, Any]]) -> list[ClaimedEvent]:
     return [
         ClaimedEvent(
             id=r["id"],
