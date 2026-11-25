@@ -280,6 +280,8 @@ def make_materials(**overrides: object) -> dict[str, object]:
         binding["dispatched_job"] = dispatched
     target = str(overrides.pop("target_ref", TARGET))
     product, environment, _host = target.split("/")
+    if "lease_max_seconds" in overrides:
+        binding["lease_max_seconds"] = overrides.pop("lease_max_seconds")
     snapshot: dict[str, object] = {
         "deploy_binding": binding,
         "release_ref": "release-1",
@@ -344,16 +346,18 @@ class FakeCp:
         self.tamper_signature = False
         self.omit_signature = False
         self.status_5xx = False
-        self.standing = "CLEAN"
+        self.standing = "free"
         self.expired_run: str | None = None  # CP's lease row, once expired
         self.lease_log: list[tuple[str, dict[str, object]]] = []
         self.handlers: dict[str, Callable[[dict[str, object]], dict[str, object]]] = {
-            "lease/standing": lambda _p: {"standing": self.standing}
-            | ({"dispatch_run": self.expired_run} if self.expired_run else {}),
+            "lease/standing": lambda _p: {
+                "standing": self.standing,
+                "dispatch_run": self.expired_run,  # null unless expired_unreleased
+            },
             "lease/acquire": self._acquire,
             "lease/covers": lambda p: self._log("lease/covers", p) | {"covers": True},
             "lease/release": lambda p: self._log("lease/release", p)
-            | {"released": True},
+            | {"released": True, "replay": False},
         }
 
     def _log(self, endpoint: str, payload: dict[str, object]) -> dict[str, object]:

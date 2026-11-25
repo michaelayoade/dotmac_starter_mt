@@ -39,6 +39,9 @@ class RunSpec:
     job_params_env: Path | None = None
     job_secrets_dir: Path | None = None
     job_argv_digest: str | None = None
+    #: Upper bound on this run, set from what is left of the host lease (WP3B).
+    #: The runner uses the smaller of this and its configured timeout.
+    timeout_seconds: int | None = None
     #: Foundation mounts ONLY these files (per file, read-only), not the directory.
     job_secret_files: tuple[str, ...] = ()
     #: The render unit's InvocationID (32 hex): Foundation re-reads the unit and
@@ -195,8 +198,13 @@ class SubprocessRunner:
             else self._grace
         )
         try:
+            limit = (
+                bound
+                if spec.timeout_seconds is None
+                else min(bound, spec.timeout_seconds)
+            )
             try:
-                code = process.wait(timeout=bound)
+                code = process.wait(timeout=limit)
                 result = RunResult(code, False)
             except subprocess.TimeoutExpired:
                 # SIGTERM only first: Foundation stops and removes its job container
