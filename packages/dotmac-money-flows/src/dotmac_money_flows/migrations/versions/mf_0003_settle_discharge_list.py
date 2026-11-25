@@ -51,9 +51,9 @@ def downgrade() -> None:
         op.get_bind()
         .execute(
             sa.text(
-                f"SELECT 1 FROM {_SCHEMA}.{_TABLE} "  # noqa: S608
-                f"WHERE {_COLUMN} IS NOT NULL "
-                f"AND cardinality({_COLUMN}) > 1 LIMIT 1"
+                "SELECT 1 FROM mod_mflows.settle_instances "
+                "WHERE withholding_discharge_list_ref IS NOT NULL "
+                "AND cardinality(withholding_discharge_list_ref) > 1 LIMIT 1"
             )
         )
         .first()
