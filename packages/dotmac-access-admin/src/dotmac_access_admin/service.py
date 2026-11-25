@@ -26,12 +26,16 @@ from dotmac_kernel.identity_admin import (
     IdentityAdminRefusal,
     NewPersonValues,
     PartyFact,
+    RoleFact,
+    create_tenant_role,
     ensure_grant,
     find_party_normalized_email,
     lock_grants,
     lock_parties,
     remove_grants,
+    rename_tenant_role,
     revoke_party_sessions,
+    set_party_active,
 )
 from dotmac_kernel.identity_admin import create_person as _create_person
 from dotmac_kernel.models import (
@@ -52,7 +56,6 @@ from dotmac_access_admin import provisioning
 from dotmac_access_admin.roles import (
     CodeRole,
     SodWarning,
-    code_role_slugs,
     code_roles,
     sod_warnings,
     validate_composition,
@@ -263,16 +266,15 @@ def composition_check(permission_codes: Sequence[str]) -> tuple[str, ...]:
 
 def create_role(
     db: Session, tenant: Tenant, actor: Party, *, slug: str, name: str
-) -> Role:
-    if slug in code_role_slugs():
-        raise ConflictError(
-            "That slug belongs to an assembly-declared role and cannot be created here"
-        )
-    role = Role(tenant_id=tenant.id, slug=slug, name=name)
+) -> RoleFact:
+    """Create a tenant role through the kernel command, which refuses a slug a
+    declared permission binds (a code role is assembly-owned)."""
     try:
         with conflict_savepoint(db):
-            db.add(role)
-            db.flush()
+            try:
+                role = create_tenant_role(db, tenant_id=tenant.id, slug=slug, name=name)
+            except IdentityAdminRefusal as exc:
+                raise ConflictError(str(exc)) from exc
             _audit(
                 db,
                 tenant,
@@ -289,20 +291,19 @@ def create_role(
 
 def rename_role(
     db: Session, tenant: Tenant, actor: Party, *, role_id: UUID, name: str
-) -> Role:
+) -> RoleFact:
     with conflict_savepoint(db):
-        role = db.scalars(
-            select(Role)
-            .where(Role.tenant_id == tenant.id, Role.id == role_id)
-            .with_for_update()
-        ).first()
-        if role is None:
+        previous = db.scalar(
+            select(Role.name).where(Role.tenant_id == tenant.id, Role.id == role_id)
+        )
+        if previous is None:
             raise NotFoundError("Role not found")
-        if role.slug in code_role_slugs():
-            raise ConflictError("An assembly-declared role is read-only")
-        previous = role.name
-        role.name = name
-        db.flush()
+        try:
+            role = rename_tenant_role(
+                db, tenant_id=tenant.id, role_id=role_id, name=name
+            )
+        except IdentityAdminRefusal as exc:
+            raise ConflictError(str(exc)) from exc
         _audit(
             db,
             tenant,
@@ -400,13 +401,12 @@ def _locked_person(db: Session, tenant: Tenant, party_id: UUID) -> PartyFact:
     return found[0]
 
 
-def _loaded_party(db: Session, party_id: UUID) -> Party:
-    # A real check, not an `assert`: asserts vanish under `python -O`, and this
-    # is the row whose flag is about to change.
-    party = db.get(Party, party_id)
-    if party is None:
-        raise NotFoundError("User not found")
-    return party
+def _set_active(db: Session, tenant: Tenant, party_id: UUID, active: bool) -> None:
+    """The flag changes only through the kernel command (party lock held)."""
+    try:
+        set_party_active(db, tenant_id=tenant.id, party_id=party_id, active=active)
+    except IdentityAdminRefusal as exc:
+        raise ConflictError(str(exc)) from exc
 
 
 def _refuse_self(actor: Party, party_id: UUID, what: str) -> None:
@@ -436,9 +436,7 @@ def deactivate_user(
             session_ids=None,
             revoked_at=datetime.now(UTC),
         )
-        party = _loaded_party(db, party_id)
-        party.is_active = False
-        db.flush()
+        _set_active(db, tenant, party_id, False)
         _audit(
             db,
             tenant,
@@ -461,9 +459,7 @@ def reactivate_user(
         if fact.is_active:
             raise ConflictError("User is already active")
         held = lock_grants(db, tenant_id=tenant.id, party_ids=(party_id,))
-        party = _loaded_party(db, party_id)
-        party.is_active = True
-        db.flush()
+        _set_active(db, tenant, party_id, True)
         _audit(
             db,
             tenant,
@@ -514,9 +510,7 @@ def leaver_revoke(
             revoked_at=datetime.now(UTC),
         )
         if deactivate:
-            party = _loaded_party(db, party_id)
-            party.is_active = False
-            db.flush()
+            _set_active(db, tenant, party_id, False)
         for grant in removed:
             _audit(
                 db,

@@ -120,6 +120,22 @@ def test_the_package_never_touches_the_frozen_identity_storage() -> None:
     assert not module.requires
 
 
+def test_identity_state_is_written_only_through_kernel_commands() -> None:
+    text = (PACKAGE / "service.py").read_text()
+    # The flag, roles and grants change only through identity_admin commands.
+    assert ".is_active =" not in text
+    assert "Role(" not in text and "PartyRoleGrant(" not in text
+    for command in (
+        "set_party_active",
+        "create_tenant_role",
+        "rename_tenant_role",
+        "ensure_grant",
+        "remove_grants",
+        "revoke_party_sessions",
+    ):
+        assert command in text, command
+
+
 def test_credentials_are_created_only_through_the_lifecycle_provision() -> None:
     for path in PACKAGE.glob("*.py"):
         text = path.read_text()
