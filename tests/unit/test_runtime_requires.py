@@ -18,6 +18,7 @@ from dotmac_kernel.prerequisites import (
     IDENTITY_ADMIN_V1,
     TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
+    DuplicatePrerequisiteError,
     PrerequisiteBinding,
     UnknownPrerequisiteError,
     install_prerequisite_bindings,
@@ -80,7 +81,7 @@ def test_a_stateless_module_still_cannot_require_a_migration_effect() -> None:
 def test_runtime_requires_names_a_registered_effect_once() -> None:
     with pytest.raises(UnknownPrerequisiteError):
         ModuleManifest(code="x", version="1.0.0", runtime_requires=("nope.v1",))
-    with pytest.raises(ModuleRegistryError, match="declared twice|more than one"):
+    with pytest.raises(DuplicatePrerequisiteError, match="declared twice"):
         ModuleManifest(code="x", version="1.0.0", runtime_requires=(NAME, NAME))
 
 
@@ -114,7 +115,7 @@ def test_create_app_refuses_when_only_other_effects_are_bound() -> None:
     manifest = ModuleManifest(
         code="needs-identity", version="1.0.0", runtime_requires=(NAME,)
     )
-    with pytest.raises(ModuleRegistryError, match="identity_admin.v1"):
+    with pytest.raises(ModuleRegistryError, match=r"identity_admin\.v1"):
         create_app(_spec(manifest))
 
 

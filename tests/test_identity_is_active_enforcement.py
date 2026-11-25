@@ -154,7 +154,12 @@ def test_reactivating_the_party_restores_login(
     inactive = client.post("/auth/login", json=body)
     wrong = client.post("/auth/login", json={**body, "password": "not-the-password"})
     assert inactive.status_code == wrong.status_code == 401
-    assert inactive.json() == wrong.json()
+
+    # Identical apart from the per-request correlation id.
+    def shape(response):
+        return {k: v for k, v in response.json().items() if "request" not in k}
+
+    assert shape(inactive) == shape(wrong)
     _set_active(admin_session, tenant_a, True)
     assert client.post("/auth/login", json=body).status_code == 200
 

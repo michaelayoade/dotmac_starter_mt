@@ -138,13 +138,13 @@ def test_the_sql_function_claims_nothing_for_a_null_or_empty_array(
     admin_session: Session, tenant_a, dispatcher_engine: Engine, cleanup
 ) -> None:
     eid = _seed(admin_session, tenant_a.id, f"typed.null.{uuid.uuid4().hex}")
+    statements = (
+        "SELECT id FROM claim_outbox_batch_by_type('w', 50, 300, NULL::text[])",
+        "SELECT id FROM claim_outbox_batch_by_type('w', 50, 300, ARRAY[]::text[])",
+    )
     with dispatcher_engine.connect() as conn:
-        for array in ("NULL::text[]", "ARRAY[]::text[]"):
-            rows = conn.execute(
-                text(
-                    f"SELECT id FROM claim_outbox_batch_by_type('w', 50, 300, {array})"
-                )
-            ).all()
+        for statement in statements:
+            rows = conn.execute(text(statement)).all()
             conn.commit()
             assert eid not in {r.id for r in rows}
     assert _status(admin_session, eid) == ("pending", None)
