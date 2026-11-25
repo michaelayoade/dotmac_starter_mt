@@ -7,16 +7,26 @@ either claim arm (pending-and-due or stale-lease reclaim), and the one new grant
 
 from __future__ import annotations
 
+import inspect
 import os
 import uuid
 from collections.abc import Generator
 
 import pytest
-from dotmac_kernel.messaging.relay import RelayPolicy, claim_batch
+from dotmac_kernel.messaging import relay
+from dotmac_kernel.messaging.relay import RelayPolicy, claim_batch, claim_batch_by_type
+from dotmac_kernel.migrations.verify import (
+    PrerequisiteNotSatisfiedError,
+    verify_outbox_typed_claim,
+)
+from dotmac_kernel.prerequisites import install_prerequisite_bindings
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+from tests.test_migration_split_rehearsals import _upgrade, scratch_db  # noqa: F401
 
 SIG = "public.claim_outbox_batch_by_type(text, integer, integer, text[])"
 
@@ -93,7 +103,7 @@ def test_foreign_events_are_never_claimed_in_either_arm(
     foreign_stale = _seed(admin_session, tenant_a.id, foreign, stale=True)
 
     with Session(dispatcher_engine) as db:
-        claimed = claim_batch(
+        claimed = claim_batch_by_type(
             db,
             worker_id="typed-w1",
             policy=RelayPolicy(batch_size=50),
@@ -116,7 +126,7 @@ def test_several_types_and_the_unfiltered_claim_is_unchanged(
     a, b, c = (f"typed.{n}.{uuid.uuid4().hex}" for n in "abc")
     ids = {t: _seed(admin_session, tenant_a.id, t) for t in (a, b, c)}
     with Session(dispatcher_engine) as db:
-        got = claim_batch(db, worker_id="typed-w2", event_types=(a, b))
+        got = claim_batch_by_type(db, worker_id="typed-w2", event_types=(a, b))
         db.commit()
     assert {x.id for x in got if x.event_type in (a, b, c)} == {ids[a], ids[b]}
     assert _status(admin_session, ids[c]) == ("pending", None)
@@ -126,12 +136,24 @@ def test_several_types_and_the_unfiltered_claim_is_unchanged(
     assert ids[c] in {x.id for x in rest}
 
 
+def test_the_all_types_claim_cannot_be_given_a_type_filter() -> None:
+    """`None` can never mean "every type" for the typed claim: the all-types
+    claim takes no filter at all, and the typed one has no None default."""
+    assert "event_types" not in inspect.signature(claim_batch).parameters
+    assert inspect.signature(claim_batch_by_type).parameters["event_types"].default is (
+        inspect.Parameter.empty
+    )
+    assert "claim_batch_by_type" in relay.__all__
+    with Session(create_engine("sqlite://")) as db, pytest.raises(ValueError):
+        claim_batch_by_type(db, worker_id="w", event_types=None)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("empty", ((), [], ""))
 def test_an_empty_type_list_is_refused_not_read_as_no_filter(
     dispatcher_engine: Engine, empty
 ) -> None:
     with Session(dispatcher_engine) as db, pytest.raises(ValueError):
-        claim_batch(db, worker_id="typed-w4", event_types=empty)
+        claim_batch_by_type(db, worker_id="typed-w4", event_types=empty)
 
 
 def test_the_sql_function_claims_nothing_for_a_null_or_empty_array(
@@ -179,10 +201,94 @@ def test_the_grant_reaches_the_dispatcher_only(admin_session: Session) -> None:
         {"s": SIG},
     ).one()
     assert facts[0] is True and facts[2] == "app_admin"
-    assert any(str(c).startswith("search_path=") for c in facts[1])
+    assert list(facts[1]) == ['search_path=""']
 
 
 def test_the_dispatcher_still_has_no_table_access(dispatcher_engine: Engine) -> None:
     with dispatcher_engine.connect() as conn:
         with pytest.raises(DBAPIError, match="permission denied"):
             conn.execute(text("SELECT count(*) FROM outbox_events")).fetchone()
+
+
+# ── the verifier and the two-revision split ─────────────────────────────────
+
+
+@pytest.fixture
+def bound():
+    install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
+    yield
+    install_prerequisite_bindings(())
+
+
+def test_the_verifier_accepts_the_migrated_catalogue(admin_session: Session) -> None:
+    verify_outbox_typed_claim(admin_session.connection())
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        f"GRANT EXECUTE ON FUNCTION {SIG} TO app_user",
+        f"GRANT EXECUTE ON FUNCTION {SIG} TO platform_api",
+        f"GRANT EXECUTE ON FUNCTION {SIG} TO PUBLIC",
+        f"REVOKE EXECUTE ON FUNCTION {SIG} FROM outbox_dispatcher",
+        f"ALTER FUNCTION {SIG} RESET search_path",
+        f"ALTER FUNCTION {SIG} SECURITY INVOKER",
+        f"DROP FUNCTION {SIG}",
+    ),
+)
+def test_the_verifier_refuses_each_planted_defect(
+    admin_session: Session, bound, statement: str
+) -> None:
+    connection = admin_session.connection()
+    connection.execute(text(statement))
+    try:
+        with pytest.raises(PrerequisiteNotSatisfiedError, match=r"outbox_typed_claim"):
+            verify_outbox_typed_claim(connection)
+    finally:
+        admin_session.rollback()
+
+
+def test_at_0035_alone_nobody_may_execute_and_0036_grants_the_dispatcher(
+    scratch_db: str,  # noqa: F811
+) -> None:
+    def may(url: str, role: str) -> bool:
+        engine = create_engine(url)
+        try:
+            with engine.connect() as conn:
+                return bool(
+                    conn.execute(
+                        text("SELECT has_function_privilege(:r, :s, 'EXECUTE')"),
+                        {"r": role, "s": SIG},
+                    ).scalar()
+                )
+        finally:
+            engine.dispose()
+
+    _upgrade(scratch_db, "0035_outbox_typed_claim")
+    assert may(scratch_db, "outbox_dispatcher") is False
+    assert may(scratch_db, "app_user") is False
+    _upgrade(scratch_db, "0036_typed_claim_grant")
+    assert may(scratch_db, "outbox_dispatcher") is True
+    assert may(scratch_db, "app_user") is False
+
+
+def test_the_binding_is_true_exactly_at_0036(
+    scratch_db: str,  # noqa: F811
+    bound,
+) -> None:
+    from dotmac_kernel.prerequisites import binding_for
+
+    assert binding_for("outbox_typed_claim.v1").provider_revision == (
+        "0036_typed_claim_grant"
+    )
+    _upgrade(scratch_db, "0035_outbox_typed_claim")
+    engine = create_engine(scratch_db)
+    try:
+        with engine.connect() as conn:
+            with pytest.raises(PrerequisiteNotSatisfiedError):
+                verify_outbox_typed_claim(conn)
+        _upgrade(scratch_db, "0036_typed_claim_grant")
+        with engine.connect() as conn:
+            verify_outbox_typed_claim(conn)
+    finally:
+        engine.dispose()

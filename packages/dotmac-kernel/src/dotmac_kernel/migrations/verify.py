@@ -50,6 +50,7 @@ from dotmac_kernel.prerequisites import (
     IDENTITY_ADMIN_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    OUTBOX_TYPED_CLAIM_V1,
     PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
     TENANT_AUDIT_LOG_V1,
@@ -1578,7 +1579,15 @@ _IDENTITY_ADMIN_TABLE_PRIVILEGES: Final[tuple[tuple[str, str], ...]] = (
     ("party_role_grants", "INSERT"),
     ("party_role_grants", "DELETE"),
     ("roles", "SELECT"),
+    ("roles", "INSERT"),
     ("auth_sessions", "SELECT"),
+)
+#: Column-level UPDATE the commands perform: session revocation, the governed
+#: `set_party_active`, and `rename_tenant_role`.
+_IDENTITY_ADMIN_COLUMN_UPDATES: Final[tuple[tuple[str, str], ...]] = (
+    ("auth_sessions", "revoked_at"),
+    ("parties", "is_active"),
+    ("roles", "name"),
 )
 _IDENTITY_ADMIN_LOCK_TABLES: Final[tuple[str, ...]] = ("parties", "party_role_grants")
 
@@ -1701,17 +1710,82 @@ def verify_identity_admin(bind: Connection) -> None:
                 f"role {DEFAULT_APP_ROLE!r} cannot row-lock "
                 f"{HOST_SCHEMA}.{table} (no UPDATE privilege on any column)",
             )
-    if not bind.scalar(
+    for table, column in _IDENTITY_ADMIN_COLUMN_UPDATES:
+        if not bind.scalar(
+            sa.text(
+                "SELECT has_column_privilege("
+                "CAST(:role AS name), CAST(:table AS text), "
+                "CAST(:column AS text), 'UPDATE')"
+            ),
+            {
+                "role": DEFAULT_APP_ROLE,
+                "table": f"{HOST_SCHEMA}.{table}",
+                "column": column,
+            },
+        ):
+            _fail(
+                name,
+                f"role {DEFAULT_APP_ROLE!r} cannot UPDATE "
+                f"{HOST_SCHEMA}.{table}.{column}",
+            )
+
+
+# ── outbox_typed_claim.v1 ───────────────────────────────────────────────────
+
+_TYPED_CLAIM_SIGNATURE: Final[str] = (
+    "claim_outbox_batch_by_type(text, integer, integer, text[])"
+)
+
+
+def verify_outbox_typed_claim(bind: Connection) -> None:
+    """Prove the typed claim exists, is hardened, and is reachable by the
+    dispatcher and by nobody else. `outbox_relay.v1` must hold too."""
+    name = OUTBOX_TYPED_CLAIM_V1.name
+    verify_outbox_relay(bind)
+    if bind.dialect.name != "postgresql":
+        return
+    qualified = f"{HOST_SCHEMA}.{_TYPED_CLAIM_SIGNATURE}"
+    facts = bind.execute(
         sa.text(
-            "SELECT has_column_privilege("
-            "CAST(:role AS name), CAST(:table AS text), 'revoked_at', 'UPDATE')"
+            """
+            SELECT p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner),
+                   has_function_privilege(
+                       CAST(:dispatcher AS name), p.oid, 'EXECUTE'),
+                   has_function_privilege(
+                       CAST(:app AS name), p.oid, 'EXECUTE'),
+                   has_function_privilege(
+                       CAST(:platform AS name), p.oid, 'EXECUTE'),
+                   EXISTS (
+                       SELECT 1 FROM aclexplode(COALESCE(
+                              p.proacl, acldefault(CAST('f' AS "char"), p.proowner))) a
+                        WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE')
+              FROM pg_proc p
+             WHERE p.oid = to_regprocedure(CAST(:signature AS text))
+            """
         ),
-        {"role": DEFAULT_APP_ROLE, "table": f"{HOST_SCHEMA}.auth_sessions"},
-    ):
+        {
+            "dispatcher": "outbox_dispatcher",
+            "app": DEFAULT_APP_ROLE,
+            "platform": "platform_api",
+            "signature": qualified,
+        },
+    ).one_or_none()
+    if facts is None:
+        _fail(name, f"{qualified} does not exist")
+    secdef, proconfig, owner, dispatcher, app_user, platform, public = facts
+    if not bool(secdef):
+        _fail(name, f"{qualified} is not SECURITY DEFINER")
+    if not _search_path_is_empty(proconfig):
+        _fail(name, f"{qualified} lacks an empty pinned search_path")
+    if str(owner) != _DEFINER_OWNER:
+        _fail(name, f"{qualified} is owned by {str(owner)!r}, expected app_admin")
+    if not bool(dispatcher):
+        _fail(name, f"outbox_dispatcher cannot EXECUTE {qualified}")
+    if bool(public) or bool(app_user) or bool(platform):
         _fail(
             name,
-            f"role {DEFAULT_APP_ROLE!r} cannot UPDATE "
-            f"{HOST_SCHEMA}.auth_sessions.revoked_at",
+            f"EXECUTE on {qualified} reaches a role other than outbox_dispatcher "
+            "(PUBLIC, app_user or platform_api)",
         )
 
 
@@ -1734,6 +1808,7 @@ _VERIFIERS: dict[str, Verifier] = {
     TENANT_AUDIT_LOG_V1.name: verify_tenant_audit_log,
     PARTY_PERSON_CATALOG_V1.name: verify_party_person_catalog,
     IDENTITY_ADMIN_V1.name: verify_identity_admin,
+    OUTBOX_TYPED_CLAIM_V1.name: verify_outbox_typed_claim,
 }
 
 
@@ -1810,6 +1885,23 @@ def require_prerequisites(bind: Connection, names: Sequence[str]) -> None:
         verifier(bind)
 
 
+def require_runtime_prerequisites(bind: Connection, manifests: Sequence[Any]) -> None:
+    """Prove, against the live database, every effect the ENABLED modules call.
+
+    A stateless module has no migration, so nothing else ever runs the verifier
+    for its `runtime_requires` and the effect would be trusted on the binding
+    alone. Call this from the assembly's migration environment after the upgrade
+    (`alembic/env.py`), over the enabled manifests, so a deploy refuses a
+    database that lacks what a stateless module calls. Modules without
+    `runtime_requires` (including feature manifests) contribute nothing.
+    """
+    names = sorted(
+        {name for m in manifests for name in getattr(m, "runtime_requires", ())}
+    )
+    if names:
+        require_prerequisites(bind, names)
+
+
 __all__ = [
     "PrerequisiteNotSatisfiedError",
     "PrerequisiteVerifierMissingError",
@@ -1817,11 +1909,13 @@ __all__ = [
     "register_verifier",
     "registered_verifiers",
     "require_prerequisites",
+    "require_runtime_prerequisites",
     "role_violations",
     "verify_idempotency_ledger",
     "verify_identity_admin",
     "verify_module_database_roles",
     "verify_outbox_relay",
+    "verify_outbox_typed_claim",
     "verify_platform_audit_log",
     "verify_party_person_catalog",
     "verify_tenant_scope_catalog",

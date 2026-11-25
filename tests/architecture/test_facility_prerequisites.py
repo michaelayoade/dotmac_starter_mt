@@ -215,6 +215,7 @@ _CONSTANTS = {
     "PLATFORM_AUDIT_LOG_V1": "platform_audit_log.v1",
     "TENANT_AUDIT_LOG_V1": "tenant_audit_log.v1",
     "IDENTITY_ADMIN_V1": "identity_admin.v1",
+    "OUTBOX_TYPED_CLAIM_V1": "outbox_typed_claim.v1",
     "TENANT_SCOPE_CATALOG_V1": "tenant_scope_catalog.v1",
     "MODULE_DATABASE_ROLES_V1": "module_database_roles.v1",
 }
@@ -615,7 +616,10 @@ def test_identity_admin_is_mapped_and_the_storage_primitives_stay_frozen_empty()
     mapped = {
         item.key: item for item in MAPPED if item.key.startswith("identity_admin:")
     }
-    assert set(mapped) == {f"identity_admin:{name}" for name in commands}
+    governed_only = {"set_party_active", "create_tenant_role", "rename_tenant_role"}
+    assert set(mapped) == {
+        f"identity_admin:{name}" for name in commands | governed_only
+    }
     assert {item.prerequisite for item in mapped.values()} == {"identity_admin.v1"}
     for name in commands:
         reason, callers = FROZEN[f"identity_storage:{name}"]

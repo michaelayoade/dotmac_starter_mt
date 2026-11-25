@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from sqlalchemy import text
@@ -34,6 +34,7 @@ from dotmac_kernel.messaging.relay import (
     ClaimedEvent,
     RelayPolicy,
     claim_batch,
+    claim_batch_by_type,
     deferral_dead_letters,
     failure_dead_letters,
     record_dead_letter,
@@ -207,9 +208,22 @@ def run_once(
     transport: DeliveryTransport,
     worker_id: str,
     policy: RelayPolicy = RelayPolicy(),
+    event_types: Sequence[str] | None = None,
 ) -> int:
-    """Claim one batch and deliver each event. Returns the number claimed."""
-    claimed = claim_batch(dispatcher_db, worker_id=worker_id, policy=policy)
+    """Claim one batch and deliver each event. Returns the number claimed.
+
+    `event_types=None` is the historical claim of every type. A non-empty
+    sequence claims only those types (`claim_batch_by_type`, prerequisite
+    `outbox_typed_claim.v1`); an empty one is refused, never read as no filter."""
+    if event_types is None:
+        claimed = claim_batch(dispatcher_db, worker_id=worker_id, policy=policy)
+    else:
+        claimed = claim_batch_by_type(
+            dispatcher_db,
+            worker_id=worker_id,
+            event_types=event_types,
+            policy=policy,
+        )
     dispatcher_db.commit()  # make the lease durable before delivering
     for event in claimed:
         _deliver_one(
@@ -232,6 +246,7 @@ def run_forever(
     stop: threading.Event,
     policy: RelayPolicy = RelayPolicy(),
     poll_interval: float = 1.0,
+    event_types: Sequence[str] | None = None,
 ) -> None:
     """Poll until `stop` is set (clean shutdown). Each iteration uses a fresh
     dispatcher session; an idle poll (nothing claimed) sleeps interruptibly."""
@@ -245,6 +260,7 @@ def run_forever(
                 transport=transport,
                 worker_id=worker_id,
                 policy=policy,
+                event_types=event_types,
             )
         finally:
             dispatcher_db.close()
