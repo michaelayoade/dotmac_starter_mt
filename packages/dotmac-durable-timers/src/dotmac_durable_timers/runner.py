@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Protocol
 
 from dotmac_kernel.messaging.relay import RelayPolicy
-from dotmac_kernel.messaging.worker import SessionFactory, run_once
+from dotmac_kernel.messaging.worker import SessionFactory, run_once_by_type
 from dotmac_kernel.models import Tenant
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -113,7 +113,7 @@ class JobRunner:
         """
         dispatcher_db: Session = self._dispatcher_sessions()
         try:
-            return run_once(
+            return run_once_by_type(
                 dispatcher_db=dispatcher_db,
                 tenant_session_factory=self._runtime.session_factory,
                 transport=self._transport,

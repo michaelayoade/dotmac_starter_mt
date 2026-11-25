@@ -23,7 +23,7 @@ immutable, so the runner cannot be folded into it.
 - Migration `dt_0002_job_states` (tenant plane): `mod_timers.job_states` with
   FORCE RLS; requires `tenant_audit_log.v1`.
 - R2 review follow-ups: the runner claims through the kernel's type-scoped claim
-  (`run_once(event_types=("durable_timers.job_due.v1",))`, prerequisite `outbox_typed_claim.v1` verified by `dt_0003`), so foreign outbox
+  (`run_once_by_type(event_types=("durable_timers.job_due.v1",))`, prerequisite `outbox_typed_claim.v1` verified by `dt_0003`), so foreign outbox
   events are never claimed; a failing
   health sink is logged, never raised; an event already dead-lettered is never
   re-run; a purged outbox row re-arms the job; boot reads back both roles and
