@@ -17,7 +17,15 @@ Source only; not published. Promoted from the reference app's `app/features/rbac
   only (enforcement stays the tenant dual-control policy, default OFF).
 - Contract-2 `staff` surface and JSON API.
 
+- Kernel access is through `dotmac_kernel.identity_admin` (never the frozen
+  `identity_storage`); the manifest declares
+  `runtime_requires=(identity_admin.v1, tenant_audit_log.v1, outbox_relay.v1)`.
+- Deactivate keeps grants (the kernel enforces `is_active`); reactivation
+  restores them. Leaver revoke removes them.
+
 ### Before release
+
+- Raise the kernel floor to the release that publishes `identity_admin`.
 
 - Persisting a role's permission composition needs a kernel role-to-permission
   store and an evaluator that reads it (programme section 1.2); until then the

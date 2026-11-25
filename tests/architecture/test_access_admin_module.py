@@ -108,6 +108,18 @@ def test_no_request_or_response_shape_can_carry_password_material() -> None:
         )
 
 
+def test_the_package_never_touches_the_frozen_identity_storage() -> None:
+    for path in PACKAGE.glob("*.py"):
+        text = path.read_text()
+        assert "identity_storage" not in text, path.name
+    assert module.runtime_requires == (
+        "identity_admin.v1",
+        "tenant_audit_log.v1",
+        "outbox_relay.v1",
+    )
+    assert not module.requires
+
+
 def test_credentials_are_created_only_through_the_lifecycle_provision() -> None:
     for path in PACKAGE.glob("*.py"):
         text = path.read_text()

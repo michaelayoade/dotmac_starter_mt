@@ -342,7 +342,47 @@ def test_you_cannot_revoke_or_deactivate_your_own_account(
     assert c.get(f"{BASE}/users", headers=_h(admin)).status_code == 200
 
 
-def test_deactivate_is_refused_while_grants_remain_then_reactivate(
+def test_deactivate_suspends_access_and_reactivate_restores_held_grants(
+    app_client: TestClient, admin_session: Session, tenant_a
+) -> None:
+    c = client_for(app_client, tenant_a.slug)
+    admin = provision_and_login(
+        admin_session, tenant_a, c, "admin@tenant-a.example.com"
+    )
+    email = "suspend@tenant-a.example.com"
+    token = provision_and_login(admin_session, tenant_a, c, email)
+    uid = next(
+        u["id"]
+        for u in c.get(f"{BASE}/users?q=suspend", headers=_h(admin)).json()
+        if u["email"] == email
+    )
+    assert c.get(f"{BASE}/users", headers=_h(token)).status_code == 200
+
+    # The kernel honours is_active, so the flag alone cuts access: the live
+    # token fails, a fresh login is refused, and the grants are kept.
+    done = c.post(f"{BASE}/users/{uid}/deactivate", headers=_h(admin))
+    assert done.status_code == 200 and done.json()["roles"] == ["admin"]
+    assert c.get(f"{BASE}/users", headers=_h(token)).status_code == 401
+    relogin = c.post(
+        "/auth/login",
+        json={"email": email, "password": "correct horse battery staple"},
+    )
+    assert relogin.status_code == 401
+
+    # Reactivation restores the held grants (and records how many).
+    back = c.post(f"{BASE}/users/{uid}/reactivate", headers=_h(admin))
+    assert back.status_code == 200 and back.json()["roles"] == ["admin"]
+    assert (
+        c.post(
+            "/auth/login",
+            json={"email": email, "password": "correct horse battery staple"},
+        ).status_code
+        == 200
+    )
+    assert "access_admin.user.reactivate" in _actions(admin_session, tenant_a, uid)
+
+
+def test_leaver_revoke_removes_grants_then_reactivation_restores_none(
     app_client: TestClient, admin_session: Session, tenant_a
 ) -> None:
     c = client_for(app_client, tenant_a.slug)
@@ -357,18 +397,16 @@ def test_deactivate_is_refused_while_grants_remain_then_reactivate(
     )
     assert granted.status_code == 201
     assert (
-        c.post(f"{BASE}/users/{uid}/deactivate", headers=_h(admin)).status_code == 409
-    )
-    assert (
         c.post(f"{BASE}/users/{uid}/leaver-revoke", headers=_h(admin)).status_code
         == 200
     )
-    # Leaver revoke already deactivated; reactivate restores the flag only.
     back = c.post(f"{BASE}/users/{uid}/reactivate", headers=_h(admin))
     assert back.status_code == 200
     assert back.json()["is_active"] is True and back.json()["roles"] == []
-    regrant_inactive = c.post(f"{BASE}/users/{uid}/deactivate", headers=_h(admin))
-    assert regrant_inactive.status_code == 200
+    # An inactive person cannot be granted a role.
+    assert (
+        c.post(f"{BASE}/users/{uid}/deactivate", headers=_h(admin)).status_code == 200
+    )
     refused = c.post(
         f"{BASE}/grants",
         headers=_h(admin),

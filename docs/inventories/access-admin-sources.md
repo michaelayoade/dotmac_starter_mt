@@ -30,9 +30,11 @@ claim. The permission model is inventoried in
    persist one.
 2. A tenant role with the slug of a code role would inherit that code role's
    permissions, so such slugs are refused.
-3. `authenticate_request` and `login` do not consult `Party.is_active`; revoking
-   sessions and grants is what cuts access. Deactivate is therefore refused while
-   grants remain, and leaver revoke removes grants and sessions together.
+3. Until kernel lane A2, `authenticate_request` and `login` did not consult
+   `Party.is_active`, so deactivate was refused while grants remained. A2
+   enforces the flag at login, in session authentication and in role
+   evaluation, so deactivation is now a reversible suspension that keeps grants;
+   leaver revoke is the destructive path.
 4. `user_credentials` has no reset flag or version column; a provisioned
    credential is unusable because its hash is of material nobody was told.
 5. The recovery intent is a refs-only kernel outbox row

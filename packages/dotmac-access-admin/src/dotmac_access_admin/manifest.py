@@ -89,9 +89,11 @@ module = ModuleManifest(
     ],
     outbox_event_types=[RECOVERY_EVENT_TYPE],
     core=False,
-    # No `requires`: the kernel registry refuses migration prerequisites on a
-    # module that owns no lineage. The audit-log and outbox-relay effects its
-    # callers need are therefore undeclared here; see PR #1160 (open decision).
+    # Runtime prerequisites (stateless modules only): the kernel identity
+    # administration commands and the audit and outbox writers this module
+    # calls. The assembly binds each, and `create_app` refuses one that has
+    # not. Never `requires`, which orders migrations of a lineage.
+    runtime_requires=("identity_admin.v1", "tenant_audit_log.v1", "outbox_relay.v1"),
 )
 
 __all__ = ["module"]

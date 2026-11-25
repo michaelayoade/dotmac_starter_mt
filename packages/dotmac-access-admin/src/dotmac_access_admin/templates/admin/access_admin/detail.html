@@ -38,12 +38,12 @@
 {% if user.is_active %}
 <form method="post" action="{{ surface_url('deactivate', party_id=user.id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Deactivate (only once access is revoked)</button>
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Deactivate (suspend; grants are kept)</button>
 </form>
 {% else %}
 <form method="post" action="{{ surface_url('reactivate', party_id=user.id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Reactivate (no grants are restored)</button>
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Reactivate (held grants take effect again)</button>
 </form>
 {% endif %}
 <p style="font-size:var(--dmui-font-size-xs);"><a href="{{ surface_url('list') }}">Back to users</a></p>

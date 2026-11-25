@@ -276,7 +276,11 @@ def reactivate_submit(
     except (ConflictError, NotFoundError) as exc:
         return _detail_response(request, db, tenant, party_id, error=str(exc))
     return _detail_response(
-        request, db, tenant, party_id, notice="User reactivated (no grants restored)."
+        request,
+        db,
+        tenant,
+        party_id,
+        notice="User reactivated (held grants take effect again).",
     )
 
 

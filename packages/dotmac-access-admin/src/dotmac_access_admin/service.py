@@ -22,7 +22,8 @@ from uuid import UUID, uuid4
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.identity import normalize_email, person_display_name
-from dotmac_kernel.identity_storage import (
+from dotmac_kernel.identity_admin import (
+    IdentityAdminRefusal,
     NewPersonValues,
     PartyFact,
     ensure_grant,
@@ -32,9 +33,8 @@ from dotmac_kernel.identity_storage import (
     remove_grants,
     revoke_party_sessions,
 )
-from dotmac_kernel.identity_storage import create_person as _create_person
+from dotmac_kernel.identity_admin import create_person as _create_person
 from dotmac_kernel.models import (
-    AuthSession,
     Party,
     PartyPerson,
     PartyRoleGrant,
@@ -389,7 +389,12 @@ def create_user(
 
 
 def _locked_person(db: Session, tenant: Tenant, party_id: UUID) -> PartyFact:
-    found = lock_parties(db, tenant_id=tenant.id, party_ids=(party_id,))
+    try:
+        found = lock_parties(db, tenant_id=tenant.id, party_ids=(party_id,))
+    except IdentityAdminRefusal as exc:
+        # Absent or another tenant's party: the kernel refuses rather than
+        # returning a shorter tuple. Same answer as "not found".
+        raise NotFoundError("User not found") from exc
     if len(found) != 1 or found[0].party_type != PartyType.person:
         raise NotFoundError("User not found")
     return found[0]
@@ -412,19 +417,16 @@ def _refuse_self(actor: Party, party_id: UUID, what: str) -> None:
 def deactivate_user(
     db: Session, tenant: Tenant, actor: Party, *, party_id: UUID
 ) -> UserRow:
-    """Mark a person inactive and end every session.
+    """Mark a person inactive and end every session; grants are kept.
 
-    Refused while the person still holds grants: the kernel's login and session
-    checks do not consult `Party.is_active`, so a flag alone would cut nothing.
-    Remove access first with `leaver_revoke`.
+    The kernel now honours `Party.is_active` at login, in session
+    authentication and in role evaluation, so the flag alone cuts access and
+    deactivation is a reversible suspension. Reactivation restores the grants
+    the person still holds; use `leaver_revoke` to remove them.
     """
     _refuse_self(actor, party_id, "deactivate")
     with conflict_savepoint(db):
         fact = _locked_person(db, tenant, party_id)
-        if lock_grants(db, tenant_id=tenant.id, party_ids=(party_id,)):
-            raise ConflictError(
-                "User still holds grants; revoke their access first (leaver revoke)"
-            )
         if not fact.is_active:
             raise ConflictError("User is already inactive")
         revoked = revoke_party_sessions(
@@ -452,11 +454,13 @@ def deactivate_user(
 def reactivate_user(
     db: Session, tenant: Tenant, actor: Party, *, party_id: UUID
 ) -> UserRow:
-    """Flag only. Grants are never restored; re-grant explicitly (audited)."""
+    """Flag only: no grant is added. Grants kept through a deactivation become
+    effective again, so the audit row records how many the person holds."""
     with conflict_savepoint(db):
         fact = _locked_person(db, tenant, party_id)
         if fact.is_active:
             raise ConflictError("User is already active")
+        held = lock_grants(db, tenant_id=tenant.id, party_ids=(party_id,))
         party = _loaded_party(db, party_id)
         party.is_active = True
         db.flush()
@@ -467,7 +471,7 @@ def reactivate_user(
             "access_admin.user.reactivate",
             "party",
             str(party_id),
-            {},
+            {"grants_held": len(held)},
         )
     return get_user(db, tenant, party_id)
 
@@ -482,28 +486,18 @@ def leaver_revoke(
 ) -> RevokeOutcome:
     """Revoke ALL grants and ALL sessions of one person in ONE transaction.
 
-    One conflict SAVEPOINT: the party is locked first, then its grants and
-    sessions; the grants are removed and the sessions revoked through the kernel
-    identity-storage primitives; then the party flag and the audit rows (one per
-    grant, plus a summary) are written. Any failure, including the audit write,
-    rolls the whole operation back, so a leaver is never left half-revoked.
+    One conflict SAVEPOINT: the party is locked first, then its grants; the
+    grants are removed and the sessions revoked through the kernel
+    `identity_admin` commands (which lock the session cohort themselves); then
+    the party flag and the audit rows (one per grant, plus a summary) are
+    written. Any failure, including the audit write, rolls the whole operation
+    back, so a leaver is never left half-revoked.
     The next request carrying one of that person's tokens fails authentication.
     """
     _refuse_self(actor, party_id, "revoke")
     with conflict_savepoint(db):
         _locked_person(db, tenant, party_id)
         grants = lock_grants(db, tenant_id=tenant.id, party_ids=(party_id,))
-        # Lock the complete session cohort before the revoke, as the kernel's
-        # own session owners do.
-        db.scalars(
-            select(AuthSession.id)
-            .where(
-                AuthSession.tenant_id == tenant.id,
-                AuthSession.party_id == party_id,
-            )
-            .order_by(AuthSession.id)
-            .with_for_update()
-        ).all()
         role_slugs: dict[UUID, str] = {}
         for rid, slug in db.execute(
             select(Role.id, Role.slug).where(Role.tenant_id == tenant.id)
@@ -580,15 +574,10 @@ def grant_role(
             if rid in {grant.role_id for grant in existing}
         ]
         warnings = sod_warnings([*held, role.slug])
-        ensure_grant(
-            db,
-            tenant_id=tenant.id,
-            party_id=party_id,
-            role_id=role_id,
-            new_grant_id=None,
-            created_at=None,
-            updated_at=None,
-        )
+        try:
+            ensure_grant(db, tenant_id=tenant.id, party_id=party_id, role_id=role_id)
+        except IdentityAdminRefusal as exc:
+            raise ConflictError(str(exc)) from exc
         _audit(
             db,
             tenant,
