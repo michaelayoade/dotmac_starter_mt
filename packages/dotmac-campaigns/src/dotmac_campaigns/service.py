@@ -201,6 +201,7 @@ def _add_revision(
         send_window_end=command.send_window_end,
         created_at=recorded_at,
         sender_key=command.sender_key,
+        delivery_expires_at=command.delivery_expires_at,
     )
     db.add(revision)
     db.flush()
@@ -345,6 +346,9 @@ def _consent_receipt(
     evaluated_at: datetime,
     forced_reason: str | None = None,
 ) -> CampaignConsentReceipt:
+    policy_owner = (
+        "dotmac_campaigns" if forced_reason is not None else "dotmac_kernel.consent"
+    )
     reason = forced_reason
     if reason is None and recipient.address is not None:
         reason = suppression_reason(
@@ -357,7 +361,7 @@ def _consent_receipt(
     allowed = reason is None
     receipt_fingerprint = fingerprint(
         {
-            "policy_owner": "dotmac_kernel.consent",
+            "policy_owner": policy_owner,
             "recipient_id": recipient.id,
             "recipient_step_id": recipient_step_id,
             "phase": phase,
@@ -367,6 +371,21 @@ def _consent_receipt(
             "evaluated_at": evaluated_at,
         }
     )
+    if forced_reason is not None:
+        # Callers hold the campaign lock. Exact timer/transport redelivery
+        # reuses this campaign-policy decision instead of violating the
+        # evaluation key or manufacturing another observation.
+        previous = db.scalar(
+            select(CampaignConsentReceipt).where(
+                CampaignConsentReceipt.tenant_id == tenant_id,
+                CampaignConsentReceipt.recipient_id == recipient.id,
+                CampaignConsentReceipt.recipient_step_id == recipient_step_id,
+                CampaignConsentReceipt.phase == phase,
+                CampaignConsentReceipt.fingerprint == receipt_fingerprint,
+            )
+        )
+        if previous is not None:
+            return previous
     receipt = CampaignConsentReceipt(
         tenant_id=tenant_id,
         campaign_id=campaign_id,
@@ -375,7 +394,7 @@ def _consent_receipt(
         phase=phase,
         allowed=allowed,
         reason=reason,
-        policy_owner="dotmac_kernel.consent",
+        policy_owner=policy_owner,
         destination_hash=recipient.address_hash,
         fingerprint=receipt_fingerprint,
         evaluated_at=evaluated_at,
@@ -530,6 +549,10 @@ def schedule_campaign(
                 f"cannot schedule a campaign in {campaign.status!r} state"
             )
         revision = _revision(session, tenant_id, campaign)
+        if revision.delivery_expires_at is not None and recorded_at >= _as_utc(
+            revision.delivery_expires_at
+        ):
+            raise InvalidTransition("campaign delivery deadline has passed")
         recipients = list(
             session.scalars(
                 select(CampaignRecipient).where(
@@ -773,6 +796,48 @@ def accept_due_work(
         window_start=revision.send_window_start,
         window_end=revision.send_window_end,
     )
+    if revision.delivery_expires_at is not None and due >= _as_utc(
+        revision.delivery_expires_at
+    ):
+        # The timer has already attested this trigger is current. Stale timer
+        # generations never reach this mutation, even after the deadline.
+        recipient = db.scalar(
+            select(CampaignRecipient).where(
+                CampaignRecipient.tenant_id == tenant_id,
+                CampaignRecipient.id == row.recipient_id,
+            )
+        )
+        if recipient is None:
+            raise CampaignError("recipient-step snapshot is incomplete")
+        expired = accepted_at >= _as_utc(revision.delivery_expires_at)
+        _consent_receipt(
+            db,
+            tenant_id=tenant_id,
+            campaign_id=campaign.id,
+            recipient=recipient,
+            recipient_step_id=row.id,
+            phase="delayed_step",
+            evaluated_at=accepted_at,
+            forced_reason="campaign_delivery_expired"
+            if expired
+            else "campaign_delivery_window_closed",
+        )
+        # An accepted trigger may be replayed after a real delivery. Refusing
+        # another send must not rewrite that earlier terminal observation.
+        if row.resolved_at is None:
+            row.status = RecipientStepStatus.SUPPRESSED.value
+            row.delivery_state = DeliveryState.SUPPRESSED.value
+            row.resolved_at = accepted_at
+            row.updated_at = accepted_at
+            db.flush()
+            rebuild_counters(
+                db, tenant_id=tenant_id, campaign_id=campaign.id, rebuilt_at=accepted_at
+            )
+        return DueWorkResult(
+            row.id,
+            "expired" if expired else "delivery_window_closed",
+            replayed=acceptance.replayed,
+        )
     if due > accepted_at:
         scheduled = timers.schedule(
             db,
@@ -954,6 +1019,7 @@ def authorize_delivery(
     Publication is not permission to deliver. A suppression or cancellation
     recorded after queueing therefore still wins.
     """
+    _aware("evaluated_at", evaluated_at)
     intent = db.scalar(
         select(CampaignDeliveryIntent)
         .where(
@@ -986,6 +1052,13 @@ def authorize_delivery(
         if campaign.status == CampaignStatus.CANCELLED.value
         else None
     )
+    revision = _revision(db, tenant_id, campaign)
+    if (
+        forced_reason is None
+        and revision.delivery_expires_at is not None
+        and evaluated_at >= _as_utc(revision.delivery_expires_at)
+    ):
+        forced_reason = "campaign_delivery_expired"
     receipt = _consent_receipt(
         db,
         tenant_id=tenant_id,
@@ -996,7 +1069,9 @@ def authorize_delivery(
         evaluated_at=evaluated_at,
         forced_reason=forced_reason,
     )
-    if not receipt.allowed:
+    if not receipt.allowed and not (
+        forced_reason == "campaign_delivery_expired" and step.resolved_at is not None
+    ):
         step.status = RecipientStepStatus.SUPPRESSED.value
         step.delivery_state = DeliveryState.SUPPRESSED.value
         step.resolved_at = evaluated_at
@@ -1348,9 +1423,15 @@ def resume_campaign(
     timers: TimerPort,
     resumed_at: datetime,
 ) -> Campaign:
+    _aware("resumed_at", resumed_at)
     campaign = _campaign(db, tenant_id, campaign_id, lock=True)
     if campaign.status != CampaignStatus.PAUSED.value:
         raise InvalidTransition("only a paused campaign can resume")
+    revision = _revision(db, tenant_id, campaign)
+    if revision.delivery_expires_at is not None and resumed_at >= _as_utc(
+        revision.delivery_expires_at
+    ):
+        raise InvalidTransition("campaign delivery deadline has passed")
     campaign.status = (
         CampaignStatus.SENDING.value
         if campaign.started_at is not None
@@ -1888,6 +1969,7 @@ def campaign_snapshot(
                 allowed=row.allowed,
                 reason=row.reason,
                 evaluated_at=row.evaluated_at,
+                policy_owner=row.policy_owner,
             )
             for row in db.scalars(
                 select(CampaignConsentReceipt)
@@ -1947,6 +2029,11 @@ def campaign_snapshot(
             replied=counter.replied,
         ),
         recipients=tuple(recipients),
+        scheduled_at=_as_utc(campaign.scheduled_at),
+        timezone=revision.timezone,
+        delivery_expires_at=_as_utc(revision.delivery_expires_at)
+        if revision.delivery_expires_at is not None
+        else None,
     )
 
 
