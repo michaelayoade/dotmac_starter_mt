@@ -14,7 +14,7 @@ from uuid import UUID
 from dotmac_kernel.models import Base, Tenant, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
-    JSON,
+    ARRAY,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -117,10 +117,10 @@ class SettleInstance(Base):
     withholding_discharge_ref: Mapped[str | None] = mapped_column(
         String(160), nullable=True
     )
-    #: JSON array of discharge references in acceptance order (mf_0003). The
+    #: Array of discharge references in acceptance order (mf_0003). The
     #: legacy column above keeps the first one.
     withholding_discharge_list_ref: Mapped[list[str] | None] = mapped_column(
-        JSON(), nullable=True
+        ARRAY(String(160)), nullable=True
     )
 
 

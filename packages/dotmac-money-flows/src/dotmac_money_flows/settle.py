@@ -70,6 +70,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -112,6 +113,7 @@ from dotmac_money_flows.contracts import (
     InvoiceIssuedV1,
     SettleAttentionCursorV1,
     SettleConfirmationV1,
+    SettleConfirmationV2,
     SettleInstanceV1,
     SettlementTargetV1,
     SettleOutcomeV1,
@@ -119,6 +121,7 @@ from dotmac_money_flows.contracts import (
     SettlePorts,
     SettleRefused,
     SettleState,
+    WithholdingAcceptedV1,
     confirmation_deductions,
     settle_transition_allowed,
 )
@@ -372,6 +375,12 @@ def _prepare(
     source = cash.source.value
     if source not in policy.accepted_confirmation_sources or source not in _EVIDENCE:
         return refuse("source_not_accepted")
+    if (
+        isinstance(command, SettleConfirmationV2)
+        and command.withholding is not None
+        and command.deductions
+    ):
+        return refuse("withholding_and_deductions_both_set")
     deductions = confirmation_deductions(command)
     if deductions and source != WITHHOLDING_SOURCE:
         return refuse("withholding_requires_manual_source")
@@ -393,6 +402,14 @@ def _prepare(
         return refuse("bound_document_required")
     if purpose == _DEPOSIT_PURPOSE and target.bound_document_id is not None:
         return refuse("deposit_must_not_bind_document")
+    if (
+        isinstance(command, SettleConfirmationV2)
+        and target.bound_document_id is not None
+        and any(
+            d.tax_evidence.document_id != target.bound_document_id for d in deductions
+        )
+    ):
+        return refuse("deduction_document_not_bound")
     if target.bound_document_id is not None:
         try:
             exposure = get_document_exposure(
@@ -471,6 +488,37 @@ def _pay_in_order(
             ceiling = outstanding
 
 
+def _accept_deduction(
+    db: Session,
+    scope: TenantScope,
+    wht: Any,
+    account_id: UUID,
+    cash: Any,
+    settlement_id: UUID,
+) -> Any:
+    return accept_withholding_discharge(
+        db,
+        scope=scope,
+        command=AcceptWithholdingDischarge(
+            scope=scope,
+            billing_account_id=account_id,
+            document_id=wht.tax_evidence.document_id,
+            idempotency_key=wht.idempotency_key,
+            source_owner=wht.source_owner,
+            source_ref=wht.source_ref,
+            claim_ref=wht.claim_ref,
+            claimed_amount=wht.claimed,
+            accepted_amount=wht.accepted,
+            tax_evidence=wht.tax_evidence,
+            authorization_actor_ref=wht.authorization_actor_ref,
+            authorization_evidence_ref=wht.authorization_evidence_ref,
+            occurred_at=cash.observed_at,
+            certificate_observation=wht.certificate_observation,
+            settlement_id=settlement_id,
+        ),
+    )
+
+
 def _execute(
     db: Session,
     scope: TenantScope,
@@ -517,28 +565,19 @@ def _execute(
     # Accepted deductions first: the whole-invoice test is made against what
     # remains owing after cash-equivalents (cash + accepted deductions).
     discharge_refs: list[str] = []
-    for wht in confirmation_deductions(command):
-        discharge = accept_withholding_discharge(
-            db,
-            scope=scope,
-            command=AcceptWithholdingDischarge(
-                scope=scope,
-                billing_account_id=account_id,
-                document_id=wht.tax_evidence.document_id,
-                idempotency_key=wht.idempotency_key,
-                source_owner=wht.source_owner,
-                source_ref=wht.source_ref,
-                claim_ref=wht.claim_ref,
-                claimed_amount=wht.claimed,
-                accepted_amount=wht.accepted,
-                tax_evidence=wht.tax_evidence,
-                authorization_actor_ref=wht.authorization_actor_ref,
-                authorization_evidence_ref=wht.authorization_evidence_ref,
-                occurred_at=cash.observed_at,
-                certificate_observation=wht.certificate_observation,
-                settlement_id=settlement.id,
-            ),
-        )
+    for index, wht in enumerate(confirmation_deductions(command)):
+        try:
+            discharge = _accept_deduction(
+                db, scope, wht, account_id, cash, settlement.id
+            )
+        except Exception as exc:
+            # Name which deduction failed (position and component, no amounts);
+            # the owner's code and type are untouched.
+            exc.add_note(
+                f"deduction {index} component "
+                f"{getattr(wht.tax_evidence, 'component_ref', None)}"
+            )
+            raise
         discharge_refs.append(str(discharge.id))
 
     def pay_whole(document_id: UUID, outstanding: Money) -> str | None:
@@ -876,11 +915,73 @@ def apply_balance_on_invoice_issued(
     can be paid again. Faults raise ``BalancePassFailed``; Billing exceptions
     propagate unchanged. Both are retryable.
     """
+    return _balance_pass(
+        db,
+        scope=scope,
+        ports=ports,
+        trigger=request.document_id,
+        expected_account=None,
+        not_before=None,
+        ref_prefix=f"money-flows:settle:issue:{request.document_id}",
+    )
+
+
+def apply_balance_on_withholding_accepted(
+    db: Session,
+    *,
+    scope: TenantScope,
+    request: WithholdingAcceptedV1,
+    ports: SettlePorts,
+) -> BalanceAppliedOutcomeV1:
+    """C2b/MED-2: the balance pays whole open invoices once a deduction is accepted.
+
+    A withholding certificate that arrives after the cash is accepted by calling
+    Billing's ``accept_withholding_discharge`` directly (a Payments confirmation
+    cannot be zero), so no settle pass follows it. This runs the very same full
+    pass as ``apply_balance_on_invoice_issued`` (same lock-first order, same
+    gates, same whole-only, oldest-due-first, skip-misfit rule) for the account
+    of the discharged document. Nothing is wired here: the assembly routes
+    Billing's accepted fact to it.
+
+    Dating: each application is at the later of the usual dating rule (the
+    invoice issue dates and the newest cash since) and ``accepted_at``, the
+    instant Billing accepted the discharge, so a payment is never dated before
+    the deduction that made the invoice fit. Idempotent: the source reference
+    carries the discharge id and the document's Billing ``source_version``, a
+    replay finds the invoice already paid, and a refused draw leaves no record.
+    A discharge naming another account than the document's raises
+    ``BalancePassFailed("document_account_mismatch")``.
+    """
+    return _balance_pass(
+        db,
+        scope=scope,
+        ports=ports,
+        trigger=request.document_id,
+        expected_account=request.billing_account_id,
+        not_before=request.accepted_at,
+        ref_prefix=(
+            f"money-flows:settle:wht:{request.discharge_id}:{request.document_id}"
+        ),
+    )
+
+
+def _balance_pass(
+    db: Session,
+    *,
+    scope: TenantScope,
+    ports: SettlePorts,
+    trigger: UUID,
+    expected_account: UUID | None,
+    not_before: datetime | None,
+    ref_prefix: str,
+) -> BalanceAppliedOutcomeV1:
+    """The one full balance pass behind invoice issue and an accepted deduction."""
     _tenant(scope)
-    trigger = request.document_id
     account_id = get_document_exposure(
         db, scope=scope, document_id=trigger
     ).billing_account_id  # immutable, so this read before the lock is safe
+    if expected_account is not None and expected_account != account_id:
+        raise BalancePassFailed("document_account_mismatch")
     availability = get_funding_availability(
         db, scope=scope, request=GetFundingAvailabilityV1(scope, account_id)
     )  # account lock
@@ -932,6 +1033,9 @@ def apply_balance_on_invoice_issued(
 
     def pay(document: OpenReceivableDocumentV1) -> str | None:
         base = bases[document.document_id]
+        occurred = base if newest_cash is None else max(base, newest_cash)
+        if not_before is not None:
+            occurred = max(occurred, not_before)
         try:
             apply_available_credit(
                 db,
@@ -940,9 +1044,9 @@ def apply_balance_on_invoice_issued(
                     billing_account_id=account_id,
                     document_id=document.document_id,
                     amount=document.collectible_receivable,
-                    occurred_at=base if newest_cash is None else max(base, newest_cash),
+                    occurred_at=occurred,
                     source_ref=(
-                        f"money-flows:settle:issue:{trigger}:{document.document_id}"
+                        f"{ref_prefix}:{document.document_id}"
                         f":{document.source_version}"
                     ),
                 ),
@@ -1018,6 +1122,7 @@ def list_settle_attention(
 
 __all__ = [
     "apply_balance_on_invoice_issued",
+    "apply_balance_on_withholding_accepted",
     "CONFIRMATION_UNIQUE_CONSTRAINT",
     "REPLAY_CONSTRAINTS",
     "get_settle_instance",

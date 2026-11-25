@@ -19,6 +19,7 @@ from dotmac_billing.contracts import DueDateBasisStatus
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.money import Currency, Money
 from dotmac_money_flows import (
+    BalancePassFailed,
     DepositApplication,
     SettleConfirmationV1,
     SettleConfirmationV2,
@@ -28,6 +29,7 @@ from dotmac_money_flows import (
     SettleRefused,
     SettleState,
     SettleWithholdingV1,
+    WithholdingAcceptedV1,
 )
 from dotmac_money_flows import settle as flows
 from dotmac_money_flows.contracts import (
@@ -625,3 +627,107 @@ def test_stored_references_prefer_the_list_and_fall_back_to_the_legacy_column():
     assert flows._stored_refs(both) == ("a", "b")
     assert flows._stored_refs(legacy) == ("x",)
     assert flows._stored_refs(none) == ()
+
+
+def test_a_v2_confirmation_setting_both_withholding_and_deductions_is_refused(
+    monkeypatch,
+):
+    _install(monkeypatch, source="MANUAL")
+    ports = _ports(ACCOUNT, _MANUAL_POLICY)
+    result = _prepare(ports, _command_v2(_deduction(), withholding=_deduction()))
+    assert isinstance(result, flows._Refusal)
+    assert result.code == "withholding_and_deductions_both_set"
+    assert ports.targets.calls == []
+
+
+def test_a_v2_deduction_on_another_document_than_the_bound_one_is_refused(
+    monkeypatch,
+):
+    _install(monkeypatch, source="MANUAL", purpose="INVOICE_SETTLEMENT")
+    bound = BOUND.bound_document_id
+
+    def on(document_id, component):
+        base = _deduction()
+        return SettleWithholdingV1(
+            tax_evidence=SimpleNamespace(
+                document_id=document_id, component_ref=component
+            ),
+            claim_ref=base.claim_ref,
+            claimed=base.claimed,
+            accepted=base.accepted,
+            source_owner=base.source_owner,
+            source_ref=base.source_ref,
+            idempotency_key=f"k-{component}",
+            authorization_actor_ref=base.authorization_actor_ref,
+            authorization_evidence_ref=base.authorization_evidence_ref,
+        )
+
+    monkeypatch.setattr(
+        flows,
+        "get_document_exposure",
+        lambda *a, **k: SimpleNamespace(billing_account_id=BOUND.billing_account_id),
+    )
+    ports = _ports(BOUND, _MANUAL_POLICY)
+    refused = _prepare(ports, _command_v2(on(bound, "a"), on(uuid4(), "b")))
+    assert isinstance(refused, flows._Refusal)
+    assert refused.code == "deduction_document_not_bound"
+    accepted = _prepare(ports, _command_v2(on(bound, "a"), on(bound, "b")))
+    assert isinstance(accepted, flows._Plan)
+
+
+def test_a_failing_deduction_is_named_by_position_and_component(monkeypatch):
+    _install(monkeypatch, source="MANUAL")
+    ports = _ports(
+        ACCOUNT,
+        SettlePolicyV1(
+            "p1",
+            accepted_confirmation_sources=frozenset({"MANUAL"}),
+            deposit_application=DepositApplication.NONE,
+        ),
+    )
+    first, second = _deduction(), _deduction()
+    command = _command_v2(first, second)
+    plan = _prepare(ports, command)
+    monkeypatch.setattr(
+        flows, "accept_settlement", lambda *a, **k: SimpleNamespace(id=uuid4())
+    )
+    calls = []
+
+    def discharge(db, *, scope, command):
+        calls.append(command.idempotency_key)
+        if len(calls) == 2:
+            raise BillingRuleViolation("no_component", "refused")
+        return SimpleNamespace(id=uuid4())
+
+    monkeypatch.setattr(flows, "accept_withholding_discharge", discharge)
+    with pytest.raises(BillingRuleViolation) as caught:
+        flows._execute(
+            None, TenantScope(uuid4()), command, plan, uuid4(), recheck=False
+        )
+    assert caught.value.code == "billing.no_component"
+    notes = " ".join(caught.value.__notes__)
+    assert "deduction 1" in notes
+    assert second.tax_evidence.component_ref in notes
+    assert first.tax_evidence.component_ref not in notes
+
+
+def test_the_withholding_entry_point_refuses_another_accounts_document(monkeypatch):
+    document = uuid4()
+    monkeypatch.setattr(
+        flows,
+        "get_document_exposure",
+        lambda *a, **k: SimpleNamespace(billing_account_id=uuid4()),
+    )
+
+    def boom(*args, **kwargs):
+        raise AssertionError("the account lock was taken for a mismatched account")
+
+    monkeypatch.setattr(flows, "get_funding_availability", boom)
+    with pytest.raises(BalancePassFailed) as caught:
+        flows.apply_balance_on_withholding_accepted(
+            None,
+            scope=TenantScope(uuid4()),
+            request=WithholdingAcceptedV1(uuid4(), document, uuid4(), NOW),
+            ports=_ports(ACCOUNT),
+        )
+    assert caught.value.code == "document_account_mismatch"

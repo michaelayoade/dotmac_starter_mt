@@ -446,10 +446,11 @@ def foreign_key_violations(source: str) -> list[str]:
     return problems
 
 
-def migration_security_violations(source: str) -> list[str]:
+def migration_security_violations(source: str, *, creates: bool = True) -> list[str]:
+    """DELETE and GRANT ALL are refused everywhere; FORCE RLS where a table is made."""
     text = re.sub(r"\s+", " ", source)
     problems = []
-    if "FORCE ROW LEVEL SECURITY" not in text:
+    if creates and "FORCE ROW LEVEL SECURITY" not in text:
         problems.append("row level security is not forced")
     if re.search(r"GRANT [^;]*\bDELETE\b[^;]*TO app_user", text):
         problems.append("the runtime role is granted DELETE")
@@ -844,8 +845,10 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "SettlementTargetResolver",
         "SettlementTargetV1",
         "StartFundedChargeV1",
+        "WithholdingAcceptedV1",
         "__version__",
         "apply_balance_on_invoice_issued",
+        "apply_balance_on_withholding_accepted",
         "charge_ref_for",
         "get_funded_charge_instance",
         "get_settle_instance",
@@ -892,12 +895,11 @@ def test_real_tables_are_allowlisted_instance_tables() -> None:
         assert schema_violations(created) == [], path
         assert added_column_violations(added) == [], path
         assert foreign_key_violations(source) == [], path
-        if created:
-            assert migration_security_violations(source) == [], path
+        assert migration_security_violations(source, creates=bool(created)) == [], path
     additive = migration_added_columns(
         (MIGRATIONS / "mf_0003_settle_discharge_list.py").read_text("utf-8")
     )
-    assert additive == {"settle_instances": {"withholding_discharge_list_ref": "JSON"}}
+    assert additive == {"settle_instances": {"withholding_discharge_list_ref": "ARRAY"}}
     for table, migration in (
         ("settle_instances", "mf_0001_settle_instances.py"),
         ("funded_charge_instances", "mf_0002_funded_charge_instances.py"),
@@ -1085,6 +1087,12 @@ def test_planted_foreign_keys_to_another_owner_are_refused() -> None:
     assert foreign_key_violations('X = ["public.accounts.id"]')
     assert foreign_key_violations('X = ["mod_mflows.settle_instances.id"]') == []
     assert foreign_key_violations('X = ["public.tenants.id"]') == []
+
+
+def test_an_add_column_migration_still_gets_the_grant_checks() -> None:
+    assert migration_security_violations("op.add_column(t, c)", creates=False) == []
+    assert migration_security_violations("GRANT DELETE ON t TO app_user", creates=False)
+    assert migration_security_violations("GRANT ALL ON t TO app_user", creates=False)
 
 
 def test_planted_migration_security_violations_are_refused() -> None:

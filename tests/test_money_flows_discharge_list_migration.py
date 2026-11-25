@@ -41,7 +41,7 @@ def _insert_refused(app, tenant, refs) -> None:
                 "(id, tenant_id, state, reason_code, policy_version, "
                 "definition_version, confirmation_id, intent_id, "
                 f"{COLUMN}) VALUES (:id, :tenant, 'refused', 'x', 'p1', "
-                "'settle.v1', :confirmation, :intent, CAST(:refs AS json))"
+                "'settle.v1', :confirmation, :intent, CAST(:refs AS varchar[]))"
             ),
             {
                 "id": uuid.uuid4(),
@@ -78,7 +78,7 @@ def test_the_column_is_a_nullable_json_list_beside_the_legacy_reference(
             {"c": COLUMN},
         )
     engine.dispose()
-    assert rows == {"withholding_discharge_ref": "character varying", COLUMN: "json"}
+    assert rows == {"withholding_discharge_ref": "character varying", COLUMN: "ARRAY"}
     assert nullable == "YES"
 
 
@@ -88,7 +88,7 @@ def test_downgrade_refuses_while_a_row_holds_several_references(migrated) -> Non
     admin_url, app_url = migrated
     tenant = _tenant(admin_url)
     app = create_engine(app_url)
-    _insert_refused(app, tenant, '["a", "b"]')
+    _insert_refused(app, tenant, "{a,b}")
     app.dispose()
     cfg = _config()
     with pytest.raises(RuntimeError, match="several discharge references"):

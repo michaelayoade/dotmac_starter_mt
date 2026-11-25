@@ -204,6 +204,22 @@ class InvoiceIssuedV1:
 
 
 @dataclass(frozen=True, slots=True)
+class WithholdingAcceptedV1:
+    """Trigger: Billing accepted a withholding discharge for this document.
+
+    The assembly maps Billing's accepted fact to it. The account and document are
+    cross-checked against Billing (a mismatch raises); ``discharge_id`` keys the
+    idempotent source references; ``accepted_at`` is the instant Billing accepted
+    the discharge and floors the payment dating. No amount is carried.
+    """
+
+    billing_account_id: UUID
+    document_id: UUID
+    discharge_id: UUID
+    accepted_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class BalanceAppliedOutcomeV1:
     """What an invoice-issued balance pass did. References only.
 

@@ -45,6 +45,7 @@ from dotmac_money_flows.contracts import (
     SettleState,
     SettleWithholdingV1,
     StartFundedChargeV1,
+    WithholdingAcceptedV1,
 )
 from dotmac_money_flows.events import (
     FUNDED_CHARGE_ACCESS_EVENT_TYPE,
@@ -75,6 +76,7 @@ from dotmac_money_flows.migrations import versions_dir
 from dotmac_money_flows.receivables import BillingReceivablesReader, subject_ref_for
 from dotmac_money_flows.settle import (
     apply_balance_on_invoice_issued,
+    apply_balance_on_withholding_accepted,
     get_settle_instance,
     is_settle_replay_conflict,
     list_settle_attention,
@@ -132,8 +134,10 @@ __all__ = [
     "SettlementTargetResolver",
     "SettlementTargetV1",
     "StartFundedChargeV1",
+    "WithholdingAcceptedV1",
     "__version__",
     "apply_balance_on_invoice_issued",
+    "apply_balance_on_withholding_accepted",
     "charge_ref_for",
     "get_funded_charge_instance",
     "get_settle_instance",

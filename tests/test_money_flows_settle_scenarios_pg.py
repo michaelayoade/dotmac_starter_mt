@@ -822,51 +822,117 @@ def test_deductions_on_a_non_manual_confirmation_are_refused_before_any_write(
     assert targets.calls == []
 
 
-def test_a_deduction_then_the_balance_pays_the_now_fitting_invoice(scratch):
-    """Cash already on the account pays the invoice once a deduction fits it.
+def test_a_second_deduction_refusing_rolls_back_the_first_then_retries_cleanly(
+    scratch,
+):
+    from tests import test_billing_isolation as billing
+    from tests.billing_frozen_fixtures import ensure_frozen
 
-    The first payment (90.00) stays as balance: the invoice has 30.00 of
-    frozen withholding not yet discharged. The second, MANUAL, confirmation
-    brings the deduction and 1.00 more cash; the balance pass runs after the
-    deduction is accepted and pays the invoice whole.
-    """
     scope = new_scope(scratch)
     with session(scratch, scope) as db:
         account = seed_account(db, scope)
         invoice = seed_invoice(db, scope, account)
-        first = seed_payment(
-            db, scope, purpose=DEPOSIT, amount="90.00", target_reference="target:1"
-        )
-        second = seed_payment(
+        payment = seed_payment(
             db,
             scope,
-            purpose=DEPOSIT,
-            amount="1.00",
+            purpose=INVOICE,
+            amount="90.00",
             target_reference="target:1",
             source=MANUAL,
         )
         tax = withholding_command(
-            db, account.id, invoice.id, scope=scope, claimed="30.00", accepted="30.00"
+            db,
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix="wht",
+            claimed="20.00",
+            accepted="20.00",
+        )
+        # Not frozen yet, so Billing refuses it after the first deduction.
+        stamp = billing._withholding_command(
+            account.id,
+            invoice.id,
+            scope=scope,
+            suffix="stamp",
+            claimed="10.00",
+            accepted="10.00",
         )
         db.commit()
         account_id, doc = account.id, invoice.id
-    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id)})
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id, doc)})
     ports = make_ports(targets, _manual_policy())
+    command = payment.command_v2(deductions=(_deduction(tax), _deduction(stamp)))
 
-    before = assembly_settle(scratch, scope, first.command(), ports)
-    assert before.applied_document_ids == ()
+    refused = assembly_settle(scratch, scope, command, ports)
+
+    assert refused.state is SettleState.REFUSED
     with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 0
+        assert _count(db, billing_models.WithholdingDischarge) == 0
+        assert _count(db, SettleInstance) == 1
         assert _collectible(db, scope, doc)[1] == 120
+        ensure_frozen(db, scope, stamp)
+        db.commit()
 
-    outcome = assembly_settle(
-        scratch, scope, second.command_v2(deductions=(_deduction(tax),)), ports
-    )
-
-    assert outcome.state is SettleState.SETTLED, outcome
-    assert outcome.applied_document_ids == (doc,)
     with session(scratch, scope) as db:
+        retried = retry_settle(
+            db,
+            scope=scope,
+            instance_id=refused.instance_id,
+            expected_version=refused.version,
+            actor_ref="finance-user:1",
+            command=command,
+            ports=ports,
+        )
+        db.commit()
+    assert retried.state is SettleState.SETTLED, retried
+    assert retried.applied_document_ids == (doc,)
+    with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 1
+        assert _count(db, billing_models.WithholdingDischarge) == 2
         assert _collectible(db, scope, doc) == ("resolved", 0)
-        assert _credit(db, scope, account_id) == 1
+
+    replay = assembly_settle(scratch, scope, command, ports)
+    assert replay.replayed and replay.state is SettleState.SETTLED
+    with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 1
+        assert _count(db, billing_models.WithholdingDischarge) == 2
+        view = get_settle_instance(db, scope=scope, instance_id=refused.instance_id)
+        assert len(view.withholding_discharge_refs) == 2
+
+
+def test_a_v2_deduction_on_another_document_is_refused_before_any_write(scratch):
+    scope = new_scope(scratch)
+    with session(scratch, scope) as db:
+        account = seed_account(db, scope)
+        bound = seed_invoice(db, scope, account)
+        other = seed_invoice(db, scope, account)
+        payment = seed_payment(
+            db,
+            scope,
+            purpose=INVOICE,
+            amount="90.00",
+            target_reference="target:1",
+            source=MANUAL,
+        )
+        wht = withholding_command(
+            db, account.id, other.id, scope=scope, claimed="30.00", accepted="30.00"
+        )
+        db.commit()
+        account_id, doc = account.id, bound.id
+    targets = RecordingTargets({"target:1": SettlementTargetV1(account_id, doc)})
+    outcome = assembly_settle(
+        scratch,
+        scope,
+        payment.command_v2(deductions=(_deduction(wht),)),
+        make_ports(targets, _manual_policy()),
+    )
+    assert outcome.state is SettleState.REFUSED
+    assert outcome.reason_code == "deduction_document_not_bound"
+    with session(scratch, scope) as db:
+        assert _count(db, billing_models.ConfirmedSettlement) == 0
+        assert _count(db, billing_models.WithholdingDischarge) == 0
 
 
 # --------------------------------------------------------------------------

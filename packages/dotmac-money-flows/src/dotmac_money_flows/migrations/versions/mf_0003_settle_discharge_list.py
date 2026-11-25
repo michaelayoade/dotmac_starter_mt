@@ -4,7 +4,7 @@ Revision ID: mf_0003_settle_discharge_list
 Revises: mf_0002_funded_charge_instances
 
 A confirmation may now carry several deductions, so the instance keeps every
-discharge reference as a JSON array of opaque strings, in acceptance order. The
+discharge reference as an array of opaque strings (varchar(160) elements), in acceptance order. The
 single ``withholding_discharge_ref`` column stays and holds the first one, so
 existing readers and rows are unchanged. No backfill: terminal rows are
 immutable by trigger, and a row without the list reports its single legacy
@@ -35,7 +35,9 @@ def upgrade() -> None:
     require_prerequisites(op.get_bind(), REQUIRES)
     op.add_column(
         "settle_instances",
-        sa.Column("withholding_discharge_list_ref", sa.JSON(), nullable=True),
+        sa.Column(
+            "withholding_discharge_list_ref", sa.ARRAY(sa.String(160)), nullable=True
+        ),
         schema=_SCHEMA,
     )
 
@@ -51,7 +53,7 @@ def downgrade() -> None:
             sa.text(
                 f"SELECT 1 FROM {_SCHEMA}.{_TABLE} "  # noqa: S608
                 f"WHERE {_COLUMN} IS NOT NULL "
-                f"AND json_array_length({_COLUMN}) > 1 LIMIT 1"
+                f"AND cardinality({_COLUMN}) > 1 LIMIT 1"
             )
         )
         .first()
