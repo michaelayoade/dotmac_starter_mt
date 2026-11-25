@@ -22,6 +22,18 @@ immutable, so the runner cannot be folded into it.
   `durable_timers.jobs.read|run|manage`.
 - Migration `dt_0002_job_states` (tenant plane): `mod_timers.job_states` with
   FORCE RLS; requires `tenant_audit_log.v1`.
+- R2 review follow-ups: the runner refuses to boot while another enabled module
+  declares outbox event types (until a type-filtered claim exists); a failing
+  health sink is logged, never raised; an event already dead-lettered is never
+  re-run; a purged outbox row re-arms the job; boot reads back both roles and
+  refuses a shared, superuser or BYPASSRLS tenant role; suspended or deleted
+  tenants run and arm nothing; one event is claimed at a time so SIGTERM stops
+  after the event in hand; wildcard-hour cron runs in both passes of the autumn
+  repeated hour.
+- Adoption gate: a consumer must set an explicit `surface_selection` before
+  adopting a3 (the staff routes and page are new). Release gate: the kernel floor
+  rises to the kernel that ships `dotmac_kernel.jobs` and durable-timers joins
+  `module_floor_check` before release.
 - The manifest is now contract 2 and declares `fastapi` as a dependency; the
   kernel floor needs the allocation that publishes `dotmac_kernel.jobs`.
 

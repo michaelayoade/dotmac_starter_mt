@@ -25,9 +25,14 @@ policy range (30 s to 1 h by default).
 
 Dead letters (from this transport or from the relay's own policy) reach
 ``dead_letter``: it records the outcome, writes one audit row and raises a
-health observation through the assembly-bound sink, before the outbox row is
-settled dead.  There is no staff queue; the job's next generation is armed by
-the reconciler, so a dead letter does not stop the job.
+health observation through the assembly-bound sink (a failing sink is logged,
+never raised), before the outbox row is settled dead.
+
+A handler must not commit or roll back the session it is given: the run is one
+transaction owned by this transport and the relay worker.
+
+There is no staff queue; the job's next generation is armed by the reconciler,
+so a dead letter does not stop the job.
 
 The module reads no clock: ``clock`` is injected.
 """
@@ -42,6 +47,7 @@ from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.delivery import DeliveryDeferred, DeliveryTerminal
 from dotmac_kernel.messaging.relay import ClaimedEvent
+from dotmac_kernel.models import Tenant
 from sqlalchemy.orm import Session
 
 from dotmac_durable_timers.health import JobDeadLetter, JobHealthSink
@@ -121,7 +127,24 @@ class JobDispatchTransport:
         tenant_id = event.tenant_id
         scope = TenantScope(tenant_id)
 
+        tenant = tenant_db.get(Tenant, tenant_id)
+        if (
+            tenant is None
+            or not tenant.is_active
+            or tenant.suspended_at is not None
+            or tenant.deleted_at is not None
+        ):
+            # An inactive tenant runs nothing and arms nothing; the event is
+            # settled and the stream simply stops until the tenant is back
+            # (the reconciler re-arms it then).
+            logger.info("job event for inactive tenant %s settled unrun", tenant_id)
+            return
+
         state = get_state(tenant_db, tenant_id, entry)
+        if state is not None and state.dead_letter_event_id == event.id:
+            # The dead-letter hook already recorded this event, so the relay is
+            # only re-delivering it; never run the handler again.
+            raise DeliveryTerminal("event already dead-lettered")
         if state is not None and state.paused:
             # Settled without accepting: the generation row stays `scheduled`
             # (not lost); resume re-arms it as the next generation.
@@ -237,18 +260,29 @@ class JobDispatchTransport:
                 )
         if generation is None:
             self._audit(tenant_db, event, module_code, job_code, None, error, now)
-        self._health.job_dead_lettered(
-            JobDeadLetter(
-                event_id=event.id,
-                tenant_id=event.tenant_id,
-                module_code=module_code,
-                job_code=job_code,
-                generation=generation,
-                attempts=event.attempts + event.deferrals + 1,
-                error=error,
-                observed_at=now,
+        try:
+            self._health.job_dead_lettered(
+                JobDeadLetter(
+                    event_id=event.id,
+                    tenant_id=event.tenant_id,
+                    module_code=module_code,
+                    job_code=job_code,
+                    generation=generation,
+                    attempts=event.attempts + event.deferrals + 1,
+                    error=error,
+                    observed_at=now,
+                )
             )
-        )
+        except Exception:
+            # The audit row and the job state are the durable record. A failing
+            # sink must never keep the event claimed: it would be reclaimed and
+            # the handler run again every lease period.
+            logger.exception(
+                "health sink failed for dead-lettered event %s (job %s.%s)",
+                event.id,
+                module_code,
+                job_code,
+            )
 
     @staticmethod
     def _audit(

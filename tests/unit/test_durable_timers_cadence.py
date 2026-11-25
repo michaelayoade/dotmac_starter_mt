@@ -89,3 +89,27 @@ def test_an_expression_that_never_matches_fails_closed() -> None:
 def test_a_naive_instant_is_refused() -> None:
     with pytest.raises(JobSpecError):
         next_due(_spec(interval_seconds=60), after=datetime(2029, 1, 1), tz=UTC_TZ)
+
+
+def test_a_wildcard_hour_expression_runs_in_both_passes_of_the_repeated_hour() -> None:
+    cron = CronSchedule("*/15 * * * *")
+    # 05:50Z is 01:50 EDT. The 01:00-01:59 wall hour then repeats as EST, so the
+    # next quarter hour is the SECOND pass of 01:00 (06:00Z), not 02:00 EST.
+    after = datetime(2029, 11, 4, 5, 50, tzinfo=UTC)
+    assert cron.next_after(after, NEW_YORK) == datetime(2029, 11, 4, 6, 0, tzinfo=UTC)
+    # No hole: every quarter hour from 05:45Z to 07:00Z fires exactly once.
+    seen = []
+    cursor = datetime(2029, 11, 4, 5, 40, tzinfo=UTC)
+    while True:
+        cursor = cron.next_after(cursor, NEW_YORK)
+        if cursor > datetime(2029, 11, 4, 7, 0, tzinfo=UTC):
+            break
+        seen.append(cursor)
+    assert [t.strftime("%H:%M") for t in seen] == [
+        "05:45",
+        "06:00",
+        "06:15",
+        "06:30",
+        "06:45",
+        "07:00",
+    ]

@@ -215,12 +215,15 @@ def needs_arming(db: Session, tenant_id: UUID, entry: JobEntry) -> bool:
 
     Covers a first run, a stream whose last generation was terminal, a
     generation whose outbox row was settled without running it (a paused fire)
-    and one whose outbox row was dead-lettered.
+    one whose outbox row was dead-lettered, and one whose outbox row no longer
+    exists (purged).
     """
     snapshot = current_timer(db, scope=TenantScope(tenant_id), identity=entry.identity)
     if snapshot is None or snapshot.status != SCHEDULED:
         return True
-    return _outbox_status(db, snapshot) in {"sent", "dead"}
+    # `None`: the outbox row is gone (purged after a long pause); the generation
+    # can never be delivered, so it needs arming like a settled or dead one.
+    return _outbox_status(db, snapshot) in {None, "sent", "dead"}
 
 
 def reconcile_tenant(

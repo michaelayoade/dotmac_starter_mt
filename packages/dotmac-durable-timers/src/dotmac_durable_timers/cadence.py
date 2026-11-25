@@ -11,7 +11,9 @@ Cron semantics (five fields, evaluated on the tenant's wall clock):
 * a wall time that does not exist (spring-forward gap) runs once, shifted
   forward by the length of the gap (02:30 becomes 03:30);
 * a wall time that happens twice (fall-back overlap) runs once, at its first
-  occurrence; the repeated pass never fires it again;
+  occurrence, when the hour field is fixed (``30 1 * * *``); a wildcard-hour
+  expression (``*/15 * * * *``) runs in both passes, like Vixie cron, so the
+  repeated hour is not a 75-minute hole;
 * a job never catches up: ``after`` is the completion instant, and the next due
   is strictly later than it, so missed ticks are skipped, not replayed.
 """
@@ -66,6 +68,7 @@ class CronSchedule:
         self._dom = _expand(dom, 1, 31)
         self._months = _expand(month, 1, 12)
         self._dow = frozenset(v % 7 for v in _expand(dow, 0, 7))
+        self._hour_star = hour.startswith("*")
         self._dom_star = dom.startswith("*")
         self._dow_star = dow.startswith("*")
 
@@ -88,20 +91,35 @@ class CronSchedule:
             current = day + timedelta(days=offset)
             if not self._day_matches(current):
                 continue
-            for hour in self._hours:
-                for minute in self._minutes:
-                    candidate = _resolve(current, hour, minute, tz)
-                    if candidate > after:
-                        return candidate
+            candidates = [
+                candidate
+                for hour in self._hours
+                for minute in self._minutes
+                for candidate in _resolve(
+                    current, hour, minute, tz, both_passes=self._hour_star
+                )
+                if candidate > after
+            ]
+            if candidates:
+                return min(candidates)
         raise JobSpecError("cron expression never matches within nine years")
 
 
-def _resolve(day: date, hour: int, minute: int, tz: ZoneInfo) -> datetime:
-    """Wall time to a UTC instant: gap -> shifted forward, overlap -> first pass."""
+def _resolve(
+    day: date, hour: int, minute: int, tz: ZoneInfo, *, both_passes: bool
+) -> list[datetime]:
+    """Wall time to UTC instants: gap -> shifted forward, overlap -> first pass
+    (or both passes for a wildcard-hour expression)."""
     naive = datetime.combine(day, time(hour, minute))
     # fold=0 picks the first pass of an overlap; for a nonexistent wall time it
     # applies the pre-transition offset, which lands the gap length later.
-    return naive.replace(tzinfo=tz, fold=0).astimezone(UTC)
+    first = naive.replace(tzinfo=tz, fold=0).astimezone(UTC)
+    found = [first]
+    if both_passes:
+        second = naive.replace(tzinfo=tz, fold=1).astimezone(UTC)
+        if second != first and second.astimezone(tz).replace(tzinfo=None) == naive:
+            found.append(second)
+    return found
 
 
 def next_due(spec: JobSpec, *, after: datetime, tz: ZoneInfo) -> datetime:

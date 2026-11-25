@@ -48,12 +48,14 @@ from dotmac_durable_timers.jobs import (
 )
 from dotmac_durable_timers.manifest import module as timers_module
 from dotmac_durable_timers.models import JobState, Timer, TimerRejection
+from dotmac_durable_timers.rolecheck import RoleSplitError, verify_role_split
 from dotmac_kernel.audit import AuditEvent, write_audit_event
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.cache import TenantScope
+from dotmac_kernel.delivery import DeliveryTerminal
 from dotmac_kernel.exceptions import ConflictError
 from dotmac_kernel.jobs import JobSpec
-from dotmac_kernel.messaging.relay import RelayPolicy, claim_batch
+from dotmac_kernel.messaging.relay import ClaimedEvent, RelayPolicy, claim_batch
 from dotmac_kernel.messaging.worker import run_once
 from dotmac_kernel.outbox_event_types import (
     OutboxEventTypeRegistry,
@@ -608,3 +610,153 @@ def test_builtin_purges_delete_only_expired_terminal_rows(env) -> None:
         assert purge_timer_history(db, scope, context).counters["deleted"] == 1
     rows = _timers(env, tenant_id, env.ok)
     assert [(r.generation, r.status) for r in rows] == [(2, "scheduled")]
+
+
+# ── R2 follow-ups ───────────────────────────────────────────────────────────
+
+
+class _RaisingSink:
+    def job_dead_lettered(self, dead_letter: JobDeadLetter) -> None:
+        raise ConnectionError("alerting channel is down")
+
+
+def _fail_twice_to_dead(env: SimpleNamespace, tenant_id: UUID) -> None:
+    PROBE.fail = True
+    _arm(env, tenant_id, env.flaky)
+    assert _drain(env) == 1
+    _make_due_again(env)
+    assert _drain(env) == 1
+
+
+def test_a_failing_health_sink_does_not_keep_the_dead_event_claimed(env) -> None:
+    tenant_id = _make_tenant(env.scratch["admin"])
+    env.transport = JobDispatchTransport(
+        catalogue=env.catalogue, health=_RaisingSink(), clock=lambda: NOW
+    )
+    _fail_twice_to_dead(env, tenant_id)
+
+    # The sink error was contained: the row is settled dead, not left claimed to
+    # be reclaimed and re-run every lease period.
+    assert _outbox_statuses(env) == ["dead"]
+    state = _state(env, tenant_id, env.flaky)
+    assert state is not None and state.last_outcome == "dead_letter"
+    with env.tenant.tenant_session(tenant_id) as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.action == "durable_timers.job.dead_letter")
+            )
+            == 1
+        )
+
+
+def test_an_already_dead_lettered_event_is_never_run_again(env) -> None:
+    tenant_id = _make_tenant(env.scratch["admin"])
+    _fail_twice_to_dead(env, tenant_id)
+    state = _state(env, tenant_id, env.flaky)
+    assert state is not None and state.dead_letter_event_id is not None
+    with env.admin.connect() as connection:
+        payload = connection.execute(
+            text("SELECT payload FROM public.outbox_events WHERE id = :id"),
+            {"id": state.dead_letter_event_id},
+        ).scalar_one()
+    event = ClaimedEvent(
+        id=state.dead_letter_event_id,
+        tenant_id=tenant_id,
+        event_type="durable_timers.job_due.v1",
+        payload=payload,
+        attempts=0,
+        correlation_id=None,
+        last_error=None,
+    )
+    PROBE.fail = False
+    db = env.tenant.session_factory()
+    try:
+        db.execute(
+            text("SELECT set_config('app.current_tenant', :t, true)"),
+            {"t": str(tenant_id)},
+        )
+        with pytest.raises(DeliveryTerminal):
+            env.transport.deliver(event, db)
+    finally:
+        db.close()
+    assert _effects(env, tenant_id) == []  # the handler did not run again
+
+
+def test_a_purged_outbox_row_means_the_job_is_armed_again(env) -> None:
+    tenant_id = _make_tenant(env.scratch["admin"])
+    _arm(env, tenant_id, env.ok, due_at=NOW + timedelta(days=1))
+    with env.admin.connect() as connection:
+        connection.execute(text("DELETE FROM public.outbox_events"))
+    with env.tenant.tenant_session(tenant_id) as db:
+        assert (
+            reconcile_tenant(db, tenant_id=tenant_id, catalogue=env.catalogue, now=NOW)
+            >= 1
+        )
+    rows = _timers(env, tenant_id, env.ok)
+    assert [(r.generation, r.status) for r in rows] == [
+        (1, "superseded"),
+        (2, "scheduled"),
+    ]
+
+
+def test_the_database_role_split_is_read_back_not_assumed(env) -> None:
+    tenant, dispatcher = verify_role_split(
+        tenant_factory=env.tenant.session_factory,
+        dispatcher_factory=env.dispatcher.session_factory,
+    )
+    assert (tenant.name, dispatcher.name) == ("app_user", "outbox_dispatcher")
+    assert not tenant.superuser and not tenant.bypass_rls
+
+    with pytest.raises(RoleSplitError, match="must differ"):
+        verify_role_split(
+            tenant_factory=env.tenant.session_factory,
+            dispatcher_factory=env.tenant.session_factory,
+        )
+    privileged = DatabaseRuntime.from_urls(database_url=env.scratch["admin"])
+    try:
+        with pytest.raises(RoleSplitError, match=r"BYPASSRLS|superuser"):
+            verify_role_split(
+                tenant_factory=privileged.session_factory,
+                dispatcher_factory=env.dispatcher.session_factory,
+            )
+    finally:
+        privileged.engine.dispose()
+        privileged.platform_engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT count(*) FROM mod_timers.timers",
+        "SELECT count(*) FROM mod_timers.job_states",
+        "SELECT count(*) FROM public.tenants",
+        "SELECT count(*) FROM public.outbox_events",
+        "SELECT count(*) FROM public.audit_events",
+    ],
+)
+def test_the_dispatcher_credential_reads_no_tenant_or_module_table(
+    env, statement: str
+) -> None:
+    db = env.dispatcher.session_factory()
+    try:
+        with pytest.raises(DBAPIError):
+            db.execute(text(statement))
+    finally:
+        db.close()
+
+
+def test_an_inactive_tenant_runs_nothing_and_arms_nothing(env) -> None:
+    tenant_id = _make_tenant(env.scratch["admin"])
+    _arm(env, tenant_id, env.ok)
+    with env.admin.connect() as connection:
+        connection.execute(
+            text("UPDATE public.tenants SET is_active = false WHERE id = :id"),
+            {"id": tenant_id},
+        )
+    assert _drain(env) == 1
+    assert PROBE.calls == []
+    rows = _timers(env, tenant_id, env.ok)
+    assert [(r.generation, r.status) for r in rows] == [(1, "scheduled")]
+    assert _outbox_statuses(env) == ["sent"]

@@ -17,13 +17,18 @@ never logged):
 
 Refuses to start (exit 2, nothing claimed) when: the assembly cannot be
 loaded; ``durable_timers`` is absent, disabled or lacks the tenant plane; a
-declared job uses the platform plane; the assembly binds no health sink under
-``durable_timers.health_sink``; no source application is named; or either DSN
-is missing or the two are identical (one credential would collapse the split).
+declared job uses the platform plane; any OTHER enabled module declares outbox
+event types (the kernel claim is not type-scoped, so this runner would
+dead-letter their events; lifted when the kernel offers a filtered claim); the
+assembly binds no health sink under ``durable_timers.health_sink``; no source
+application is named; either DSN is missing; or the database read-back of the
+two roles fails (same role, a superuser or BYPASSRLS tenant role, or a
+dispatcher that can read tenant data).
 
-SIGTERM and SIGINT request a clean stop: the event being processed finishes
-and commits, no new batch is claimed, engines are disposed, exit 0.  Anything
-claimed but unfinished at a hard kill is reclaimed after the lease goes stale.
+The runner claims ONE event at a time, so SIGTERM and SIGINT stop after the
+event in hand: it finishes and commits, nothing more is claimed, engines are
+disposed, exit 0.  Anything claimed but unfinished at a hard kill is reclaimed
+after the lease goes stale.
 
 This file is the composition root: it is the only place that builds engines and
 reads the ambient clock.
@@ -39,13 +44,14 @@ import signal
 import socket
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Final
 
 from dotmac_durable_timers.dispatch import JobDispatchTransport
 from dotmac_durable_timers.health import HEALTH_SINK_PROVIDER_KEY
 from dotmac_durable_timers.jobs import JobCatalogue, JobPlaneUnsupported
+from dotmac_durable_timers.rolecheck import RoleSplitError, verify_role_split
 from dotmac_durable_timers.runner import JobRunner
 
 logger = logging.getLogger("dotmac_durable_timers.run")
@@ -71,6 +77,24 @@ def load_assembly(target: str) -> object:
     except (ImportError, AttributeError) as exc:
         raise RunnerConfigError(f"cannot load assembly {target!r}: {exc}") from exc
     return value() if callable(value) else value
+
+
+def foreign_outbox_event_types(
+    manifests: Iterable[object],
+) -> dict[str, tuple[str, ...]]:
+    """Outbox event types declared by modules other than durable_timers.
+
+    The kernel's outbox claim is not type-scoped: this runner would claim and
+    dead-letter any other module's events (and another relay would claim ours).
+    Until a type-filtered claim exists the runner refuses such an assembly.
+    """
+    foreign: dict[str, tuple[str, ...]] = {}
+    for manifest in manifests:
+        code = str(getattr(manifest, "code", ""))
+        declared = tuple(getattr(manifest, "outbox_event_types", ()))
+        if code != MODULE_CODE and declared:
+            foreign[code] = declared
+    return foreign
 
 
 def prepare(
@@ -117,6 +141,16 @@ def prepare(
             "name this application with --source-application or "
             "DOTMAC_SOURCE_APPLICATION (audit attribution)"
         )
+    foreign = foreign_outbox_event_types(registry.enabled_order(disabled))
+    if foreign:
+        listed = "; ".join(
+            f"{code}: {', '.join(types)}" for code, types in foreign.items()
+        )
+        raise RunnerConfigError(
+            "other enabled modules declare outbox event types and the outbox "
+            f"claim is not type-scoped yet ({listed}); the job runner would "
+            "dead-letter their events"
+        )
     manifests = list(registry.startup_order())
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
     install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
@@ -146,7 +180,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--worker-id", default=f"{socket.gethostname()}:{os.getpid()}")
     parser.add_argument("--poll-interval", type=float, default=1.0)
     parser.add_argument("--reconcile-interval", type=float, default=30.0)
-    parser.add_argument("--batch-size", type=int, default=5)
     return parser
 
 
@@ -180,6 +213,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         pool_size=1,
         max_overflow=0,
     )
+    try:
+        verify_role_split(
+            tenant_factory=tenant_runtime.session_factory,
+            dispatcher_factory=dispatcher_runtime.session_factory,
+        )
+    except Exception as exc:
+        for runtime in (tenant_runtime, dispatcher_runtime):
+            runtime.engine.dispose()
+            runtime.platform_engine.dispose()
+        reason = str(exc) if isinstance(exc, RoleSplitError) else type(exc).__name__
+        print(
+            f"refusing to start: database role check failed: {reason}", file=sys.stderr
+        )
+        return EXIT_REFUSED
     stop = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stop.set())
@@ -195,7 +242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         tenant_runtime=tenant_runtime,
         worker_id=args.worker_id,
         clock=_clock,
-        policy=RelayPolicy(batch_size=args.batch_size),
+        policy=RelayPolicy(batch_size=1),
         reconcile_interval_seconds=args.reconcile_interval,
         poll_interval_seconds=args.poll_interval,
     )

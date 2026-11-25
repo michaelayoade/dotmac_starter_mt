@@ -35,10 +35,11 @@ CLOCK_ALLOWED = frozenset({"run.py", "runtime.py"})
 
 
 def _module_source(exclude: frozenset[str] = frozenset()) -> str:
+    # Exemptions are matched by path relative to the module root, not basename.
     return "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(MODULE_ROOT.rglob("*.py"))
-        if path.name not in exclude
+        if path.relative_to(MODULE_ROOT).as_posix() not in exclude
     )
 
 
@@ -161,6 +162,7 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
         "claim_outbox_batch",
         "claim_platform_outbox_batch",
         "SKIP LOCKED",
+        "skip_locked",
         "SessionLocal(",
         "sessionmaker(",
         "create_engine(",
