@@ -11,6 +11,7 @@ from dotmac_campaigns.contracts import (
     ContractError,
     CounterView,
     CreateCampaign,
+    DatedCampaignOccurrence,
     DeliveryGateResult,
     DeliveryIntentView,
     DeliveryState,
@@ -76,7 +77,7 @@ from dotmac_campaigns.service import (
     schedule_campaign,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a1+dev"
 
 __all__ = [
     "CAMPAIGN_CATEGORY",
@@ -92,6 +93,7 @@ __all__ = [
     "ContractError",
     "CounterView",
     "CreateCampaign",
+    "DatedCampaignOccurrence",
     "DeliveryGateResult",
     "DeliveryIntentNotFound",
     "DeliveryIntentView",

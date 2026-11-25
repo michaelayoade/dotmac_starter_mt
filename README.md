@@ -32,6 +32,12 @@ customer workspaces, shared services and an optional admin portal.
 
 ## Reference and contribution
 
+The optional Campaigns package includes unpublished source preparation for
+dated greetings and delivery deadlines. It is not composed into the reference
+app and is not a Selfcare holiday-message deployment. See
+[dated holiday campaigns](docs/inventories/dated-holiday-campaigns.md) for
+ownership, migration, validation and product adoption requirements.
+
 - [Detailed project reference](docs/reference/project-guide.md): setup details,
   route map, database roles, feature switches and deployment notes.
 - [Module catalog](docs/MODULE_CATALOG.md): generated package inventory and evidence state.
