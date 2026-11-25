@@ -100,7 +100,11 @@ def _run_reference_adapter(
         "dotmac_kernel.settings_models": {},
         "dotmac_kernel.messaging.models": {},
         "dotmac_kernel.models": {"Base": SimpleNamespace(metadata=object())},
-        "app.assembly": {"assembly": SimpleNamespace(module_planes=())},
+        "app.assembly": {
+            "assembly": SimpleNamespace(
+                module_planes=(), modules=(), disabled_modules=frozenset()
+            )
+        },
         "app.features.custom_fields.models": {},
         "app.migration_bindings": {"ASSEMBLY_PREREQUISITE_BINDINGS": ()},
     }

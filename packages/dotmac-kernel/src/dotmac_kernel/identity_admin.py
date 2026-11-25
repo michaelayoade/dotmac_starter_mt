@@ -9,17 +9,27 @@ governed entry point instead. The commands carry the same names as the storage
 primitives they wrap, take no more authority than those primitives, and add the
 rules every caller would otherwise re-implement:
 
-- **Party first.** `lock_parties` is the only way a party becomes lockable
-  here. `lock_grants`, `ensure_grant`, `remove_grants` and
-  `revoke_party_sessions` refuse a party this transaction scope has not locked
-  (or created), and `lock_parties` refuses a NEW party once a subordinate lock
-  has been taken, so two operators cannot interleave opposite lock orders.
+- **Party first, in ONE call.** `lock_parties` is the only way a party becomes
+  lockable here, and it is called ONCE per transaction scope with every party the
+  operation needs (a second call may only re-name parties already held). Two
+  fresh calls in opposite orders by two operators could deadlock (PostgreSQL
+  would abort one side), so a fresh second call is refused. `lock_grants`,
+  `ensure_grant`, `remove_grants`, `set_party_active` and
+  `revoke_party_sessions` refuse a party this scope has not locked (or created),
+  and `lock_parties` also refuses a NEW party once a subordinate lock exists.
   A party locked inside a SAVEPOINT is released with it, so a lock is only
   honoured while the scope that took it (or one of its ancestors) is live.
 - **Drift is refusal.** `lock_parties` refuses when any requested id is absent
   or belongs to another tenant, instead of returning a shorter tuple.
 - **Normalised email only.** `find_party_normalized_email` and `create_person`
   refuse an email that is not already trimmed and lower-cased.
+- **Deactivation has one owner.** `set_party_active` is the only governed writer
+  of `Party.is_active` and requires the held party lock, so the lock that makes a
+  racing login re-read the flag is not left to each caller to remember.
+- **Tenant roles only.** `create_tenant_role` and `rename_tenant_role` refuse a
+  slug that any declared permission binds through `default_roles` (a code role
+  must not be created or renamed by a tenant: it would silently inherit the code
+  role's permissions).
 - **No grant to an inactive party**, and no grant of a role that is not in the
   tenant. The party's `is_active` is read under the party lock, so a concurrent
   deactivation is observed, never raced.
@@ -49,21 +59,31 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, SessionTransaction
 
 from dotmac_kernel import identity_storage as _storage
-from dotmac_kernel.identity_storage import GrantFact, NewPersonValues, PartyFact
+from dotmac_kernel.identity_storage import (
+    GrantFact,
+    NewPersonValues,
+    PartyFact,
+    RoleFact,
+)
 from dotmac_kernel.models import AuthSession, Party, Role
+from dotmac_kernel.permissions import active_permissions
 
 __all__ = (
     "GrantFact",
     "IdentityAdminRefusal",
     "NewPersonValues",
     "PartyFact",
+    "RoleFact",
     "create_person",
+    "create_tenant_role",
     "ensure_grant",
     "find_party_normalized_email",
     "lock_grants",
     "lock_parties",
     "remove_grants",
+    "rename_tenant_role",
     "revoke_party_sessions",
+    "set_party_active",
 )
 
 
@@ -183,6 +203,11 @@ def lock_parties(
         raise IdentityAdminRefusal(
             "party locks must precede subordinate locks: lock every party "
             "first, in one call"
+        )
+    if fresh and state.parties:
+        raise IdentityAdminRefusal(
+            "lock_parties is called once per scope: name every party in one "
+            "call (two fresh calls in opposite orders can deadlock)"
         )
     facts = _storage.lock_parties(db, tenant_id=tenant_id, party_ids=ids)
     if {f.id for f in facts} != set(ids) or any(
@@ -338,3 +363,111 @@ def revoke_party_sessions(
         session_ids=session_ids,
         revoked_at=revoked_at,
     )
+
+
+def set_party_active(
+    db: Session, *, tenant_id: UUID, party_id: UUID, active: bool
+) -> tuple[PartyFact, PartyFact]:
+    """Set `Party.is_active` for a LOCKED party; returns (before, after).
+
+    The only governed writer of the flag. It requires the party lock this scope
+    already holds, so a login racing the change either committed first (and its
+    session is part of the leaver's cohort) or waits on the lock and re-reads the
+    new value. Grants are not touched: whether deactivation requires an empty
+    grant set is the caller's policy.
+    """
+    _uuid(tenant_id, "tenant_id")
+    _uuid(party_id, "party_id")
+    if not isinstance(active, bool):
+        raise IdentityAdminRefusal("active must be a bool")
+    _require_held(db, tenant_id, (party_id,))
+    party = db.scalars(
+        select(Party)
+        .where(Party.tenant_id == tenant_id, Party.id == party_id)
+        .execution_options(populate_existing=True)
+    ).first()
+    if party is None:
+        raise IdentityAdminRefusal("the party is absent from this tenant")
+
+    def fact() -> PartyFact:
+        return PartyFact(
+            party.id,
+            party.tenant_id,
+            party.party_type,
+            party.email,
+            party.display_name,
+            party.is_active,
+        )
+
+    before = fact()
+    if party.is_active is not active:
+        party.is_active = active
+        db.flush()
+    return before, fact()
+
+
+def _code_role_slugs() -> frozenset[str]:
+    catalogue = active_permissions()
+    slugs: set[str] = set()
+    for code in catalogue.codes():
+        spec = catalogue.spec(code)
+        if spec is not None:
+            slugs.update(spec.default_roles)
+    return frozenset(slugs)
+
+
+def _role_fact(row: Role) -> RoleFact:
+    return RoleFact(row.id, row.tenant_id, row.slug, row.name)
+
+
+def _role_name(name: object) -> str:
+    if not isinstance(name, str) or not name.strip() or len(name) > 120:
+        raise IdentityAdminRefusal("role name must be 1 to 120 characters")
+    return name
+
+
+def create_tenant_role(
+    db: Session, *, tenant_id: UUID, slug: str, name: str
+) -> RoleFact:
+    """Create a TENANT role. Refuses a slug a declared permission binds."""
+    _uuid(tenant_id, "tenant_id")
+    if (
+        not isinstance(slug, str)
+        or not slug
+        or len(slug) > 63
+        or slug != slug.strip().lower()
+    ):
+        raise IdentityAdminRefusal("role slug must be 1 to 63 trimmed lower-case chars")
+    if slug in _code_role_slugs():
+        raise IdentityAdminRefusal(
+            "the slug names a code role (a declared permission binds it)"
+        )
+    row = Role(tenant_id=tenant_id, slug=slug, name=_role_name(name))
+    db.add(row)
+    db.flush()
+    return _role_fact(row)
+
+
+def rename_tenant_role(
+    db: Session, *, tenant_id: UUID, role_id: UUID, name: str
+) -> RoleFact:
+    """Rename a TENANT role (the slug never changes). Refuses a code role."""
+    _uuid(tenant_id, "tenant_id")
+    _uuid(role_id, "role_id")
+    new_name = _role_name(name)
+    row = db.scalars(
+        select(Role)
+        .where(Role.tenant_id == tenant_id, Role.id == role_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    if row is None:
+        raise IdentityAdminRefusal("the role is not in this tenant")
+    if row.slug in _code_role_slugs():
+        raise IdentityAdminRefusal(
+            "a code role cannot be renamed (a declared permission binds it)"
+        )
+    if row.name != new_name:
+        row.name = new_name
+        db.flush()
+    return _role_fact(row)

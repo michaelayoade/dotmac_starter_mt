@@ -30,6 +30,8 @@ Create Date: 2026-11-25
 
 from __future__ import annotations
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0035_outbox_typed_claim"
@@ -41,6 +43,14 @@ _SIG = "public.claim_outbox_batch_by_type(text, integer, integer, text[])"
 
 
 def upgrade() -> None:
+    # Serves the typed predicate: without it each claim scans past every foreign
+    # row ahead in `available_at` order while holding FOR UPDATE locks.
+    op.create_index(
+        "ix_outbox_events_type_available",
+        "outbox_events",
+        ["event_type", "available_at"],
+        postgresql_where=sa.text("status IN ('pending', 'claimed')"),
+    )
     op.execute(
         """
         CREATE OR REPLACE FUNCTION public.claim_outbox_batch_by_type(
@@ -72,4 +82,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_outbox_events_type_available", table_name="outbox_events")
     op.execute(f"DROP FUNCTION IF EXISTS {_SIG};")

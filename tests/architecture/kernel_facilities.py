@@ -249,6 +249,31 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "caller declares it in `runtime_requires`",
     ),
     Facility(
+        "identity_admin:set_party_active",
+        "identity_admin.v1",
+        "governed command: updates Party.is_active under the party lock; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:create_tenant_role",
+        "identity_admin.v1",
+        "governed command: inserts a tenant Role; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:rename_tenant_role",
+        "identity_admin.v1",
+        "governed command: updates a tenant Role name; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "messaging/relay:claim_batch_by_type",
+        "outbox_typed_claim.v1",
+        "calls claim_outbox_batch_by_type; a separate effect from "
+        "outbox_relay.v1 (the function and its dispatcher grant arrive later)",
+    ),
+    Facility(
         "audit:write_platform_audit_event",
         "platform_audit_log.v1",
         "writes the append-only public.platform_audit_events trail",

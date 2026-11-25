@@ -69,6 +69,7 @@ from dotmac_kernel.web_surfaces import (
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
 
 
 def _staff_landing_route(disabled_modules: frozenset[str]) -> WebRouteRef | None:
@@ -123,6 +124,9 @@ _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
 
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
+    # The same tuple `alembic/env.py` installs; `create_app` resolves enabled
+    # modules' `runtime_requires` through it.
+    prerequisite_bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     # The assembly's own features, plus every INSTALLED MODULE it composes.
     #
     # `dotmac_template_studio.module` is a `ModuleManifest`, not a

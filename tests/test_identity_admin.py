@@ -15,15 +15,24 @@ import pytest
 from dotmac_kernel import identity_admin as ia
 from dotmac_kernel.migrations.verify import (
     PrerequisiteNotSatisfiedError,
+    require_runtime_prerequisites,
     verify_identity_admin,
 )
-from dotmac_kernel.models import Role
+from dotmac_kernel.models import Party, Role
+from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.permissions import (
+    PermissionCatalogue,
+    PermissionSpec,
+    active_permissions,
+    install_permissions,
+)
 from dotmac_kernel.prerequisites import install_prerequisite_bindings
 from dotmac_kernel.transactions import conflict_savepoint
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+from tests.test_migration_split_rehearsals import _upgrade, scratch_db  # noqa: F401
 
 NOW = datetime(2026, 11, 25, tzinfo=UTC)
 
@@ -88,15 +97,22 @@ def test_the_verifier_accepts_the_migrated_catalogue(admin_session: Session) -> 
         "REVOKE UPDATE ON auth_sessions FROM app_user",
         "ALTER TABLE party_role_grants NO FORCE ROW LEVEL SECURITY",
         "DROP INDEX uq_parties_tenant_lower_email",
+        "REVOKE INSERT ON roles FROM app_user",
+        # Column-level only: UPDATE elsewhere on the table must not satisfy it.
+        "REVOKE UPDATE ON parties FROM app_user; "
+        "GRANT UPDATE (display_name) ON parties TO app_user",
+        "REVOKE UPDATE ON roles FROM app_user; "
+        "GRANT UPDATE (slug) ON roles TO app_user",
     ),
 )
 def test_the_verifier_refuses_each_planted_defect(
     admin_session: Session, bound, statement: str
 ) -> None:
     connection = admin_session.connection()
-    connection.execute(text(statement))
+    for part in statement.split("; "):
+        connection.execute(text(part))
     try:
-        with pytest.raises(PrerequisiteNotSatisfiedError, match="identity_admin.v1"):
+        with pytest.raises(PrerequisiteNotSatisfiedError, match=r"identity_admin\.v1"):
             verify_identity_admin(connection)
     finally:
         admin_session.rollback()
@@ -291,3 +307,148 @@ def test_a_lock_taken_inside_a_rolled_back_savepoint_is_not_honoured(
         with pytest.raises(ia.IdentityAdminRefusal, match="party lock required"):
             ia.ensure_grant(db, tenant_id=tid, party_id=person.id, role_id=role_id)
         assert db.scalar(select(Role.id).where(Role.id == role_id)) == role_id
+
+
+# ── one lock_parties call per scope (F5) ────────────────────────────────────
+
+
+def test_a_second_fresh_lock_parties_call_is_refused(
+    admin_session: Session, tenant_a
+) -> None:
+    tid = tenant_a.id
+    with _app_user(tid) as db:
+        with conflict_savepoint(db):
+            first = ia.create_person(db, values=_values(tid, "o1@tenant-a.example.com"))
+            second = ia.create_person(
+                db, values=_values(tid, "o2@tenant-a.example.com")
+            )
+        db.commit()
+    with _app_user(tid) as db:
+        ia.lock_parties(db, tenant_id=tid, party_ids=(first.id,))
+        with pytest.raises(ia.IdentityAdminRefusal, match="once per scope"):
+            ia.lock_parties(db, tenant_id=tid, party_ids=(second.id,))
+    with _app_user(tid) as db:  # one call naming both is the supported shape
+        assert (
+            len(ia.lock_parties(db, tenant_id=tid, party_ids=(first.id, second.id)))
+            == 2
+        )
+
+
+# ── set_party_active and tenant roles (F1) ──────────────────────────────────
+
+
+def test_set_party_active_needs_the_lock_and_reports_before_and_after(
+    admin_session: Session, tenant_a
+) -> None:
+    tid = tenant_a.id
+    with _app_user(tid) as db:
+        with conflict_savepoint(db):
+            person = ia.create_person(
+                db, values=_values(tid, "act@tenant-a.example.com")
+            )
+        db.commit()
+    with _app_user(tid) as db:
+        with pytest.raises(ia.IdentityAdminRefusal, match="party lock required"):
+            ia.set_party_active(db, tenant_id=tid, party_id=person.id, active=False)
+        with conflict_savepoint(db):
+            ia.lock_parties(db, tenant_id=tid, party_ids=(person.id,))
+            before, after = ia.set_party_active(
+                db, tenant_id=tid, party_id=person.id, active=False
+            )
+            assert (before.is_active, after.is_active) == (True, False)
+            same, again = ia.set_party_active(
+                db, tenant_id=tid, party_id=person.id, active=False
+            )
+            assert (same.is_active, again.is_active) == (False, False)
+        with pytest.raises(ia.IdentityAdminRefusal, match="must be a bool"):
+            ia.set_party_active(db, tenant_id=tid, party_id=person.id, active=1)  # type: ignore[arg-type]
+        db.commit()
+    admin_session.rollback()
+    assert (
+        admin_session.scalars(
+            select(Party.is_active).where(Party.id == person.id)
+        ).one()
+        is False
+    )
+
+
+@pytest.fixture
+def code_roles():
+    previous = active_permissions()
+    install_permissions(
+        PermissionCatalogue(
+            [("probe", PermissionSpec(code="probe.read", default_roles=("treasury",)))]
+        )
+    )
+    yield
+    install_permissions(previous)
+
+
+def test_tenant_roles_are_created_and_renamed_but_code_roles_are_refused(
+    admin_session: Session, tenant_a, code_roles
+) -> None:
+    tid = tenant_a.id
+    with _app_user(tid) as db:
+        with conflict_savepoint(db):
+            made = ia.create_tenant_role(
+                db, tenant_id=tid, slug="approver", name="Approver"
+            )
+            assert (made.slug, made.name) == ("approver", "Approver")
+            renamed = ia.rename_tenant_role(
+                db, tenant_id=tid, role_id=made.id, name="Senior Approver"
+            )
+            assert renamed.name == "Senior Approver"
+            with pytest.raises(ia.IdentityAdminRefusal, match="code role"):
+                ia.create_tenant_role(db, tenant_id=tid, slug="treasury", name="Mine")
+            with pytest.raises(ia.IdentityAdminRefusal, match="trimmed lower-case"):
+                ia.create_tenant_role(db, tenant_id=tid, slug="Bad Slug", name="x")
+            with pytest.raises(ia.IdentityAdminRefusal, match="role name"):
+                ia.rename_tenant_role(db, tenant_id=tid, role_id=made.id, name=" ")
+            with pytest.raises(ia.IdentityAdminRefusal, match="not in this tenant"):
+                ia.rename_tenant_role(
+                    db, tenant_id=tid, role_id=uuid.uuid4(), name="Nope"
+                )
+        db.commit()
+    code_role = _role(admin_session, tenant_a, "treasury")
+    with _app_user(tid) as db:
+        with pytest.raises(
+            ia.IdentityAdminRefusal, match="code role cannot be renamed"
+        ):
+            ia.rename_tenant_role(db, tenant_id=tid, role_id=code_role, name="Hijack")
+
+
+# ── runtime_requires proven against the database at migrate time (F3) ───────
+
+
+def test_require_runtime_prerequisites_proves_enabled_modules_against_the_catalogue(
+    admin_session: Session, bound
+) -> None:
+    needs = ModuleManifest(
+        code="needs-identity", version="1.0.0", runtime_requires=("identity_admin.v1",)
+    )
+    plain = ModuleManifest(code="plain", version="1.0.0")
+    connection = admin_session.connection()
+    require_runtime_prerequisites(connection, [plain])  # nothing to prove
+    require_runtime_prerequisites(connection, [needs, plain])
+    connection.execute(text("REVOKE DELETE ON party_role_grants FROM app_user"))
+    try:
+        require_runtime_prerequisites(connection, [plain])  # still nothing to prove
+        with pytest.raises(PrerequisiteNotSatisfiedError, match=r"identity_admin\.v1"):
+            require_runtime_prerequisites(connection, [needs, plain])
+    finally:
+        admin_session.rollback()
+
+
+def test_the_binding_claim_holds_at_exactly_0025(scratch_db: str, bound) -> None:  # noqa: F811
+    from dotmac_kernel.prerequisites import binding_for
+
+    assert binding_for("identity_admin.v1").provider_revision == (
+        "0025_session_provenance"
+    )
+    _upgrade(scratch_db, "0025_session_provenance")
+    engine = create_engine(scratch_db)
+    try:
+        with engine.connect() as conn:
+            verify_identity_admin(conn)
+    finally:
+        engine.dispose()
