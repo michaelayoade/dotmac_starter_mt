@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import PermissionSpec
-from dotmac_kernel.prerequisites import OUTBOX_RELAY_V1, TENANT_AUDIT_LOG_V1
 from dotmac_kernel.web_surfaces import (
     LocalizedText,
     TemplatePackage,
@@ -90,10 +89,9 @@ module = ModuleManifest(
     ],
     outbox_event_types=[RECOVERY_EVENT_TYPE],
     core=False,
-    # Effects the callers need, declared so an adopter running its own lineage
-    # fails at migration time rather than at the first call: the audit writer
-    # and the recovery-intent outbox row. No lineage of its own.
-    requires=(TENANT_AUDIT_LOG_V1.name, OUTBOX_RELAY_V1.name),
+    # No `requires`: the kernel registry refuses migration prerequisites on a
+    # module that owns no lineage. The audit-log and outbox-relay effects its
+    # callers need are therefore undeclared here; see PR #1160 (open decision).
 )
 
 __all__ = ["module"]
