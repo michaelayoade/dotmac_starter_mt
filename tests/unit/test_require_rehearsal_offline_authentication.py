@@ -320,10 +320,14 @@ def test_publication_rechecks_after_install_and_before_first_write():
         if step.get("name") == "Publish to the Forgejo private index"
     )
     run = step["run"]
+    # r2 (architect ruling): the unpinned twine install runs only AFTER the
+    # gate passed (after `esac`), never in the credentialed job before it. The
+    # recheck still precedes the install, the first write and the upload.
     assert (
-        run.index("pip install")
-        < run.index("assert_current_main.sh")
+        run.index("assert_current_main.sh")
         < run.index("scripts/recheck_offline_result.py")
+        < run.index("esac")
+        < run.index("pip install")
         < run.index("twine upload")
     )
     for field, name in recheck.EXPECTED_ENV.items():
