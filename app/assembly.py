@@ -37,6 +37,9 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import dotmac_settings_admin
 import dotmac_template_studio
 import dotmac_ticketing
@@ -126,20 +129,27 @@ dotmac_template_studio.register_contexts(
 # prerequisite, so the assembly (which runs the kernel lineage) binds the writer.
 configure_audit_writer(write_audit_event)
 
+logger = logging.getLogger(__name__)
+
 _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
 
 
-def _seed_setting_defaults() -> None:
+async def _seed_setting_defaults() -> None:
     """Seed platform-default setting rows at startup (the reference app's choice).
 
     Bound here, not on the published `settings_admin` manifest: an adopter that
     composes the module must not silently gain unaudited NULL-tenant platform
-    writes at boot. Gated like every seed on `SEED_ON_STARTUP`, and skipped when
-    the module is disabled.
+    writes at boot. Gated like every seed on `SEED_ON_STARTUP`, skipped when the
+    module is disabled, run off the event loop, and DEFERRED, NON-FATAL exactly
+    like the kernel's own seed dispatch: an unreachable database never stops the
+    app serving (`/health` stays DB-free) and the next boot retries.
     """
     if "settings_admin" in _DISABLED_MODULES or not settings.seed_on_startup:
         return
-    seed_platform_defaults()
+    try:
+        await asyncio.to_thread(seed_platform_defaults)
+    except Exception as exc:  # seed failure never downs startup
+        logger.warning("Module settings_admin seed skipped: %s", exc)
 
 
 assembly = ProductAssemblySpec(

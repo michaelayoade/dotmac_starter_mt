@@ -127,11 +127,22 @@ def test_assembly_seed_hook_respects_the_startup_flag(monkeypatch):
         assembly_module, "seed_platform_defaults", lambda: calls.append("seed")
     )
     settings.seed_on_startup = False
-    assembly_module._seed_setting_defaults()
+    asyncio.run(assembly_module._seed_setting_defaults())
     assert calls == []
     settings.seed_on_startup = True
-    assembly_module._seed_setting_defaults()
+    asyncio.run(assembly_module._seed_setting_defaults())
     assert calls == ["seed"]
+
+
+def test_assembly_seed_hook_failure_is_non_fatal(monkeypatch):
+    import app.assembly as assembly_module
+
+    def boom() -> None:
+        raise RuntimeError("database unreachable")
+
+    monkeypatch.setattr(assembly_module, "seed_platform_defaults", boom)
+    settings.seed_on_startup = True
+    asyncio.run(assembly_module._seed_setting_defaults())  # must not raise
 
 
 def test_import_app_main_works_with_settings_admin_disabled():

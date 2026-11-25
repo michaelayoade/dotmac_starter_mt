@@ -785,7 +785,8 @@ def test_a_validation_failure_on_a_secret_never_echoes_the_input(
     monkeypatch.setenv(sc.KEY_ENV_VAR, Fernet.generate_key().decode())
 
     def echoing(value: object) -> None:
-        raise ValueError(f"bad value {value!r}")
+        if value != "unset":  # the spec default itself must stay valid
+            raise ValueError(f"bad value {value!r}")
 
     spec = sr.SettingSpec(
         domain=SettingDomain.auth,
