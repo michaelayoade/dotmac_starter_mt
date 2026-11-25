@@ -49,6 +49,7 @@ from dotmac_durable_timers.jobs import (
 from dotmac_durable_timers.manifest import module as timers_module
 from dotmac_durable_timers.models import JobState, Timer, TimerRejection
 from dotmac_durable_timers.rolecheck import RoleSplitError, verify_role_split
+from dotmac_durable_timers.runner import JobRunner
 from dotmac_kernel.audit import AuditEvent, write_audit_event
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.cache import TenantScope
@@ -56,7 +57,6 @@ from dotmac_kernel.delivery import DeliveryTerminal
 from dotmac_kernel.exceptions import ConflictError
 from dotmac_kernel.jobs import JobSpec
 from dotmac_kernel.messaging.relay import ClaimedEvent, RelayPolicy, claim_batch
-from dotmac_kernel.messaging.worker import run_once
 from dotmac_kernel.outbox_event_types import (
     OutboxEventTypeRegistry,
     install_outbox_event_types,
@@ -206,17 +206,16 @@ def _arm(
 
 
 def _drain(env: SimpleNamespace, policy: RelayPolicy | None = None) -> int:
-    db = env.dispatcher.session_factory()
-    try:
-        return run_once(
-            dispatcher_db=db,
-            tenant_session_factory=env.tenant.session_factory,
-            transport=env.transport,
-            worker_id="runner-1",
-            policy=policy or RelayPolicy(),
-        )
-    finally:
-        db.close()
+    runner = JobRunner(
+        catalogue=env.catalogue,
+        transport=env.transport,
+        dispatcher_session_factory=env.dispatcher.session_factory,
+        tenant_runtime=env.tenant,
+        worker_id="runner-1",
+        clock=lambda: NOW,
+        policy=policy or RelayPolicy(batch_size=10),
+    )
+    return runner.drain_once()
 
 
 def _timers(env: SimpleNamespace, tenant_id: UUID, entry: JobEntry) -> list[Timer]:
@@ -760,3 +759,67 @@ def test_an_inactive_tenant_runs_nothing_and_arms_nothing(env) -> None:
     rows = _timers(env, tenant_id, env.ok)
     assert [(r.generation, r.status) for r in rows] == [(1, "scheduled")]
     assert _outbox_statuses(env) == ["sent"]
+
+
+# ── typed claim: foreign events are never claimed ───────────────────────────
+
+FOREIGN_EVENT = "tests.foreign_module.thing_due.v1"
+
+
+def test_a_foreign_outbox_event_is_never_claimed_and_is_left_for_its_own_relay(
+    env,
+) -> None:
+    from dotmac_kernel.messaging.outbox import enqueue_event
+
+    tenant_id = _make_tenant(env.scratch["admin"])
+    _arm(env, tenant_id, env.ok)
+    with env.tenant.tenant_session(tenant_id) as db:
+        pending = enqueue_event(
+            db, tenant_id=tenant_id, event_type=FOREIGN_EVENT, payload={"k": 1}
+        )
+        pending.available_at = PAST
+        stale = enqueue_event(
+            db, tenant_id=tenant_id, event_type=FOREIGN_EVENT, payload={"k": 2}
+        )
+        stale.available_at = PAST
+        stale_id, pending_id = stale.id, pending.id
+    with env.admin.connect() as connection:
+        # A foreign row whose lease went stale: the reclaim arm must not take it.
+        connection.execute(
+            text(
+                "UPDATE public.outbox_events SET status = 'claimed', "
+                "leased_by = 'other-relay', leased_at = :old WHERE id = :id"
+            ),
+            {"old": PAST, "id": stale_id},
+        )
+
+    assert _drain(env) == 1  # only the job event
+    assert [c.generation for c in PROBE.calls] == [1]
+    assert _drain(env) == 0  # nothing else is claimable by this runner
+
+    with env.admin.connect() as connection:
+        rows = {
+            row.id: row
+            for row in connection.execute(
+                text(
+                    "SELECT id, status, attempts, leased_by, last_error "
+                    "FROM public.outbox_events WHERE event_type = :t"
+                ),
+                {"t": FOREIGN_EVENT},
+            )
+        }
+    assert (rows[pending_id].status, rows[pending_id].attempts) == ("pending", 0)
+    assert rows[pending_id].leased_by is None and rows[pending_id].last_error is None
+    assert (rows[stale_id].status, rows[stale_id].leased_by) == (
+        "claimed",
+        "other-relay",
+    )
+    with env.tenant.tenant_session(tenant_id) as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.action == "durable_timers.job.dead_letter")
+            )
+            == 0
+        )

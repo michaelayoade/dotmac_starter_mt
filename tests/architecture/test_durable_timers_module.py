@@ -28,10 +28,12 @@ JOB_STATES_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0002_job_states.py"
 #  - dispatch.py is a relay transport; like the kernel's own transports it
 #    commits the failure record inside `deliver` before telling the relay to
 #    retry, because the worker rolls back on raise;
+#  - runner.py commits the dispatcher claim so the lease is durable before
+#    delivery, exactly as the kernel relay worker does (it owns that session);
 #  - run.py is the process entrypoint: it alone reads the ambient clock;
 #  - runtime.py holds the staff surface's single request clock read;
 #  - probe.py is the health-probe command, which compares file ages to now.
-COMMIT_ALLOWED = frozenset({"dispatch.py"})
+COMMIT_ALLOWED = frozenset({"dispatch.py", "runner.py"})
 CLOCK_ALLOWED = frozenset({"run.py", "runtime.py", "probe.py"})
 
 

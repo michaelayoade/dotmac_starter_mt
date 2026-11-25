@@ -22,8 +22,9 @@ immutable, so the runner cannot be folded into it.
   `durable_timers.jobs.read|run|manage`.
 - Migration `dt_0002_job_states` (tenant plane): `mod_timers.job_states` with
   FORCE RLS; requires `tenant_audit_log.v1`.
-- R2 review follow-ups: the runner refuses to boot while another enabled module
-  declares outbox event types (until a type-filtered claim exists); a failing
+- R2 review follow-ups: the runner claims through the kernel's type-scoped claim
+  (`claim_batch(event_types=("durable_timers.job_due.v1",))`), so foreign outbox
+  events are never claimed; a failing
   health sink is logged, never raised; an event already dead-lettered is never
   re-run; a purged outbox row re-arms the job; boot reads back both roles and
   refuses a shared, superuser or BYPASSRLS tenant role; suspended or deleted

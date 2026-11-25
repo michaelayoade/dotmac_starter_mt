@@ -25,9 +25,7 @@ runs ``python -m dotmac_durable_timers.probe ping`` (process alive) and
 
 Refuses to start (exit 2, nothing claimed) when: the assembly cannot be
 loaded; ``durable_timers`` is absent, disabled or lacks the tenant plane; a
-declared job uses the platform plane; any OTHER enabled module declares outbox
-event types (the kernel claim is not type-scoped, so this runner would
-dead-letter their events; lifted when the kernel offers a filtered claim); the
+declared job uses the platform plane; the
 assembly binds no health sink under ``durable_timers.health_sink``; no source
 application is named; either DSN is missing; or the database read-back of the
 two roles fails (same role, a superuser or BYPASSRLS tenant role, or a
@@ -52,7 +50,7 @@ import signal
 import socket
 import sys
 import threading
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Final
 
@@ -87,24 +85,6 @@ def load_assembly(target: str) -> object:
     except (ImportError, AttributeError) as exc:
         raise RunnerConfigError(f"cannot load assembly {target!r}: {exc}") from exc
     return value() if callable(value) else value
-
-
-def foreign_outbox_event_types(
-    manifests: Iterable[object],
-) -> dict[str, tuple[str, ...]]:
-    """Outbox event types declared by modules other than durable_timers.
-
-    The kernel's outbox claim is not type-scoped: this runner would claim and
-    dead-letter any other module's events (and another relay would claim ours).
-    Until a type-filtered claim exists the runner refuses such an assembly.
-    """
-    foreign: dict[str, tuple[str, ...]] = {}
-    for manifest in manifests:
-        code = str(getattr(manifest, "code", ""))
-        declared = tuple(getattr(manifest, "outbox_event_types", ()))
-        if code != MODULE_CODE and declared:
-            foreign[code] = declared
-    return foreign
 
 
 def prepare(
@@ -150,16 +130,6 @@ def prepare(
         raise RunnerConfigError(
             "name this application with --source-application or "
             "DOTMAC_SOURCE_APPLICATION (audit attribution)"
-        )
-    foreign = foreign_outbox_event_types(registry.enabled_order(disabled))
-    if foreign:
-        listed = "; ".join(
-            f"{code}: {', '.join(types)}" for code, types in foreign.items()
-        )
-        raise RunnerConfigError(
-            "other enabled modules declare outbox event types and the outbox "
-            f"claim is not type-scoped yet ({listed}); the job runner would "
-            "dead-letter their events"
         )
     manifests = list(registry.startup_order())
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))

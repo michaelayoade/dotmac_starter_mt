@@ -31,10 +31,10 @@ Failures retry with the job's backoff, then dead-letter through the relay with
 an audit row and a health observation (the assembly binds a `JobHealthSink`
 under `providers["durable_timers.health_sink"]`). There is no staff queue.
 
-Operational limits of this slice: the kernel outbox claim is not type-scoped, so
-the runner refuses to boot when any other enabled module declares outbox event
-types (and no other relay may run against the same database); it claims one
-event at a time so SIGTERM stops after the event in hand; at boot it reads back
+Operational notes: the runner claims through the kernel's type-scoped claim for
+`durable_timers.job_due.v1` only, so another module's outbox events are never
+leased and stay for their own relay (and this runner never claims a foreign
+type); it claims one event at a time so SIGTERM stops after the event in hand; at boot it reads back
 both database roles and refuses a shared role, a superuser or BYPASSRLS tenant
 role, or a dispatcher that can read tenant data. A handler must not commit or
 roll back the session it is given. A consumer adopting 0.1.0a3 must declare an
