@@ -84,6 +84,16 @@ on:
         required: false
         type: string
         default: ""
+      gate2_evidence_b64:
+        description: "Gate 2 evidence manifest (public ids and digests only), base64; honoured only for a version the publication-gate policy excepts"
+        required: false
+        type: string
+        default: ""
+      gate2_signature_b64:
+        description: "Detached SSHSIG for the Gate 2 evidence manifest, base64"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -133,6 +143,11 @@ jobs:
       offline_ciphertext_digest: ${{ steps.rehearsal.outputs.rehearsal_evidence_bundle_digest }}
       offline_candidate_artifact_digest: ${{ steps.rehearsal.outputs.rehearsed_artifact_digest }}
       offline_release_revision: ${{ steps.rehearsal.outputs.release_revision }}
+      gate: ${{ steps.gate.outputs.gate }}
+      gate2_manifest_sha256: ${{ steps.gate2.outputs.gate2_manifest_sha256 }}
+      gate2_signature_sha256: ${{ steps.gate2.outputs.gate2_signature_sha256 }}
+      gate2_signer_fingerprint: ${{ steps.gate2.outputs.gate2_signer_fingerprint }}
+      gate2_e3_baseline_sha256: ${{ steps.gate2.outputs.gate2_e3_baseline_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -261,6 +276,21 @@ jobs:
           python -m venv .foundation-candidate
           .foundation-candidate/bin/python -m pip install --no-deps candidate-dist/*.whl
 
+      # THE PUBLICATION GATE IS SELECTED BY VERSION, FROM A COMMITTED POLICY.
+      #
+      # `docs/inventories/foundation-publication-gates.json` defaults every
+      # version to the Lane 3 rehearsal and excepts exactly one (facility,
+      # version) to Gate 2 evidence (Michael, register v2149). An unreadable or
+      # malformed policy exits non-zero and fails this step; it is never read as
+      # the default. No dispatch input selects a gate.
+      - name: Select the publication gate
+        id: gate
+        run: |
+          set -euo pipefail
+          python -E -P scripts/foundation_publication_gate.py select \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
       # THE REHEARSAL ORACLE, and THREE REVISIONS bound rather than one shared.
       #
       # This package executes migrations, backup, the warm-candidate handoff and
@@ -296,6 +326,7 @@ jobs:
       # source it was written beside instead of the bytes about to be published.
       - name: Require a passing Lane 3 rehearsal on this exact SHA
         id: rehearsal
+        if: steps.gate.outputs.gate == 'lane3_rehearsal'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           # Evidence only: no input selects a verifier or trust policy.
@@ -321,6 +352,59 @@ jobs:
             --artifact-digest "${{ steps.candidate.outputs.candidate_sha256 }}" \
             | tee -a "${GITHUB_OUTPUT}"
 
+      # GATE 2 EVIDENCE REPLACES THE LANE 3 RECEIPT FOR EXACTLY ONE VERSION
+      # (docs/inventories/foundation-publication-gates.json). The E3 machine
+      # re-check runs the isolation test at the candidate source commit, so it
+      # needs pytest; that interpreter is a separate hash-locked venv, never the
+      # candidate's (which stays dependency-free).
+      - name: Provision the hash-locked E3 re-check interpreter
+        if: steps.gate.outputs.gate == 'gate2_evidence'
+        run: |
+          set -euo pipefail
+          python -m venv .gate2-e3
+          .gate2-e3/bin/python -m pip install --require-hashes --only-binary=:all: \
+            -r .github/foundation-gate2-e3-requirements.txt
+
+      - name: Require the Gate 2 evidence for this exact candidate
+        id: gate2
+        if: steps.gate.outputs.gate == 'gate2_evidence'
+        env:
+          # Public evidence only: the manifest never selects a signer, a policy
+          # or a namespace.
+          FOUNDATION_GATE2_EVIDENCE_B64: ${{ inputs.gate2_evidence_b64 }}
+          FOUNDATION_GATE2_SIGNATURE_B64: ${{ inputs.gate2_signature_b64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p .gate2
+          python3 -I scripts/foundation_publication_gate.py verify-gate2 \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --candidate-sha256 "${{ steps.candidate.outputs.candidate_sha256 }}" \
+            --candidate-source-sha "${{ steps.candidate.outputs.candidate_source_sha }}" \
+            --e3-python "${GITHUB_WORKSPACE}/.gate2-e3/bin/python" \
+            --out .gate2 \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      # EXACTLY ONE gate passed. A skipped step reads as success to everything
+      # downstream, so this runs always and fails unless the selected gate's
+      # step succeeded and the other was skipped. Every later step runs under
+      # the default success() condition, so none can run past a failure here.
+      - name: Exactly one publication gate passed
+        if: always()
+        env:
+          SELECTED: ${{ steps.gate.outputs.gate }}
+          REHEARSAL_OUTCOME: ${{ steps.rehearsal.outcome }}
+          GATE2_OUTCOME: ${{ steps.gate2.outcome }}
+        run: |
+          set -euo pipefail
+          case "${SELECTED}:${REHEARSAL_OUTCOME}:${GATE2_OUTCOME}" in
+            lane3_rehearsal:success:skipped) ;;
+            gate2_evidence:skipped:success) ;;
+            *)
+              echo "::error::publication gate not satisfied exactly once (selected=${SELECTED} lane3=${REHEARSAL_OUTCOME} gate2=${GATE2_OUTCOME})"
+              exit 1
+              ;;
+          esac
+
       # RULING 4: the three revisions stand in a stated RELATIONSHIP, and it is
       # neither equality nor nothing.
       #
@@ -342,10 +426,23 @@ jobs:
       # reports "not an ancestor" for two commits that are related and that
       # reads exactly like the defect.
       - name: Bind the three revisions
+        if: steps.gate.outputs.gate == 'lane3_rehearsal'
         run: |
           python scripts/release_facility.py verify-revisions \
             "${{ inputs.facility }}" --version "${{ inputs.version }}" \
             --runner-revision "${{ steps.rehearsal.outputs.rehearsal_runner_revision }}" \
+            --release-revision "${GITHUB_SHA}"
+
+      # Gate 2 has no Lane 3 runner, so there is no runner revision to bind. The
+      # candidate source must still be an ancestor of the release revision, and
+      # `release_facility.py` refuses `--gate gate2_evidence` unless the same
+      # policy file selects it for this exact version.
+      - name: Bind the candidate and release revisions (Gate 2)
+        if: steps.gate.outputs.gate == 'gate2_evidence'
+        run: |
+          python scripts/release_facility.py verify-revisions \
+            "${{ inputs.facility }}" --version "${{ inputs.version }}" \
+            --gate gate2_evidence \
             --release-revision "${GITHUB_SHA}"
 
       # Wheel-content policy: the declared surface and py.typed present, no
@@ -398,6 +495,7 @@ jobs:
           retention-days: 90
 
       - name: Retain authenticated public offline verification evidence
+        if: steps.gate.outputs.gate == 'lane3_rehearsal'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: foundation-offline-verification-${{ github.run_id }}-${{ github.run_attempt }}
@@ -408,6 +506,16 @@ jobs:
             .rehearsal/source-artifact.json
             .rehearsal/offline-result.json
             .rehearsal/offline-result.sshsig
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+
+      - name: Retain the Gate 2 evidence
+        if: steps.gate.outputs.gate == 'gate2_evidence'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foundation-gate2-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .gate2/*
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 90
@@ -510,10 +618,29 @@ jobs:
           FOUNDATION_EXPECTED_CIPHERTEXT_DIGEST: ${{ needs.build.outputs.offline_ciphertext_digest }}
           FOUNDATION_EXPECTED_CANDIDATE_ARTIFACT_DIGEST: ${{ needs.build.outputs.offline_candidate_artifact_digest }}
           FOUNDATION_EXPECTED_RELEASE_REVISION: ${{ needs.build.outputs.offline_release_revision }}
+          PUBLICATION_GATE: ${{ needs.build.outputs.gate }}
+          FOUNDATION_GATE2_EVIDENCE_B64: ${{ inputs.gate2_evidence_b64 }}
+          FOUNDATION_GATE2_SIGNATURE_B64: ${{ inputs.gate2_signature_b64 }}
+          FOUNDATION_EXPECTED_GATE2_MANIFEST_SHA256: ${{ needs.build.outputs.gate2_manifest_sha256 }}
+          FOUNDATION_EXPECTED_GATE2_SIGNATURE_SHA256: ${{ needs.build.outputs.gate2_signature_sha256 }}
         run: |
-          python -m pip install --quiet twine
           bash scripts/assert_current_main.sh "${GITHUB_SHA}"
-          python -E -P scripts/recheck_offline_result.py
+          case "${PUBLICATION_GATE}" in
+            lane3_rehearsal)
+              python -E -P scripts/recheck_offline_result.py
+              ;;
+            gate2_evidence)
+              python3 -I scripts/foundation_publication_gate.py recheck-gate2 \
+                "${{ inputs.facility }}" --version "${{ inputs.version }}"
+              ;;
+            *)
+              echo "::error::unknown publication gate"
+              exit 1
+              ;;
+          esac
+          # Only after the gate passed: an unpinned PyPI install must never run
+          # in the job that holds the publish credential before the gate.
+          python -m pip install --quiet twine
           python -m twine upload \
             --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
 
@@ -530,6 +657,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      # Outside the checkout on purpose: the record writer commits with
+      # `git add -A`, and retained evidence must never land in that diff.
+      - name: Download the retained Gate 2 evidence
+        if: needs.build.outputs.gate == 'gate2_evidence'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: foundation-gate2-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/gate2-evidence
 
       # The index may lag a few seconds after publish.
       - name: Wait for the release on the Forgejo index
@@ -640,9 +776,18 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ steps.recorder-token.outputs.token || secrets.GITHUB_TOKEN }}
+          PUBLICATION_GATE: ${{ needs.build.outputs.gate }}
         run: |
+          GATE_ARGS=()
+          if [ -n "${PUBLICATION_GATE}" ]; then
+            GATE_ARGS+=(--publication-gate "${PUBLICATION_GATE}")
+          fi
+          if [ "${PUBLICATION_GATE}" = "gate2_evidence" ]; then
+            GATE_ARGS+=(--gate2-record "${RUNNER_TEMP}/gate2-evidence/gate.json")
+          fi
           bash scripts/open_release_record_pr.sh \
             --distribution "${{ inputs.facility }}" \
             --version "${{ inputs.version }}" \
             --tag "${{ needs.build.outputs.tag }}" \
-            --package-dir "${{ needs.build.outputs.package_dir }}"
+            --package-dir "${{ needs.build.outputs.package_dir }}" \
+            "${GATE_ARGS[@]}"
