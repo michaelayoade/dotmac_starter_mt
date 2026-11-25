@@ -122,6 +122,7 @@ from dotmac_money_flows.contracts import (
     SettleRefused,
     SettleState,
     WithholdingAcceptedV1,
+    WithholdingReleasedV1,
     confirmation_deductions,
     settle_transition_allowed,
 )
@@ -961,6 +962,43 @@ def apply_balance_on_withholding_accepted(
         not_before=request.accepted_at,
         ref_prefix=(
             f"money-flows:settle:wht:{request.discharge_id}:{request.document_id}"
+        ),
+    )
+
+
+def apply_balance_on_withholding_released(
+    db: Session,
+    *,
+    scope: TenantScope,
+    request: WithholdingReleasedV1,
+    ports: SettlePorts,
+) -> BalanceAppliedOutcomeV1:
+    """Q-F: the balance pays whole open invoices once expected withholding is released.
+
+    A staff release (Billing's ``release_withholding_component``) raises the
+    cash the invoice requires, so a document that did not fit before may fit the
+    balance now. This runs the very same full pass as
+    ``apply_balance_on_invoice_issued`` (account lock first, same gates, whole
+    only, oldest due first, misfits skipped). The assembly calls it from
+    delivery of ``billing.withholding.released.v1`` in a NEW transaction, never
+    inside the release transaction; a failure raises and delivery retries. The
+    next deposit or invoice-issue pass would pay the invoice anyway.
+
+    Dating: the later of the usual dating rule and ``released_at``, so a
+    payment never predates the decision. The source reference carries the
+    release id and the document's Billing ``source_version`` and cannot collide
+    with the issue or deposit references. A release naming another account
+    than the document's raises ``BalancePassFailed("document_account_mismatch")``.
+    """
+    return _balance_pass(
+        db,
+        scope=scope,
+        ports=ports,
+        trigger=request.document_id,
+        expected_account=request.billing_account_id,
+        not_before=request.released_at,
+        ref_prefix=(
+            f"money-flows:settle:release:{request.release_id}:{request.document_id}"
         ),
     )
 

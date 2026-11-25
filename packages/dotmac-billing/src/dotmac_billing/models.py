@@ -1910,6 +1910,91 @@ class PlatformDocumentWithholdingComponent(Base, _WithholdingComponentColumns):
     __table_args__ = _withholding_component_constraints(tenant=False)
 
 
+def _withholding_release_constraints() -> tuple[object, ...]:
+    table = "withholding_releases"
+    return (
+        # Reversal-safe link: the row id of the frozen component, never a copy.
+        ForeignKeyConstraint(
+            ["tenant_id", "component_id", "billing_account_id", "document_id"],
+            [
+                f"{SCHEMA}.document_withholding_components.tenant_id",
+                f"{SCHEMA}.document_withholding_components.id",
+                f"{SCHEMA}.document_withholding_components.billing_account_id",
+                f"{SCHEMA}.document_withholding_components.document_id",
+            ],
+            name=f"fk_{table}_component",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "reverses_release_id", "component_id"],
+            [
+                f"{SCHEMA}.{table}.tenant_id",
+                f"{SCHEMA}.{table}.id",
+                f"{SCHEMA}.{table}.component_id",
+            ],
+            name=f"fk_{table}_reverses",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("tenant_id", "id", name=f"uq_{table}_id"),
+        UniqueConstraint(
+            "tenant_id", "id", "component_id", name=f"uq_{table}_component_row"
+        ),
+        UniqueConstraint("tenant_id", "command_id", name=f"uq_{table}_command"),
+        UniqueConstraint(
+            "tenant_id", "reverses_release_id", name=f"uq_{table}_reversal"
+        ),
+        CheckConstraint("amount_delta <> 0", name=f"ck_{table}_amount"),
+        CheckConstraint(
+            "(reverses_release_id IS NULL AND amount_delta > 0) "
+            "OR (reverses_release_id IS NOT NULL AND amount_delta < 0)",
+            name=f"ck_{table}_direction",
+        ),
+        CheckConstraint(
+            "currency = upper(currency) AND length(currency) = 3 "
+            "AND minor_units BETWEEN 0 AND 6",
+            name=f"ck_{table}_currency",
+        ),
+        CheckConstraint(
+            "length(trim(command_id)) > 0 AND length(trim(actor_ref)) > 0 "
+            "AND length(trim(reason)) > 0 "
+            "AND (evidence_ref IS NULL OR length(trim(evidence_ref)) > 0)",
+            name=f"ck_{table}_attribution",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class WithholdingRelease(Base, _TenantRow):
+    """A staff release of frozen expected withholding the customer did not deduct.
+
+    Append-only and tenant-plane only. ``amount_delta`` is positive for a release
+    and the exact negative for its undo (``reverses_release_id``). The row id of
+    the frozen component is the link; ``recorded_at`` is stamped by the database
+    clock. No posting group, accounting fact or position row accompanies it: the
+    receivable was never booked net of the expectation.
+    """
+
+    __tablename__ = "withholding_releases"
+    __table_args__ = _withholding_release_constraints()
+
+    id: Mapped[UUID] = uuid_pk()
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    component_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    command_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_ref: Mapped[str | None] = mapped_column(String(255))
+    amount_delta: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    reverses_release_id: Mapped[UUID | None] = mapped_column(Uuid())
+    # Stamped by the database admission trigger; never a caller value.
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
+
+
 class _TermsTail:
     @declared_attr
     def recorded_at(cls) -> Mapped[datetime]:
@@ -3507,6 +3592,7 @@ TENANT_TABLES = (
     "receivable_position_facts_v2",
     "withholding_discharges",
     "document_withholding_components",
+    "withholding_releases",
     "billing_account_terms_versions",
     "billing_terms_defaults_versions",
     "billing_accounts",
@@ -3606,6 +3692,7 @@ __all__ = [
     "PlatformWithholdingDischarge",
     "DocumentWithholdingComponent",
     "PlatformDocumentWithholdingComponent",
+    "WithholdingRelease",
     "BillingAccountTermsVersion",
     "PlatformBillingAccountTermsVersion",
     "BillingTermsDefaultsVersion",

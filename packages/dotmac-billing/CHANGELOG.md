@@ -2,6 +2,34 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a14 — UNRELEASED
+
+Release of frozen expected withholding (Q-F; design approved by Michael 2026-11-25
+at its defaults). a13 is tagged; `bi_0020` chains after `bi_0019_opening_dual_control`.
+
+- `bi_0020_withholding_releases`: append-only `withholding_releases` (tenant plane
+  only, forced RLS, `SELECT, INSERT` for the online role, `refuse_mutation`). A row
+  is a positive release or the exact negative undo (`reverses_release_id`); it links
+  to the frozen component by row id (composite FK), is idempotent by `command_id`,
+  and carries `reason` (required) and `evidence_ref` (optional). `recorded_at` is
+  stamped by the database clock. The admission trigger locks the document and keeps
+  `0 <= discharged + released <= frozen`; `cap_withholding_component` is replaced so a
+  discharge also counts releases.
+- `release_withholding_component` / `reverse_withholding_release` (module
+  `dotmac_billing.withholding_release`; the undo is not re-exported at top level).
+  New permission `billing.withholding.release`, default role `admin`, checked through
+  the wired `ActorPermissionReader`; no maker-checker. A release removes only
+  Billing's own expectation, so it raises the cash the invoice requires and reduces no
+  debt. Residual of a partly discharged component can be released; undo is allowed
+  while the invoice still has the room. No Tax write, no Tax seal read.
+- Cash requirement is now frozen minus discharged minus released; a discharge after a
+  release is refused by the service and the database cap.
+- No posting group, AccountingFact, exposure or position row (the GL never booked the
+  expectation). One outbox event `billing.withholding.released.v1` (ids only) on a
+  release; none on an undo.
+- Reads: `get_withholding_release`, `get_withholding_component_position`.
+- No backfill; existing components read `released = 0`.
+
 ## 0.1.0a13 — UNRELEASED
 
 Account terms (approved 2026-11-16; new owner work). a12 was published (tag

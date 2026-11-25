@@ -37,6 +37,21 @@ KERNEL_VERSIONS = (
     REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
 )
 
+_TENANT_ONLY_RELATIONS = (
+    (
+        "withholding_releases",
+        ("component_id", "billing_account_id", "document_id"),
+        "document_withholding_components",
+        ("id", "billing_account_id", "document_id"),
+    ),
+    (
+        "withholding_releases",
+        ("reverses_release_id", "component_id"),
+        "withholding_releases",
+        ("id", "component_id"),
+    ),
+)
+
 _INTERNAL_RELATIONS = (
     ("settlement_earmarks", ("billing_account_id",), "billing_accounts", ("id",)),
     (
@@ -560,6 +575,9 @@ def _expected_internal_foreign_keys() -> set[tuple[object, ...]]:
                 remote,
             )
         )
+    # Tenant-plane-only tables (Q-F withholding releases) have no platform twin.
+    for source, local, target, remote in _TENANT_ONLY_RELATIONS:
+        expected.add((source, ("tenant_id", *local), target, ("tenant_id", *remote)))
     return expected
 
 

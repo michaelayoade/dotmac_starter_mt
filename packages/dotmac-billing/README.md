@@ -106,6 +106,15 @@ rows are built from Tax's values). An opening-imported invoice is refused with
 the cash an invoice requires once a Tax-owned withholding amount is deducted; it
 is not a discharge, cash or credit.
 
+A customer who does not deduct what Tax expected leaves the frozen component
+undischargeable. `release_withholding_component` (permission
+`billing.withholding.release`, default role `admin`, same assembly-wired reader and
+`permission_guard` rule as the freeze) appends a release row for the component's
+residual, so the cash requirement becomes frozen minus discharged minus released; it
+reduces no debt and posts nothing. `reverse_withholding_release` appends the inverse
+while the invoice still has the room. Each release emits `billing.withholding.released.v1`
+(ids only).
+
 `get_account_statement` projects a sealed, read-only account statement over the
 ordered ledger: opening balances, each posting group with its per-lane deltas and
 running balances, closing balances and a digest a consumer can recompute. It
