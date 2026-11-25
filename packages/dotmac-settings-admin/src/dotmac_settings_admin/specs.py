@@ -158,6 +158,8 @@ SPECS: Final[list[SettingSpec[Any]]] = [
         label="Pending setting proposals (internal)",
         description="Internal state of the optional maker-checker. Not editable.",
         validator=_validate_pending,
+        # A platform-level proposal list must never be inherited by a tenant.
+        inherits=False,
     ),
 ]
 

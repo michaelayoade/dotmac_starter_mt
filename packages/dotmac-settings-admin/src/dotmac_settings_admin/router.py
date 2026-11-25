@@ -19,6 +19,7 @@ from dotmac_kernel.deps import (
     require_tenant,
 )
 from dotmac_kernel.models import Party, Tenant
+from dotmac_kernel.request_evidence import current_evidence
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
@@ -46,12 +47,18 @@ APPROVE = "settings_admin.approve"
 
 
 def actor_from(request: Request, party: Party) -> service.Actor:
-    client = request.client.host if request.client else None
+    # The kernel's request evidence resolves the client address under the
+    # assembly's trusted-proxy policy; fall back to the socket peer only when
+    # no evidence context was created (a bare app).
+    evidence = current_evidence()
+    client = evidence.client_address or (
+        request.client.host if request.client else None
+    )
     return service.Actor(
         party_id=party.id,
-        ip_address=client,
+        ip_address=client or None,
         user_agent=request.headers.get("user-agent"),
-        request_id=getattr(request.state, "request_id", None),
+        request_id=evidence.request_id or getattr(request.state, "request_id", None),
     )
 
 

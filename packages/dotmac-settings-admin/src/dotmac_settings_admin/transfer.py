@@ -179,7 +179,7 @@ def apply_import(
     raw: object,
     reason: object,
     expected_digest: str,
-    may_approve: bool = True,
+    may_approve: bool,
 ) -> int:
     """Apply a previewed import. Returns the number of settings changed."""
     actor = service._require_actor(actor)

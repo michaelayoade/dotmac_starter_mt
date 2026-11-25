@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from dotmac_kernel.branding import RETIRED_BRAND_KEYS, load_branding
@@ -39,7 +40,6 @@ from dotmac_kernel.web_surfaces import surface_path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from starlette.datastructures import FormData
 
 from dotmac_settings_admin import service, transfer
 from dotmac_settings_admin.router import APPROVE, MANAGE, READ, actor_from, may_approve
@@ -70,7 +70,7 @@ def _page(
     return render(request, _T + name, context, status_code=status)
 
 
-def _form_value(setting: service.SettingView, form_data: FormData) -> object:
+def _form_value(setting: service.SettingView, form_data: Mapping[str, Any]) -> object:
     if setting.value_type == "boolean":
         return "value" in form_data
     raw = str(form_data.get("value", "")).strip()

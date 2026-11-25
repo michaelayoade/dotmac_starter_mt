@@ -13,6 +13,27 @@ Source only; no release is requested by this change.
   audited write; secrets only ever set/unset; export omits secrets; import preview with
   a drift digest; optional maker-checker (default OFF).
 
+### JSON API contract change (reference app only)
+
+The `/settings` API moved with the feature and is NOT backward compatible: every
+write needs a `reason` in the body; `PUT` returns `{applied, proposal_id, setting}`
+(the old flat setting is under `setting`); a secret reports `is_set` with no
+`value`; and the audit action `settings.update` became
+`settings_admin.setting.update`. Acceptable here because the reference app is the
+only consumer; an adopter composing this module gets the new contract from day one.
+
+### Review round (architect, 2026-11-25)
+
+- Maker-checker proposals are serialised per tenant with `pg_advisory_xact_lock`; a
+  staged value is refused if the spec has since become secret; the approver sees the
+  proposed value beside the current one (non-secret only); `pending_changes` is
+  `inherits=False`.
+- `list_history` shows no values and is never restorable for a secret spec.
+- A validation failure on a secret spec is generic and never echoes the input.
+- `may_approve` is a required keyword on every public write function.
+- The platform-default seed is no longer on the manifest; the reference assembly
+  binds it in `startup_hooks` (gated on `SEED_ON_STARTUP`).
+
 ### Deferred
 
 - Feature-flag writes (read-only page now): the kernel has no flag-override writer.

@@ -305,6 +305,7 @@ def test_the_write_guard_compares_domains_by_value_not_identity(db, tenant_row) 
             key="ui_branding",
             value={"name": "Acme", "custom_css": ".evil{}"},
             reason="test",
+            may_approve=True,
         )
 
 
@@ -320,6 +321,7 @@ def test_a_permitted_branding_write_still_succeeds(db, tenant_row) -> None:
         key="ui_branding",
         value={"name": "Acme", "tagline": "Hi"},
         reason="test",
+        may_approve=True,
     )
 
     assert load_branding(db, tenant_row.id)["name"] == "Acme"

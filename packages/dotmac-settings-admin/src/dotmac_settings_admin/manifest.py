@@ -23,7 +23,6 @@ from dotmac_kernel.web_surfaces import (
 
 from dotmac_settings_admin import specs as _specs  # registers the specs
 from dotmac_settings_admin.router import router as api_router
-from dotmac_settings_admin.seed import seed_platform_defaults
 from dotmac_settings_admin.service import AUDIT_ACTIONS
 from dotmac_settings_admin.web import router as web_router
 from dotmac_settings_admin.web import template_dir
@@ -73,8 +72,6 @@ module = ModuleManifest(
         ),
     ],
     audit_actions=list(AUDIT_ACTIONS),
-    # The platform-default seed moved here from the reference app's settings feature.
-    seed=seed_platform_defaults,
     core=False,
 )
 

@@ -316,6 +316,7 @@ def test_history_page_restores_as_a_new_write(client, cookies, db, tenant_row, p
         key="timezone",
         value="Europe/London",
         reason="a",
+        may_approve=True,
     )
     service.write_setting(
         db,
@@ -325,6 +326,7 @@ def test_history_page_restores_as_a_new_write(client, cookies, db, tenant_row, p
         key="timezone",
         value="Asia/Tokyo",
         reason="b",
+        may_approve=True,
     )
     page = client.get("/admin/settings/display/timezone/history", cookies=cookies)
     assert page.status_code == 200 and "Restore previous" in page.text
@@ -389,6 +391,7 @@ def test_import_preview_then_apply_on_the_surface(
         key="timezone",
         value="Europe/London",
         reason="a",
+        may_approve=True,
     )
     doc = transfer.export_settings(db, tenant_row.id)
     service.clear_setting(
@@ -398,6 +401,7 @@ def test_import_preview_then_apply_on_the_surface(
         domain="display",
         key="timezone",
         reason="reset",
+        may_approve=True,
     )
     import json
 

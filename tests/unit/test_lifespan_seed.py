@@ -110,11 +110,28 @@ def test_lifespan_does_not_seed_when_flag_false():
     assert calls == []
 
 
-def test_settings_admin_manifest_carries_the_real_seed_hook():
+def test_settings_seed_is_bound_by_the_assembly_not_the_published_manifest():
     from dotmac_settings_admin import module as settings_admin_module
-    from dotmac_settings_admin.seed import seed_platform_defaults
 
-    assert settings_admin_module.seed is seed_platform_defaults
+    from app.assembly import _seed_setting_defaults, assembly
+
+    assert settings_admin_module.seed is None
+    assert _seed_setting_defaults in assembly.startup_hooks
+
+
+def test_assembly_seed_hook_respects_the_startup_flag(monkeypatch):
+    import app.assembly as assembly_module
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        assembly_module, "seed_platform_defaults", lambda: calls.append("seed")
+    )
+    settings.seed_on_startup = False
+    assembly_module._seed_setting_defaults()
+    assert calls == []
+    settings.seed_on_startup = True
+    assembly_module._seed_setting_defaults()
+    assert calls == ["seed"]
 
 
 def test_import_app_main_works_with_settings_admin_disabled():

@@ -95,6 +95,7 @@ def secret_spec(monkeypatch):
 
 
 def _write(db, tenant, actor, domain, key, value, reason="because", **kw):
+    kw.setdefault("may_approve", True)
     return service.write_setting(
         db,
         tenant.id,
@@ -196,7 +197,12 @@ def test_restore_is_a_new_audited_write_and_history_is_never_edited(
     before_ids = {e.id for e in entries}
 
     out = service.restore_setting(
-        db, tenant_row.id, actor=actor, history_id=update.id, reason="undo second"
+        db,
+        tenant_row.id,
+        actor=actor,
+        history_id=update.id,
+        reason="undo second",
+        may_approve=True,
     )
     assert out.setting.value == "Europe/London"
     after = service.list_history(db, tenant_row.id, "display", "timezone")
@@ -213,7 +219,12 @@ def test_restoring_a_create_clears_the_override_as_a_new_write(db, tenant_row, a
     _write(db, tenant_row, actor, "display", "timezone", "Europe/London")
     (create,) = service.list_history(db, tenant_row.id, "display", "timezone")
     out = service.restore_setting(
-        db, tenant_row.id, actor=actor, history_id=create.id, reason="back to inherited"
+        db,
+        tenant_row.id,
+        actor=actor,
+        history_id=create.id,
+        reason="back to inherited",
+        may_approve=True,
     )
     assert out.setting.has_override is False and out.setting.source != "tenant"
     assert len(service.list_history(db, tenant_row.id, "display", "timezone")) == 2
@@ -224,7 +235,12 @@ def test_restore_needs_a_reason(db, tenant_row, actor):
     (create,) = service.list_history(db, tenant_row.id, "display", "timezone")
     with pytest.raises(BadRequestError, match="reason"):
         service.restore_setting(
-            db, tenant_row.id, actor=actor, history_id=create.id, reason=""
+            db,
+            tenant_row.id,
+            actor=actor,
+            history_id=create.id,
+            reason="",
+            may_approve=True,
         )
 
 
@@ -237,7 +253,12 @@ def test_restore_of_a_json_setting_round_trips(db, tenant_row, actor):
         if e.action == "update"
     )
     out = service.restore_setting(
-        db, tenant_row.id, actor=actor, history_id=upd.id, reason="r"
+        db,
+        tenant_row.id,
+        actor=actor,
+        history_id=upd.id,
+        reason="r",
+        may_approve=True,
     )
     assert out.setting.value == {"name": "One"}
 
@@ -266,7 +287,12 @@ def test_a_secret_cannot_be_restored_and_is_never_exported(
     assert all(not h.restorable for h in hist)
     with pytest.raises(BadRequestError, match="secret"):
         service.restore_setting(
-            db, tenant_row.id, actor=actor, history_id=hist[0].id, reason="r"
+            db,
+            tenant_row.id,
+            actor=actor,
+            history_id=hist[0].id,
+            reason="r",
+            may_approve=True,
         )
     exported = transfer.export_settings(db, tenant_row.id)
     blob = json.dumps(exported)
@@ -283,7 +309,13 @@ def test_export_import_round_trip_with_preview_and_drift_refusal(db, tenant_row,
     document = transfer.export_settings(db, tenant_row.id)
     assert document["format"] == transfer.EXPORT_FORMAT
     service.clear_setting(
-        db, tenant_row.id, actor=actor, domain="display", key="timezone", reason="reset"
+        db,
+        tenant_row.id,
+        actor=actor,
+        domain="display",
+        key="timezone",
+        reason="reset",
+        may_approve=True,
     )
     plan = transfer.plan_import(db, tenant_row.id, document)
     assert plan.ok and [e.status for e in plan.entries] == ["change"]
@@ -298,6 +330,7 @@ def test_export_import_round_trip_with_preview_and_drift_refusal(db, tenant_row,
         raw=document,
         reason="restore backup",
         expected_digest=plan.digest,
+        may_approve=True,
     )
     assert n == 1
     assert (
@@ -334,6 +367,7 @@ def test_import_refuses_undeclared_secret_invalid_and_drift(
             raw=doc,
             reason="r",
             expected_digest=plan.digest,
+            may_approve=True,
         )
     good = {
         "format": transfer.EXPORT_FORMAT,
@@ -353,6 +387,7 @@ def test_import_refuses_undeclared_secret_invalid_and_drift(
             raw=good,
             reason="r",
             expected_digest=stale.digest,
+            may_approve=True,
         )
 
 
@@ -360,7 +395,13 @@ def test_import_needs_a_reason_and_a_valid_document(db, tenant_row, actor):
     good = {"format": transfer.EXPORT_FORMAT, "settings": []}
     with pytest.raises(BadRequestError, match="reason"):
         transfer.apply_import(
-            db, tenant_row.id, actor=actor, raw=good, reason="", expected_digest="x"
+            db,
+            tenant_row.id,
+            actor=actor,
+            raw=good,
+            reason="",
+            expected_digest="x",
+            may_approve=True,
         )
     with pytest.raises(BadRequestError):
         transfer.plan_import(db, tenant_row.id, {"format": "other", "settings": []})
@@ -698,3 +739,139 @@ def test_without_a_bound_audit_writer_every_write_refuses_and_stores_nothing(
     with pytest.raises(audit_seam.AuditWriterNotConfiguredError):
         _write(db, tenant_row, actor, "display", "timezone", "Asia/Tokyo")
     assert not db.scalars(select(DomainSettingHistory)).all()
+
+
+# ── Architect review: secret history, generic errors, approve refusal ───────
+
+
+def test_history_shows_no_values_and_is_not_restorable_for_a_secret_spec(
+    db, tenant_row, actor, secret_spec
+):
+    """A row written before a spec became secret may hold plaintext; never show it."""
+    from datetime import UTC, datetime
+
+    from dotmac_kernel.settings_models import SettingChangeAction
+
+    db.add(
+        DomainSettingHistory(
+            tenant_id=tenant_row.id,
+            domain=SettingDomain.auth,
+            key="test_secret_token",
+            action=SettingChangeAction.update,
+            value_before="old-plaintext-credential",
+            value_after="new-plaintext-credential",
+            secret_changed=False,  # the row claims it is not a secret
+            changed_at=datetime.now(UTC),
+        )
+    )
+    db.flush()
+    (entry,) = service.list_history(db, tenant_row.id, "auth", "test_secret_token")
+    assert entry.value_before is None and entry.value_after is None
+    assert entry.restorable is False and entry.secret_changed is True
+    with pytest.raises(BadRequestError, match="secret"):
+        service.restore_setting(
+            db,
+            tenant_row.id,
+            actor=actor,
+            history_id=entry.id,
+            reason="r",
+            may_approve=True,
+        )
+
+
+def test_a_validation_failure_on_a_secret_never_echoes_the_input(
+    db, tenant_row, actor, monkeypatch
+):
+    monkeypatch.setenv(sc.KEY_ENV_VAR, Fernet.generate_key().decode())
+
+    def echoing(value: object) -> None:
+        raise ValueError(f"bad value {value!r}")
+
+    spec = sr.SettingSpec(
+        domain=SettingDomain.auth,
+        key="echo_secret",
+        value_type=SettingValueType.string,
+        default="unset",
+        is_secret=True,
+        validator=echoing,
+    )
+    sr.register_specs([spec])
+    try:
+        with pytest.raises(BadRequestError) as caught:
+            _write(db, tenant_row, actor, "auth", "echo_secret", "typed-secret-text")
+        assert "typed-secret-text" not in str(caught.value)
+        assert "auth/echo_secret" in str(caught.value)
+    finally:
+        del sr._REGISTRY[(spec.domain, spec.key)]
+
+
+def test_approve_refuses_a_spec_that_became_secret_after_staging(
+    db, tenant_row, actor, monkeypatch
+):
+    from dotmac_kernel.exceptions import ForbiddenError
+
+    _write(db, tenant_row, actor, "settings_admin", "maker_checker", True)
+    maker = _party(db, tenant_row, "maker2@acme.test")
+    out = _write(
+        db,
+        tenant_row,
+        service.Actor(party_id=maker.id),
+        "display",
+        "timezone",
+        "Asia/Tokyo",
+        may_approve=False,
+    )
+    real = sr.get_spec(SettingDomain.display, "timezone")
+    now_secret = sr.SettingSpec(
+        domain=real.domain,
+        key=real.key,
+        value_type=real.value_type,
+        default=real.default,
+        is_secret=True,
+    )
+    monkeypatch.setitem(sr._REGISTRY, (real.domain, real.key), now_secret)
+    with pytest.raises(ForbiddenError, match="now secret"):
+        service.approve_proposal(
+            db, tenant_row.id, actor=actor, proposal_id=out.proposal_id, reason="ok"
+        )
+    (listed,) = service.list_proposals(db, tenant_row.id)
+    assert listed["value"] is None  # a secret spec never shows a staged value
+
+
+def test_proposals_show_the_proposed_value_beside_the_current_one(
+    db, tenant_row, actor
+):
+    _write(db, tenant_row, actor, "settings_admin", "maker_checker", True)
+    _write(db, tenant_row, actor, "display", "timezone", "Europe/London")
+    maker = _party(db, tenant_row, "maker3@acme.test")
+    _write(
+        db,
+        tenant_row,
+        service.Actor(party_id=maker.id),
+        "display",
+        "timezone",
+        "Asia/Tokyo",
+        may_approve=False,
+    )
+    (listed,) = service.list_proposals(db, tenant_row.id)
+    assert listed["value"] == "Asia/Tokyo" and listed["current"] == "Europe/London"
+
+
+def test_may_approve_has_no_default_on_any_public_write():
+    import inspect
+
+    for fn in (
+        service.write_setting,
+        service.clear_setting,
+        service.restore_setting,
+        transfer.apply_import,
+    ):
+        param = inspect.signature(fn).parameters["may_approve"]
+        assert param.default is inspect.Parameter.empty, fn.__name__
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_pending_changes_never_inherits_and_the_manifest_carries_no_seed():
+    spec = sr.get_spec(SettingDomain("settings_admin"), "pending_changes")
+    assert spec.inherits is False
+    assert settings_admin_module.seed is None

@@ -56,7 +56,7 @@ from dotmac_kernel.settings_resolver import (
     clear_by_key,
     stored_at,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from dotmac_settings_admin.audit_seam import require_audit_writer
@@ -195,7 +195,15 @@ def _guard_value(spec: SettingSpec[Any], value: object) -> object:
     # `==`, never `is`: SettingDomain is an open str subclass (ADR-0008).
     if spec.domain == SettingDomain.branding and spec.key == "ui_branding":
         reject_retired_brand_keys(value)
-    return validate_spec_value(spec, value)
+    try:
+        return validate_spec_value(spec, value)
+    except BadRequestError:
+        if spec.is_secret:
+            # Validator text may embed the typed input; a secret is never echoed.
+            raise BadRequestError(
+                f"Invalid value for {spec.domain}/{spec.key}."
+            ) from None
+        raise
 
 
 # ── Reading ─────────────────────────────────────────────────────────────────
@@ -320,10 +328,28 @@ def maker_checker_enabled(db: Session, tenant_id: UUID) -> bool:
     return value is True
 
 
-def _pending(db: Session, tenant_id: UUID) -> dict[str, dict[str, Any]]:
-    value, _ = resolve_with_source(
-        db, ADMIN_DOMAIN, "pending_changes", tenant_id=tenant_id
+def _lock_pending(db: Session, tenant_id: UUID) -> None:
+    """Serialise proposal read-modify-write per tenant (transaction-scoped).
+
+    `pending_changes` is one JSON row; without a lock two concurrent writers
+    each read a stale list and the last commit silently drops or resurrects a
+    proposal. A no-op off PostgreSQL (the unit lane is single-session SQLite).
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"settings_admin.pending:{tenant_id}"},
     )
+
+
+def _pending(db: Session, tenant_id: UUID) -> dict[str, dict[str, Any]]:
+    # Read the stored row, not the resolver cache: after taking the lock the
+    # list must reflect what other transactions have already committed.
+    stored = stored_at(
+        db, ADMIN_DOMAIN, "pending_changes", scope=SettingScope.tenant(tenant_id)
+    )
+    value = stored.raw if stored is not None and stored.valid else None
     items = value.get("items", {}) if isinstance(value, dict) else {}
     return {str(k): dict(v) for k, v in items.items()}
 
@@ -346,10 +372,26 @@ def _store_pending(
 
 
 def list_proposals(db: Session, tenant_id: UUID) -> list[dict[str, Any]]:
-    return sorted(
-        ({"id": pid, **item} for pid, item in _pending(db, tenant_id).items()),
-        key=lambda p: p.get("proposed_at", ""),
-    )
+    """Pending proposals with the proposed and current value side by side.
+
+    Values appear only for a non-secret spec; a proposal for a spec that is
+    secret now (or no longer declared) shows no value at all.
+    """
+    rows: list[dict[str, Any]] = []
+    for pid, item in _pending(db, tenant_id).items():
+        entry: dict[str, Any] = {"id": pid, **item, "current": None}
+        try:
+            spec = declared_spec(item["domain"], item["key"])
+        except NotFoundError:
+            entry["value"] = None
+            rows.append(entry)
+            continue
+        if spec.is_secret:
+            entry["value"] = None
+        else:
+            entry["current"] = _view(db, tenant_id, spec).value
+        rows.append(entry)
+    return sorted(rows, key=lambda p: p.get("proposed_at", ""))
 
 
 # ── Writing ─────────────────────────────────────────────────────────────────
@@ -400,7 +442,7 @@ def write_setting(
     key: str,
     value: object,
     reason: object,
-    may_approve: bool = True,
+    may_approve: bool,
 ) -> WriteOutcome:
     """Set one tenant override. Actor and reason are mandatory; audited in-transaction.
 
@@ -420,6 +462,7 @@ def write_setting(
                 "ask a person with the approve permission to set it."
             )
         proposal_id = uuid.uuid4().hex
+        _lock_pending(db, tenant_id)
         items = _pending(db, tenant_id)
         items[proposal_id] = {
             "domain": str(spec.domain),
@@ -459,7 +502,7 @@ def clear_setting(
     domain: str,
     key: str,
     reason: object,
-    may_approve: bool = True,
+    may_approve: bool,
 ) -> SettingView:
     """Remove the tenant override so the setting inherits again (an audited write)."""
     actor = _require_actor(actor)
@@ -503,6 +546,7 @@ def approve_proposal(
     """Apply a staged proposal. The proposer can never approve their own."""
     actor = _require_actor(actor)
     reason_text = clean_reason(reason)
+    _lock_pending(db, tenant_id)
     items = _pending(db, tenant_id)
     item = items.get(proposal_id)
     if item is None:
@@ -510,6 +554,12 @@ def approve_proposal(
     if item.get("proposer") == str(actor.party_id):
         raise ForbiddenError("A proposal must be approved by a different person.")
     spec = declared_spec(item["domain"], item["key"])
+    if spec.is_secret:
+        # The spec became secret after the proposal was staged; never apply a
+        # staged plaintext value to a secret.
+        raise ForbiddenError(
+            "This setting is now secret; a staged value cannot be approved."
+        )
     del items[proposal_id]
     _apply(
         db,
@@ -535,6 +585,7 @@ def reject_proposal(
 ) -> None:
     actor = _require_actor(actor)
     reason_text = clean_reason(reason)
+    _lock_pending(db, tenant_id)
     items = _pending(db, tenant_id)
     item = items.pop(proposal_id, None)
     if item is None:
@@ -572,6 +623,7 @@ def list_history(
         .order_by(DomainSettingHistory.changed_at.desc(), DomainSettingHistory.id)
         .limit(max(1, min(limit, 200)))
     ).all()
+    secret = spec.is_secret  # whatever a row says: it may predate the secret flag
     return [
         HistoryEntry(
             id=r.id,
@@ -579,11 +631,11 @@ def list_history(
             changed_at=r.changed_at,
             changed_by_party_id=r.changed_by_party_id,
             reason=r.change_reason,
-            value_before=r.value_before,
-            value_after=r.value_after,
-            secret_changed=r.secret_changed,
-            # A secret's past value is never recorded, so it cannot be restored.
-            restorable=not r.secret_changed,
+            value_before=None if secret else r.value_before,
+            value_after=None if secret else r.value_after,
+            secret_changed=r.secret_changed or secret,
+            # A secret's past value is never shown or restored.
+            restorable=not (r.secret_changed or secret),
         )
         for r in rows
     ]
@@ -608,7 +660,7 @@ def restore_setting(
     actor: Actor | None,
     history_id: UUID,
     reason: object,
-    may_approve: bool = True,
+    may_approve: bool,
 ) -> WriteOutcome:
     """Undo one recorded change: a NEW audited write of the value that preceded it.
 

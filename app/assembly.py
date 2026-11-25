@@ -68,6 +68,7 @@ from dotmac_kernel.web_surfaces import (
     WebRouteRef,
 )
 from dotmac_settings_admin.audit_seam import configure_audit_writer
+from dotmac_settings_admin.seed import seed_platform_defaults
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
@@ -127,6 +128,20 @@ configure_audit_writer(write_audit_event)
 
 _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
 
+
+def _seed_setting_defaults() -> None:
+    """Seed platform-default setting rows at startup (the reference app's choice).
+
+    Bound here, not on the published `settings_admin` manifest: an adopter that
+    composes the module must not silently gain unaudited NULL-tenant platform
+    writes at boot. Gated like every seed on `SEED_ON_STARTUP`, and skipped when
+    the module is disabled.
+    """
+    if "settings_admin" in _DISABLED_MODULES or not settings.seed_on_startup:
+        return
+    seed_platform_defaults()
+
+
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
     # The assembly's own features, plus every INSTALLED MODULE it composes.
@@ -183,6 +198,7 @@ assembly = ProductAssemblySpec(
             planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
         ),
     ),
+    startup_hooks=(_seed_setting_defaults,),
     web_enabled=settings.web_enabled,
     # Resolved from ENVIRONMENT at composition time, failing CLOSED: only the
     # enumerated development and test spellings publish. Unset, blank, a typo
