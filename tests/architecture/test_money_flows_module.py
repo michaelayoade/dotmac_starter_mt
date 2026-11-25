@@ -791,7 +791,7 @@ def test_package_version_surfaces_agree() -> None:
     version = pyproject["tool"]["poetry"]["version"]
     import dotmac_money_flows
 
-    assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a2"
+    assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a3"
 
 
 def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
