@@ -72,7 +72,7 @@ from dotmac_kernel.middleware.security_headers import (
     compose_content_security_policy,
 )
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
-from dotmac_kernel.modules import AnyManifest, ModuleRegistry
+from dotmac_kernel.modules import AnyManifest, ModuleRegistry, ModuleRegistryError
 from dotmac_kernel.outbox_event_types import (
     OutboxEventTypeRegistry,
     install_outbox_event_types,
@@ -401,6 +401,35 @@ def _referenced_capabilities(app: FastAPI) -> list[tuple[str, str]]:
     return _referenced_codes(app, CAPABILITY_CODE_ATTR)
 
 
+def _refuse_unbound_runtime_requires(manifests: Sequence[AnyManifest]) -> None:
+    """Fail the BOOT when an enabled module calls a kernel facility this assembly
+    cannot supply.
+
+    `ModuleManifest.runtime_requires` is the stateless module's declaration that
+    it CALLS a facility (`requires` orders migrations, which a stateless module
+    has none of). Each entry is checked against the assembly's prerequisite
+    binding table — the same table `requires` resolves through — so an adopter
+    that never bound the effect refuses to start rather than failing at the
+    first guarded call.
+    """
+    from dotmac_kernel.prerequisites import is_bound
+
+    unbound = sorted(
+        (manifest.code, name)
+        for manifest in manifests
+        for name in getattr(manifest, "runtime_requires", ())
+        if not is_bound(name)
+    )
+    if unbound:
+        listed = ", ".join(f"{code} -> {name!r}" for code, name in unbound)
+        raise ModuleRegistryError(
+            "enabled module(s) call a kernel facility this assembly has not "
+            f"bound a provider for: {listed} — add a PrerequisiteBinding for "
+            "each effect to the assembly's bindings "
+            "(`DOTMAC_MIGRATION_BINDINGS` / `install_prerequisite_bindings`)"
+        )
+
+
 def _validate_referenced_permissions(app: FastAPI, plan: PermissionPlan) -> None:
     """Fail the BOOT when a mounted route requires a permission no installed
     module declares. Without this a typo'd code is invisible until the first
@@ -597,6 +626,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     registry = ModuleRegistry(spec.modules)
     manifests = list(registry.startup_order())
     enabled_manifests = list(registry.enabled_order(disabled))
+    _refuse_unbound_runtime_requires(enabled_manifests)
     logger.info(
         "Module startup order (%d of %d enabled): %s",
         len(enabled_manifests),

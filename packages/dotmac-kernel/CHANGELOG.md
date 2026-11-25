@@ -11,6 +11,39 @@ here.
 No version is bumped or allocated here; kernel releases are owned by the release
 allocation (this ships with the next allocated release).
 
+- **`Party.is_active` is honoured at authentication** (review R3 Q1).
+  `deps.authenticate_request` returns `None` for an inactive party (bearer and
+  cookie share the seam), `deps._holds_any_role` joins `Party` and requires
+  `is_active` (so `authorize_party` is false for an inactive party that still
+  holds grant rows), and the reference `app.features.auth.service.login` sends
+  an inactive party down the existing constant-work miss path (one dummy
+  verification, identical `Invalid credentials`) under the party `FOR UPDATE`
+  lock, so a login racing a deactivation re-reads `is_active` and issues no
+  session. Behaviour change: a deactivated party can no longer authenticate.
+- **`ModuleManifest.runtime_requires`** (R3 Q3), appended last. Legal ONLY on a
+  stateless module (a stateful module is refused); validated like `requires` and
+  included in the overlap check. The refusal of `requires` on a stateless module
+  and every migration gate are unchanged. `create_app` refuses an assembly that
+  has not bound each entry of an ENABLED module (same binding table as
+  `requires`; `DOTMAC_MIGRATION_BINDINGS` or `install_prerequisite_bindings`).
+- **`dotmac_kernel.identity_admin`** and prerequisite **`identity_admin.v1`**
+  (`IDENTITY_ADMIN_V1`, `verify_identity_admin`; the reference assembly binds it
+  to `0025_session_provenance`). Governed commands `create_person`,
+  `ensure_grant`, `find_party_normalized_email`, `lock_grants`, `lock_parties`,
+  `remove_grants`, `revoke_party_sessions` that enforce Party-first lock order,
+  refuse drift, a non-normalised email, a grant to an inactive party, and lock the
+  session cohort before revoking it. The frozen `identity_storage` primitives stay
+  frozen with empty module-caller sets. Additive; no root export changes.
+- **Event-type-filtered outbox claim** (R2 F1). `messaging.relay.claim_batch`
+  gains `event_types=`; with it, claims go through the new SECURITY DEFINER
+  `public.claim_outbox_batch_by_type(text, integer, integer, text[])`
+  (migration `0035_outbox_typed_claim`), which applies the existing claim's
+  predicate plus `event_type = ANY(...)` to BOTH arms, so a foreign event is never
+  leased, even a stale-claimed one. An empty list is refused. **Policy change:**
+  `0036_typed_claim_grant` grants EXECUTE on it to `outbox_dispatcher` (narrower
+  than the existing all-types claim it already holds). `outbox_relay.v1` is
+  unchanged.
+
 - `dotmac_kernel.delivery_providers` publishes the `email.send.v1` payload
   contract for the delivery domain: `EMAIL_SEND_CAPABILITY_ID` and
   `EMAIL_SEND_COMMAND_SCHEMA` (one rendered message: `dispatch_id`, `address`,

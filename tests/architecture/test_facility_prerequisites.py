@@ -155,7 +155,7 @@ def _source_files(package: Path) -> list[Path]:
 
 
 def _manifest_requires(package: Path) -> set[str]:
-    """Every prerequisite the manifest declares, across all three lists."""
+    """Every prerequisite the manifest declares, across all four lists."""
     manifest = next(package.rglob("manifest.py"), None)
     if manifest is None:
         return set()
@@ -166,6 +166,10 @@ def _manifest_requires(package: Path) -> set[str]:
             "requires",
             "tenant_requires",
             "platform_requires",
+            # A stateless module's declaration that it CALLS a facility. Its
+            # migration half is skipped for stateless modules (no lineage), and
+            # that skip is unchanged: only the manifest half reads this list.
+            "runtime_requires",
         }:
             continue
         for element in ast.walk(node.value):
@@ -210,6 +214,7 @@ _CONSTANTS = {
     "OUTBOX_RELAY_V1": "outbox_relay.v1",
     "PLATFORM_AUDIT_LOG_V1": "platform_audit_log.v1",
     "TENANT_AUDIT_LOG_V1": "tenant_audit_log.v1",
+    "IDENTITY_ADMIN_V1": "identity_admin.v1",
     "TENANT_SCOPE_CATALOG_V1": "tenant_scope_catalog.v1",
     "MODULE_DATABASE_ROLES_V1": "module_database_roles.v1",
 }
@@ -553,3 +558,65 @@ def test_verification_reader_resolves_tenant_audit_constant_and_empty_tuple(
     assert _verified_in_migrations(tmp_path) == {"tenant_audit_log.v1"}
     path.write_text("REQUIRES = ()\n", encoding="utf-8")
     assert _verified_in_migrations(tmp_path) == set()
+
+
+# ── runtime_requires: the stateless module's half of the obligation ─────────
+
+
+def _write_manifest(
+    tmp_path, keyword: str | None, names: str = "TENANT_AUDIT_LOG_V1.name"
+):
+    argument = "" if keyword is None else f", {keyword}=({names},)"
+    (tmp_path / "manifest.py").write_text(
+        f"module = ModuleManifest(code='x', version='1'{argument})\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_the_manifest_reader_resolves_runtime_requires(tmp_path) -> None:
+    package = _write_manifest(tmp_path, "runtime_requires")
+    assert "tenant_audit_log.v1" in _normalise(_manifest_requires(package))
+
+
+def test_a_stateless_caller_with_no_declaration_still_fails(tmp_path) -> None:
+    """Sensitivity: accepting `runtime_requires` must not make the gate
+    satisfiable without a declaration."""
+    package = _write_manifest(tmp_path, None)
+    assert "tenant_audit_log.v1" not in _normalise(_manifest_requires(package))
+
+
+def test_stateless_audit_and_outbox_callers_are_satisfied_by_runtime_requires(
+    tmp_path,
+) -> None:
+    package = _write_manifest(
+        tmp_path,
+        "runtime_requires",
+        "TENANT_AUDIT_LOG_V1.name, OUTBOX_RELAY_V1.name",
+    )
+    declared = _normalise(_manifest_requires(package))
+    for key in ("audit:write_audit_event", "messaging/outbox:enqueue_event"):
+        facility = next(item for item in MAPPED if item.key == key)
+        assert facility.prerequisite in declared
+
+
+def test_identity_admin_is_mapped_and_the_storage_primitives_stay_frozen_empty() -> (
+    None
+):
+    commands = {
+        "create_person",
+        "ensure_grant",
+        "find_party_normalized_email",
+        "lock_grants",
+        "lock_parties",
+        "remove_grants",
+        "revoke_party_sessions",
+    }
+    mapped = {
+        item.key: item for item in MAPPED if item.key.startswith("identity_admin:")
+    }
+    assert set(mapped) == {f"identity_admin:{name}" for name in commands}
+    assert {item.prerequisite for item in mapped.values()} == {"identity_admin.v1"}
+    for name in commands:
+        reason, callers = FROZEN[f"identity_storage:{name}"]
+        assert callers == frozenset(), f"{name} must keep an EMPTY caller set"

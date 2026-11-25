@@ -40,8 +40,9 @@ noise, which is how a guard stops being read.
 
 A module that calls a MAPPED facility must
 
-1. declare the prerequisite on its `ModuleManifest`, so composition can refuse
-   an assembly that cannot supply the effect; AND
+1. declare the prerequisite on its `ModuleManifest` (`requires` for a stateful
+   module; `runtime_requires` for a STATELESS one, which owns no lineage), so
+   composition can refuse an assembly that cannot supply the effect; AND
 2. verify it in a migration's requires tuple, so DEPLOY refuses a database that
    does not have it.
 
@@ -201,6 +202,48 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "audit:write_audit_event",
         "tenant_audit_log.v1",
         "writes the append-only public.audit_events tenant trail",
+    ),
+    Facility(
+        "identity_admin:create_person",
+        "identity_admin.v1",
+        "governed command: flushes the Party and person subtype rows; stateless callers declare it in "
+        "`runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:ensure_grant",
+        "identity_admin.v1",
+        "governed command: reads and inserts a PartyRoleGrant under the party lock; stateless callers declare it in "
+        "`runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:find_party_normalized_email",
+        "identity_admin.v1",
+        "governed command: reads Party by normalised email; stateless callers declare it in "
+        "`runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:lock_grants",
+        "identity_admin.v1",
+        "governed command: locks PartyRoleGrant rows under held party locks; stateless callers declare it in "
+        "`runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:lock_parties",
+        "identity_admin.v1",
+        "governed command: locks Party rows in UUID order; stateless callers declare it in "
+        "`runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:remove_grants",
+        "identity_admin.v1",
+        "governed command: deletes an exact PartyRoleGrant cohort in the caller's SAVEPOINT; stateless callers declare it in "
+        "`runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:revoke_party_sessions",
+        "identity_admin.v1",
+        "governed command: updates the AuthSession cohort's revoked_at; stateless callers declare it in "
+        "`runtime_requires`",
     ),
     Facility(
         "audit:write_platform_audit_event",
