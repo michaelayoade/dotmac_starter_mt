@@ -64,6 +64,55 @@ def test_the_only_mutating_container_command_is_rm_in_one_function() -> None:
     assert mutating == [("launcher.py", "_remove_owned_containers")]
 
 
+#: config.py only DEFINES `docker_path` and lists it among the paths it validates;
+#: it never builds an argv, so it is the one file the use-site rule skips.
+USE_SITE_EXEMPT = {"config.py"}
+
+
+def stray_docker_path_uses(tree: ast.AST) -> list[int]:
+    """R8-L3: line numbers of every `docker_path` use that is NOT inside the first
+    element of an argv (a tuple or list) whose second element is a string constant.
+    An alias (`d = str(cfg.docker_path)`) or a variable verb fails here."""
+    covered: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Tuple | ast.List)
+            and len(node.elts) >= 2
+            and isinstance(node.elts[1], ast.Constant)
+            and isinstance(node.elts[1].value, str)
+        ):
+            covered.update(id(n) for n in ast.walk(node.elts[0]))
+    stray: list[int] = []
+    for node in ast.walk(tree):
+        named = (isinstance(node, ast.Attribute) and node.attr == "docker_path") or (
+            isinstance(node, ast.Name) and node.id == "docker_path"
+        )
+        if named and id(node) not in covered:
+            stray.append(node.lineno)  # type: ignore[attr-defined]
+    return sorted(stray)
+
+
+def test_every_docker_path_use_heads_an_argv_with_a_constant_verb() -> None:
+    for path in sorted(SRC.rglob("*.py")):
+        if path.name in USE_SITE_EXEMPT:
+            continue
+        assert stray_docker_path_uses(ast.parse(path.read_text())) == [], path.name
+
+
+def test_the_use_site_rule_is_sensitive_to_aliases_and_variable_verbs() -> None:
+    def stray(source: str) -> list[int]:
+        return stray_docker_path_uses(ast.parse(source))
+
+    assert stray("a = (str(cfg.docker_path), 'ps', '-a')") == []
+    assert stray("a = [os.fspath(cfg.docker_path), 'ps']") == []
+    assert stray("d = str(cfg.docker_path)\na = (d, 'stop')") == [1]  # alias
+    assert stray("a = (str(cfg.docker_path), verb)") == [1]  # variable verb
+    assert stray("a = (str(cfg.docker_path),)") == [1]  # no verb at all
+    assert stray("a = ('x', str(cfg.docker_path), 'ps')") == [1]  # not first
+    assert stray("f(cfg.docker_path)") == [1]  # passed along
+    assert stray("a = (docker_path, 'ps')") == []
+
+
 def _is_docstring(node: ast.stmt) -> bool:
     return (
         isinstance(node, ast.Expr)

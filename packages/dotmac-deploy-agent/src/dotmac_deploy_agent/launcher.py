@@ -148,12 +148,22 @@ class Launcher:
 
     def _clean_stale(self) -> None:
         """A file left by a crashed run is removed before anything else (s2.5.5)."""
-        remove_runtime_files(self.config.deploy_run_dir, (PARAMS_FILE,))
-        remove_legacy_copy(self.config.deploy_run_dir)
-        # A kill mid-copy leaves the loopback registry's storage on tmpfs (R5.6),
-        # and a kill mid-run leaves the per-run credentials directory.
-        shutil.rmtree(self.config.registry_dir, ignore_errors=True)
-        shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+        # R8-I3: only while holding the role-job lock. A busy lock means a role job
+        # may be running: its directories are not stale, so nothing is removed.
+        try:
+            descriptor = self._lock_role_job()
+        except Refusal:
+            LOG.info("role-job lock busy at agent start: stale cleanup deferred")
+            return
+        try:
+            remove_runtime_files(self.config.deploy_run_dir, (PARAMS_FILE,))
+            remove_legacy_copy(self.config.deploy_run_dir)
+            # A kill mid-copy leaves the loopback registry's storage on tmpfs (R5.6),
+            # and a kill mid-run leaves the per-run credentials directory.
+            shutil.rmtree(self.config.registry_dir, ignore_errors=True)
+            shutil.rmtree(self._run_credentials_dir(), ignore_errors=True)
+        finally:
+            os.close(descriptor)  # purge_stale_jobs takes the lock itself
         self.purge_stale_jobs()
 
     def purge_stale_jobs(self) -> None:
@@ -543,7 +553,13 @@ class Launcher:
 
             if not self.lease.covers(lease, dispatch_id=materials.dispatch_id):
                 raise Refusal("lease_unavailable")
-            # The run must end inside the lease: no renew exists, so it is clipped.
+            # R8-M1: CP can still hold the lease (so `covers` is true) while the
+            # keeper has stopped renewing it (crashed, or a renew reply was lost).
+            # The run budget counts on renewal, so nothing runs on a lost lease.
+            if keeper.lease_lost is not None:
+                raise Refusal("lease_unavailable", keeper.lease_lost)
+            # The run is clipped to what is left of the plan's total (renewal keeps
+            # the lease alive for that long).
             run_budget = self.lease.run_budget(
                 lease, configured_seconds=self.config.foundation_timeout_seconds
             )
@@ -677,12 +693,15 @@ class Launcher:
             # R2-C1: a job runs an image already on the host. No transfer.
             check_images_present(self.config, self.read_only, materials.images)
 
+            # R8-I2: the clock is read BEFORE the request, so the lease end is never
+            # overestimated by the round trip.
+            acquired_at = int(self.epoch())
             lease = self.lease.acquire(
                 dispatch_id=materials.dispatch_id,
                 ttl_seconds=materials.lease_ttl_seconds,
+                max_seconds=materials.lease_max_seconds,
                 serving=False,
             )
-            acquired_at = int(self.epoch())
             details["lease"] = {
                 "lease_id": lease.lease_id,
                 "ttl_seconds": lease.ttl_seconds,

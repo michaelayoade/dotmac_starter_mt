@@ -2609,6 +2609,23 @@ def test_r6m1_a_busy_role_job_lock_is_a_lease_refusal_with_no_page_and_no_rm(
     assert rig.cp.lease_log == [] and rig.bao.paths == []  # nothing started
 
 
+def test_r8i3_a_busy_role_job_lock_defers_the_stale_directory_cleanup(
+    tmp_path: Path,
+) -> None:
+    rig = job_rig(tmp_path)
+    rig.config.deploy_run_dir.mkdir(parents=True, exist_ok=True)
+    params = rig.config.deploy_run_dir / "params.env"
+    params.write_text("A=1\n")
+    held = rig.launcher._lock_role_job()
+    try:
+        rig.launcher._clean_stale()
+    finally:
+        os.close(held)
+    assert params.exists()  # a role job may be running: nothing is stale
+    rig.launcher._clean_stale()
+    assert not params.exists()
+
+
 def test_r7l2_a_busy_role_job_lock_defers_the_whole_purge(tmp_path: Path) -> None:
     rig = job_rig(tmp_path)
     purged: list[str] = []

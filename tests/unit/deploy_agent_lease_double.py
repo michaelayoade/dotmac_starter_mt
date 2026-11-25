@@ -10,10 +10,10 @@ It mirrors the production lease CLASS next to the rehearsal class:
   next acquire is refused with `reconcile_marker_required` until a marker exists;
   v2 has NO "reconciled" standing, so the standing stays `expired_unreleased`
   until a new acquire succeeds;
-* acquire by the SAME run returns its lease with its first ttl;
+* acquire by the SAME run returns its lease with its REMAINING ttl;
 * renew grants `min(ttl, lease_max - held)`; signed refusals `lease_not_held`,
   `lease_expired`, `lease_max_reached` (expiry is checked before the cap);
-* `covers` is a 200 `{covers: bool}` and never a refusal;
+* `covers` is a 200 `{covers: bool}`; only a superseded lease is a signed 409;
 * a second release is a signed 200 replay `{released: true, replay: true}`;
 * releasing an EXPIRED lease is a signed 409 `lease_expired` and the host stays
   `expired_unreleased`; covers/renew/release of a lease that a newer acquire

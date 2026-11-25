@@ -16,6 +16,7 @@ from typing import Final, cast
 
 from .client import Reply, TargetClient
 from .refusal import Refusal
+from .transport import TIMEOUT_SECONDS
 
 #: Control `target_api_v2.json` `standing_values`: the ONLY standings CP may report.
 STANDING_VALUES: Final = ("free", "held", "expired_unreleased")
@@ -69,6 +70,10 @@ RENEW_REFUSALS: Final = frozenset(
 SUPERSEDED: Final = "lease_superseded"
 #: How often the keeper thread looks at the clock; a renew is due every ttl/3.
 POLL_SECONDS: Final = 2.0
+#: A failed, non-lost renew waits `min(RETRY_SECONDS, ttl/10)` before the next try.
+RETRY_SECONDS: Final = 15.0
+#: The keeper thread is joined for at least three transport timeouts.
+JOIN_SECONDS: Final = 3 * TIMEOUT_SECONDS
 
 
 def check_body(route: str, direction: str, body: object) -> None:
@@ -144,6 +149,10 @@ class LeaseKeeper:
         self._last_ok = lease.deadline - lease.ttl_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        #: A failed, non-lost renew is not retried before this (monotonic) time.
+        self._retry_at = 0.0
+        #: False when the thread was still alive after the join (R8-L1).
+        self.joined = True
         self.renewals = 0
         self.lease_lost: str | None = None
 
@@ -161,15 +170,19 @@ class LeaseKeeper:
             return
         if now >= lease.started + lease.max_seconds:
             return  # the plan's total is spent: nothing left to renew into
-        if now < self._last_ok + lease.ttl_seconds / 3:
+        if now < self._last_ok + lease.ttl_seconds / 3 or now < self._retry_at:
             return
+        if self._stop.is_set():
+            return  # R8-L1: stop() was called: no renew may race the release
         try:
             renewed = self._client.renew(lease, dispatch_id=self._dispatch_id)
         except Refusal as refusal:
             if refusal.detail in RENEW_REFUSALS:
                 self.lease_lost = refusal.detail
-            # Anything else (unreachable, 5xx) is retried on the next tick; the
-            # deadline check above turns a long outage into `lease_lost`.
+            # Anything else (unreachable, 5xx) is retried after a pause, not every
+            # poll (R8-L2); the deadline check above turns a long outage into
+            # `lease_lost`.
+            self._retry_at = now + min(RETRY_SECONDS, lease.ttl_seconds / 10)
             return
         self._lease = renewed
         self._last_ok = renewed.deadline - renewed.ttl_seconds  # cadence follows grants
@@ -183,22 +196,30 @@ class LeaseKeeper:
         )
         self._thread.start()
 
+    def run_tick(self) -> None:
+        try:
+            self.tick()
+        except Exception:  # a keeper must never raise into the run
+            self.lease_lost = self.lease_lost or "lease_keeper_failed"
+
     def _loop(self) -> None:
         while not self._stop.is_set():
-            try:
-                self.tick()
-            except Exception:  # a keeper must never raise into the run
-                self.lease_lost = self.lease_lost or "lease_keeper_failed"
+            self.run_tick()
             self._stop.wait(self._client.poll_seconds)
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=30)
+            # At least three transport timeouts: one in-flight renew call must be
+            # able to finish before the release goes out.
+            self._thread.join(timeout=JOIN_SECONDS)
+            self.joined = not self._thread.is_alive()
             self._thread = None
 
     def as_details(self) -> dict[str, object]:
         details: dict[str, object] = {"renewals": self.renewals}
+        if not self.joined:
+            details["keeper_joined"] = False
         if self.lease_lost is not None:
             details["lease_lost"] = self.lease_lost
         return details
@@ -302,7 +323,7 @@ class LeaseClient:
 
     def renew(self, lease: Lease, *, dispatch_id: str) -> Lease:
         """`POST lease/renew {lease_id, dispatch_run}` -> `{lease_id, ttl_seconds}`.
-        A grant is never longer than the first one the plan bound."""
+        A grant is never longer than the ttl the plan asked for (`cap`)."""
         sent = self._monotonic()
         reply = self._post(
             "renew", {"lease_id": lease.lease_id, "dispatch_run": dispatch_id}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -184,8 +185,15 @@ def expired_rig(tmp_path: Path) -> tuple[Rig, DeployLeaseDouble, LeaseClock]:
     return rig, double, clock
 
 
+def no_lease_use_after_refusal(double: DeployLeaseDouble) -> None:
+    """A refused acquire is the end of the cycle: the only lease calls ever made are
+    acquires (the host's own expired one, then the refused one)."""
+    names = [name for name, _ in double.log]
+    assert names and set(names) <= {"lease/acquire"}, names
+
+
 def test_reconcile_observation_read_only(tmp_path: Path) -> None:
-    rig, _, _ = expired_rig(tmp_path)
+    rig, double, _ = expired_rig(tmp_path)
     result = rig.launcher.run_once()
     # The v2 standing has no "reconciled" value: the agent observes, then the
     # acquire proves the marker. Without it: signed 409, and nothing else happens.
@@ -196,6 +204,7 @@ def test_reconcile_observation_read_only(tmp_path: Path) -> None:
     assert not (rig.config.deploy_run_dir / "params.env").exists()
     assert not (rig.config.run_dir / "app").exists()
     assert rig.bao.paths == []
+    no_lease_use_after_refusal(double)
     # Every command was an inspection verb.
     assert rig.commands.calls
     for argv in rig.commands.calls:
@@ -231,7 +240,7 @@ def test_read_only_commands_pass_inspection() -> None:
 def test_reconcile_reports_even_with_no_container_found(tmp_path: Path) -> None:
     rig, _, _ = expired_rig(tmp_path)
     rig.commands.script[("inspect",)] = CommandResult(1, b"")
-    rig.launcher.run_once()
+    assert rig.launcher.run_once().outcome == "refused"
     [observation, _] = rig.cp.observations
     assert observation["details"]["containers"] == []  # type: ignore[index]
     # The agent reports facts: never `not_needed`, never a verdict on the host.
@@ -243,7 +252,7 @@ def test_an_image_that_cannot_be_read_makes_the_observation_failed(
 ) -> None:
     rig, _, _ = expired_rig(tmp_path)
     rig.commands.script[("image", "inspect")] = CommandResult(1, b"")
-    rig.launcher.run_once()
+    assert rig.launcher.run_once().outcome == "refused"
     observation = rig.cp.observations[0]
     assert (observation["outcome"], observation["reason"]) == (
         "failed",
@@ -296,9 +305,14 @@ def test_reconcile_is_posted_once_per_expired_dispatch_and_observed_digest(
     )
     rig.launcher.run_once()  # the digest changed: posted afresh
     assert [o["kind"] for o in rig.cp.observations].count("reconcile") == 2
+    assert double.row is not None
+    double.row.run = "old-run-2"  # another expired dispatch posts afresh
+    rig.launcher.run_once()
+    assert [o["kind"] for o in rig.cp.observations].count("reconcile") == 3
     assert (
         double.standing() == "expired_unreleased"
     )  # never changes on the agent's word
+    no_lease_use_after_refusal(double)
 
 
 def test_a_refusal_is_reported_once_per_dispatch_and_reason_not_once_per_poll(
@@ -1031,3 +1045,113 @@ def test_r5m2_only_a_proven_absent_container_is_a_clean_observation(
         observation["outcome"] == "reconciled"
         and observation["details"]["containers"] == []
     )  # type: ignore[index]
+
+
+# -- R8: a lost lease runs nothing; keeper stop and retry ------------------------
+
+
+def test_r8m1_a_crashed_keeper_means_no_run_on_a_lease_cp_still_holds(
+    tmp_path: Path,
+) -> None:
+    rig, double, _ = with_double(
+        tmp_path,
+        max_seconds=3000,
+        materials=long_plan(),
+        foundation_timeout_seconds=7200,
+    )
+    original = rig.transfer.transfer_all
+
+    def crash_during_transfer(images, *, ttl_seconds):  # type: ignore[no-untyped-def]
+        keeper = rig.launcher.lease.last_keeper
+        assert keeper is not None
+
+        def boom() -> None:
+            raise RuntimeError("keeper crashed")
+
+        keeper.tick = boom  # type: ignore[method-assign]
+        keeper.run_tick()  # what the thread does: the failure is recorded
+        return original(images, ttl_seconds=ttl_seconds)
+
+    rig.transfer.transfer_all = crash_during_transfer  # type: ignore[method-assign]
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "lease_unavailable")
+    details = rig.cp.observations[0]["details"]  # type: ignore[index]
+    assert details["refusal_detail"] == "lease_keeper_failed"
+    assert details["lease"]["lease_lost"] == "lease_keeper_failed"
+    assert "lease/covers" in [n for n, _ in double.log]  # CP still held it...
+    assert rig.runner.specs == [] and rig.bao.paths == []  # ...but nothing ran
+    assert double.log[-1][0] == "lease/release" and double.standing() == "free"
+
+
+def test_r8m1_a_lost_renew_reply_means_no_run(tmp_path: Path) -> None:
+    rig, double, clock = with_double(
+        tmp_path,
+        max_seconds=3000,
+        materials=long_plan(),
+        foundation_timeout_seconds=7200,
+    )
+    lease_client = rig.launcher.lease
+    real_renew = lease_client.renew
+
+    def renew_whose_reply_is_lost(lease, *, dispatch_id):  # type: ignore[no-untyped-def]
+        real_renew(lease, dispatch_id=dispatch_id)  # CP extended the lease...
+        raise Refusal("lease_refused", "reply_lost")  # ...the answer never arrived
+
+    lease_client.renew = renew_whose_reply_is_lost  # type: ignore[method-assign]
+    original = rig.transfer.transfer_all
+
+    def slow(images, *, ttl_seconds):  # type: ignore[no-untyped-def]
+        keeper = lease_client.last_keeper
+        assert keeper is not None
+        clock.advance(300)
+        keeper.tick()  # a renew is due: it lands at CP, the reply is lost
+        clock.advance(700)  # past the grant the agent still believes it holds
+        keeper.tick()
+        assert keeper.lease_lost == "lease_expired_locally"
+        return original(images, ttl_seconds=ttl_seconds)
+
+    rig.transfer.transfer_all = slow  # type: ignore[method-assign]
+    result = rig.launcher.run_once()
+    assert (result.outcome, result.reason) == ("refused", "lease_unavailable")
+    assert [n for n, _ in double.log].count("lease/covers") == 1  # CP says covered
+    assert rig.runner.specs == [] and rig.bao.paths == []
+
+
+def test_r8l2_a_failed_renew_is_retried_after_a_pause_not_every_poll(
+    tmp_path: Path,
+) -> None:
+    rig, double, clock = with_double(tmp_path, max_seconds=3000, materials=long_plan())
+    client = rig.launcher.lease
+    lease = client.acquire(dispatch_id="d", ttl_seconds=900, max_seconds=3000)
+    keeper = client.keeper(lease, dispatch_id="d")
+    calls: list[float] = []
+
+    def failing(_lease, *, dispatch_id):  # type: ignore[no-untyped-def]
+        calls.append(clock.t)
+        raise Refusal("lease_refused", "renew_unavailable")  # not a lost lease
+
+    client.renew = failing  # type: ignore[method-assign]
+    clock.advance(300)  # due
+    for _ in range(40):  # the keeper polls every 2 s
+        keeper.tick()
+        clock.advance(2)
+    # min(15, ttl/10) = 15 s apart: 80 s of polling is 6 tries, never 40.
+    assert 2 <= len(calls) <= 6
+    assert all(b - a >= 15 for a, b in pairwise(calls))
+    assert keeper.lease_lost is None
+
+
+def test_r8l1_no_renew_is_sent_after_stop(tmp_path: Path) -> None:
+    rig, double, clock = with_double(tmp_path, max_seconds=3000, materials=long_plan())
+    client = rig.launcher.lease
+    lease = client.acquire(dispatch_id="d", ttl_seconds=900, max_seconds=3000)
+    keeper = client.keeper(lease, dispatch_id="d")
+    clock.advance(300)  # a renew is due
+    keeper.stop()
+    keeper.tick()
+    assert "lease/renew" not in [n for n, _ in double.log]
+    assert keeper.joined is True
+    from dotmac_deploy_agent.lease import JOIN_SECONDS
+    from dotmac_deploy_agent.transport import TIMEOUT_SECONDS
+
+    assert JOIN_SECONDS >= 3 * TIMEOUT_SECONDS
