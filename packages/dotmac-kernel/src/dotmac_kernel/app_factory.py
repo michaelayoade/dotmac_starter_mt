@@ -415,7 +415,7 @@ def _refuse_unbound_runtime_requires(manifests: Sequence[AnyManifest]) -> None:
     from dotmac_kernel.prerequisites import is_bound
 
     unbound = sorted(
-        (manifest.code, name)
+        (str(getattr(manifest, "code", getattr(manifest, "name", "?"))), name)
         for manifest in manifests
         for name in getattr(manifest, "runtime_requires", ())
         if not is_bound(name)

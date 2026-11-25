@@ -206,44 +206,47 @@ MAPPED: Final[tuple[Facility, ...]] = (
     Facility(
         "identity_admin:create_person",
         "identity_admin.v1",
-        "governed command: flushes the Party and person subtype rows; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: flushes the Party and person subtype rows; a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "identity_admin:ensure_grant",
         "identity_admin.v1",
-        "governed command: reads and inserts a PartyRoleGrant under the party lock; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: inserts a PartyRoleGrant under the party lock; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "identity_admin:find_party_normalized_email",
         "identity_admin.v1",
-        "governed command: reads Party by normalised email; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: reads Party by normalised email; a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "identity_admin:lock_grants",
         "identity_admin.v1",
-        "governed command: locks PartyRoleGrant rows under held party locks; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: locks PartyRoleGrant rows under party locks; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "identity_admin:lock_parties",
         "identity_admin.v1",
-        "governed command: locks Party rows in UUID order; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: locks Party rows in UUID order; a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "identity_admin:remove_grants",
         "identity_admin.v1",
-        "governed command: deletes an exact PartyRoleGrant cohort in the caller's SAVEPOINT; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: deletes an exact PartyRoleGrant cohort; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "identity_admin:revoke_party_sessions",
         "identity_admin.v1",
-        "governed command: updates the AuthSession cohort's revoked_at; stateless callers declare it in "
-        "`runtime_requires`",
+        "governed command: updates the AuthSession cohort's revoked_at; a stateless "
+        "caller declares it in `runtime_requires`",
     ),
     Facility(
         "audit:write_platform_audit_event",
