@@ -689,6 +689,9 @@ def test_a_transient_renew_failure_is_retried_not_lost(tmp_path: Path) -> None:
     del rig.cp.raw_status["lease/renew"]
     clock.advance(10)
     keeper.tick()
+    assert keeper.renewals == 0  # R8-L2: not before the retry pause (15 s)
+    clock.advance(5)
+    keeper.tick()
     assert keeper.renewals == 1
 
 
