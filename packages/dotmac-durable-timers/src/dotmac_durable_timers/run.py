@@ -6,14 +6,22 @@
 one.  The runner reads that assembly's ``ModuleRegistry.jobs()``, so it runs
 exactly the jobs the web process declares, from the same pins.
 
-Two database credentials, supplied as DSNs through the ENVIRONMENT (the names
-of the variables are arguments; a DSN is never a command-line argument and is
-never logged):
+Two database credentials, each read from a FILE (a tmpfs secret mount).  The
+path is an argument or a ``*_FILE`` variable; the value is never an argument,
+never in the environment and never logged.  A file must be a regular file (not a
+symlink), mode 0400, owned by the running user or root:
 
-* ``RELAY_DISPATCHER_DATABASE_URL`` - the least-privilege ``outbox_dispatcher``
-  role: claim and settle outbox rows only, never a tenant read;
-* ``DATABASE_URL`` - the RLS-enforced ``app_user`` role, scoped per event to
-  that event's tenant for every handler and every tenant read.
+* ``--dispatcher-dsn-file`` / ``RELAY_DISPATCHER_DATABASE_URL_FILE`` - the
+  least-privilege ``outbox_dispatcher`` role: claim and settle outbox rows only,
+  never a tenant read;
+* ``--database-dsn-file`` (alias ``--app-dsn-file``) / ``DATABASE_URL_FILE`` -
+  the RLS-enforced ``app_user`` role, scoped per event to that event's tenant
+  for every handler and every tenant read.
+
+Health: a heartbeat file (``--heartbeat-file``, default under /tmp) is refreshed
+by a background thread and stamped after each reconcile pass; the deploy probe
+runs ``python -m dotmac_durable_timers.probe ping`` (process alive) and
+``... probe tick`` (scheduler still reconciling).
 
 Refuses to start (exit 2, nothing claimed) when: the assembly cannot be
 loaded; ``durable_timers`` is absent, disabled or lacks the tenant plane; a
@@ -49,7 +57,9 @@ from datetime import UTC, datetime
 from typing import Final
 
 from dotmac_durable_timers.dispatch import JobDispatchTransport
+from dotmac_durable_timers.dsnfile import DsnFileError, resolve_dsn
 from dotmac_durable_timers.health import HEALTH_SINK_PROVIDER_KEY
+from dotmac_durable_timers.heartbeat import DEFAULT_PATH, Heartbeat
 from dotmac_durable_timers.jobs import JobCatalogue, JobPlaneUnsupported
 from dotmac_durable_timers.rolecheck import RoleSplitError, verify_role_split
 from dotmac_durable_timers.runner import JobRunner
@@ -162,18 +172,35 @@ def prepare(
     return catalogue, sink
 
 
-def _dsn(env_name: str) -> str:
-    value = os.environ.get(env_name)
-    if not value:
-        raise RunnerConfigError(f"environment variable {env_name} is not set")
-    return value
+def _dsn(path_arg: str | None, env_name: str) -> str:
+    try:
+        return resolve_dsn(path_arg, env_name)
+    except DsnFileError as exc:
+        raise RunnerConfigError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m dotmac_durable_timers.run")
     parser.add_argument("--assembly", required=True, help="package.module:attr")
-    parser.add_argument("--dispatcher-dsn-env", default="RELAY_DISPATCHER_DATABASE_URL")
-    parser.add_argument("--database-dsn-env", default="DATABASE_URL")
+    parser.add_argument(
+        "--dispatcher-dsn-file",
+        help="path of the file holding the outbox_dispatcher DSN "
+        "(else the RELAY_DISPATCHER_DATABASE_URL_FILE variable)",
+    )
+    parser.add_argument(
+        "--database-dsn-file",
+        "--app-dsn-file",
+        help="path of the file holding the app_user DSN "
+        "(else the DATABASE_URL_FILE variable)",
+    )
+    parser.add_argument("--heartbeat-file", default=DEFAULT_PATH)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        choices=(1,),
+        default=1,
+        help="reserved: the runner claims one event at a time",
+    )
     parser.add_argument(
         "--source-application", default=os.environ.get("DOTMAC_SOURCE_APPLICATION")
     )
@@ -190,8 +217,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         catalogue, sink = prepare(
             load_assembly(args.assembly), source_application=args.source_application
         )
-        dispatcher_dsn = _dsn(args.dispatcher_dsn_env)
-        tenant_dsn = _dsn(args.database_dsn_env)
+        dispatcher_dsn = _dsn(
+            args.dispatcher_dsn_file, "RELAY_DISPATCHER_DATABASE_URL_FILE"
+        )
+        tenant_dsn = _dsn(args.database_dsn_file, "DATABASE_URL_FILE")
         if dispatcher_dsn == tenant_dsn:
             raise RunnerConfigError(
                 "the dispatcher and tenant DSNs are identical; they must be two "
@@ -245,6 +274,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         policy=RelayPolicy(batch_size=1),
         reconcile_interval_seconds=args.reconcile_interval,
         poll_interval_seconds=args.poll_interval,
+        heartbeat=Heartbeat(
+            args.heartbeat_file, worker_id=args.worker_id, clock=_clock
+        ),
     )
     try:
         runner.run_forever(stop)

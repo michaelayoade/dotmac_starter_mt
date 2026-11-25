@@ -29,9 +29,10 @@ JOB_STATES_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0002_job_states.py"
 #    commits the failure record inside `deliver` before telling the relay to
 #    retry, because the worker rolls back on raise;
 #  - run.py is the process entrypoint: it alone reads the ambient clock;
-#  - runtime.py holds the staff surface's single request clock read.
+#  - runtime.py holds the staff surface's single request clock read;
+#  - probe.py is the health-probe command, which compares file ages to now.
 COMMIT_ALLOWED = frozenset({"dispatch.py"})
-CLOCK_ALLOWED = frozenset({"run.py", "runtime.py"})
+CLOCK_ALLOWED = frozenset({"run.py", "runtime.py", "probe.py"})
 
 
 def _module_source(exclude: frozenset[str] = frozenset()) -> str:

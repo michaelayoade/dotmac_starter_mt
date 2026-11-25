@@ -30,6 +30,7 @@ immutable, so the runner cannot be folded into it.
   tenants run and arm nothing; one event is claimed at a time so SIGTERM stops
   after the event in hand; wildcard-hour cron runs in both passes of the autumn
   repeated hour.
+- Deploy surfaces (projects-ff D8 review): each DSN is read from a 0400 root-or-self-owned regular file (`--dispatcher-dsn-file`, `--database-dsn-file`, or `*_FILE` variables; no plain-value form); a heartbeat file plus `python -m dotmac_durable_timers.probe ping|tick` serve the deploy health probe; `--batch-size` accepts only 1.
 - Adoption gate: a consumer must set an explicit `surface_selection` before
   adopting a3 (the staff routes and page are new). Release gate: the kernel floor
   rises to the kernel that ships `dotmac_kernel.jobs` and durable-timers joins

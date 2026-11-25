@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_durable_timers.dispatch import JobDispatchTransport
+from dotmac_durable_timers.heartbeat import Heartbeat
 from dotmac_durable_timers.jobs import JobCatalogue, reconcile_tenant
 
 logger = logging.getLogger("dotmac_durable_timers.runner")
@@ -60,6 +61,7 @@ class JobRunner:
         reconcile_interval_seconds: float = 30.0,
         poll_interval_seconds: float = 1.0,
         monotonic: Callable[[], float] = time.monotonic,
+        heartbeat: Heartbeat | None = None,
     ) -> None:
         self._catalogue = catalogue
         self._transport = transport
@@ -71,6 +73,7 @@ class JobRunner:
         self._reconcile_interval = reconcile_interval_seconds
         self._poll_interval = poll_interval_seconds
         self._monotonic = monotonic
+        self._heartbeat = heartbeat
 
     def reconcile(self) -> int:
         """Arm every unpaused declared job in every active tenant. A tenant that
@@ -116,11 +119,15 @@ class JobRunner:
     def run_forever(self, stop: threading.Event) -> None:
         """Loop until ``stop`` is set; an in-flight event finishes first."""
         logger.info("job runner %s starting", self._worker_id)
+        if self._heartbeat is not None:
+            self._heartbeat.start(stop)
         next_reconcile = self._monotonic()
         while not stop.is_set():
             if self._monotonic() >= next_reconcile:
                 try:
                     self.reconcile()
+                    if self._heartbeat is not None:
+                        self._heartbeat.tick()
                 except Exception:
                     logger.exception("job reconcile pass failed")
                 next_reconcile = self._monotonic() + self._reconcile_interval
@@ -131,6 +138,8 @@ class JobRunner:
                 claimed = 0
             if claimed == 0:
                 stop.wait(self._poll_interval)  # interruptible idle sleep
+        if self._heartbeat is not None:
+            self._heartbeat.remove()
         logger.info("job runner %s stopped", self._worker_id)
 
 
