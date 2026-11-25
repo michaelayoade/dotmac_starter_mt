@@ -215,6 +215,7 @@ _CONSTANTS = {
     "PLATFORM_AUDIT_LOG_V1": "platform_audit_log.v1",
     "TENANT_AUDIT_LOG_V1": "tenant_audit_log.v1",
     "IDENTITY_ADMIN_V1": "identity_admin.v1",
+    "OUTBOX_TYPED_CLAIM_V1": "outbox_typed_claim.v1",
     "TENANT_SCOPE_CATALOG_V1": "tenant_scope_catalog.v1",
     "MODULE_DATABASE_ROLES_V1": "module_database_roles.v1",
 }
