@@ -634,6 +634,23 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.identity_admin": {
+      "classification": "supported",
+      "exports": [
+        "GrantFact",
+        "IdentityAdminRefusal",
+        "NewPersonValues",
+        "PartyFact",
+        "create_person",
+        "ensure_grant",
+        "find_party_normalized_email",
+        "lock_grants",
+        "lock_parties",
+        "remove_grants",
+        "revoke_party_sessions"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.identity_provisioning": {
       "classification": "supported",
       "exports": [
@@ -1043,6 +1060,7 @@
         "require_prerequisites",
         "role_violations",
         "verify_idempotency_ledger",
+        "verify_identity_admin",
         "verify_module_database_roles",
         "verify_outbox_relay",
         "verify_party_person_catalog",
@@ -1296,6 +1314,7 @@
         "DuplicateBindingError",
         "DuplicatePrerequisiteError",
         "IDEMPOTENCY_LEDGER_V1",
+        "IDENTITY_ADMIN_V1",
         "InvalidPrerequisiteNameError",
         "InvalidRevisionReferenceError",
         "KERNEL_PREREQUISITES",
@@ -2231,6 +2250,7 @@
     "dotmac_kernel.idempotency",
     "dotmac_kernel.idempotency_models",
     "dotmac_kernel.identity",
+    "dotmac_kernel.identity_admin",
     "dotmac_kernel.identity_provisioning",
     "dotmac_kernel.identity_storage",
     "dotmac_kernel.licensing",

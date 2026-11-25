@@ -354,6 +354,30 @@ PARTY_PERSON_CATALOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
+#: The storage `dotmac_kernel.identity_admin` reads and writes. A STATELESS
+#: module that calls those governed commands declares it in
+#: `ModuleManifest.runtime_requires` (it owns no lineage, so `requires` is
+#: refused for it). The frozen `identity_storage` primitives stay frozen with
+#: empty caller sets: modules call the governed commands, never the primitives.
+IDENTITY_ADMIN_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="identity_admin.v1",
+    summary=(
+        "public.parties, public.party_persons, public.party_role_grants, "
+        "public.roles and public.auth_sessions with the kernel identity "
+        "contract: the unique functional index uq_parties_tenant_lower_email "
+        "over (tenant_id, lower(email)) and the unique constraint "
+        "uq_party_role_grants_member over (tenant_id, party_id, role_id); "
+        "ENABLE and FORCE row-level security on each of the five tables; and "
+        "app_user (NOSUPERUSER, NOBYPASSRLS) holding exactly the privileges "
+        "the commands use — SELECT, INSERT and row-lock (UPDATE) on parties, "
+        "SELECT and INSERT on party_persons, SELECT, INSERT, DELETE and "
+        "row-lock (UPDATE) on party_role_grants, SELECT on roles, and SELECT "
+        "and UPDATE of revoked_at on auth_sessions. Supplies the storage "
+        "dotmac_kernel.identity_admin commands write; it does not decide who "
+        "may call them or what any role confers."
+    ),
+)
+
 KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     TENANT_SCOPE_CATALOG_V1,
     MODULE_DATABASE_ROLES_V1,
@@ -362,6 +386,7 @@ KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     PLATFORM_AUDIT_LOG_V1,
     TENANT_AUDIT_LOG_V1,
     PARTY_PERSON_CATALOG_V1,
+    IDENTITY_ADMIN_V1,
 )
 
 
@@ -647,6 +672,7 @@ __all__ = [
     "all_bound",
     "autoload_bindings",
     "IDEMPOTENCY_LEDGER_V1",
+    "IDENTITY_ADMIN_V1",
     "MODULE_DATABASE_ROLES_V1",
     "OUTBOX_RELAY_V1",
     "PARTY_PERSON_CATALOG_V1",
