@@ -89,7 +89,14 @@ allocation (this ships with the next allocated release).
   DEFINER, empty search_path, owner, EXECUTE for `outbox_dispatcher` only), bound
   to `0036_typed_claim_grant`; `outbox_relay.v1` is unchanged. **Policy change:**
   `0036_typed_claim_grant` grants EXECUTE on it to `outbox_dispatcher` (narrower
-  than the all-types claim it already holds).
+  than the all-types claim it already holds). The worker gains `run_once_by_type`
+  / `run_forever_by_type` with a REQUIRED `event_types` (MAPPED to
+  `outbox_typed_claim.v1`; `run_once`/`run_forever` take no filter, so `None`
+  cannot mean every type). `create_tenant_role`/`rename_tenant_role` refuse when
+  the permission catalogue is not installed (a CLI or job process).
+  **Release note:** `0035` builds `ix_outbox_events_type_available` without
+  CONCURRENTLY, so the build briefly blocks writes to `outbox_events`; run it in
+  a quiet window.
 
 ## 0.1.0a110 — Release inventory
 

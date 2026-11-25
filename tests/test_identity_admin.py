@@ -417,6 +417,28 @@ def test_tenant_roles_are_created_and_renamed_but_code_roles_are_refused(
             ia.rename_tenant_role(db, tenant_id=tid, role_id=code_role, name="Hijack")
 
 
+def test_role_commands_fail_closed_when_the_catalogue_is_not_installed(
+    admin_session: Session, tenant_a
+) -> None:
+    """Outside `create_app` (CLI, job runner, script) the permission catalogue is
+    empty; that must be a refusal, never "no code roles"."""
+    previous = active_permissions()
+    install_permissions(PermissionCatalogue(()))
+    try:
+        role_id = _role(admin_session, tenant_a, "treasury")
+        with _app_user(tenant_a.id) as db:
+            with pytest.raises(ia.IdentityAdminRefusal, match="not installed"):
+                ia.create_tenant_role(
+                    db, tenant_id=tenant_a.id, slug="treasury2", name="X"
+                )
+            with pytest.raises(ia.IdentityAdminRefusal, match="not installed"):
+                ia.rename_tenant_role(
+                    db, tenant_id=tenant_a.id, role_id=role_id, name="Y"
+                )
+    finally:
+        install_permissions(previous)
+
+
 # ── runtime_requires proven against the database at migrate time (F3) ───────
 
 
