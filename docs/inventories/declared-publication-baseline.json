@@ -157,11 +157,6 @@
       "reason": "Unpublished source successor to verified 0.1.0a110. It publishes the email.send.v1 command contract (EMAIL_SEND_COMMAND_SCHEMA) for the delivery domain; definition only, no allocation. This row records source awaiting the protected Kernel release lifecycle and is not publication or adoption evidence. Remove only with the independently reviewed release record that publishes the next kernel version.",
       "state": "declared-unpublished"
     },
-    "dotmac-money-flows": {
-      "declared": "0.1.0a3",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a2 is the last published and tagged version (dotmac-money-flows-v0.1.0a2) and its released mf_0001/mf_0002 bytes are unchanged. 0.1.0a3 adds SettleConfirmationV2 (several MANUAL-only deductions), apply_balance_on_withholding_accepted, and mf_0003_settle_discharge_list, a nullable list of opaque discharge refs; V1 is unchanged; apply_balance_on_withholding_released (Q-F) is added; requires dotmac-billing>=0.1.0a14 (Q-F apply_balance_on_withholding_released), so it is published only after billing 0.1.0a14 is published. Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only after a verified 0.1.0a3 publication.",
-      "state": "declared-unpublished"
-    },
     "dotmac-positioning": {
       "declared": "0.2.0a2",
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.2.0a1 is the last published and tagged version (dotmac-positioning-v0.2.0a1) and its released po_0001 bytes are unchanged. 0.2.0a2 adds po_0002_observation_holds: neutral retention holds on observations, honoured by prune_observations, so a product-owned decision can pin evidence under an opaque reference without positioning learning what the reference means. No subject, address or business data enters positioning (ADR-0039). Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove this row only through an oracle-backed release record for an authorized exact 0.2.0a2 publication, never by editing the declared version down.",
