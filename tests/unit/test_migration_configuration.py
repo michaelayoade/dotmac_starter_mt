@@ -10,11 +10,12 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 import pytest
-from alembic.config import Config
 from dotmac_kernel.migrations.configuration import (
     select_migration_database_url,
     set_alembic_database_url,
 )
+
+from alembic.config import Config
 
 OWNER_URL = "postgresql://owner:encoded%25%2F@localhost/migrations"
 FALLBACK_URL = "postgresql://runtime@localhost/application"
