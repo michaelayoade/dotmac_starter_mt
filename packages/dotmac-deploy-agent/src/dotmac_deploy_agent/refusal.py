@@ -73,6 +73,7 @@ CODES: Final = frozenset(
         "lease_refused",
         "lease_ttl_invalid",
         "lease_unavailable",
+        "lease_exhausted",
         # image transfer (lane B)
         "transfer_inbox_unsafe",
         "transfer_archive_missing",

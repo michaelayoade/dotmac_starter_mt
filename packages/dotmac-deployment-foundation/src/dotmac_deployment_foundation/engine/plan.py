@@ -152,6 +152,10 @@ class StepKind(str, Enum):
     RECORD_EVIDENCE = "record_evidence"
     PRUNE_IMAGES = "prune_images"
     RELEASE_LOCK = "release_lock"
+    #: The operator-job entry point's step (`operator_job.py`). Used ONLY by
+    #: `plan_operator_job`; `build_plan` never emits it, and it has no
+    #: `_PHASE_OF` row because it never appears in a `DeploymentPlan`.
+    OPERATOR_JOB = "operator_job"
 
 
 _PHASE_OF: Final[Mapping[StepKind, Phase]] = {

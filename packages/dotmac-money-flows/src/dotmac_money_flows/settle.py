@@ -50,6 +50,12 @@ Assembly order and permissions:
 * Withholding supplied with a source other than MANUAL is refused before any
   write and the instance stays ``refused``; the person fixes the evidence (or
   the source) and retries.
+* ``SettleConfirmationV2`` carries several deductions (C2b). Each is accepted
+  through Billing's withholding-discharge command, in order, before the
+  whole-invoice pass, so cash plus every accepted deduction decide whether an
+  invoice fits. The same component or retry key twice is refused before any
+  write (``duplicate_deduction_component``); the rule that deductions come only
+  from a MANUAL confirmation is unchanged.
 * ``retry_settle`` is a human-triggered command. The assembly must gate it with
   a permission at least as strong as the manual-cash and withholding
   permissions, and pass the actor as ``actor_ref``.
@@ -64,6 +70,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -106,6 +113,7 @@ from dotmac_money_flows.contracts import (
     InvoiceIssuedV1,
     SettleAttentionCursorV1,
     SettleConfirmationV1,
+    SettleConfirmationV2,
     SettleInstanceV1,
     SettlementTargetV1,
     SettleOutcomeV1,
@@ -113,6 +121,9 @@ from dotmac_money_flows.contracts import (
     SettlePorts,
     SettleRefused,
     SettleState,
+    WithholdingAcceptedV1,
+    WithholdingReleasedV1,
+    confirmation_deductions,
     settle_transition_allowed,
 )
 from dotmac_money_flows.events import (
@@ -226,7 +237,7 @@ class _Result:
     state: SettleState
     reason_code: str | None
     settlement_id: UUID
-    discharge_ref: str | None
+    discharge_refs: tuple[str, ...]
     applied: tuple[UUID, ...]
 
 
@@ -278,11 +289,21 @@ def _view(row: SettleInstance) -> SettleInstanceV1:
         billing_account_id=row.billing_account_id,
         settlement_id=row.settlement_id,
         withholding_discharge_ref=row.withholding_discharge_ref,
+        withholding_discharge_refs=_stored_refs(row),
         actor_ref=row.actor_ref,
         resolution_ref=row.resolution_ref,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _stored_refs(row: SettleInstance) -> tuple[str, ...]:
+    """Every stored discharge reference; a pre-list row has only the legacy one."""
+    if row.withholding_discharge_list_ref:
+        return tuple(str(ref) for ref in row.withholding_discharge_list_ref)
+    if row.withholding_discharge_ref:
+        return (row.withholding_discharge_ref,)
+    return ()
 
 
 def _text(value: UUID | None) -> str | None:
@@ -314,6 +335,18 @@ def _emit(db: Session, row: SettleInstance) -> None:
     )
 
 
+def _duplicate_deduction(deductions: tuple[Any, ...]) -> bool:
+    """True if two deductions name the same frozen component or retry key.
+
+    Billing cannot discharge one component twice under two keys, and one key
+    names one discharge, so either repeat is a caller error caught before any
+    write.
+    """
+    components = [getattr(d.tax_evidence, "component_ref", None) for d in deductions]
+    keys = [d.idempotency_key for d in deductions]
+    return len(set(components)) != len(components) or len(set(keys)) != len(keys)
+
+
 # --------------------------------------------------------------------------
 # Phase 1: decisions that need no owner write
 # --------------------------------------------------------------------------
@@ -343,8 +376,17 @@ def _prepare(
     source = cash.source.value
     if source not in policy.accepted_confirmation_sources or source not in _EVIDENCE:
         return refuse("source_not_accepted")
-    if command.withholding is not None and source != WITHHOLDING_SOURCE:
+    if (
+        isinstance(command, SettleConfirmationV2)
+        and command.withholding is not None
+        and command.deductions
+    ):
+        return refuse("withholding_and_deductions_both_set")
+    deductions = confirmation_deductions(command)
+    if deductions and source != WITHHOLDING_SOURCE:
         return refuse("withholding_requires_manual_source")
+    if len(deductions) > 1 and _duplicate_deduction(deductions):
+        return refuse("duplicate_deduction_component")
     purpose = intent.purpose.value
     if purpose not in _BOUND_PURPOSES and purpose != _DEPOSIT_PURPOSE:
         return refuse("purpose_not_settled_here")
@@ -361,6 +403,14 @@ def _prepare(
         return refuse("bound_document_required")
     if purpose == _DEPOSIT_PURPOSE and target.bound_document_id is not None:
         return refuse("deposit_must_not_bind_document")
+    if (
+        isinstance(command, SettleConfirmationV2)
+        and target.bound_document_id is not None
+        and any(
+            d.tax_evidence.document_id != target.bound_document_id for d in deductions
+        )
+    ):
+        return refuse("deduction_document_not_bound")
     if target.bound_document_id is not None:
         try:
             exposure = get_document_exposure(
@@ -439,6 +489,37 @@ def _pay_in_order(
             ceiling = outstanding
 
 
+def _accept_deduction(
+    db: Session,
+    scope: TenantScope,
+    wht: Any,
+    account_id: UUID,
+    cash: Any,
+    settlement_id: UUID,
+) -> Any:
+    return accept_withholding_discharge(
+        db,
+        scope=scope,
+        command=AcceptWithholdingDischarge(
+            scope=scope,
+            billing_account_id=account_id,
+            document_id=wht.tax_evidence.document_id,
+            idempotency_key=wht.idempotency_key,
+            source_owner=wht.source_owner,
+            source_ref=wht.source_ref,
+            claim_ref=wht.claim_ref,
+            claimed_amount=wht.claimed,
+            accepted_amount=wht.accepted,
+            tax_evidence=wht.tax_evidence,
+            authorization_actor_ref=wht.authorization_actor_ref,
+            authorization_evidence_ref=wht.authorization_evidence_ref,
+            occurred_at=cash.observed_at,
+            certificate_observation=wht.certificate_observation,
+            settlement_id=settlement_id,
+        ),
+    )
+
+
 def _execute(
     db: Session,
     scope: TenantScope,
@@ -484,31 +565,21 @@ def _execute(
 
     # Accepted deductions first: the whole-invoice test is made against what
     # remains owing after cash-equivalents (cash + accepted deductions).
-    discharge_ref: str | None = None
-    wht = command.withholding
-    if wht is not None:
-        discharge = accept_withholding_discharge(
-            db,
-            scope=scope,
-            command=AcceptWithholdingDischarge(
-                scope=scope,
-                billing_account_id=account_id,
-                document_id=wht.tax_evidence.document_id,
-                idempotency_key=wht.idempotency_key,
-                source_owner=wht.source_owner,
-                source_ref=wht.source_ref,
-                claim_ref=wht.claim_ref,
-                claimed_amount=wht.claimed,
-                accepted_amount=wht.accepted,
-                tax_evidence=wht.tax_evidence,
-                authorization_actor_ref=wht.authorization_actor_ref,
-                authorization_evidence_ref=wht.authorization_evidence_ref,
-                occurred_at=cash.observed_at,
-                certificate_observation=wht.certificate_observation,
-                settlement_id=settlement.id,
-            ),
-        )
-        discharge_ref = str(discharge.id)
+    discharge_refs: list[str] = []
+    for index, wht in enumerate(confirmation_deductions(command)):
+        try:
+            discharge = _accept_deduction(
+                db, scope, wht, account_id, cash, settlement.id
+            )
+        except Exception as exc:
+            # Name which deduction failed (position and component, no amounts);
+            # the owner's code and type are untouched.
+            exc.add_note(
+                f"deduction {index} component "
+                f"{getattr(wht.tax_evidence, 'component_ref', None)}"
+            )
+            raise
+        discharge_refs.append(str(discharge.id))
 
     def pay_whole(document_id: UUID, outstanding: Money) -> str | None:
         """Pay ``document_id`` whole from the balance, or leave it untouched.
@@ -569,7 +640,7 @@ def _execute(
                 lambda d: pay_whole(d.document_id, d.collectible_receivable),
                 skip=bound_id,
             )
-    return _Result(state, reason, settlement.id, discharge_ref, tuple(applied))
+    return _Result(state, reason, settlement.id, tuple(discharge_refs), tuple(applied))
 
 
 # --------------------------------------------------------------------------
@@ -587,7 +658,7 @@ def _insert(
     reason_code: str | None,
     account_id: UUID | None,
     settlement_id: UUID | None,
-    discharge_ref: str | None,
+    discharge_refs: tuple[str, ...],
     actor_ref: str | None,
 ) -> SettleInstance:
     row = SettleInstance(
@@ -603,7 +674,8 @@ def _insert(
         intent_id=intent_id,
         billing_account_id=account_id,
         settlement_id=settlement_id,
-        withholding_discharge_ref=discharge_ref,
+        withholding_discharge_ref=discharge_refs[0] if discharge_refs else None,
+        withholding_discharge_list_ref=list(discharge_refs) or None,
     )
     db.add(row)
     db.flush()
@@ -620,7 +692,7 @@ def _advance(
     reason_code: str | None,
     account_id: UUID | None,
     settlement_id: UUID | None,
-    discharge_ref: str | None,
+    discharge_refs: tuple[str, ...],
     actor_ref: str | None,
 ) -> None:
     if not settle_transition_allowed(SettleState(row.state), state):
@@ -630,7 +702,8 @@ def _advance(
     row.policy_version = policy_version
     row.billing_account_id = account_id
     row.settlement_id = settlement_id
-    row.withholding_discharge_ref = discharge_ref
+    row.withholding_discharge_ref = discharge_refs[0] if discharge_refs else None
+    row.withholding_discharge_list_ref = list(discharge_refs) or None
     row.actor_ref = actor_ref
     row.version = row.version + 1
     db.flush()
@@ -671,7 +744,7 @@ def settle_confirmation(
             reason_code=_check_code(prepared.code),
             account_id=None,
             settlement_id=None,
-            discharge_ref=None,
+            discharge_refs=(),
             actor_ref=None,
         )
         return _outcome(row, replayed=False)
@@ -689,7 +762,7 @@ def settle_confirmation(
         reason_code=result.reason_code,
         account_id=prepared.target.billing_account_id,
         settlement_id=result.settlement_id,
-        discharge_ref=result.discharge_ref,
+        discharge_refs=result.discharge_refs,
         actor_ref=None,
     )
     return _outcome(row, replayed=False, applied=result.applied)
@@ -724,7 +797,7 @@ def record_settle_refusal(
                 reason_code=code,
                 account_id=None,
                 settlement_id=None,
-                discharge_ref=None,
+                discharge_refs=(),
                 actor_ref=actor_ref or existing.actor_ref,
             )
             return _outcome(existing, replayed=False)
@@ -744,7 +817,7 @@ def record_settle_refusal(
         reason_code=code,
         account_id=None,
         settlement_id=None,
-        discharge_ref=None,
+        discharge_refs=(),
         actor_ref=actor_ref,
     )
     return _outcome(row, replayed=False)
@@ -795,7 +868,7 @@ def retry_settle(
             reason_code=_check_code(prepared.code),
             account_id=None,
             settlement_id=None,
-            discharge_ref=None,
+            discharge_refs=(),
             actor_ref=actor_ref,
         )
         return _outcome(row, replayed=False)
@@ -810,7 +883,7 @@ def retry_settle(
         reason_code=result.reason_code,
         account_id=prepared.target.billing_account_id,
         settlement_id=result.settlement_id,
-        discharge_ref=result.discharge_ref,
+        discharge_refs=result.discharge_refs,
         actor_ref=actor_ref,
     )
     return _outcome(row, replayed=False, applied=result.applied)
@@ -843,11 +916,110 @@ def apply_balance_on_invoice_issued(
     can be paid again. Faults raise ``BalancePassFailed``; Billing exceptions
     propagate unchanged. Both are retryable.
     """
+    return _balance_pass(
+        db,
+        scope=scope,
+        ports=ports,
+        trigger=request.document_id,
+        expected_account=None,
+        not_before=None,
+        ref_prefix=f"money-flows:settle:issue:{request.document_id}",
+    )
+
+
+def apply_balance_on_withholding_accepted(
+    db: Session,
+    *,
+    scope: TenantScope,
+    request: WithholdingAcceptedV1,
+    ports: SettlePorts,
+) -> BalanceAppliedOutcomeV1:
+    """C2b/MED-2: the balance pays whole open invoices once a deduction is accepted.
+
+    A withholding certificate that arrives after the cash is accepted by calling
+    Billing's ``accept_withholding_discharge`` directly (a Payments confirmation
+    cannot be zero), so no settle pass follows it. This runs the very same full
+    pass as ``apply_balance_on_invoice_issued`` (same lock-first order, same
+    gates, same whole-only, oldest-due-first, skip-misfit rule) for the account
+    of the discharged document. Nothing is wired here: the assembly routes
+    Billing's accepted fact to it.
+
+    Dating: each application is at the later of the usual dating rule (the
+    invoice issue dates and the newest cash since) and ``accepted_at``, the
+    instant Billing accepted the discharge, so a payment is never dated before
+    the deduction that made the invoice fit. Idempotent: the source reference
+    carries the discharge id and the document's Billing ``source_version``, a
+    replay finds the invoice already paid, and a refused draw leaves no record.
+    A discharge naming another account than the document's raises
+    ``BalancePassFailed("document_account_mismatch")``.
+    """
+    return _balance_pass(
+        db,
+        scope=scope,
+        ports=ports,
+        trigger=request.document_id,
+        expected_account=request.billing_account_id,
+        not_before=request.accepted_at,
+        ref_prefix=(
+            f"money-flows:settle:wht:{request.discharge_id}:{request.document_id}"
+        ),
+    )
+
+
+def apply_balance_on_withholding_released(
+    db: Session,
+    *,
+    scope: TenantScope,
+    request: WithholdingReleasedV1,
+    ports: SettlePorts,
+) -> BalanceAppliedOutcomeV1:
+    """Q-F: the balance pays whole open invoices once expected withholding is released.
+
+    A staff release (Billing's ``release_withholding_component``) raises the
+    cash the invoice requires, so a document that did not fit before may fit the
+    balance now. This runs the very same full pass as
+    ``apply_balance_on_invoice_issued`` (account lock first, same gates, whole
+    only, oldest due first, misfits skipped). The assembly calls it from
+    delivery of ``billing.withholding.released.v1`` in a NEW transaction, never
+    inside the release transaction; a failure raises and delivery retries. The
+    next deposit or invoice-issue pass would pay the invoice anyway.
+
+    Dating: the later of the usual dating rule and ``released_at``, so a
+    payment never predates the decision. The source reference carries the
+    release id and the document's Billing ``source_version`` and cannot collide
+    with the issue or deposit references. A release naming another account
+    than the document's raises ``BalancePassFailed("document_account_mismatch")``.
+    """
+    return _balance_pass(
+        db,
+        scope=scope,
+        ports=ports,
+        trigger=request.document_id,
+        expected_account=request.billing_account_id,
+        not_before=request.released_at,
+        ref_prefix=(
+            f"money-flows:settle:release:{request.release_id}:{request.document_id}"
+        ),
+    )
+
+
+def _balance_pass(
+    db: Session,
+    *,
+    scope: TenantScope,
+    ports: SettlePorts,
+    trigger: UUID,
+    expected_account: UUID | None,
+    not_before: datetime | None,
+    ref_prefix: str,
+) -> BalanceAppliedOutcomeV1:
+    """The one full balance pass behind invoice issue and an accepted deduction."""
     _tenant(scope)
-    trigger = request.document_id
     account_id = get_document_exposure(
         db, scope=scope, document_id=trigger
     ).billing_account_id  # immutable, so this read before the lock is safe
+    if expected_account is not None and expected_account != account_id:
+        raise BalancePassFailed("document_account_mismatch")
     availability = get_funding_availability(
         db, scope=scope, request=GetFundingAvailabilityV1(scope, account_id)
     )  # account lock
@@ -899,6 +1071,9 @@ def apply_balance_on_invoice_issued(
 
     def pay(document: OpenReceivableDocumentV1) -> str | None:
         base = bases[document.document_id]
+        occurred = base if newest_cash is None else max(base, newest_cash)
+        if not_before is not None:
+            occurred = max(occurred, not_before)
         try:
             apply_available_credit(
                 db,
@@ -907,9 +1082,9 @@ def apply_balance_on_invoice_issued(
                     billing_account_id=account_id,
                     document_id=document.document_id,
                     amount=document.collectible_receivable,
-                    occurred_at=base if newest_cash is None else max(base, newest_cash),
+                    occurred_at=occurred,
                     source_ref=(
-                        f"money-flows:settle:issue:{trigger}:{document.document_id}"
+                        f"{ref_prefix}:{document.document_id}"
                         f":{document.source_version}"
                     ),
                 ),
@@ -985,6 +1160,7 @@ def list_settle_attention(
 
 __all__ = [
     "apply_balance_on_invoice_issued",
+    "apply_balance_on_withholding_accepted",
     "CONFIRMATION_UNIQUE_CONSTRAINT",
     "REPLAY_CONSTRAINTS",
     "get_settle_instance",
