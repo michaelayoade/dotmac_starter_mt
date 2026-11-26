@@ -373,6 +373,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "fleet",
         "help_centre",
         "webhooks",
+        "notifications",
+        "reporting",
+        "custom_fields",
         # The two Cloud service-lifecycle owners (ADR-0030 amendment
         # 2026-08-23). `domains` takes `dn`, NOT the `do` its candidate tree
         # carried: `documents` holds `do` permanently and an allocation is
@@ -1044,8 +1047,10 @@ def test_parity_programme_d3_allocations_are_exactly_these() -> None:
     """Wave 0 (D3) reserved identity for the new STATEFUL modules only.
 
     Stateless D3 packages (settings-admin, access-admin, account, audit-viewer)
-    own no lineage and have no row; notifications, reporting and custom-fields
-    are held back until their statefulness is ruled.
+    own no lineage and have no row. notifications, reporting and custom_fields
+    were allocated by the R0 ruling (decision 2, 2026-11-25); moving the
+    existing custom-fields tables out of `public` is Wave 5 migration design,
+    not part of this allocation.
     """
     allocations = {
         owner.owner: (owner.db_schema, owner.prefix, owner.branch_label)
@@ -1064,6 +1069,9 @@ def test_parity_programme_d3_allocations_are_exactly_these() -> None:
         "fleet": ("mod_fleet", "fl", "fleet"),
         "help_centre": ("mod_helpctr", "hc", "help_centre"),
         "webhooks": ("mod_webhooks", "wh", "webhooks"),
+        "notifications": ("mod_notify", "nf", "notifications"),
+        "reporting": ("mod_reporting", "rp", "reporting"),
+        "custom_fields": ("mod_custfld", "cf", "custom_fields"),
     }
     assert {name: allocations[name] for name in expected} == expected
     for stateless in ("settings_admin", "access_admin", "account", "audit_viewer"):

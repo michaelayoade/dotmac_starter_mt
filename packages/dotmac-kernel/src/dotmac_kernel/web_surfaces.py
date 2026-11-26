@@ -1111,6 +1111,13 @@ class WebSurfaceRegistry:
                 for route in router.routes:
                     if not isinstance(route, APIRoute):
                         continue
+                    if not surface.legacy and route.path == "":
+                        raise RouteCompositionError(
+                            f"surface {surface.owner}.{surface.contribution.code} "
+                            f"route {route.name!r} has an empty path; v2 routes "
+                            "must start with '/' (an empty path boots under a "
+                            "prefix but fails on a '/' facet)"
+                        )
                     path = (
                         route.path
                         if surface.legacy

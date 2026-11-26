@@ -16,13 +16,14 @@ allocation (this ships with the next allocated release).
   cron cadence, max attempts, backoff, `concurrency='single'`. `ModuleRegistry`
   refuses a duplicate code within a module, a malformed cadence, and a handler
   that does not import or accept `(session, scope, run_context)`; it exposes
-  `jobs()` for the runner. Declaration only: the runner lands in
+  `jobs()` for the runner (`jobs(module_planes=...)` filters by installed planes). Declaration only: the runner lands in
   `dotmac-durable-timers`. Additive; contract-1 manifests are unchanged.
 - `ProductAssemblySpec.surface_selection` (`dotmac_kernel.surface_selection`:
   `SurfaceSelection`, `SELECT_ALL`, `SurfaceSelectionError`). An assembly lists
   the `(module, surface)` pairs and the module API-router sets it serves;
-  anything unlisted is not mounted, and an entry naming an absent module,
-  surface or router set refuses the boot. `None` (default) keeps today's
+  a module or surface that is not listed adds nothing (routes added inside a
+  listed one still mount; see the R0 note below), and an entry naming an absent
+  module, surface or router set refuses the boot. `None` (default) keeps today's
   behaviour and logs a warning; `SELECT_ALL` states "everything" explicitly. The
   reference assembly selects `SELECT_ALL`.
 - `create_app` now mounts contract-2 surfaces of a facet whose `url_prefix` is
@@ -33,13 +34,33 @@ allocation (this ships with the next allocated release).
   Template Studio in the reference tests.
 - Ledger rows (allocation only, no source) for the Wave 0 / D3 stateful modules
   `staff_loans`, `leave`, `leases`, `attendance`, `hr_lifecycle`, `performance`,
-  `recruitment`, `employee_relations`, `calendar`, `fleet`, `help_centre` and
-  `webhooks`; `MIGRATION_OWNER_LEDGER_DIGEST` restamped.
+  `recruitment`, `employee_relations`, `calendar`, `fleet`, `help_centre`,
+  `webhooks`, `notifications`, `reporting` and `custom_fields`; `MIGRATION_OWNER_LEDGER_DIGEST` restamped.
 - `public_exports.json` regenerated with `derive_public_exports`: adds
   `dotmac_kernel.jobs`, `dotmac_kernel.surface_selection` and
   `dotmac_kernel.testing.surface_conformance`, and the top-level names
   `JobSpec`, `JobSpecError`, `SELECT_ALL`, `SurfaceSelection`,
   `SurfaceSelectionError`.
+- R0 review fixes (2026-11-25). Selection granularity is stated honestly: a new
+  module or surface adds nothing, but a new route inside a selected module or
+  surface mounts, so each assembly commits a route-inventory snapshot test
+  (`dotmac_kernel.testing.route_inventory`); named router sets are a known later
+  item. Contract-1 `web_routers` mount only when `(module, "legacy")` is
+  selected. `create_app` refuses duplicate `(method, path)` routes and surface
+  routes under `/health`, `/docs`, `/redoc`, `/openapi.json`, `/static`, `/api`
+  (and `/platform` when enabled); an empty v2 route path is refused. The
+  conformance kit requires the kernel permission (or machine-scope) dependency by
+  function identity, checks `api_routers`, takes `public_routes=`, and no longer
+  exports `AUTH_GUARD_NAMES`. A PLATFORM `JobSpec` requires declared platform
+  tables, `ModuleRegistry.jobs(module_planes=...)` filters by installed planes,
+  and handlers must be plain synchronous functions in the declaring module's own
+  package (not coroutines, classes, the kernel, the stdlib or another module).
+  Ledger rows added for `notifications`, `reporting` and `custom_fields`.
+- NOTE: `surface_selection=None` (pre-selection behaviour) is accepted for the
+  integration merge only. It becomes a fatal startup error in production before
+  the Wave 0 kernel release is tagged, and refuses everywhere at the next
+  contract generation; every `ProductAssemblySpec` consumer adds an explicit
+  selection in the PR that bumps its kernel pin.
 - `dotmac_kernel.delivery_providers` publishes the `email.send.v1` payload
   contract for the delivery domain: `EMAIL_SEND_CAPABILITY_ID` and
   `EMAIL_SEND_COMMAND_SCHEMA` (one rendered message: `dispatch_id`, `address`,

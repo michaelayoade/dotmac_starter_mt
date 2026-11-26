@@ -26,11 +26,13 @@ import logging
 import re
 from collections.abc import Mapping, Sequence, Set
 from contextlib import asynccontextmanager
+from typing import Final
 
 import fastapi
 import starlette
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 
 from dotmac_kernel.api_documentation import (
@@ -125,6 +127,7 @@ from dotmac_kernel.web_surfaces import (
     WebFacetMount,
     WebRouteRef,
     WebSurfaceRegistry,
+    _route_shape,
 )
 
 logger = logging.getLogger(__name__)
@@ -531,6 +534,62 @@ def _install_profile_defaults(defaults: Mapping[str, object]) -> None:
     install_setting_defaults(defaults)
 
 
+_RESERVED_SURFACE_ROOTS: Final[tuple[str, ...]] = (
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/static",
+    "/api",
+)
+
+
+def _validate_route_collisions(app: FastAPI, *, platform_enabled: bool) -> None:
+    """Refuse silent shadowing across the whole composed app.
+
+    Two checks, both after every mount: (1) no two routes share a
+    ``(method, path shape)`` - Starlette resolves such twins by first match, so
+    one silently shadows the other; (2) no composed browser surface route sits
+    under a reserved root (health, docs, static, ``/api``, and ``/platform``
+    when the platform surface is enabled). Under a ``/`` facet the facet prefix
+    no longer shields module routes from these.
+    """
+    reserved = _RESERVED_SURFACE_ROOTS + (("/platform",) if platform_enabled else ())
+    seen: dict[tuple[str, str], str] = {}
+    problems: list[str] = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        shape = _route_shape(route.path)
+        for method in sorted(route.methods or set()):
+            key = (method, shape)
+            if key in seen:
+                problems.append(
+                    f"{method} {route.path} is mounted twice ({seen[key]!r} and "
+                    f"{route.name!r})"
+                )
+            else:
+                seen[key] = route.name
+        # Legacy (contract-1) and kernel built-in surfaces predate the rule.
+        if (
+            route.name.startswith("web:")
+            and ":legacy:" not in route.name
+            and ":kernel_platform:" not in route.name
+            and any(
+                route.path == root or route.path.startswith(f"{root}/")
+                for root in reserved
+            )
+        ):
+            problems.append(
+                f"surface route {route.path} ({route.name!r}) is under a "
+                "reserved root"
+            )
+    if problems:
+        raise ValueError(
+            "route composition refused: " + "; ".join(sorted(set(problems)))
+        )
+
+
 def create_app(spec: ProductAssemblySpec) -> FastAPI:
     """Compose a FastAPI application for `spec`. Behavior is identical to the
     pre-Task-3 `app/main.py` when given the reference spec; the spec's
@@ -610,6 +669,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             )
         enabled_manifests = spec.surface_selection.apply(enabled_manifests)
     else:
+        # TODO(R0 decision 1): `None` is acceptable for the integration merge
+        # only. Before the Wave 0 kernel release is tagged it follows the
+        # environment policy (warning in development, FATAL in production), and
+        # at the next contract generation it refuses everywhere. Every
+        # ProductAssemblySpec consumer adds an explicit selection in the PR
+        # that bumps its kernel pin.
         logger.warning(
             "ProductAssemblySpec %r sets no surface_selection: every enabled "
             "module's API routers and web surfaces are mounted (compatibility "
@@ -953,6 +1018,8 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             enabled_modules=frozenset(manifest.code for manifest in enabled_manifests),
             stylesheets=tuple(spec.stylesheets),
         )
+
+    _validate_route_collisions(app, platform_enabled=spec.platform_surface_enabled)
 
     # Inspect the effective, post-include dependency tree (including lazy
     # FastAPI route contexts). An earlier parent/global yield dependency would
