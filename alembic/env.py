@@ -94,12 +94,19 @@ def run_migrations_online() -> None:
             # A stateless module has no migration to verify what it CALLS, so
             # prove each enabled module's `runtime_requires` against the live
             # database here: a deploy refuses a database that lacks them.
-            require_runtime_prerequisites(
-                connection,
-                ModuleRegistry(assembly.modules).enabled_order(
-                    set(assembly.disabled_modules)
-                ),
-            )
+            #
+            # Only when the run targets the heads: a partial upgrade (a test
+            # or an operator stopping at a named revision) legitimately leaves
+            # the tables a stateless module calls not yet created, and refusing
+            # there would fail a migration that is correct so far. A deploy
+            # always runs `upgrade heads`.
+            if context.get_revision_argument() in ("head", "heads"):
+                require_runtime_prerequisites(
+                    connection,
+                    ModuleRegistry(assembly.modules).enabled_order(
+                        set(assembly.disabled_modules)
+                    ),
+                )
 
 
 if context.is_offline_mode():

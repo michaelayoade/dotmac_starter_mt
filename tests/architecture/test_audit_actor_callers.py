@@ -159,8 +159,9 @@ def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     # caller (the relay, not a person, decided).
     # dotmac-access-admin adds two literal-`user` callers: the service's
     # `_audit` helper and the credential-provisioned port, each naming the
-    # authenticated Party as both party and id.
-    assert len(calls) == 33, "the ratchet must change when the caller set changes"
+    # authenticated Party as both party and id. Removing the old rbac role and
+    # grant writers (two API, two web) takes four away: 31 + 2 - 4.
+    assert len(calls) == 29, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"
