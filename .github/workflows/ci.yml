@@ -799,6 +799,9 @@ jobs:
       - run: bash scripts/consumer_boot_check.sh
 
   erp-like-composition-boot:
+    # One fixed, non-matrix context name, runs on every pull request (no paths
+    # or branch filter), so it can later be a required check on main.
+    name: erp-like-composition-boot
     runs-on: ubuntu-latest
     # Wave-end composition proof (Starter parity programme 4.3 item 3). Boots an
     # assembly composed like ERP v2 (staff_admin facet at `/`, the ERP module

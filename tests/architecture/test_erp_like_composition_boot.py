@@ -7,17 +7,19 @@ conformance kit over a packaged surface inside that composition.  It proves
 wave-end composition on the integration branch before any branch-to-main squash
 or ERP pin bump.  No database, no network: `create_app` is built, never served.
 
-The module set mirrors ERP v2's ``assembly.py`` (the product-local features and
-readiness are not Starter code and are represented by one probe module that
-declares the admission permission).  Template Studio is added as the packaged
-web surface under test: ERP v2 does not pin it yet, and this is exactly the
-composition a Starter surface module will meet there.
+The module set mirrors ERP v2's ``assembly.py`` as of ERP v2 ``main`` commit
+``0c9dacf`` (a hand copy: re-check it when ERP v2 adds or drops a module).  The
+product-local features and readiness are not Starter code and are represented
+by one probe module that declares the admission permission.  Template Studio
+is added as the packaged web surface under test: ERP v2 does not pin it yet,
+and this is exactly the composition a Starter surface module will meet there.
 """
 
 from __future__ import annotations
 
 import functools
 
+import pytest
 from dotmac_kernel import (
     SELECT_ALL,
     ModuleManifest,
@@ -257,3 +259,36 @@ def test_surface_conformance_holds_inside_the_erp_like_composition() -> None:
 
     assert report.routes_checked > 0
     assert report.templates_checked > 0
+
+
+def test_a_root_facet_surface_cannot_shadow_a_product_route() -> None:
+    """On a `/` facet a packaged route may not take `/health` (R0 F4)."""
+    import dataclasses
+
+    from dotmac_kernel import WebSurfaceContribution
+    from fastapi import APIRouter
+
+    router = APIRouter()
+
+    @router.get("/health", name="shadow")
+    def shadow() -> dict[str, bool]:
+        return {"ok": True}
+
+    surface = WebSurfaceContribution(
+        code="shadow",
+        facet="staff_admin",
+        routers=(router,),
+        supported_ui_contract_versions=frozenset({1}),
+    )
+    hostile = dataclasses.replace(_template_studio(), web_surfaces=(surface,))
+    modules = (_ERP_LOCAL_PROBE, *_erp_modules(), hostile)
+    spec = dataclasses.replace(
+        _erp_like_spec(),
+        modules=modules,
+        surface_selection=SurfaceSelection(
+            surfaces={(hostile.code, "shadow")},
+            api_routers={m.code for m in modules if m.api_routers},
+        ),
+    )
+    with pytest.raises(Exception, match="reserved root|mounted twice|claimed by"):
+        create_app(spec)
