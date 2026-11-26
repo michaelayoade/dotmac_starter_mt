@@ -14,7 +14,7 @@ Create Date: 2026-11-25
 from __future__ import annotations
 
 from dotmac_kernel.migrations.verify import require_prerequisites
-from dotmac_kernel.prerequisites import OUTBOX_TYPED_CLAIM_V1, resolve_depends_on
+from dotmac_kernel.prerequisites import resolve_depends_on
 
 from alembic import op
 
@@ -23,7 +23,7 @@ down_revision = "dt_0002_job_states"
 branch_labels = None
 
 MODULE_CODE = "durable_timers"
-COMMON_REQUIRES = (OUTBOX_TYPED_CLAIM_V1.name,)
+COMMON_REQUIRES = ("outbox_typed_claim.v1",)
 TENANT_REQUIRES: tuple[str, ...] = ()
 PLATFORM_REQUIRES: tuple[str, ...] = ()
 
