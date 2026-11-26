@@ -50,6 +50,7 @@ from dotmac_money_flows import (
     RatedChargeKeyV1,
     RatedChargeV1,
     SettleConfirmationV1,
+    SettleConfirmationV2,
     SettledFundsV1,
     SettlementTargetV1,
     SettleOutcomeV1,
@@ -384,6 +385,14 @@ class Payment:
         }
         values.update(overrides)
         return SettleConfirmationV1(**values)
+
+    def command_v2(self, **overrides) -> SettleConfirmationV2:
+        values = {
+            "confirmation_id": self.confirmation_id,
+            "intent_reference": self.intent_reference,
+        }
+        values.update(overrides)
+        return SettleConfirmationV2(**values)
 
 
 def seed_payment(
