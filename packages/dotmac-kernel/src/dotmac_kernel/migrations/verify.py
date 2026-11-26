@@ -1756,12 +1756,14 @@ def verify_outbox_typed_claim(bind: Connection) -> None:
                               p.proacl, acldefault(CAST('f' AS "char"), p.proowner))) a
                         WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'),
                    COALESCE((
-                       SELECT string_agg(r.rolname::text, ', ' ORDER BY r.rolname)
-                         FROM pg_roles r
-                        WHERE NOT r.rolsuper
-                          AND r.oid <> p.proowner
-                          AND r.rolname <> CAST(:dispatcher AS name)
-                          AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+                       SELECT string_agg(g.rolname::text, ', ' ORDER BY g.rolname)
+                         FROM aclexplode(COALESCE(
+                                  p.proacl,
+                                  acldefault(CAST('f' AS "char"), p.proowner))) a
+                         JOIN pg_roles g ON g.oid = a.grantee
+                        WHERE a.privilege_type = 'EXECUTE'
+                          AND a.grantee <> p.proowner
+                          AND g.rolname <> CAST(:dispatcher AS name)
                    ), '')
               FROM pg_proc p
              WHERE p.oid = to_regprocedure(CAST(:signature AS text))
@@ -1785,8 +1787,8 @@ def verify_outbox_typed_claim(bind: Connection) -> None:
     if others:
         _fail(
             name,
-            f"EXECUTE on {qualified} reaches role(s) other than outbox_dispatcher "
-            f"and its owner (direct or inherited): {others}",
+            f"EXECUTE on {qualified} is DIRECTLY granted to role(s) other than outbox_dispatcher "
+            f"and its owner: {others}",
         )
 
 

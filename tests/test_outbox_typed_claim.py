@@ -294,3 +294,44 @@ def test_the_binding_is_true_exactly_at_0036(
             verify_outbox_typed_claim(conn)
     finally:
         engine.dispose()
+
+
+def test_a_login_role_that_is_a_member_of_the_dispatcher_passes(
+    scratch_db: str,  # noqa: F811
+    bound,
+) -> None:
+    """Only DIRECT grantees count: a runner login that inherits EXECUTE through
+    membership of `outbox_dispatcher` (or of the owner) must not refuse a deploy."""
+    from sqlalchemy.engine import make_url
+
+    from tests.test_migration_split_rehearsals import _superuser_url, _url_for
+
+    _upgrade(scratch_db, "0036_typed_claim_grant")
+    engine = create_engine(_url_for(_superuser_url(), make_url(scratch_db).database))
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("CREATE ROLE zz_typed_runner LOGIN"))
+            conn.execute(text("GRANT outbox_dispatcher TO zz_typed_runner"))
+            conn.execute(text("CREATE ROLE zz_typed_migrator LOGIN"))
+            conn.execute(text("GRANT app_admin TO zz_typed_migrator"))
+            try:
+                assert conn.execute(
+                    text(
+                        "SELECT has_function_privilege("
+                        "'zz_typed_runner', :s, 'EXECUTE')"
+                    ),
+                    {"s": SIG},
+                ).scalar()
+                verify_outbox_typed_claim(conn)
+                # A DIRECT grant to a login role is still refused.
+                conn.execute(
+                    text(f"GRANT EXECUTE ON FUNCTION {SIG} TO zz_typed_migrator")
+                )
+                with pytest.raises(
+                    PrerequisiteNotSatisfiedError, match="zz_typed_migrator"
+                ):
+                    verify_outbox_typed_claim(conn)
+            finally:
+                conn.rollback()
+    finally:
+        engine.dispose()
