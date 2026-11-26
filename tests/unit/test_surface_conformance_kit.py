@@ -107,7 +107,7 @@ def test_a_conforming_module_passes_under_both_prefixes(tmp_path: Path) -> None:
 
 def test_unguarded_route_is_reported(tmp_path: Path) -> None:
     report = check_surface_conformance(_module(tmp_path, guarded=False))
-    assert any("no permission or authentication guard" in v for v in report.violations)
+    assert any("no kernel permission guard" in v for v in report.violations)
 
 
 def test_absolute_url_in_a_template_is_reported(tmp_path: Path) -> None:
