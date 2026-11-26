@@ -72,11 +72,6 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-billing": {
-      "declared": "0.1.0a14",
-      "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a13 is the last published and tagged version (dotmac-billing-v0.1.0a13) and its released bi_0001 to bi_0019 bytes are unchanged. 0.1.0a14 adds bi_0020_withholding_releases (tenant plane, append-only), permission billing.withholding.release (default admin), event billing.withholding.released.v1 and the release and undo commands (Q-F, design approved by Michael 2026-11-25), and replaces cap_withholding_component to count releases. Hosted acceptance, authorized publication and install-back verification precede any adopter pin; this row authorizes no tag, adoption or production migration. Remove only after a verified 0.1.0a14 publication, never by editing the declared version down.",
-      "state": "declared-unpublished"
-    },
     "dotmac-brand-profiles": {
       "declared": "0.1.0a1+dev",
       "reason": "SOURCE PREPARATION ONLY; UNPUBLISHED AND UNALLOCATED. The previously released 0.1.0a1 remains immutable. This local PEP 440 development marker prevents source preparation from allocating a bare successor identity while the approved tagline addition is completed. Remove this row only after a separately authorized successor allocation and verified publication record; this entry grants no release, adoption, deployment, or flip authority.",
