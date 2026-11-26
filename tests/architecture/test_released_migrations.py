@@ -9004,6 +9004,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-money-flows ──
+    "dotmac-money-flows-v0.1.0a3": (
+        "dotmac-money-flows",
+        "7e6ef54c9bab444db6327485f6997f254b152bdb",
+        {
+            "mf_0001_settle_instances.py": (
+                "fa10195f884f7e6d7404e03af52d90003d24b91b7813f6c93ee1ea0c2f3ea03e"
+            ),
+            "mf_0002_funded_charge_instances.py": (
+                "f33b75e1ce84a3cfea69bd535067ea640dc614da4d61a575eb6c89c2f327842e"
+            ),
+            "mf_0003_settle_discharge_list.py": (
+                "9a9da4c71ced5f586806f965936113616701f5aa7caaba5a8aa0bf798b120a88"
+            ),
+        },
+    ),
     "dotmac-money-flows-v0.1.0a2": (
         "dotmac-money-flows",
         "d26951c1452567767fc977e0f76929818efc1ceb",
@@ -9293,7 +9308,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-learning": frozenset(),
     # `mf_0003` adds the nullable JSON list of discharge references (C2b);
     # still editable until `dotmac-money-flows` 0.1.0a3 is tagged.
-    "dotmac-money-flows": frozenset({"mf_0003_settle_discharge_list.py"}),
+    "dotmac-money-flows": frozenset(),
 }
 
 
