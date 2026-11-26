@@ -35,7 +35,7 @@ what `dotmac_kernel.prerequisites` refuses to do.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
@@ -1751,28 +1751,27 @@ def verify_outbox_typed_claim(bind: Connection) -> None:
             SELECT p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner),
                    has_function_privilege(
                        CAST(:dispatcher AS name), p.oid, 'EXECUTE'),
-                   has_function_privilege(
-                       CAST(:app AS name), p.oid, 'EXECUTE'),
-                   has_function_privilege(
-                       CAST(:platform AS name), p.oid, 'EXECUTE'),
                    EXISTS (
                        SELECT 1 FROM aclexplode(COALESCE(
                               p.proacl, acldefault(CAST('f' AS "char"), p.proowner))) a
-                        WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE')
+                        WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'),
+                   COALESCE((
+                       SELECT string_agg(r.rolname::text, ', ' ORDER BY r.rolname)
+                         FROM pg_roles r
+                        WHERE NOT r.rolsuper
+                          AND r.oid <> p.proowner
+                          AND r.rolname <> CAST(:dispatcher AS name)
+                          AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+                   ), '')
               FROM pg_proc p
              WHERE p.oid = to_regprocedure(CAST(:signature AS text))
             """
         ),
-        {
-            "dispatcher": "outbox_dispatcher",
-            "app": DEFAULT_APP_ROLE,
-            "platform": "platform_api",
-            "signature": qualified,
-        },
+        {"dispatcher": "outbox_dispatcher", "signature": qualified},
     ).one_or_none()
     if facts is None:
         _fail(name, f"{qualified} does not exist")
-    secdef, proconfig, owner, dispatcher, app_user, platform, public = facts
+    secdef, proconfig, owner, dispatcher, public, others = facts
     if not bool(secdef):
         _fail(name, f"{qualified} is not SECURITY DEFINER")
     if not _search_path_is_empty(proconfig):
@@ -1781,11 +1780,13 @@ def verify_outbox_typed_claim(bind: Connection) -> None:
         _fail(name, f"{qualified} is owned by {str(owner)!r}, expected app_admin")
     if not bool(dispatcher):
         _fail(name, f"outbox_dispatcher cannot EXECUTE {qualified}")
-    if bool(public) or bool(app_user) or bool(platform):
+    if bool(public):
+        _fail(name, f"EXECUTE on {qualified} is granted to PUBLIC")
+    if others:
         _fail(
             name,
-            f"EXECUTE on {qualified} reaches a role other than outbox_dispatcher "
-            "(PUBLIC, app_user or platform_api)",
+            f"EXECUTE on {qualified} reaches role(s) other than outbox_dispatcher "
+            f"and its owner (direct or inherited): {others}",
         )
 
 
@@ -1902,6 +1903,30 @@ def require_runtime_prerequisites(bind: Connection, manifests: Sequence[Any]) ->
         require_prerequisites(bind, names)
 
 
+def require_runtime_prerequisites_at_heads(
+    bind: Connection,
+    manifests: Sequence[Any],
+    *,
+    current_heads: Iterable[str],
+    script_heads: Iterable[str],
+) -> bool:
+    """`require_runtime_prerequisites`, but only once the database is COMPLETE.
+
+    A partial upgrade (to a named predecessor revision, a downgrade, a scratch
+    database built to an earlier point) legitimately lacks storage a later
+    revision creates, so proving a stateless module's effects there would fail
+    for the wrong reason. The proof runs only when the database is at every head
+    of the composed graph after the migration; returns whether it ran. Call it
+    from the migration environment with `MigrationContext.get_current_heads()`
+    and `context.get_head_revisions()`.
+    """
+    current = set(current_heads)
+    if not current or current != set(script_heads):
+        return False
+    require_runtime_prerequisites(bind, manifests)
+    return True
+
+
 __all__ = [
     "PrerequisiteNotSatisfiedError",
     "PrerequisiteVerifierMissingError",
@@ -1910,6 +1935,7 @@ __all__ = [
     "registered_verifiers",
     "require_prerequisites",
     "require_runtime_prerequisites",
+    "require_runtime_prerequisites_at_heads",
     "role_violations",
     "verify_idempotency_ledger",
     "verify_identity_admin",

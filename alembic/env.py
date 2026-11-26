@@ -29,7 +29,7 @@ from dotmac_kernel.migrations.configuration import (
     select_migration_database_url,
     set_alembic_database_url,
 )
-from dotmac_kernel.migrations.verify import require_runtime_prerequisites
+from dotmac_kernel.migrations.verify import require_runtime_prerequisites_at_heads
 from dotmac_kernel.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
     Base,
 )
@@ -94,19 +94,17 @@ def run_migrations_online() -> None:
             # A stateless module has no migration to verify what it CALLS, so
             # prove each enabled module's `runtime_requires` against the live
             # database here: a deploy refuses a database that lacks them.
-            #
-            # Only when the run targets the heads: a partial upgrade (a test
-            # or an operator stopping at a named revision) legitimately leaves
-            # the tables a stateless module calls not yet created, and refusing
-            # there would fail a migration that is correct so far. A deploy
-            # always runs `upgrade heads`.
-            if context.get_revision_argument() in ("head", "heads"):
-                require_runtime_prerequisites(
-                    connection,
-                    ModuleRegistry(assembly.modules).enabled_order(
-                        set(assembly.disabled_modules)
-                    ),
-                )
+            # Only once the database is at every head: a partial upgrade (to a
+            # named predecessor, a scratch database) legitimately lacks storage a
+            # later revision creates.
+            require_runtime_prerequisites_at_heads(
+                connection,
+                ModuleRegistry(assembly.modules).enabled_order(
+                    set(assembly.disabled_modules)
+                ),
+                current_heads=context.get_context().get_current_heads(),
+                script_heads=context.get_head_revisions(),
+            )
 
 
 if context.is_offline_mode():

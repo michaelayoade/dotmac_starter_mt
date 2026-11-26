@@ -230,6 +230,8 @@ def test_the_verifier_accepts_the_migrated_catalogue(admin_session: Session) -> 
         f"GRANT EXECUTE ON FUNCTION {SIG} TO app_user",
         f"GRANT EXECUTE ON FUNCTION {SIG} TO platform_api",
         f"GRANT EXECUTE ON FUNCTION {SIG} TO PUBLIC",
+        # ANY other role, not just the three named ones.
+        f"GRANT EXECUTE ON FUNCTION {SIG} TO platform_outbox_dispatcher",
         f"REVOKE EXECUTE ON FUNCTION {SIG} FROM outbox_dispatcher",
         f"ALTER FUNCTION {SIG} RESET search_path",
         f"ALTER FUNCTION {SIG} SECURITY INVOKER",
