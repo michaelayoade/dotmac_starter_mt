@@ -1111,7 +1111,13 @@ class WebSurfaceRegistry:
                 for route in router.routes:
                     if not isinstance(route, APIRoute):
                         continue
-                    if not surface.legacy and route.path == "":
+                    # The kernel's own platform surface predates this rule and is
+                    # only ever mounted under its non-root `/platform` prefix.
+                    if (
+                        not surface.legacy
+                        and surface.owner != "kernel_platform"
+                        and route.path == ""
+                    ):
                         raise RouteCompositionError(
                             f"surface {surface.owner}.{surface.contribution.code} "
                             f"route {route.name!r} has an empty path; v2 routes "
