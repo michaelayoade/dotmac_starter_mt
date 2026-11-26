@@ -507,6 +507,7 @@ def test_genuine_bi0005_upgrade_preserves_all_history_and_backfills_exact_identi
             "settlement_earmark_effects",
             "billing_account_terms_versions",
             "billing_terms_defaults_versions",
+            "withholding_releases",
         }
         names = tuple(
             name for name in names if name.removeprefix("platform_") not in later_tables

@@ -29,7 +29,13 @@ Source only; one additive migration. a2 is released and tagged.
   invoices oldest first, misfits skipped), dated at the later of the usual dating
   rule and `accepted_at`, idempotent on the discharge id. Exposed only: wiring it to
   Billing's accepted fact is assembly work (W04).
-- No Billing change.
+- Q-F: `apply_balance_on_withholding_released(WithholdingReleasedV1)` runs the same
+  full pass after Billing releases an expected-withholding component, dated at the
+  later of the usual rule and `released_at` (the release instant), with source
+  references `money-flows:settle:release:{release_id}:...`. The assembly calls it from
+  delivery of `billing.withholding.released.v1` in a new transaction. Requires
+  `dotmac-billing >=0.1.0a14`. No allowlist change.
+- Otherwise no Billing change.
 
 ## 0.1.0a2 — released, tag `dotmac-money-flows-v0.1.0a2` (GAP-4: the X1 receivables reader)
 

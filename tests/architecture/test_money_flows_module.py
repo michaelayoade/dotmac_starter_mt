@@ -182,6 +182,9 @@ F5_REVERSAL_CALLERS: frozenset[str] = frozenset()
 CREDIT_DRAW_CALLERS: frozenset[str] = frozenset({"settle.py", "funded_charge.py"})
 # D2: only FundedCharge issues a rated invoice (the prepaid charge it funds).
 ISSUE_CALLERS: frozenset[str] = frozenset({"funded_charge.py"})
+# Q-F: releasing an expected withholding is a staff Tax correction on Billing,
+# never a flow. No money-flows module may call it.
+WITHHOLDING_RELEASE_CALLERS: frozenset[str] = frozenset()
 RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "apply_available_credit": CREDIT_DRAW_CALLERS,
     "ApplyAvailableCreditCommand": CREDIT_DRAW_CALLERS,
@@ -193,6 +196,8 @@ RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "reverse_cash_credit_draw": F5_REVERSAL_CALLERS,
     "reverse_non_cash_credit_application": F5_REVERSAL_CALLERS,
     "reverse_withholding_discharge": F5_REVERSAL_CALLERS,
+    "release_withholding_component": WITHHOLDING_RELEASE_CALLERS,
+    "reverse_withholding_release": WITHHOLDING_RELEASE_CALLERS,
 }
 FORBIDDEN_BUILTINS = frozenset(
     {
@@ -846,9 +851,11 @@ def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:
         "SettlementTargetV1",
         "StartFundedChargeV1",
         "WithholdingAcceptedV1",
+        "WithholdingReleasedV1",
         "__version__",
         "apply_balance_on_invoice_issued",
         "apply_balance_on_withholding_accepted",
+        "apply_balance_on_withholding_released",
         "charge_ref_for",
         "get_funded_charge_instance",
         "get_settle_instance",
