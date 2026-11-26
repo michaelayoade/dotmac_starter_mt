@@ -3799,8 +3799,24 @@ def _undischarged_frozen_withholding(
         ).scalar_one()
     )
     return max(
-        frozen - _document_withheld(db, scope=scope, document_id=document_id),
+        frozen
+        - _document_withheld(db, scope=scope, document_id=document_id)
+        - _document_released(db, scope=scope, document_id=document_id),
         Decimal(0),
+    )
+
+
+def _document_released(db: Session, *, scope: Scope, document_id: UUID) -> Decimal:
+    """Net staff-released withholding of the document (Q-F); tenant plane only."""
+
+    if not isinstance(scope, TenantScope):
+        return Decimal(0)
+    return Decimal(
+        db.execute(
+            select(func.coalesce(func.sum(models.WithholdingRelease.amount_delta), 0))
+            .where(models.WithholdingRelease.document_id == document_id)
+            .where(models.WithholdingRelease.tenant_id == scope.tenant_id)
+        ).scalar_one()
     )
 
 
@@ -3869,6 +3885,17 @@ def _require_frozen_withholding(
             )
         ).scalar_one()
     )
+    if isinstance(scope, TenantScope):
+        # A released component cannot be discharged: releases use the cap too.
+        used += Decimal(
+            db.execute(
+                select(
+                    func.coalesce(func.sum(models.WithholdingRelease.amount_delta), 0)
+                )
+                .where(models.WithholdingRelease.component_id == component.id)
+                .where(models.WithholdingRelease.tenant_id == scope.tenant_id)
+            ).scalar_one()
+        )
     if used + command.accepted_amount.amount > Decimal(component.tax_amount):
         raise BillingRuleViolation(
             "withholding_exceeds_frozen_component",

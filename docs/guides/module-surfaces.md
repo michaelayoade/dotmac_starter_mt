@@ -21,7 +21,7 @@
 
 1. A module never names a prefix, host, brand or another module's facet. Routes are facet-relative. Navigation uses route names.
 2. Modules never import each other. Cross-module flows use typed contracts, outbox events, or structural `Protocol` ports bound by the assembly's `providers` mapping.
-3. **Selection is the safety control.** A new module release adds nothing to an assembly that has set a selection. The assembly opts in.
+3. **Selection is the safety control, at module and surface granularity.** A new module, or a new surface, adds nothing to an assembly that has set a selection; the assembly opts in. A new route inside a module or surface the assembly already selected DOES mount, so every assembly commits a route-inventory snapshot test (below). Named router sets are a later contract-generation item and a known limitation.
 4. A non-web channel (e-mail, PDF, mobile) gets its own contract, never a facet.
 5. Contract 1 (`web_routers`, `nav`) is frozen. No new contract-1 surfaces. A contract-1 manifest still loads and cannot declare `jobs` or `web_surfaces`.
 
@@ -46,6 +46,8 @@ jobs = (
 - The handler is `handler(session, scope, run_context) -> JobOutcome`. **It must be idempotent**: delivery is at-least-once and a lease can expire mid-run.
 - `ModuleRegistry` refuses, at boot: a duplicate job code in one module, a malformed cadence, an unknown plane, and a handler that does not import or does not accept three positional arguments.
 - `concurrency` is `"single"`, the only mode: one run of a job at a time per scope.
+- The plane must be real: a `platform` job needs declared `platform_tables`, a `tenant` job needs tenant tables (or a stateless module). `ModuleRegistry.jobs(module_planes=...)` returns only jobs whose plane the assembly installs.
+- The handler must be a plain synchronous function (no coroutines, classes or builtins) defined in your own package, never the kernel, the standard library or another module.
 - Jobs require module contract 2. The runner is a separate process and is not part of the kernel.
 
 ## Selecting surfaces (assemblies)
@@ -66,7 +68,23 @@ ProductAssemblySpec(
 - With a selection set the assembly is **fail-closed**: anything not named is not mounted. A surface that targets a facet the assembly does not declare stays inert until selected.
 - An entry naming an absent module, surface, or a module with no API routers refuses the boot.
 - `None` (the default) is the compatibility mode: every enabled module's API routers and surfaces are mounted, and `create_app` logs a warning. Declare a selection. The default will become a refusal in a later contract generation.
-- Contract-1 `web_routers` are outside the selection (frozen).
+- Contract-1 `web_routers` mount only when `(module, "legacy")` is selected, valid only for a module that has `web_routers`.
+- `None` becomes a fatal startup error in production before the Wave 0 kernel release is tagged. Add the selection in the PR that bumps your kernel pin.
+
+### Commit a route-inventory snapshot
+
+```python
+from dotmac_kernel.testing.route_inventory import route_inventory
+
+def test_mounted_routes_match_the_committed_snapshot() -> None:
+    assert [list(r) for r in route_inventory(app)] == json.loads(SNAPSHOT.read_text())
+```
+
+A pin bump that adds, removes or renames a mounted route then fails in the pin PR.
+
+### Composition checks `create_app` makes
+
+`create_app` refuses two routes with the same method and path shape, a composed browser surface route under `/health`, `/docs`, `/redoc`, `/openapi.json`, `/static` or `/api` (and `/platform` when enabled), and a v2 route with an empty path. On a `/` facet the facet prefix no longer shields module routes from these.
 
 ## Prove it with the conformance kit
 
@@ -81,9 +99,9 @@ def test_my_surfaces_conform() -> None:
 The kit boots the module under a `/admin` facet and a `/` facet and checks:
 
 - it boots under both, with identical relative routes;
-- every route has a permission or authentication-tier guard;
+- every web route and every `api_routers` route carries the kernel permission dependency (matched by function identity, not by name; machine-scope for API routes). Name genuinely public entry routes (login, reset) with `public_routes=(WebRouteRef(...),)`; they must be declared facet `entry_routes`;
 - every mutation carries CSRF protection;
-- no template hard-codes an absolute URL (`/static/` is allowed);
+- no template hard-codes an absolute URL in `href`, `action`, `formaction`, `src`, `srcset`, `poster` or `hx-*` (including `//host`; `/static/` is allowed). The kit reads template files only: an unqualified `TemplateResponse("x.html")` or a path string in Python is not scanned;
 - every `WebNavItem` names a route the surface owns;
 - template namespace isolation: every package template resolves only through `<namespace>/` and does not reference its own files un-namespaced.
 

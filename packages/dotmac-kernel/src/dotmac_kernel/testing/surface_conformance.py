@@ -8,12 +8,18 @@ prefix-agnostic surface:
   capability refusal);
 * **identical relative routes** under both prefixes (no prefix was authored
   into a route path);
-* **a guard on every route** - a ``require_permission`` stamp or an
-  authentication-tier ``require_*`` dependency (hiding is never authorization);
+* **a permission guard on every route** - the kernel's own permission
+  dependency (``PERMISSION_CODE_ATTR`` stamp, matched by function identity, not
+  by name), or for ``api_routers`` the kernel machine-scope dependency; hiding
+  is never authorization.  Genuinely public entry routes (login, reset) are
+  named in ``public_routes=`` and must be the facet's declared ``entry_routes``;
 * **CSRF on every mutation** (POST/PUT/PATCH/DELETE carry the kernel CSRF
   dependency);
-* **no absolute paths in templates** (``href``/``action``/``src``/``hx-*``
-  attributes must come from named routes; ``/static/`` is allowed);
+* **no absolute paths in templates** (``href``/``action``/``formaction``/
+  ``src``/``srcset``/``poster``/``hx-*`` attributes, including protocol-relative
+  ``//host``, must come from named routes; ``/static/`` is allowed).  The check
+  reads template files only; an unqualified ``TemplateResponse("x.html")`` or a
+  hard-coded path string in Python is NOT scanned;
 * **named-route navigation** - every ``WebNavItem`` names a route its surface
   owns;
 * **template namespace isolation** - every package template resolves only
@@ -28,18 +34,21 @@ Usage in a module's tests::
         assert_surface_conformance(module)
 
 The kit never reads a database or issues a request; it inspects the composed
-app.  Checks that could pass over an empty set assert the set first.
+app, and its template checks use their own loader so results do not depend on
+which app booted last.  Checks that could pass over an empty set assert the set
+first.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
 from fastapi.routing import APIRoute
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader, PrefixLoader
 
 from dotmac_kernel.api_documentation import api_documentation_policy
 from dotmac_kernel.app_factory import create_app
@@ -48,27 +57,22 @@ from dotmac_kernel.middleware.csrf import CSRF_PROTECTED_ATTR
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.route_metadata import PERMISSION_CODE_ATTR
 from dotmac_kernel.surface_selection import SELECT_ALL
+from dotmac_kernel.templating import TEMPLATES_DIR
 from dotmac_kernel.web_surfaces import (
     BrowserCapabilityProvision,
     NavigationRegion,
     TemplateRef,
     WebFacetMount,
+    WebRouteRef,
     qualified_route_name,
 )
 
 DEFAULT_PREFIXES: Final[tuple[str, ...]] = ("/admin", "/")
-AUTH_GUARD_NAMES: Final[frozenset[str]] = frozenset(
-    {
-        "require_user_auth",
-        "require_role",
-        "require_permission",
-        "require_web_auth",
-        "require_platform_admin",
-    }
-)
 _UNSAFE: Final[frozenset[str]] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _ABSOLUTE_URL_ATTR = re.compile(
-    r"""\b(?:href|action|src|hx-(?:get|post|put|patch|delete))\s*=\s*["']/(?!/|static/)""",
+    r"""\b(?:href|action|formaction|src|srcset|poster"""
+    r"""|hx-(?:get|post|put|patch|delete|push-url|replace-url))"""
+    r"""\s*=\s*["']?\s*/(?!static/)""",
     re.IGNORECASE,
 )
 _TEMPLATE_REFERENCE = re.compile(
@@ -90,6 +94,7 @@ class ConformanceReport:
     mutations_checked: int = 0
     templates_checked: int = 0
     nav_items_checked: int = 0
+    api_routes_checked: int = 0
     violations: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -102,14 +107,34 @@ def _has_attribute(dependant: object, attribute: str) -> bool:
     )
 
 
-def _guarded(dependant: object) -> bool:
+def _is_permission_guard(call: object) -> bool:
+    """The kernel's own permission dependency, by function identity."""
+    return (
+        bool(getattr(call, PERMISSION_CODE_ATTR, None))
+        and getattr(call, "__module__", None) == "dotmac_kernel.deps"
+        and str(getattr(call, "__qualname__", "")).startswith("permission_guard.")
+    )
+
+
+def _is_machine_scope_guard(call: object) -> bool:
+    """The kernel's exact-scope machine dependency, by function identity."""
+    return (
+        getattr(call, "__module__", None) == "dotmac_kernel.machine_auth"
+        and getattr(call, "__qualname__", "")
+        == "require_machine_scope.<locals>.dependency"
+    )
+
+
+def _guarded(dependant: object, *, machine_ok: bool = False) -> bool:
     call = getattr(dependant, "call", None)
     if call is not None and (
-        getattr(call, "__name__", "") in AUTH_GUARD_NAMES
-        or getattr(call, PERMISSION_CODE_ATTR, None)
+        _is_permission_guard(call) or (machine_ok and _is_machine_scope_guard(call))
     ):
         return True
-    return any(_guarded(child) for child in getattr(dependant, "dependencies", ()))
+    return any(
+        _guarded(child, machine_ok=machine_ok)
+        for child in getattr(dependant, "dependencies", ())
+    )
 
 
 def _build_spec(
@@ -117,6 +142,7 @@ def _build_spec(
     extra_modules: Sequence[ModuleManifest],
     prefix: str,
     capability_provisions: Sequence[BrowserCapabilityProvision] | None,
+    public_routes: Collection[WebRouteRef] = (),
 ) -> ProductAssemblySpec:
     facets: dict[str, set[str]] = {}
     capabilities: dict[tuple[str, int], BrowserCapabilityProvision] = {}
@@ -147,6 +173,14 @@ def _build_spec(
                 navigation_regions=tuple(
                     NavigationRegion(region) for region in sorted(regions)
                 ),
+                entry_routes=tuple(
+                    ref
+                    for ref in public_routes
+                    if any(
+                        surface.code == ref.surface and surface.facet == code
+                        for surface in manifest.web_surfaces
+                    )
+                ),
             )
             for code, regions in sorted(facets.items())
         ),
@@ -170,6 +204,7 @@ def check_surface_conformance(
     extra_modules: Iterable[ModuleManifest] = (),
     capability_provisions: Sequence[BrowserCapabilityProvision] | None = None,
     spec_for_prefix: Callable[[str], ProductAssemblySpec] | None = None,
+    public_routes: Collection[WebRouteRef] = (),
 ) -> ConformanceReport:
     """Return the report; ``violations`` is empty when the module conforms.
 
@@ -178,6 +213,12 @@ def check_surface_conformance(
     set, auth profile and admission permission).  It must install ``manifest``
     and mount its facets at the given prefix; the kit then runs every check
     against that composition instead of its minimal one.
+
+    ``public_routes`` names the genuinely unauthenticated entry routes (login,
+    reset) as ``WebRouteRef(module, surface, route_name)``.  They are exempt
+    from the permission-guard check ONLY, and each must be a declared
+    ``entry_routes`` member of its facet (the kit adds them to its own facet;
+    with ``spec_for_prefix`` the supplied facet must already declare them).
     """
     extras = tuple(extra_modules)
     violations: list[str] = []
@@ -189,6 +230,11 @@ def check_surface_conformance(
             violations=(f"{manifest.code}: declares no web_surfaces to check",),
         )
     routes_checked = mutations_checked = templates_checked = nav_checked = 0
+    api_checked = 0
+    public = {(r.module, r.surface, r.route_name) for r in public_routes}
+    for ref in public:
+        if ref[0] != manifest.code:
+            violations.append(f"public route {ref!r} names another module")
     relative_by_prefix: dict[str, frozenset[tuple[str, str]]] = {}
 
     for prefix in prefixes:
@@ -196,13 +242,25 @@ def check_surface_conformance(
             spec = (
                 spec_for_prefix(prefix)
                 if spec_for_prefix is not None
-                else _build_spec(manifest, extras, prefix, capability_provisions)
+                else _build_spec(
+                    manifest, extras, prefix, capability_provisions, public_routes
+                )
             )
             app = create_app(spec)
         except Exception as exc:
             violations.append(f"[{prefix}] boot refused: {type(exc).__name__}: {exc}")
             continue
         facet_prefix = prefix.rstrip("/")
+        declared_entries = {
+            (ref.module, ref.surface, ref.route_name)
+            for facet in spec.web_facets
+            for ref in facet.entry_routes
+        }
+        for ref in sorted(public - declared_entries):
+            violations.append(
+                f"[{prefix}] public route {ref!r} is not a declared facet "
+                "entry route"
+            )
         mounted: set[tuple[str, str]] = set()
         for surface in manifest.web_surfaces:
             marker = f"web:{surface.facet}:{manifest.code}:{surface.code}:"
@@ -227,8 +285,14 @@ def check_surface_conformance(
                     violations.append(f"{label}: authors the facet prefix in its path")
                 for method in route.methods or set():
                     mounted.add((method, relative))
-                if not _guarded(route.dependant):
-                    violations.append(f"{label}: no permission or authentication guard")
+                local = route.name[len(marker) :]
+                if (manifest.code, surface.code, local) not in public and (
+                    not _guarded(route.dependant)
+                ):
+                    violations.append(
+                        f"{label}: no kernel permission guard "
+                        "(require_permission / require_web_permission)"
+                    )
                 if (route.methods or set()) & _UNSAFE:
                     mutations_checked += 1
                     if not _has_attribute(route.dependant, CSRF_PROTECTED_ATTR):
@@ -248,6 +312,27 @@ def check_surface_conformance(
                 violations.append(
                     f"[{prefix}] surface {surface.code!r} has no named routes"
                 )
+        api_paths = {
+            (method, route.path)
+            for router in manifest.api_routers
+            for route in router.routes
+            if isinstance(route, APIRoute)
+            for method in (route.methods or set())
+        }
+        for api_route in app.routes:
+            if not isinstance(api_route, APIRoute) or api_route.name.startswith("web:"):
+                continue
+            if not any(
+                (method, api_route.path) in api_paths
+                for method in (api_route.methods or ())
+            ):
+                continue
+            api_checked += 1
+            if not _guarded(api_route.dependant, machine_ok=True):
+                violations.append(
+                    f"[{prefix}] API {sorted(api_route.methods or set())} "
+                    f"{api_route.path}: no kernel permission or machine-scope guard"
+                )
         relative_by_prefix[prefix] = frozenset(mounted)
 
     distinct = set(relative_by_prefix.values())
@@ -258,14 +343,30 @@ def check_surface_conformance(
             "into a route"
         )
 
-    # Templates: one pass per package (prefix independent).
-    from dotmac_kernel.templating import templates as _templates
-
+    # Templates: one pass per package, through the kit's OWN loader so the result
+    # never depends on which app was booted last in the process.
+    packages = {
+        pkg.namespace: pkg.root
+        for module in (*extras, manifest)
+        for surface in module.web_surfaces
+        if (pkg := surface.templates) is not None
+    }
+    env = Environment(
+        autoescape=True,
+        loader=ChoiceLoader(
+            [
+                PrefixLoader(
+                    {ns: FileSystemLoader(str(root)) for ns, root in packages.items()},
+                    delimiter="/",
+                ),
+                FileSystemLoader(str(TEMPLATES_DIR)),
+            ]
+        ),
+    )
     seen_roots: set[Path] = set()
     for surface in manifest.web_surfaces:
         package = surface.templates
-        # The loader is process-wide and only meaningful after a boot succeeded.
-        if not relative_by_prefix or package is None or package.root in seen_roots:
+        if package is None or package.root in seen_roots:
             continue
         seen_roots.add(package.root)
         files = _template_files(package.root)
@@ -274,7 +375,6 @@ def check_surface_conformance(
                 f"template package {package.namespace!r} has no templates"
             )
             continue
-        env = _templates.env
         for path in files:
             templates_checked += 1
             relative = path.relative_to(package.root).as_posix()
@@ -290,11 +390,10 @@ def check_surface_conformance(
                         env, f"{package.namespace}/{relative}"
                     )[1]
                 except Exception as exc:
-                    if prefixes and relative_by_prefix:
-                        violations.append(
-                            f"template {package.namespace}/{relative}: not "
-                            f"reachable through its namespace ({type(exc).__name__})"
-                        )
+                    violations.append(
+                        f"template {package.namespace}/{relative}: not "
+                        f"reachable through its namespace ({type(exc).__name__})"
+                    )
                     qualified_source = None
                 if (
                     qualified_source is not None
@@ -346,6 +445,7 @@ def check_surface_conformance(
         mutations_checked=mutations_checked,
         templates_checked=templates_checked,
         nav_items_checked=nav_checked,
+        api_routes_checked=api_checked,
         violations=tuple(violations),
     )
 
@@ -357,6 +457,7 @@ def assert_surface_conformance(
     extra_modules: Iterable[ModuleManifest] = (),
     capability_provisions: Sequence[BrowserCapabilityProvision] | None = None,
     spec_for_prefix: Callable[[str], ProductAssemblySpec] | None = None,
+    public_routes: Collection[WebRouteRef] = (),
 ) -> ConformanceReport:
     """Raise :class:`SurfaceConformanceError` listing every violation."""
     report = check_surface_conformance(
@@ -365,6 +466,7 @@ def assert_surface_conformance(
         extra_modules=extra_modules,
         capability_provisions=capability_provisions,
         spec_for_prefix=spec_for_prefix,
+        public_routes=public_routes,
     )
     if report.violations:
         raise SurfaceConformanceError(
@@ -375,7 +477,6 @@ def assert_surface_conformance(
 
 
 __all__ = [
-    "AUTH_GUARD_NAMES",
     "DEFAULT_PREFIXES",
     "ConformanceReport",
     "SurfaceConformanceError",

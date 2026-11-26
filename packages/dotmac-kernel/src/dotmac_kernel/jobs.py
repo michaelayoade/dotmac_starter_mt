@@ -25,6 +25,10 @@ mandatory and explicit: it says which database plane the runner opens for the
 handler.  ``concurrency`` is ``"single"`` (one run of a job at a time per
 scope) - the only mode the contract offers.
 
+Handler rules (checked at registry construction): a plain synchronous function
+(no coroutines, classes or builtins) defined in the declaring module's own
+package, never the kernel, the standard library or another installed module.
+
 Import-safe: pure data and ``importlib``; no engine, no I/O, no FastAPI.
 """
 
@@ -33,6 +37,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final
@@ -172,9 +177,25 @@ class JobSpec:
             )
 
 
+def handler_package(handler: str) -> str:
+    """Top-level package named by a handler import path."""
+    module_path = handler.partition(":")[0]
+    if ":" not in handler:
+        module_path = module_path.rpartition(".")[0]
+    return module_path.partition(".")[0]
+
+
 def resolve_job_handler(spec: JobSpec) -> Callable[..., object]:
-    """Import and return the handler, refusing anything not callable with
-    ``(session, scope, run_context)``.  Called by the registry at boot."""
+    """Import and return the handler, refusing anything but a plain, synchronous,
+    module-level-style function owned by the declaring package.
+
+    Refused: coroutine functions (the runner calls handlers synchronously and
+    would receive a coroutine), classes/builtins/partials (``inspect.isfunction``),
+    a handler re-exported from a different package than the path names, and any
+    handler in the kernel or the standard library. The registry additionally
+    refuses a handler living in ANOTHER installed module's package (modules never
+    import each other).
+    """
     module_path, sep, attr = spec.handler.partition(":")
     if not sep:
         module_path, _, attr = spec.handler.rpartition(".")
@@ -182,6 +203,12 @@ def resolve_job_handler(spec: JobSpec) -> Callable[..., object]:
             raise JobSpecError(
                 f"job {spec.code!r} handler {spec.handler!r} names no module"
             )
+    package = module_path.partition(".")[0]
+    if package == "dotmac_kernel" or package in sys.stdlib_module_names:
+        raise JobSpecError(
+            f"job {spec.code!r} handler {spec.handler!r} lives in "
+            f"{package!r}; a handler must be the declaring module's own function"
+        )
     try:
         target: object = importlib.import_module(module_path)
         for part in attr.split("."):
@@ -190,9 +217,20 @@ def resolve_job_handler(spec: JobSpec) -> Callable[..., object]:
         raise JobSpecError(
             f"job {spec.code!r} handler {spec.handler!r} does not resolve: {exc}"
         ) from exc
-    if not callable(target):
+    if not inspect.isfunction(target):
         raise JobSpecError(
-            f"job {spec.code!r} handler {spec.handler!r} is not callable"
+            f"job {spec.code!r} handler {spec.handler!r} must be a plain function"
+        )
+    if inspect.iscoroutinefunction(target):
+        raise JobSpecError(
+            f"job {spec.code!r} handler {spec.handler!r} is a coroutine function; "
+            "the contract is synchronous"
+        )
+    owner = str(getattr(target, "__module__", "")).partition(".")[0]
+    if owner != package:
+        raise JobSpecError(
+            f"job {spec.code!r} handler {spec.handler!r} is defined in "
+            f"{owner!r}, not in the package its path names ({package!r})"
         )
     try:
         inspect.signature(target).bind(object(), object(), object())
@@ -201,11 +239,6 @@ def resolve_job_handler(spec: JobSpec) -> Callable[..., object]:
             f"job {spec.code!r} handler {spec.handler!r} must accept "
             f"(session, scope, run_context): {exc}"
         ) from exc
-    except ValueError:  # builtins without a signature: cannot be proven, refuse
-        raise JobSpecError(
-            f"job {spec.code!r} handler {spec.handler!r} has no inspectable "
-            "signature"
-        ) from None
     return target
 
 
@@ -215,6 +248,7 @@ __all__ = [
     "MIN_INTERVAL_SECONDS",
     "JobSpec",
     "JobSpecError",
+    "handler_package",
     "resolve_job_handler",
     "validate_cron",
 ]

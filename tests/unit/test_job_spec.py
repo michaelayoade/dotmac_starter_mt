@@ -21,6 +21,14 @@ def two_arg_handler(session, scope):
 NOT_CALLABLE = 3
 
 
+async def async_handler(session, scope, run_context):
+    return None
+
+
+class ClassHandler:
+    def __init__(self, session, scope, run_context): ...
+
+
 def _job(**overrides: object) -> JobSpec:
     base: dict[str, object] = {
         "code": "sweep",
@@ -109,8 +117,13 @@ def test_same_code_in_two_modules_is_allowed_and_listed_in_order() -> None:
     [
         (f"{_HERE}:missing", "does not resolve"),
         ("no_such_pkg_xyz.mod:fn", "does not resolve"),
-        (f"{_HERE}:NOT_CALLABLE", "not callable"),
+        (f"{_HERE}:NOT_CALLABLE", "plain function"),
         (f"{_HERE}:two_arg_handler", "must accept"),
+        (f"{_HERE}:async_handler", "coroutine"),
+        (f"{_HERE}:ClassHandler", "plain function"),
+        ("subprocess:call", "lives in 'subprocess'"),
+        ("dotmac_kernel.jobs:resolve_job_handler", "lives in 'dotmac_kernel'"),
+        ("os.path:join", "lives in 'os'"),
     ],
 )
 def test_unresolvable_handler_fails_registry_construction(
@@ -119,3 +132,46 @@ def test_unresolvable_handler_fails_registry_construction(
     manifest = ModuleManifest(code="m", version="1", jobs=[_job(handler=handler)])
     with pytest.raises(ModuleRegistryError, match=message):
         ModuleRegistry([manifest])
+
+
+def test_platform_job_requires_a_declared_platform_table() -> None:
+    with pytest.raises(ModuleRegistryError, match="no platform_tables"):
+        ModuleManifest(
+            code="m",
+            version="1",
+            short_code="mm",
+            migration_prefix="mm",
+            tables=("t",),
+            jobs=[_job(plane="platform")],
+        )
+
+
+def test_tenant_job_refused_when_module_owns_only_platform_tables() -> None:
+    with pytest.raises(ModuleRegistryError, match="only platform tables"):
+        ModuleManifest(
+            code="m",
+            version="1",
+            short_code="mm",
+            migration_prefix="mm",
+            platform_tables=("t",),
+            jobs=[_job(plane="tenant")],
+        )
+
+
+def test_jobs_are_filtered_by_the_assemblys_installed_planes() -> None:
+    from dotmac_kernel import ModulePlane, ModulePlaneSelection
+
+    both = ModuleManifest(
+        code="files",
+        version="1",
+        short_code="files",
+        migration_prefix="fi",
+        tables=("a",),
+        platform_tables=("b",),
+        supported_plane_sets=[("tenant",), ("tenant", "platform")],
+        jobs=[_job(code="t"), _job(code="p", plane="platform")],
+    )
+    reg = ModuleRegistry([both])
+    tenant_only = [ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,))]
+    assert [j.code for _, j in reg.jobs(module_planes=tenant_only)] == ["t"]
+    assert [j.code for _, j in reg.jobs()] == ["t", "p"]

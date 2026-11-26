@@ -49,11 +49,68 @@ def import_roots(source: str) -> set[str]:
     return roots
 
 
+#: `threading` is allowed in ONE module, for `LeaseKeeper` (renews the host lease
+#: while a transfer or the Foundation run blocks the main thread). Nowhere else.
+THREADING_ONLY_IN = "lease.py"
+
+
+def allowed_roots(name: str) -> frozenset[str]:
+    return ALLOWED_IMPORT_ROOTS | (
+        {"threading"} if name == THREADING_ONLY_IN else frozenset()
+    )
+
+
 def test_the_agent_imports_a_closed_set() -> None:
     for path in SOURCE.glob("*.py"):
         roots = import_roots(path.read_text())
         assert not roots & FORBIDDEN_ROOTS, path.name
-        assert roots <= ALLOWED_IMPORT_ROOTS, (path.name, roots - ALLOWED_IMPORT_ROOTS)
+        assert roots <= allowed_roots(path.name), (
+            path.name,
+            roots - allowed_roots(path.name),
+        )
+
+
+def test_threading_is_only_the_lease_keepers() -> None:
+    users = {
+        path.name
+        for path in SOURCE.glob("*.py")
+        if "threading" in import_roots(path.read_text())
+    }
+    assert users == {THREADING_ONLY_IN}
+    assert "threading" not in ALLOWED_IMPORT_ROOTS
+    assert "threading" not in allowed_roots("launcher.py")  # the guard bites
+
+
+def test_the_keeper_thread_is_a_daemon_that_calls_only_renew_and_is_joined() -> None:
+    source = (SOURCE / THREADING_ONLY_IN).read_text()
+    tree = ast.parse(source)
+    threads = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "Thread"
+    ]
+    assert len(threads) == 1  # one thread, in one place
+    daemon = [k for k in threads[0].keywords if k.arg == "daemon"]
+    assert daemon and isinstance(daemon[0].value, ast.Constant)
+    assert daemon[0].value.value is True
+    assert ".join(" in source  # stopped and joined before the release
+    # The thread's body is `tick`, which calls `renew` and nothing else remote.
+    keeper = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ClassDef) and n.name == "LeaseKeeper"
+    )
+    remote = {
+        node.func.attr
+        for node in ast.walk(keeper)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "_client"
+    }
+    assert remote - {"monotonic"} == {"renew"}  # the clock read is local
 
 
 def test_the_import_guard_bites() -> None:
