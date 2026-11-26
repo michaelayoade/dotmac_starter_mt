@@ -687,7 +687,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a13"
+version = "0.1.0a14"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1545,7 +1545,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-billing = ">=0.1.0a13"
+dotmac-billing = ">=0.1.0a14"
 dotmac-collections = ">=0.1.0a3"
 dotmac-kernel = ">=0.1.0a110"
 dotmac-payments = ">=0.1.0a4"

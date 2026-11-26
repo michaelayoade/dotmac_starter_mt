@@ -220,6 +220,24 @@ class WithholdingAcceptedV1:
 
 
 @dataclass(frozen=True, slots=True)
+class WithholdingReleasedV1:
+    """Trigger: Billing released a frozen expected-withholding component (Q-F).
+
+    The assembly maps ``billing.withholding.released.v1`` (ids only) to it,
+    reading ``released_at`` (the database instant Billing recorded) from
+    Billing's ``get_withholding_release``. The account and document are
+    cross-checked against Billing (a mismatch raises); ``release_id`` keys the
+    idempotent source references; ``released_at`` floors the payment dating so
+    an application never predates the decision. No amount is carried.
+    """
+
+    billing_account_id: UUID
+    document_id: UUID
+    release_id: UUID
+    released_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class BalanceAppliedOutcomeV1:
     """What an invoice-issued balance pass did. References only.
 
