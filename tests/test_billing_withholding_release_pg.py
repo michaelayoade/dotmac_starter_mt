@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import threading
 import time
-from types import SimpleNamespace
 from dataclasses import replace
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
