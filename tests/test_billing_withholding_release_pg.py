@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from types import SimpleNamespace
 from dataclasses import replace
 from decimal import Decimal
 from uuid import uuid4
@@ -326,6 +327,7 @@ def test_two_concurrent_sessions_exactly_one_release_wins(scratch):
     with billing._session(url, scope) as session:
         account, invoice_id, _ = frozen._invoice(session, scope, elected=True)
         cid = _component_id(session, invoice_id)
+        account = SimpleNamespace(id=account.id)  # detach before the session closes
         session.commit()
     outcome: list[str] = []
     started = threading.Event()
