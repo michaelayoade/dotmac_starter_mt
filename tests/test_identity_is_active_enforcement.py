@@ -243,7 +243,7 @@ def test_authorize_party_is_false_for_an_inactive_party_holding_a_grant(
             tenant = db.get(Tenant, tenant_a.id)
             assert party is not None and tenant is not None
             return deps.authorize_party(
-                db, tenant=tenant, party=party, code="rbac.roles.read"
+                db, tenant=tenant, party=party, code="rbac.audit.read"
             )
 
     # The app is imported by `app_client`, which installs the declarations.
