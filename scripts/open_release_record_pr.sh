@@ -93,6 +93,8 @@ EXPECTED_RUN_ID=""
 EXPECTED_COMMIT=""
 ARTIFACT_RUN_ID=""
 ADOPTING_RUN_ID=""
+PUBLICATION_GATE=""
+GATE2_RECORD=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -111,6 +113,8 @@ while [ $# -gt 0 ]; do
     --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
     --artifact-run-id) ARTIFACT_RUN_ID="$2"; shift 2 ;;
     --adopting-run-id) ADOPTING_RUN_ID="$2"; shift 2 ;;
+    --publication-gate) PUBLICATION_GATE="$2"; shift 2 ;;
+    --gate2-record) GATE2_RECORD="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -243,6 +247,14 @@ if [ -n "${ADOPTING_RUN_ID}" ]; then
 fi
 if [ -n "${EXPECTED_COMMIT}" ]; then
   ARGS+=(--expected-commit "${EXPECTED_COMMIT}")
+fi
+# Facility lane only: which publication gate admitted this version, and the
+# retained gate-2 record (ids and digests, never private contents).
+if [ -n "${PUBLICATION_GATE}" ]; then
+  ARGS+=(--publication-gate "${PUBLICATION_GATE}")
+fi
+if [ -n "${GATE2_RECORD}" ]; then
+  ARGS+=(--gate2-record "${GATE2_RECORD}")
 fi
 
 OUTPUT=""

@@ -2,6 +2,37 @@
 
 ## Unreleased — successor not allocated
 
+### Added: operator-job entry point (`dotmac-deploy run-job`)
+
+`dotmac-deploy run-job --execute --target <ref> --authorization <pair>` runs ONE
+Control-dispatched operator job. Additive: a new optional
+`[compose_topology.jobs.operator]` table (valid wherever a compose topology is,
+v3-v5; no new schema). The field is inside the approved descriptor digest but
+OMITTED from the canonical document while absent, so every descriptor without
+the table keeps byte-identical canonical bytes, render and configuration
+digest; a present table is always fully specified, so key-absent is the only
+spelling of "no table" (`canonical_omit_when_none`, one field, ratcheted), new
+modules `operator_job.py`, `operator_job_contract.py` and
+`providers/compose_operator_job.py`, one `StepKind.OPERATOR_JOB` member and the
+subcommand registration. The dispatch is resolved and consumed through the
+installed bindings before any container exists; the resolved context must carry
+`descriptor_digest` (from the verified authorization) equal to the loaded
+descriptor's canonical digest or the run refuses `job_descriptor_mismatch`
+before consume; a `409 already_consumed` is the
+refusal `job_already_consumed`. The container is created from the declared shape
+only, read back with `docker inspect` before start, stopped at min(timeout, agent deadline - grace) or on SIGTERM/SIGINT/SIGHUP, and always
+removed (the deploy agent removes its own dispatch containers; Foundation ships no removal subcommand). Never root, never a secret value, no secrets
+directory listing.
+
+The deploy, rollback, recovery, support-job, render and existing spec-parse
+bytes are unchanged, proved by the AST-hash guard
+`tests/architecture/test_foundation_operator_job_isolation.py`. Cross-repo key
+names are PROVISIONAL and live only in `operator_job_contract.py`.
+
+This is an unpublished source change that must land before the next candidate
+freeze. It allocates no version and publishes nothing; `0.4.0a2` is still
+unallocated.
+
 ### Added: scoped restore-rehearsal admission binding
 
 `ExecutionBindings.restore_rehearsal_admission_provider` supplies the trusted

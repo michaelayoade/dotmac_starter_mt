@@ -522,6 +522,11 @@ CANONICALIZING_MODULES: dict[str, int] = {
     "external_recovery.py": 1,
     "lease.py": 1,
     "observability_promotion.py": 1,
+    # Not a plan document: three sorted-compact-JSON sites, the operator-job
+    # receipt, the shared helper behind the argv digest, the material-set id and
+    # the pair-material snapshot, and the refusal receipt line; each is
+    # digested or written verbatim and none is a deployment plan.
+    "operator_job.py": 3,
     "provenance.py": 1,
     "recovery.py": 2,
     "rehearsal.py": 1,
