@@ -43,9 +43,11 @@ from dotmac_billing.commands import (
     NumberingProvider,
     ReduceNonCashCreditGrant,
     RefundCommand,
+    ReleaseWithholdingComponent,
     ReverseNonCashCreditApplication,
     ReversePostingGroupCommand,
     ReverseWithholdingDischarge,
+    ReverseWithholdingRelease,
 )
 from dotmac_billing.contracts import (
     AcceptRatedObligationV1,
@@ -414,7 +416,7 @@ from dotmac_billing.service import (
     void_document,
 )
 
-__version__ = "0.1.0a13"
+__version__ = "0.1.0a14"
 
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
@@ -431,6 +433,14 @@ from dotmac_billing.tax_evidence import (
     TaxDeterminationComponentEvidenceV1,
     TaxDeterminationLineEvidenceV1,
     TaxDeterminationSetEvidenceV1,
+)
+from dotmac_billing.withholding_release import (
+    WithholdingComponentPositionV1,
+    WithholdingReleaseV1,
+    get_withholding_component_position,
+    get_withholding_release,
+    release_withholding_component,
+    reverse_withholding_release,
 )
 
 __all__ = [
@@ -746,6 +756,14 @@ __all__ = [
     "AcceptWithholdingDischarge",
     "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
+    "ReleaseWithholdingComponent",
+    "ReverseWithholdingRelease",
+    "WithholdingComponentPositionV1",
+    "WithholdingReleaseV1",
+    "get_withholding_component_position",
+    "get_withholding_release",
+    "release_withholding_component",
+    "reverse_withholding_release",
     "AccountingFactV2",
     "WithholdingTaxEvidenceV1",
     "WithholdingTaxLineV1",
