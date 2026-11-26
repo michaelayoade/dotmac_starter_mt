@@ -32,7 +32,9 @@ from dotmac_money_flows import (
     InvoiceIssuedV1,
     SettlementTargetV1,
     SettlePolicyV1,
+    WithholdingAcceptedV1,
     apply_balance_on_invoice_issued,
+    apply_balance_on_withholding_accepted,
     list_settle_attention,
 )
 from dotmac_money_flows import settle as flows
@@ -41,6 +43,7 @@ from dotmac_payments.contracts import PaymentPurpose
 from sqlalchemy import func, select, text
 
 from tests import test_billing_isolation as b
+from tests.billing_frozen_fixtures import withholding_command
 from tests.money_flows_fixtures import (
     BASE,
     RecordingTargets,
@@ -705,3 +708,58 @@ def test_race_two_issue_triggers_on_one_account_pay_one_whole_invoice(scratch):
         assert _credit(db, scope, account_id) == 0
     assert sum(len(r.applied_document_ids) for r in results) == 1
     assert unrestricted(scratch, scope, account_id) == 0
+
+
+# --------------------------------------------------------------------------
+# MED-2: a deduction accepted without cash in the same confirmation
+# --------------------------------------------------------------------------
+def test_a_cash_free_deduction_then_the_entry_point_pays_the_fitting_invoice(scratch):
+    """Cash first leaves a short invoice; a direct Billing discharge; then the pass."""
+    from dataclasses import replace
+
+    from dotmac_billing import accept_withholding_discharge
+
+    scope, account_id, (doc,) = _world(scratch, balance="90.00")
+    # Seeded invoice totals 144 here; freeze 54 of withholding so 90 cash + 54 fit.
+    with session(scratch, scope) as db:
+        command = withholding_command(
+            db, account_id, doc, scope=scope, claimed="54.00", accepted="54.00"
+        )
+        db.commit()
+    command = replace(command, occurred_at=ISSUED + timedelta(hours=2))
+    with session(scratch, scope) as db:
+        # The balance alone does not fit and the discharge is not yet accepted.
+        assert _outstanding(db, scope, doc) == 144
+        discharge = accept_withholding_discharge(db, scope=scope, command=command)
+        discharge_id = discharge.id
+        db.commit()
+    with session(scratch, scope) as db:
+        # Billing accepted the deduction and the cash stays unapplied: no pass ran.
+        assert _outstanding(db, scope, doc) == 90
+        assert _credit(db, scope, account_id) == 90
+
+    request = WithholdingAcceptedV1(
+        account_id, doc, discharge_id, ISSUED + timedelta(hours=2)
+    )
+
+    def run():
+        with session(scratch, scope) as db:
+            outcome = apply_balance_on_withholding_accepted(
+                db, scope=scope, request=request, ports=_ports()
+            )
+            db.commit()
+            return outcome
+
+    outcome = run()
+    assert outcome.applied_document_ids == (doc,)
+    assert outcome.reason_code is None
+    with session(scratch, scope) as db:
+        assert _outstanding(db, scope, doc) == 0
+        assert _credit(db, scope, account_id) == 0
+        assert _allocations(db) == 1
+
+    replay = run()  # idempotent: the invoice is already paid, nothing posts twice
+    assert replay.applied_document_ids == ()
+    assert replay.reason_code == "invoice_not_open"
+    with session(scratch, scope) as db:
+        assert _allocations(db) == 1

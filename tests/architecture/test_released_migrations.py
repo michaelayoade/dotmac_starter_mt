@@ -9232,7 +9232,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
     "dotmac-learning": frozenset(),
-    "dotmac-money-flows": frozenset(),
+    # `mf_0003` adds the nullable JSON list of discharge references (C2b);
+    # still editable until `dotmac-money-flows` 0.1.0a3 is tagged.
+    "dotmac-money-flows": frozenset({"mf_0003_settle_discharge_list.py"}),
 }
 
 
