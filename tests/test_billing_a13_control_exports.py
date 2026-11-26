@@ -40,8 +40,7 @@ def test_all_has_no_duplicates_and_resolves():
         assert hasattr(billing, name), name
 
 
-def test_the_contract_constant_is_pinned_and_the_version_is_unchanged():
+def test_the_contract_constant_is_pinned():
     assert billing.RECEIVABLE_CONTROL_POSITION_CONTRACT == (
         "billing.receivable.control_position.v1"
     )
-    assert billing.module.version == "0.1.0a13"

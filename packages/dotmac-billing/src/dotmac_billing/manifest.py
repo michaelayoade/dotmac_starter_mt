@@ -14,7 +14,7 @@ from dotmac_billing.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="billing",
-    version="0.1.0a13",
+    version="0.1.0a14",
     core=False,
     short_code="billing",
     migration_prefix="bi",
@@ -27,6 +27,7 @@ module = ModuleManifest(
         OUTBOX_RELAY_V1.name,
     ),
     outbox_event_types=(
+        "billing.withholding.released.v1",
         "billing.settlement.earmarked.v1",
         "billing.settlement.earmark.changed.v1",
         "billing.accounting.fact.v6",
@@ -54,6 +55,16 @@ module = ModuleManifest(
                 "Freeze expected withholding on an already issued invoice that has "
                 "no frozen component. Append-only and Tax-confirmed; the actor, "
                 "command id and reason are recorded on every row."
+            ),
+            default_roles=("admin",),
+        ),
+        PermissionSpec(
+            code="billing.withholding.release",
+            description=(
+                "Tax correction: release expected withholding the customer did "
+                "not deduct. Raises the cash the invoice requires; reduces no "
+                "debt. Append-only; the actor, command id and reason are "
+                "recorded on every row."
             ),
             default_roles=("admin",),
         ),

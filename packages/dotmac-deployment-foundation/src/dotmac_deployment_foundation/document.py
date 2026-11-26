@@ -179,6 +179,14 @@ def _normalize(value: Any, *, descriptor_schema: str = SCHEMA_V1) -> Any:
                 field.metadata.get("descriptor_since") == SCHEMA_V5
                 and descriptor_schema in (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
             )
+            # A field flagged `canonical_omit_when_none` is ABSENT, not the
+            # UNSET sentinel, while its value is None. Its present value is
+            # always a fully specified object, so "key absent" is the one
+            # spelling of "not declared" and rule 3 still holds.
+            and not (
+                field.metadata.get("canonical_omit_when_none", False)
+                and getattr(value, field.name) is None
+            )
         }
     if isinstance(value, list | tuple):
         return [_normalize(item, descriptor_schema=descriptor_schema) for item in value]

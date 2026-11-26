@@ -1,8 +1,45 @@
 # Changelog — dotmac-money-flows
 
-## 0.1.0a2 — unreleased (GAP-4: the X1 receivables reader)
+## 0.1.0a3 — unreleased (C2b: several deductions on one MANUAL confirmation)
 
-Source only. a1 is being published; this adds one stateless module on top of it.
+Source only; one additive migration. a2 is released and tagged.
+
+- `SettleConfirmationV2` (subclass of V1, so V1 callers are unchanged) carries a tuple
+  `deductions` of `SettleWithholdingV1`, for example withholding tax plus agency stamp
+  duty, each a different Billing frozen withholding component. Every deduction is
+  accepted, in order, through Billing's `accept_withholding_discharge` before the
+  whole-invoice pass, so an invoice is discharged by cash plus all accepted deductions
+  and the balance still pays whole invoices only, oldest first, skipping misfits.
+- The same component (or the same retry key) twice is refused before any owner write
+  as `duplicate_deduction_component`. Deductions stay MANUAL-only
+  (`withholding_requires_manual_source` otherwise); no source is widened.
+- `mf_0003_settle_discharge_list` adds nullable `withholding_discharge_list_ref` (`varchar(160)[]`)
+  (every discharge reference, in order). `withholding_discharge_ref` keeps the first
+  one; no backfill. `SettleInstanceV1.withholding_discharge_refs` (new field with a
+  default) reads the list, or the single legacy reference for an older row.
+- Refused before any write: a V2 confirmation setting both `withholding` and
+  `deductions` (`withholding_and_deductions_both_set`), and a V2 deduction whose
+  document is not the bound document (`deduction_document_not_bound`). A Billing
+  refusal of one deduction propagates unchanged with a note naming its position and
+  component (no amounts); the caller's transaction rolls every earlier deduction back.
+- MED-2: a withholding certificate that arrives after the cash is accepted straight
+  by Billing (Payments refuses a zero confirmation), so no settle pass follows it.
+  `apply_balance_on_withholding_accepted(WithholdingAcceptedV1)` runs the same full
+  pass as `apply_balance_on_invoice_issued` (lock-first order, same gates, whole
+  invoices oldest first, misfits skipped), dated at the later of the usual dating
+  rule and `accepted_at`, idempotent on the discharge id. Exposed only: wiring it to
+  Billing's accepted fact is assembly work (W04).
+- Q-F: `apply_balance_on_withholding_released(WithholdingReleasedV1)` runs the same
+  full pass after Billing releases an expected-withholding component, dated at the
+  later of the usual rule and `released_at` (the release instant), with source
+  references `money-flows:settle:release:{release_id}:...`. The assembly calls it from
+  delivery of `billing.withholding.released.v1` in a new transaction. Requires
+  `dotmac-billing >=0.1.0a14`. No allowlist change.
+- Otherwise no Billing change.
+
+## 0.1.0a2 — released, tag `dotmac-money-flows-v0.1.0a2` (GAP-4: the X1 receivables reader)
+
+Source only. a1 was published first; this added one stateless module on top of it.
 
 - `receivables.BillingReceivablesReader` (X1): implements Collections'
   `ReceivablesReader` over Billing's sealed document exposure (native V1 and imported

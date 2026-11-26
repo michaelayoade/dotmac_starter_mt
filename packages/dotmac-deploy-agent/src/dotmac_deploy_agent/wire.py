@@ -52,6 +52,10 @@ ROUTES: Final = {
     "lease/release": "POST",
     "lease/standing": "GET",
 }
+#: Routes of Control's target_api `_v2` that the vendored v1 vectors do not yet
+#: carry. Kept apart so `ROUTES` stays equal to the vendored file; they fold into
+#: `ROUTES` (and this goes away) when the `_v2` file is vendored.
+PENDING_V2_ROUTES: Final = {"lease/renew": "POST"}
 _SEGMENT: Final = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 _NONCE: Final = re.compile(r"[0-9a-f]{32}")
 _STAMP: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
@@ -59,7 +63,7 @@ _B64URL: Final = re.compile(r"[A-Za-z0-9_-]*")
 
 
 def check_route(method: str, route: str) -> None:
-    if ROUTES.get(route) != method:
+    if {**ROUTES, **PENDING_V2_ROUTES}.get(route) != method:
         raise Refusal("materials_invalid")
 
 
@@ -68,7 +72,7 @@ def target_path(target_ref: str, route: str) -> str:
     parts = target_ref.split("/")
     if len(parts) != 3 or not all(_SEGMENT.fullmatch(part) for part in parts):
         raise Refusal("config_invalid")
-    if route not in ROUTES:
+    if route not in ROUTES and route not in PENDING_V2_ROUTES:
         raise Refusal("materials_invalid")
     return f"{BASE_PATH}/targets/{target_ref}/{route}"
 
@@ -314,6 +318,7 @@ class PopSigner:
 _FORBIDDEN_PATH_CHARS: Final = frozenset("%?#\\ \t\r\n\x00")
 _ALL_ROUTES: Final = {
     **ROUTES,
+    **PENDING_V2_ROUTES,
     "resolve": "POST",
     "consume": "POST",
     "committed/<dispatch_id>": "GET",

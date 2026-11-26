@@ -1,0 +1,53 @@
+{
+ "schema": "dotmac.foundation.publication-gates.v1",
+ "default": "lane3_rehearsal",
+ "exceptions": [
+  {
+   "facility": "dotmac-deployment-foundation",
+   "version": "0.4.0a2",
+   "gate": "gate2_evidence",
+   "ruling": {
+    "register": "dotmac-debt-register",
+    "version": 2155
+   },
+   "required_evidence": [
+    "R6",
+    "R11",
+    "B2",
+    "B7",
+    "B8",
+    "KIT",
+    "RECOVERY",
+    "S3",
+    "E3",
+    "NATIVE_PG",
+    "NATIVE_BAO",
+    "CEREMONY_AUTH",
+    "DSN_SHAPE",
+    "DR3_DR5"
+   ],
+   "waivable": [
+    "DR3_DR5"
+   ],
+   "subject_evidence": [
+    "RECOVERY",
+    "S3"
+   ],
+   "max_age_hours": 72,
+   "adoption_conditions": [
+    {
+     "id": "DR3_DR5_STAGING_DRILL",
+     "waives": "DR3_DR5",
+     "blocks": "production_governed_deploy",
+     "environment": "seabone-staging",
+     "required_faults": [
+      "db_outage_at_migrate",
+      "network_loss",
+      "timeout_sigterm"
+     ],
+     "register_ref": 2155
+    }
+   ]
+  }
+ ]
+}

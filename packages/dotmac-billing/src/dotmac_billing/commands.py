@@ -36,6 +36,7 @@ from dotmac_billing.tax_dependency_evidence import (
 )
 
 WITHHOLDING_FREEZE_PERMISSION = "billing.withholding.freeze"
+WITHHOLDING_RELEASE_PERMISSION = "billing.withholding.release"
 
 
 class ActorPermissionReader(Protocol):
@@ -343,6 +344,42 @@ class FreezeIssuedInvoiceWithholding:
 
 
 @dataclass(frozen=True, slots=True)
+class ReleaseWithholdingComponent:
+    """Release the residual of one frozen expected-withholding component (Q-F).
+
+    A staff "Tax correction": the customer did not deduct what Tax expected, so
+    the expectation is released and the invoice's cash requirement rises by the
+    residual. It never reduces the debt. Requires ``WITHHOLDING_RELEASE_PERMISSION``
+    through the wired ``ActorPermissionReader`` (the actor must be the party the
+    route's ``permission_guard("billing.withholding.release")`` authenticated).
+    ``expected_amount`` must equal the residual Billing computes (stale-screen
+    guard). ``reason`` is required; ``evidence_ref`` is optional. Idempotent on
+    ``command_id``.
+    """
+
+    scope: Scope
+    billing_account_id: UUID
+    document_id: UUID
+    component_id: UUID
+    command_id: str
+    actor_ref: str
+    reason: str
+    expected_amount: Money
+    evidence_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ReverseWithholdingRelease:
+    """Undo a release by appending its exact inverse (same permission)."""
+
+    scope: Scope
+    release_id: UUID
+    command_id: str
+    actor_ref: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class ReverseWithholdingDischarge:
     scope: Scope
     discharge_id: UUID
@@ -424,6 +461,9 @@ __all__ = [
     "AcceptWithholdingDischarge",
     "FreezeIssuedInvoiceWithholding",
     "ReverseWithholdingDischarge",
+    "ReleaseWithholdingComponent",
+    "ReverseWithholdingRelease",
+    "WITHHOLDING_RELEASE_PERMISSION",
     "AllocationCommand",
     "ApplyAvailableCreditCommand",
     "CreateDraftDocument",
