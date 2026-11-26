@@ -10,12 +10,11 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 import pytest
+from alembic.config import Config
 from dotmac_kernel.migrations.configuration import (
     select_migration_database_url,
     set_alembic_database_url,
 )
-
-from alembic.config import Config
 
 OWNER_URL = "postgresql://owner:encoded%25%2F@localhost/migrations"
 FALLBACK_URL = "postgresql://runtime@localhost/application"
@@ -88,6 +87,15 @@ def _run_reference_adapter(
     monkeypatch.setattr(context, "is_offline_mode", lambda: offline)
     monkeypatch.setattr(context, "begin_transaction", nullcontext)
     monkeypatch.setattr(context, "run_migrations", run_migrations)
+    monkeypatch.setattr(
+        context,
+        "get_context",
+        lambda: SimpleNamespace(get_current_heads=lambda: ("head-a",)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        context, "get_head_revisions", lambda: ("head-a",), raising=False
+    )
     monkeypatch.setattr("sqlalchemy.engine_from_config", engine_factory)
 
     # Model registration and bindings are product concerns. Retain their call

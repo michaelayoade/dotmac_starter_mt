@@ -35,7 +35,7 @@ what `dotmac_kernel.prerequisites` refuses to do.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
@@ -1903,6 +1903,30 @@ def require_runtime_prerequisites(bind: Connection, manifests: Sequence[Any]) ->
         require_prerequisites(bind, names)
 
 
+def require_runtime_prerequisites_at_heads(
+    bind: Connection,
+    manifests: Sequence[Any],
+    *,
+    current_heads: Iterable[str],
+    script_heads: Iterable[str],
+) -> bool:
+    """`require_runtime_prerequisites`, but only once the database is COMPLETE.
+
+    A partial upgrade (to a named predecessor revision, a downgrade, a scratch
+    database built to an earlier point) legitimately lacks storage a later
+    revision creates, so proving a stateless module's effects there would fail
+    for the wrong reason. The proof runs only when the database is at every head
+    of the composed graph after the migration; returns whether it ran. Call it
+    from the migration environment with `MigrationContext.get_current_heads()`
+    and `context.get_head_revisions()`.
+    """
+    current = set(current_heads)
+    if not current or current != set(script_heads):
+        return False
+    require_runtime_prerequisites(bind, manifests)
+    return True
+
+
 __all__ = [
     "PrerequisiteNotSatisfiedError",
     "PrerequisiteVerifierMissingError",
@@ -1911,6 +1935,7 @@ __all__ = [
     "registered_verifiers",
     "require_prerequisites",
     "require_runtime_prerequisites",
+    "require_runtime_prerequisites_at_heads",
     "role_violations",
     "verify_idempotency_ledger",
     "verify_identity_admin",

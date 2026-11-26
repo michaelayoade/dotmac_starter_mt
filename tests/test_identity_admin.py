@@ -474,3 +474,74 @@ def test_the_binding_claim_holds_at_exactly_0025(scratch_db: str, bound) -> None
             verify_identity_admin(conn)
     finally:
         engine.dispose()
+
+
+# ── the migrate-time proof runs only on a COMPLETE database ─────────────────
+
+
+def test_runtime_proof_skips_partial_upgrades_and_refuses_at_heads(
+    scratch_db: str,
+    bound,  # noqa: F811
+) -> None:
+    from alembic.script import ScriptDirectory
+    from dotmac_kernel.migrations.verify import (
+        require_runtime_prerequisites_at_heads,
+    )
+
+    from tests.test_migration_split_rehearsals import (
+        _alembic_config,
+        _both_locations,
+    )
+
+    needs = ModuleManifest(
+        code="needs-identity", version="1.0.0", runtime_requires=("identity_admin.v1",)
+    )
+    script_heads = ScriptDirectory.from_config(
+        _alembic_config(scratch_db, version_locations=_both_locations())
+    ).get_heads()
+
+    def current_heads(conn) -> set[str]:
+        return set(
+            conn.execute(text("SELECT version_num FROM alembic_version")).scalars()
+        )
+
+    engine = create_engine(scratch_db)
+    try:
+        # Partial: `public.parties` does not exist yet. Must NOT fail.
+        _upgrade(scratch_db, "0001_initial_tenant_schema")
+        with engine.connect() as conn:
+            assert (
+                require_runtime_prerequisites_at_heads(
+                    conn,
+                    [needs],
+                    current_heads=current_heads(conn),
+                    script_heads=script_heads,
+                )
+                is False
+            )
+        # Complete: proven, and a missing privilege still refuses.
+        _upgrade(scratch_db, "heads")
+        with engine.connect() as conn:
+            assert (
+                require_runtime_prerequisites_at_heads(
+                    conn,
+                    [needs],
+                    current_heads=current_heads(conn),
+                    script_heads=script_heads,
+                )
+                is True
+            )
+            conn.rollback()
+            conn.execute(text("REVOKE DELETE ON party_role_grants FROM app_user"))
+            with pytest.raises(
+                PrerequisiteNotSatisfiedError, match=r"identity_admin\.v1"
+            ):
+                require_runtime_prerequisites_at_heads(
+                    conn,
+                    [needs],
+                    current_heads=current_heads(conn),
+                    script_heads=script_heads,
+                )
+            conn.rollback()
+    finally:
+        engine.dispose()
