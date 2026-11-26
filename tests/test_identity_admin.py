@@ -480,8 +480,8 @@ def test_the_binding_claim_holds_at_exactly_0025(scratch_db: str, bound) -> None
 
 
 def test_runtime_proof_skips_partial_upgrades_and_refuses_at_heads(
-    scratch_db: str,
-    bound,  # noqa: F811
+    scratch_db: str,  # noqa: F811
+    bound,
 ) -> None:
     from alembic.script import ScriptDirectory
     from dotmac_kernel.migrations.verify import (
