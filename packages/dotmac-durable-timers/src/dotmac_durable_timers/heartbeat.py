@@ -5,8 +5,10 @@ writable directory such as ``/tmp``.  Two timestamps matter to a probe:
 
 * ``alive_at`` is refreshed by a daemon thread every few seconds, so a handler
   that runs for minutes does not look like a dead process (the ``worker-ping``);
-* ``tick_at`` is set when a reconcile pass finishes, so a runner that is alive
-  but no longer scheduling shows up as stale (the ``scheduler-tick``).
+* ``tick_at`` is set when a reconcile pass finishes with NO tenant failure;
+* ``drain_ok_at`` is set when a drain pass returns without raising (claiming
+  nothing counts), so a runner whose dispatcher login lost its grant or
+  password shows up as stale (the ``scheduler-tick`` checks both).
 
 All instants are supplied by the caller; this module reads no clock.
 """
@@ -32,16 +34,19 @@ class HeartbeatState:
     worker_id: str
     alive_at: float
     tick_at: float | None
+    drain_ok_at: float | None = None
 
 
 def read_heartbeat(path: str | os.PathLike[str]) -> HeartbeatState:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     tick = data.get("tick_at")
+    drain = data.get("drain_ok_at")
     return HeartbeatState(
         pid=int(data["pid"]),
         worker_id=str(data["worker_id"]),
         alive_at=float(data["alive_at"]),
         tick_at=None if tick is None else float(tick),
+        drain_ok_at=None if drain is None else float(drain),
     )
 
 
@@ -59,6 +64,7 @@ class Heartbeat:
         self._clock = clock
         self._beat = beat_seconds
         self._tick_at: float | None = None
+        self._drain_ok_at: float | None = None
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
@@ -69,14 +75,32 @@ class Heartbeat:
                 "worker_id": self._worker_id,
                 "alive_at": self._clock().timestamp(),
                 "tick_at": self._tick_at,
+                "drain_ok_at": self._drain_ok_at,
             }
-            temp = self._path.with_name(self._path.name + f".{os.getpid()}.tmp")
-            temp.write_text(json.dumps(payload), encoding="utf-8")
-            os.chmod(temp, 0o600)
-            os.replace(temp, self._path)
+            # mkstemp creates the file O_EXCL with mode 0600 and a random name,
+            # so a planted symlink in a shared directory is never followed.
+            fd, temp = tempfile.mkstemp(
+                dir=self._path.parent, prefix=self._path.name + ".", suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps(payload))
+                os.replace(temp, self._path)
+            except BaseException:
+                Path(temp).unlink(missing_ok=True)
+                raise
+
+    def drain_ok(self) -> None:
+        """Record that a drain pass returned without raising."""
+        previous = self._drain_ok_at
+        self._drain_ok_at = self._clock().timestamp()
+        # Idle polling is once a second: write on the first success and then
+        # only about once per beat; the beat thread carries the stamp otherwise.
+        if previous is None or self._drain_ok_at - previous >= self._beat:
+            self._write()
 
     def tick(self) -> None:
-        """Record that a reconcile pass finished."""
+        """Record that a reconcile pass finished with no tenant failure."""
         self._tick_at = self._clock().timestamp()
         self._write()
 

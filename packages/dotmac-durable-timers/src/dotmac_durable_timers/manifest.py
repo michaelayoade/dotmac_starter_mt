@@ -82,11 +82,18 @@ module = ModuleManifest(
         ),
         PermissionSpec(
             code="durable_timers.jobs.run",
-            description="Run a job now (makes its next generation due immediately).",
+            description=(
+                "Run a job now (makes its next generation due immediately). "
+                "Applies to EVERY module's scheduled jobs in the tenant, not "
+                "only this module's."
+            ),
         ),
         PermissionSpec(
             code="durable_timers.jobs.manage",
-            description="Pause and resume a job's scheduling.",
+            description=(
+                "Pause and resume a job's scheduling. Applies to EVERY "
+                "module's scheduled jobs in the tenant, not only this module's."
+            ),
         ),
     ],
     audit_actions=[

@@ -205,24 +205,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     from dotmac_kernel.messaging.relay import RelayPolicy
     from dotmac_kernel.session_runtime import DatabaseRuntime
 
-    tenant_runtime = DatabaseRuntime.from_urls(
-        database_url=tenant_dsn, hide_parameters=True
-    )
-    dispatcher_runtime = DatabaseRuntime.from_urls(
-        database_url=dispatcher_dsn,
-        hide_parameters=True,
-        pool_size=1,
-        max_overflow=0,
-    )
+    runtimes: list[DatabaseRuntime] = []
+
+    def _dispose_all() -> None:
+        for runtime in runtimes:
+            runtime.engine.dispose()
+            runtime.platform_engine.dispose()
+
     try:
+        # Engine construction is inside the refusal path too: a malformed DSN
+        # exits 2 with the exception type only (never the DSN text).
+        tenant_runtime = DatabaseRuntime.from_urls(
+            database_url=tenant_dsn, hide_parameters=True
+        )
+        runtimes.append(tenant_runtime)
+        dispatcher_runtime = DatabaseRuntime.from_urls(
+            database_url=dispatcher_dsn,
+            hide_parameters=True,
+            pool_size=1,
+            max_overflow=0,
+        )
+        runtimes.append(dispatcher_runtime)
         verify_role_split(
             tenant_factory=tenant_runtime.session_factory,
             dispatcher_factory=dispatcher_runtime.session_factory,
         )
     except Exception as exc:
-        for runtime in (tenant_runtime, dispatcher_runtime):
-            runtime.engine.dispose()
-            runtime.platform_engine.dispose()
+        _dispose_all()
         reason = str(exc) if isinstance(exc, RoleSplitError) else type(exc).__name__
         print(
             f"refusing to start: database role check failed: {reason}", file=sys.stderr

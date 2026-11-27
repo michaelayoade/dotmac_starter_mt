@@ -32,6 +32,20 @@ immutable, so the runner cannot be folded into it.
   after the event in hand; wildcard-hour cron runs in both passes of the autumn
   repeated hour.
 - Deploy surfaces (projects-ff D8 review): each DSN is read from a 0400 root-or-self-owned regular file (`--dispatcher-dsn-file`, `--database-dsn-file`, or `*_FILE` variables; no plain-value form); a heartbeat file plus `python -m dotmac_durable_timers.probe ping|tick` serve the deploy health probe; `--batch-size` accepts only 1.
+- R2 r2 fixes: `published_outbox_purge` deletes only this module's own
+  `job_due` rows (it previously deleted every module's `sent` outbox rows);
+  the heartbeat carries `drain_ok_at` (a drain that returned without raising)
+  and `tick_at` is stamped only by a reconcile pass with no tenant failure,
+  and `probe tick` requires both to be fresh; the boot role check is positive
+  (the dispatcher can EXECUTE the typed claim and reads no tenant, job-state or
+  outbox table; the tenant role is not a member of `outbox_dispatcher` or
+  `app_admin`, owns no relation, and both DSNs name one database); an event
+  whose final attempt already failed is never run again when only the
+  dead-letter hook failed (`exhausted_event_id` on `job_states`, in the
+  unreleased `dt_0002`); the heartbeat temp file is created `O_EXCL` 0600 with
+  a random name; a non-UTF-8 DSN file or a malformed DSN exits 2 naming only the
+  type. `durable_timers.jobs.run` and `.manage` now say plainly that they
+  control EVERY module's scheduled jobs in the tenant.
 - Adoption gate: a consumer must set an explicit `surface_selection` before
   adopting a3 (the staff routes and page are new). Release gate: the kernel floor
   rises to the kernel that ships `dotmac_kernel.jobs` and durable-timers joins

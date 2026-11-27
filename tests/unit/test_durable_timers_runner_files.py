@@ -121,6 +121,7 @@ def test_ping_and_tick_judge_alive_and_scheduling_separately(tmp_path: Path) -> 
                 "worker_id": "w1",
                 "alive_at": (now - timedelta(seconds=5)).timestamp(),
                 "tick_at": (now - timedelta(seconds=900)).timestamp(),
+                "drain_ok_at": (now - timedelta(seconds=5)).timestamp(),
             }
         ),
         encoding="utf-8",
@@ -150,3 +151,64 @@ def test_a_dead_pid_or_missing_file_or_no_tick_is_unhealthy(tmp_path: Path) -> N
 
 def test_the_probe_exit_code_is_one_when_unhealthy(tmp_path: Path) -> None:
     assert main(["ping", "--heartbeat-file", str(tmp_path / "absent")]) == 1
+
+
+def _hb_file(
+    tmp_path: Path, now: datetime, *, tick: float | None, drain: float | None
+) -> str:
+    path = tmp_path / "hb2"
+    path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "worker_id": "w",
+                "alive_at": now.timestamp(),
+                "tick_at": tick,
+                "drain_ok_at": drain,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def test_tick_needs_both_a_clean_reconcile_and_a_clean_drain(tmp_path: Path) -> None:
+    now = datetime(2029, 1, 2, tzinfo=UTC)
+    stamp = now.timestamp()
+    fresh, stale = stamp - 5, stamp - 900
+    ok = _hb_file(tmp_path, now, tick=fresh, drain=fresh)
+    assert check("tick", ok, 300, now=stamp) is None
+    # Reconcile keeps failing for a tenant: tick_at is never refreshed.
+    bad_tick = _hb_file(tmp_path, now, tick=stale, drain=fresh)
+    assert "stalled" in (check("tick", bad_tick, 300, now=stamp) or "")
+    # Dispatcher grant revoked: drains raise, so drain_ok_at goes stale while the
+    # process stays alive and reconcile stays clean.
+    bad_drain = _hb_file(tmp_path, now, tick=fresh, drain=stale)
+    assert check("ping", bad_drain, 45, now=stamp) is None
+    assert "drain failing" in (check("tick", bad_drain, 300, now=stamp) or "")
+    never = _hb_file(tmp_path, now, tick=fresh, drain=None)
+    assert "no drain pass" in (check("tick", never, 300, now=stamp) or "")
+
+
+def test_the_heartbeat_stamps_a_clean_drain_and_survives_a_planted_symlink(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2029, 1, 2, 3, 4, 5, tzinfo=UTC)
+    heartbeat, path = _beat(tmp_path, now)
+    heartbeat.drain_ok()
+    assert read_heartbeat(path).drain_ok_at == now.timestamp()
+    # A predictable temp name planted as a symlink is never written through.
+    victim = tmp_path / "victim"
+    victim.write_text("keep", encoding="utf-8")
+    (tmp_path / f"hb.{os.getpid()}.tmp").symlink_to(victim)
+    heartbeat.tick()
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert read_heartbeat(path).tick_at == now.timestamp()
+
+
+def test_a_non_utf8_dsn_file_is_a_dsn_error_not_a_crash(tmp_path: Path) -> None:
+    path = tmp_path / "bad"
+    path.write_bytes(b"\xff\xfe postgres\n")
+    path.chmod(0o400)
+    with pytest.raises(DsnFileError, match="UTF-8"):
+        read_dsn_file(path)

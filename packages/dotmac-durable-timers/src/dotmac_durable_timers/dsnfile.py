@@ -51,7 +51,10 @@ def read_dsn_file(path: str | os.PathLike[str]) -> str:
         os.close(fd)
     if len(raw) > 65536:
         raise DsnFileError(f"DSN file {target!r} is implausibly large")
-    value = raw.decode("utf-8", errors="strict").strip()
+    try:
+        value = raw.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError:
+        raise DsnFileError(f"DSN file {target!r} is not valid UTF-8 text") from None
     if not value:
         raise DsnFileError(f"DSN file {target!r} is empty")
     if "\n" in value or "\r" in value:

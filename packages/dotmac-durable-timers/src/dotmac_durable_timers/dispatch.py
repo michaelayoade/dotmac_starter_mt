@@ -141,6 +141,11 @@ class JobDispatchTransport:
             return
 
         state = get_state(tenant_db, tenant_id, entry)
+        if state is not None and state.exhausted_event_id == event.id:
+            # The final attempt already failed and was committed; the dead-letter
+            # hook did not complete (it is retried by the relay). Never run the
+            # handler a further time at attempt == max.
+            raise DeliveryTerminal("attempts already exhausted for this event")
         if state is not None and state.dead_letter_event_id == event.id:
             # The dead-letter hook already recorded this event, so the relay is
             # only re-delivering it; never run the handler again.
@@ -211,7 +216,7 @@ class JobDispatchTransport:
                 attempt,
                 type(exc).__name__,
             )
-            record_run(
+            failed_state = record_run(
                 tenant_db,
                 tenant_id=tenant_id,
                 entry=entry,
@@ -220,6 +225,8 @@ class JobDispatchTransport:
                 outcome=OUTCOME_FAILED,
                 detail=type(exc).__name__,
             )
+            if attempt >= entry.spec.max_attempts:
+                failed_state.exhausted_event_id = event.id
             # Commit the failure record now: the worker rolls back on raise.
             tenant_db.commit()
             reason = f"{type(exc).__name__} on attempt {attempt}"

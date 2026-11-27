@@ -39,3 +39,9 @@ both database roles and refuses a shared role, a superuser or BYPASSRLS tenant
 role, or a dispatcher that can read tenant data. A handler must not commit or
 roll back the session it is given. A consumer adopting 0.1.0a3 must declare an
 explicit `surface_selection` so the new staff surface is not mounted by default.
+
+**Permissions are global across modules.** `durable_timers.jobs.run` and
+`durable_timers.jobs.manage` let staff run-now, pause and resume EVERY
+module's scheduled jobs in the tenant, including jobs other modules declare
+later; they are not scoped to this module's own jobs. The built-in
+`published_outbox_purge` deletes only this module's own `job_due` outbox rows.

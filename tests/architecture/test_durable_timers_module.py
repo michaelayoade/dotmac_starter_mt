@@ -176,6 +176,16 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
         ".rollback(",
     ):
         assert forbidden not in _module_source()
+    # The kernel's all-types entry points are never used (the `*_by_type`
+    # spellings are the only legal ones; the opening parenthesis keeps them so).
+    for forbidden in ("run_once(", "claim_batch("):
+        assert forbidden not in _module_source()
+    for node in ast.walk(ast.parse(_module_source())):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "dotmac_kernel.messaging"
+        ):
+            names = {alias.name for alias in node.names}
+            assert not names & {"run_once", "run_forever", "claim_batch"}, names
 
 
 def test_clock_guard_has_a_sensitivity_proof() -> None:

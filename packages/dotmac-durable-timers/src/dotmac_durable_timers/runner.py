@@ -74,6 +74,7 @@ class JobRunner:
         self._poll_interval = poll_interval_seconds
         self._monotonic = monotonic
         self._heartbeat = heartbeat
+        self.last_reconcile_failures = 0
 
     def reconcile(self) -> int:
         """Arm every unpaused declared job in every active tenant. A tenant that
@@ -89,6 +90,7 @@ class JobRunner:
                 )
             )
         armed = 0
+        failures = 0
         for tenant_id in tenant_ids:
             try:
                 with self._runtime.tenant_session(tenant_id) as db:
@@ -99,7 +101,9 @@ class JobRunner:
                         now=self._clock(),
                     )
             except Exception:
+                failures += 1
                 logger.exception("job reconcile failed for tenant %s", tenant_id)
+        self.last_reconcile_failures = failures
         return armed
 
     def drain_once(self) -> int:
@@ -134,13 +138,15 @@ class JobRunner:
             if self._monotonic() >= next_reconcile:
                 try:
                     self.reconcile()
-                    if self._heartbeat is not None:
+                    if self._heartbeat is not None and not self.last_reconcile_failures:
                         self._heartbeat.tick()
                 except Exception:
                     logger.exception("job reconcile pass failed")
                 next_reconcile = self._monotonic() + self._reconcile_interval
             try:
                 claimed = self.drain_once()
+                if self._heartbeat is not None:
+                    self._heartbeat.drain_ok()
             except Exception:
                 logger.exception("job drain pass failed")
                 claimed = 0

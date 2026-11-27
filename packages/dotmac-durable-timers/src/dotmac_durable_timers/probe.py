@@ -5,8 +5,10 @@
 
 ``ping`` (worker-ping) passes while the runner process is alive: the heartbeat
 file's ``alive_at`` is recent and its pid still exists.  ``tick``
-(scheduler-tick) passes while reconcile passes keep finishing: ``tick_at`` is
-recent.  Exit 0 healthy, 1 unhealthy (the reason goes to stderr). The probe is
+(scheduler-tick) passes while reconcile passes keep finishing without a tenant
+failure (``tick_at`` recent) AND drain passes keep returning without raising
+(``drain_ok_at`` recent).  Exit 0 healthy, 1 unhealthy (the reason goes to
+stderr). The probe is
 the one module that reads the clock for this purpose.
 """
 
@@ -48,7 +50,13 @@ def check(command: str, path: str, max_age: float, *, now: float) -> str | None:
     if state.tick_at is None:
         return "no reconcile pass has finished yet"
     if now - state.tick_at > max_age:
-        return f"scheduler stalled: last reconcile {now - state.tick_at:.0f}s ago"
+        age = now - state.tick_at
+        return f"scheduler stalled: last clean reconcile {age:.0f}s ago"
+    if state.drain_ok_at is None:
+        return "no drain pass has succeeded yet"
+    if now - state.drain_ok_at > max_age:
+        age = now - state.drain_ok_at
+        return f"drain failing: last clean drain {age:.0f}s ago"
     return None
 
 

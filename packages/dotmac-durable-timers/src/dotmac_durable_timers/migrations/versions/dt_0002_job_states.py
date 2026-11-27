@@ -63,6 +63,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("0"),
         ),
+        sa.Column("exhausted_event_id", sa.Uuid()),
         sa.Column("dead_letter_event_id", sa.Uuid()),
         sa.Column("dead_letter_generation", sa.Integer()),
         sa.Column("dead_lettered_at", sa.DateTime(timezone=True)),

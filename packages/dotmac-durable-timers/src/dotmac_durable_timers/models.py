@@ -327,6 +327,9 @@ class JobState(Base):
     consecutive_failures: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )
+    #: The event whose final attempt failed (committed with the failure record,
+    #: before the dead-letter hook runs): a re-delivery never runs the handler.
+    exhausted_event_id: Mapped[UUID | None] = mapped_column(Uuid())
     dead_letter_event_id: Mapped[UUID | None] = mapped_column(Uuid())
     dead_letter_generation: Mapped[int | None] = mapped_column(Integer)
     dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

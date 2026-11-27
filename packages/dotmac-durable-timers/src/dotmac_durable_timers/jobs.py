@@ -274,6 +274,7 @@ def record_run(
     state.updated_at = now
     if outcome == OUTCOME_OK:
         state.consecutive_failures = 0
+        state.exhausted_event_id = None
         state.dead_letter_event_id = None
         state.dead_letter_generation = None
         state.dead_lettered_at = None

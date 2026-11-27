@@ -67,7 +67,12 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from tests.test_durable_timers_isolation import _make_tenant, scratch  # noqa: F401
+from tests.test_durable_timers_isolation import (  # noqa: F401
+    _make_tenant,
+    _superuser_url,
+    _url_for,
+    scratch,
+)
 
 PAST = datetime(2020, 1, 1, tzinfo=UTC)
 NOW = datetime(2029, 1, 2, tzinfo=UTC)
@@ -823,3 +828,213 @@ def test_a_foreign_outbox_event_is_never_claimed_and_is_left_for_its_own_relay(
             )
             == 0
         )
+
+
+# ── R2 r2 fixes: N1 purge scope, N3 positive role identity, N5 exhausted ────
+
+
+def _purge_context(tenant_id: UUID) -> JobRunContext:
+    return JobRunContext(
+        tenant_id=tenant_id,
+        module_code="durable_timers",
+        job_code="purge",
+        generation=1,
+        timer_id=UUID(int=0),
+        idempotency_key="k",
+        attempt=1,
+        scheduled_for=NOW,
+        started_at=NOW + timedelta(days=60),
+    )
+
+
+def test_the_outbox_purge_never_deletes_another_modules_sent_rows(env) -> None:
+    from dotmac_kernel.messaging.outbox import enqueue_event
+
+    tenant_id = _make_tenant(env.scratch["admin"])
+    _arm(env, tenant_id, env.ok)
+    assert _drain(env) == 1  # one settled job_due row of our own
+    with env.tenant.tenant_session(tenant_id) as db:
+        foreign = enqueue_event(
+            db, tenant_id=tenant_id, event_type=FOREIGN_EVENT, payload={"k": 1}
+        )
+        foreign_id = foreign.id
+    with env.admin.connect() as connection:
+        connection.execute(
+            text(
+                "UPDATE public.outbox_events SET status = 'sent', sent_at = :past "
+                "WHERE status = 'sent' OR id = :foreign"
+            ),
+            {"past": PAST, "foreign": foreign_id},
+        )
+    with env.tenant.tenant_session(tenant_id) as db:
+        outcome = purge_published_outbox(
+            db, TenantScope(tenant_id), _purge_context(tenant_id)
+        )
+    assert outcome.counters["deleted"] == 1
+    with env.admin.connect() as connection:
+        remaining = list(
+            connection.execute(
+                text("SELECT event_type, status FROM public.outbox_events")
+            )
+        )
+    assert [(row.event_type, row.status) for row in remaining] == [
+        (FOREIGN_EVENT, "sent")
+    ]
+
+
+@pytest.fixture
+def login_roles(env) -> Iterator[object]:
+    """Create separate LOGIN roles (cluster-level) and drop them afterwards."""
+    server = create_engine(_superuser_url(), isolation_level="AUTOCOMMIT")
+    dbname = env.scratch["admin"].rpartition("/")[2]
+    created: list[str] = []
+
+    def make(*member_of: str) -> str:
+        import uuid
+
+        name = f"jr_login_{uuid.uuid4().hex[:10]}"
+        with server.connect() as connection:
+            connection.execute(
+                text(f'CREATE ROLE "{name}" LOGIN IN ROLE ' + ", ".join(member_of))
+            )
+            connection.execute(
+                text(f'GRANT CONNECT ON DATABASE "{dbname}" TO "{name}"')
+            )
+        created.append(name)
+        return _url_for(_superuser_url(), dbname, user=name)
+
+    try:
+        yield make
+    finally:
+        with server.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE usename = ANY(:names)"
+                ),
+                {"names": created},
+            )
+            for name in created:
+                connection.execute(
+                    text(f'REVOKE CONNECT ON DATABASE "{dbname}" FROM "{name}"')
+                )
+                connection.execute(text(f'DROP ROLE IF EXISTS "{name}"'))
+        server.dispose()
+
+
+def _runtime(url: str) -> DatabaseRuntime:
+    return DatabaseRuntime.from_urls(database_url=url)
+
+
+def test_a_separate_dispatcher_login_in_the_dispatcher_group_boots_and_claims(
+    env, login_roles
+) -> None:
+    runtime = _runtime(login_roles("outbox_dispatcher"))
+    try:
+        tenant, dispatcher = verify_role_split(
+            tenant_factory=env.tenant.session_factory,
+            dispatcher_factory=runtime.session_factory,
+        )
+        assert tenant.name == "app_user" and dispatcher.name.startswith("jr_login_")
+        tenant_id = _make_tenant(env.scratch["admin"])
+        _arm(env, tenant_id, env.ok)
+        runner = JobRunner(
+            catalogue=env.catalogue,
+            transport=env.transport,
+            dispatcher_session_factory=runtime.session_factory,
+            tenant_runtime=env.tenant,
+            worker_id="runner-login",
+            clock=lambda: NOW,
+            policy=RelayPolicy(batch_size=1),
+        )
+        assert runner.drain_once() == 1
+    finally:
+        runtime.engine.dispose()
+        runtime.platform_engine.dispose()
+
+
+def test_a_tenant_login_in_the_dispatcher_group_is_refused(env, login_roles) -> None:
+    runtime = _runtime(login_roles("app_user", "outbox_dispatcher"))
+    try:
+        with pytest.raises(RoleSplitError, match="member of 'outbox_dispatcher'"):
+            verify_role_split(
+                tenant_factory=runtime.session_factory,
+                dispatcher_factory=env.dispatcher.session_factory,
+            )
+    finally:
+        runtime.engine.dispose()
+        runtime.platform_engine.dispose()
+
+
+def test_a_tenant_login_in_the_admin_group_is_refused(env, login_roles) -> None:
+    runtime = _runtime(login_roles("app_user", "app_admin"))
+    try:
+        with pytest.raises(RoleSplitError, match="member of 'app_admin'"):
+            verify_role_split(
+                tenant_factory=runtime.session_factory,
+                dispatcher_factory=env.dispatcher.session_factory,
+            )
+    finally:
+        runtime.engine.dispose()
+        runtime.platform_engine.dispose()
+
+
+def test_a_dispatcher_login_without_the_typed_claim_grant_is_refused(
+    env, login_roles
+) -> None:
+    runtime = _runtime(login_roles("app_user"))  # connects, but no EXECUTE
+    try:
+        with pytest.raises(RoleSplitError, match="cannot EXECUTE the typed"):
+            verify_role_split(
+                tenant_factory=env.tenant.session_factory,
+                dispatcher_factory=runtime.session_factory,
+            )
+    finally:
+        runtime.engine.dispose()
+        runtime.platform_engine.dispose()
+
+
+def test_an_owning_tenant_role_is_refused(env) -> None:
+    owner = _runtime(env.scratch["admin"])  # app_admin owns the tables
+    try:
+        with pytest.raises(RoleSplitError, match=r"owns \d+ relation"):
+            verify_role_split(
+                tenant_factory=owner.session_factory,
+                dispatcher_factory=env.dispatcher.session_factory,
+            )
+    finally:
+        owner.engine.dispose()
+        owner.platform_engine.dispose()
+
+
+def test_a_failing_audit_in_the_dead_letter_hook_never_reruns_the_handler(
+    env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = _make_tenant(env.scratch["admin"])
+    _arm(env, tenant_id, env.flaky)
+    PROBE.fail = True
+    _drain(env)  # attempt 1: deferred
+    _make_due_again(env)
+
+    def broken_audit(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("audit down")
+
+    monkeypatch.setattr(JobDispatchTransport, "_audit", staticmethod(broken_audit))
+    _drain(env)  # attempt 2 (== max): fails, exhausted recorded, hook raises
+    state = _state(env, tenant_id, env.flaky)
+    assert state is not None and state.exhausted_event_id is not None
+    failures_after_final = state.consecutive_failures
+    assert failures_after_final == 2
+    for _ in range(2):  # the lease goes stale and the relay re-delivers
+        with env.admin.connect() as connection:
+            connection.execute(
+                text(
+                    "UPDATE public.outbox_events SET leased_at = :past "
+                    "WHERE status = 'claimed'"
+                ),
+                {"past": PAST},
+            )
+        _drain(env)
+    state = _state(env, tenant_id, env.flaky)
+    # Every handler run records a failure; none more was recorded.
+    assert state is not None and state.consecutive_failures == failures_after_final

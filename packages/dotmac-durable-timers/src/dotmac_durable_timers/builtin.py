@@ -16,12 +16,12 @@ from dotmac_kernel.jobs import JobSpec
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from dotmac_durable_timers.jobs import JobOutcome, JobRunContext
+from dotmac_durable_timers.jobs import JOB_DUE_EVENT, JobOutcome, JobRunContext
 from dotmac_durable_timers.service import purge_history
 
 PURGE_BATCH: Final[int] = 1000
 PURGE_BATCHES_PER_RUN: Final[int] = 10
-#: Settled (``sent``) outbox rows are kept this long for diagnosis, then purged.
+#: Settled (``sent``) ``job_due`` rows are kept this long, then purged.
 PUBLISHED_OUTBOX_RETENTION: Final[timedelta] = timedelta(days=7)
 
 
@@ -43,7 +43,9 @@ def purge_timer_history(
 def purge_published_outbox(
     session: Session, scope: Scope, run_context: JobRunContext
 ) -> JobOutcome:
-    """Delete this tenant's long-settled ``sent`` outbox rows (RLS-scoped)."""
+    """Delete this tenant's long-settled ``sent`` rows of THIS module's own
+    ``job_due`` event only (RLS-scoped). Another module's outbox trail is never
+    this module's to retain or purge (ADR-0006 ownership)."""
     from dotmac_kernel.messaging.models import OutboxEvent
 
     cutoff = run_context.started_at - PUBLISHED_OUTBOX_RETENTION
@@ -51,7 +53,11 @@ def purge_published_outbox(
     for _ in range(PURGE_BATCHES_PER_RUN):
         doomed = (
             select(OutboxEvent.id)
-            .where(OutboxEvent.status == "sent", OutboxEvent.sent_at < cutoff)
+            .where(
+                OutboxEvent.event_type == JOB_DUE_EVENT,
+                OutboxEvent.status == "sent",
+                OutboxEvent.sent_at < cutoff,
+            )
             .order_by(OutboxEvent.sent_at)
             .limit(PURGE_BATCH)
         )
@@ -76,7 +82,7 @@ BUILTIN_JOBS: Final[tuple[JobSpec, ...]] = (
         handler="dotmac_durable_timers.builtin:purge_published_outbox",
         plane="tenant",
         interval_seconds=6 * 3600,
-        description="Delete long-settled published outbox rows.",
+        description="Delete this module's own long-settled job_due outbox rows.",
     ),
 )
 
