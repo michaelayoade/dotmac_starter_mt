@@ -39,7 +39,7 @@ One additive migration. a2 is released and tagged.
 
 ## 0.1.0a2 — released, tag `dotmac-money-flows-v0.1.0a2` (GAP-4: the X1 receivables reader)
 
-Source only. a1 was published first; this added one stateless module on top of it.
+Published after a1; this added one stateless module on top of it.
 
 - `receivables.BillingReceivablesReader` (X1): implements Collections'
   `ReceivablesReader` over Billing's sealed document exposure (native V1 and imported
