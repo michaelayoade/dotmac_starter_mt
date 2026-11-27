@@ -84,7 +84,7 @@ A pin bump that adds, removes or renames a mounted route then fails in the pin P
 
 ### Composition checks `create_app` makes
 
-`create_app` refuses two routes with the same method and path shape, a composed browser surface route under `/health`, `/docs`, `/redoc`, `/openapi.json`, `/static` or `/api` (and `/platform` when enabled), and a v2 route with an empty path. On a `/` facet the facet prefix no longer shields module routes from these.
+`create_app` refuses two routes with the same method and path shape, a composed browser surface route under `/health`, `/docs`, `/redoc`, `/openapi.json`, `/static` or `/api` (and `/platform` when enabled), and a v2 route with an empty path. On a `/` facet the facet prefix no longer shields module routes from these. `/platform` is the operator plane: a module's `api_routers` enter it only when the assembly lists the module in `platform_api_modules`, behind `require_platform_admin`, on a static first segment the kernel's platform routes do not use.
 
 ## Prove it with the conformance kit
 

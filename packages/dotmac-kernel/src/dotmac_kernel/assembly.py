@@ -304,6 +304,13 @@ class ProductAssemblySpec:
     # they never expand the product-wide capability/source union.
     browser_document_policies: Sequence[BrowserDocumentPolicyV1] = ()
 
+    # `/platform` is the operator plane. A module's `api_routers` may enter it
+    # only when the assembly lists the module here, every such route carries
+    # `require_platform_admin`, and the path starts with a static first segment
+    # the kernel's own platform routes do not use. `create_app` refuses the boot
+    # otherwise, and refuses a code that is not an installed module.
+    platform_api_modules: frozenset[str] = frozenset()
+
     def __post_init__(self) -> None:
         if self.request_evidence is not None and not isinstance(
             self.request_evidence, RequestEvidenceConfigurationV1
@@ -328,6 +335,9 @@ class ProductAssemblySpec:
         )
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))
+        object.__setattr__(
+            self, "platform_api_modules", frozenset(self.platform_api_modules)
+        )
         object.__setattr__(self, "startup_checks", tuple(self.startup_checks))
         object.__setattr__(self, "startup_hooks", tuple(self.startup_hooks))
         object.__setattr__(self, "web_facets", tuple(self.web_facets))

@@ -160,6 +160,9 @@ assembly = ProductAssemblySpec(
     # release that adds a surface is an informed decision here, not a silent
     # mount; a product that wants less lists (module, surface) pairs instead.
     surface_selection=SELECT_ALL,
+    # `tenants` is the operator-plane API (`/platform/tenants`, guarded by
+    # `require_platform_admin`); no other module may enter `/platform`.
+    platform_api_modules=frozenset({"tenants"}),
     # The assembly's own features, plus every INSTALLED MODULE it composes.
     #
     # `dotmac_template_studio.module` is a `ModuleManifest`, not a

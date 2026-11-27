@@ -790,9 +790,33 @@ class ModuleRegistry:
         function, accept the contract signature, and live in the declaring
         module's own package (``dotmac_<code>`` unless ``job_package`` says
         otherwise), so a typo or a cross-module import fails the start, not the
-        first due run."""
+        first due run. A ``job_package`` is itself checked: it may not be the
+        kernel, nor a ``dotmac_*`` package other than the module's own
+        ``dotmac_<code>``, nor another manifest's effective ``dotmac_*`` package."""
+        effective = {
+            manifest.code: manifest.job_package or f"dotmac_{manifest.code}"
+            for manifest in manifests
+        }
         for manifest in manifests:
-            expected = manifest.job_package or f"dotmac_{manifest.code}"
+            expected = effective[manifest.code]
+            declared = manifest.job_package
+            if declared is not None and (
+                declared == "dotmac_kernel"
+                or (
+                    declared.startswith("dotmac_")
+                    and (
+                        declared != f"dotmac_{manifest.code}"
+                        or any(
+                            code != manifest.code and package == declared
+                            for code, package in effective.items()
+                        )
+                    )
+                )
+            ):
+                raise ModuleRegistryError(
+                    f"module {manifest.code!r}: job_package {declared!r} belongs "
+                    "to the kernel or to another module"
+                )
             for job in manifest.jobs:
                 try:
                     resolve_job_handler(job)

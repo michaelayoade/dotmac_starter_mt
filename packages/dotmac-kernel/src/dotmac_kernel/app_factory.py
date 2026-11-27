@@ -24,7 +24,7 @@ import asyncio
 import inspect
 import logging
 import re
-from collections.abc import Mapping, Sequence, Set
+from collections.abc import Iterator, Mapping, Sequence, Set
 from contextlib import asynccontextmanager
 from typing import Final
 
@@ -90,6 +90,7 @@ from dotmac_kernel.platform_auth import (
     PLATFORM_COOKIE,
     PLATFORM_COOKIE_AUTHENTICATION,
     platform_auth_router,
+    require_platform_admin,
 )
 from dotmac_kernel.platform_web import PLATFORM_WEB_SURFACE
 from dotmac_kernel.request_evidence import RequestEvidenceContextV1
@@ -576,12 +577,25 @@ def _under(path: str, root: str) -> bool:
     return path == root or path.startswith(f"{root}/")
 
 
+def _dependant_calls(dependant: object) -> Iterator[object]:
+    for sub in getattr(dependant, "dependencies", ()):
+        yield getattr(sub, "call", None)
+        yield from _dependant_calls(sub)
+
+
+def _platform_first_segment(path: str) -> str | None:
+    """The first path segment after ``/platform`` (``None`` when absent)."""
+    rest = path[len("/platform") :].lstrip("/")
+    return rest.split("/", 1)[0] if rest else None
+
+
 def _validate_route_collisions(
     app: FastAPI,
     *,
     platform_enabled: bool,
     exempt_prefixes: Sequence[str],
-    module_api_keys: Set[tuple[str, str]],
+    module_api_keys: Mapping[tuple[str, str], str],
+    platform_api_modules: Set[str] = frozenset(),
 ) -> None:
     """Refuse silent shadowing across the whole composed app.
 
@@ -590,21 +604,30 @@ def _validate_route_collisions(
     other; (2) no composed browser surface route sits under a reserved root
     (health, docs, static, ``/api``, and ``/platform`` when the platform surface
     is enabled); (3) no module ``api_routers`` route enters a kernel-owned
-    subtree (docs, redoc, openapi.json, static; ``/platform``, ``/api`` and
-    ``/health/...`` stay open to module APIs). Under a ``/`` facet the facet
-    prefix no longer shields module routes. Contract-1 and kernel built-in
-    surfaces are exempt from (2) by their registered flags (``exempt_prefixes``),
-    not by anything in a route name.
+    subtree (docs, redoc, openapi.json, static, and ``/platform`` when enabled;
+    ``/api/...`` and ``/health/...`` stay open to module APIs), whatever its
+    route name; a module API route may not be named ``web:...``. ``/platform`` is
+    the operator plane: a module API enters it only when the assembly lists the
+    module in ``platform_api_modules``, every such route carries
+    ``require_platform_admin`` (matched by identity) and starts with a static
+    first segment the kernel's own platform routes do not use. Under a ``/``
+    facet the facet prefix no longer shields module routes. Contract-1 and
+    kernel built-in surfaces are exempt from (2) by their registered flags
+    (``exempt_prefixes``), not by anything in a route name.
     """
     reserved = _RESERVED_SURFACE_ROOTS + (("/platform",) if platform_enabled else ())
-    # `/platform` is reserved for browser surfaces only: the platform-admin API
-    # (e.g. the reference `tenants` module's `/platform/tenants`) is a module API
-    # that legitimately lives there, and a real clash with a platform surface
-    # route is still refused by the (method, shape) twin check above.
-    api_reserved = _RESERVED_API_ROOTS
+    api_reserved = _RESERVED_API_ROOTS + (("/platform",) if platform_enabled else ())
     exempt = tuple(exempt_prefixes)
     seen: dict[tuple[str, str], str] = {}
     problems: list[str] = []
+    # First segments under /platform used by routes the kernel itself mounted.
+    kernel_segments: set[str | None] = set()
+    for route in app.routes:
+        if isinstance(route, APIRoute) and not any(
+            (method, route.path) in module_api_keys for method in route.methods or ()
+        ):
+            if _under(route.path, "/platform"):
+                kernel_segments.add(_platform_first_segment(route.path))
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
@@ -618,21 +641,51 @@ def _validate_route_collisions(
                 )
             else:
                 seen[key] = route.name
-        if route.name.startswith("web:"):
-            if not route.name.startswith(exempt) and any(
-                _under(route.path, root) for root in reserved
+        owners = {
+            module_api_keys[(method, route.path)]
+            for method in (route.methods or ())
+            if (method, route.path) in module_api_keys
+        }
+        if owners:
+            if route.name.startswith("web:"):
+                problems.append(
+                    f"module API route {route.path} ({route.name!r}) is named "
+                    "like a browser surface route"
+                )
+            if any(
+                _under(route.path, root) for root in api_reserved if root != "/platform"
             ):
+                problems.append(
+                    f"module API route {route.path} ({route.name!r}) is under a "
+                    "kernel-owned root"
+                )
+            if platform_enabled and _under(route.path, "/platform"):
+                segment = _platform_first_segment(route.path)
+                if not owners <= set(platform_api_modules):
+                    problems.append(
+                        f"module API route {route.path} ({route.name!r}) is under "
+                        "/platform, which only modules listed in "
+                        "platform_api_modules may use"
+                    )
+                elif require_platform_admin not in set(
+                    _dependant_calls(route.dependant)
+                ):
+                    problems.append(
+                        f"module API route {route.path} ({route.name!r}) is under "
+                        "/platform without require_platform_admin"
+                    )
+                elif segment is None or "{" in segment or segment in kernel_segments:
+                    problems.append(
+                        f"module API route {route.path} ({route.name!r}) is under "
+                        "/platform but does not start with a static segment the "
+                        "kernel's platform routes leave free"
+                    )
+        elif route.name.startswith("web:") and not route.name.startswith(exempt):
+            if any(_under(route.path, root) for root in reserved):
                 problems.append(
                     f"surface route {route.path} ({route.name!r}) is under a "
                     "reserved root"
                 )
-        elif any(
-            (method, route.path) in module_api_keys for method in (route.methods or ())
-        ) and any(_under(route.path, root) for root in api_reserved):
-            problems.append(
-                f"module API route {route.path} ({route.name!r}) is under a "
-                "kernel-owned root"
-            )
     if problems:
         raise ValueError(
             "route composition refused: " + "; ".join(sorted(set(problems)))
@@ -705,6 +758,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     registry = ModuleRegistry(spec.modules)
     manifests = list(registry.startup_order())
     enabled_manifests = list(registry.enabled_order(disabled))
+    unknown_platform_api = sorted(
+        set(spec.platform_api_modules) - {manifest.code for manifest in manifests}
+    )
+    if unknown_platform_api:
+        raise ValueError(
+            "ProductAssemblySpec.platform_api_modules names modules that are not "
+            f"installed: {', '.join(unknown_platform_api)}"
+        )
     # Assembly surface selection (fail-closed). Validated against every
     # INSTALLED manifest so an entry naming an absent module/surface refuses
     # the boot; applied to the enabled set so an unselected API router set or
@@ -1063,13 +1124,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         platform_enabled=spec.platform_surface_enabled,
         exempt_prefixes=surface_registry.exempt_route_name_prefixes,
         module_api_keys={
-            (method, route.path)
+            (method, route.path): manifest.code
             for manifest in enabled_manifests
             for router in manifest.api_routers
             for route in router.routes
             if isinstance(route, APIRoute)
             for method in (route.methods or ())
         },
+        platform_api_modules=spec.platform_api_modules,
     )
 
     # Inspect the effective, post-include dependency tree (including lazy

@@ -317,3 +317,116 @@ def test_module_api_route_under_a_kernel_owned_root_is_refused() -> None:
                 surface_selection=SELECT_ALL,
             )
         )
+
+
+# --- /platform is the operator plane: module APIs enter by declaration only ---
+
+
+def _platform_module(
+    path: str, *, guarded: bool = True, code: str = "ops", name: str = "ops_view"
+) -> ModuleManifest:
+    from dotmac_kernel.platform_auth import require_platform_admin
+    from fastapi import Depends
+
+    router = APIRouter(
+        dependencies=[Depends(require_platform_admin)] if guarded else []
+    )
+
+    @router.get(path, name=name)
+    def view() -> dict[str, bool]:
+        return {"ok": True}
+
+    return ModuleManifest(code=code, version="1.0.0", api_routers=(router,))
+
+
+def _platform_spec(module: ModuleManifest, **kwargs: object) -> ProductAssemblySpec:
+    return ProductAssemblySpec(
+        api_documentation=_DOCS,
+        name="platform-api",
+        modules=(module,),
+        web_enabled=False,
+        surface_selection=SELECT_ALL,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_listed_guarded_module_may_serve_under_platform() -> None:
+    spec = _platform_spec(
+        _platform_module("/platform/ops/items"),
+        platform_api_modules=frozenset({"ops"}),
+    )
+    assert "/platform/ops/items" in _paths(create_app(spec))
+
+
+def test_unlisted_module_under_platform_is_refused() -> None:
+    with pytest.raises(ValueError, match="platform_api_modules"):
+        create_app(_platform_spec(_platform_module("/platform/ops/items")))
+
+
+def test_unlisted_module_wildcard_takeover_of_platform_is_refused() -> None:
+    with pytest.raises(ValueError, match="platform_api_modules"):
+        create_app(_platform_spec(_platform_module("/platform/{anything}")))
+
+
+def test_listed_module_without_platform_admin_guard_is_refused() -> None:
+    spec = _platform_spec(
+        _platform_module("/platform/ops/items", guarded=False),
+        platform_api_modules=frozenset({"ops"}),
+    )
+    with pytest.raises(ValueError, match="without require_platform_admin"):
+        create_app(spec)
+
+
+@pytest.mark.parametrize("path", ["/platform/{x}", "/platform/auth/extra", "/platform"])
+def test_listed_module_must_use_a_static_free_first_segment(path: str) -> None:
+    spec = _platform_spec(
+        _platform_module(path), platform_api_modules=frozenset({"ops"})
+    )
+    with pytest.raises(ValueError, match="static segment"):
+        create_app(spec)
+
+
+def test_platform_api_modules_must_name_installed_modules() -> None:
+    spec = _platform_spec(
+        _platform_module("/platform/ops/items"),
+        platform_api_modules=frozenset({"nope"}),
+    )
+    with pytest.raises(ValueError, match="not installed"):
+        create_app(spec)
+
+
+def test_module_api_route_named_like_a_surface_cannot_skip_the_root_check() -> None:
+    module = ModuleManifest(
+        code="demo",
+        version="1.0.0",
+        api_routers=(
+            _router(
+                "/static/steal", "web:platform_admin:kernel_platform:control_plane:x"
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match=r"kernel-owned root|named like a browser"):
+        create_app(
+            ProductAssemblySpec(
+                api_documentation=_DOCS,
+                name="api-named-web",
+                modules=(module,),
+                platform_surface_enabled=False,
+                surface_selection=SELECT_ALL,
+            )
+        )
+
+
+def test_create_app_refuses_no_selection_in_production(monkeypatch) -> None:
+    from dotmac_kernel import app_factory
+
+    monkeypatch.setattr(app_factory.settings, "environment", "production")
+    spec = ProductAssemblySpec(
+        api_documentation=_DOCS,
+        name="no-selection",
+        modules=(_module(api=True),),
+        platform_surface_enabled=False,
+        web_enabled=False,
+    )
+    with pytest.raises(ValueError, match="sets no surface_selection"):
+        create_app(spec)

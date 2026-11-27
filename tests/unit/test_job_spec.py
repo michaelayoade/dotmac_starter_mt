@@ -196,3 +196,16 @@ def test_handler_package_must_follow_the_module_code_or_job_package() -> None:
 def test_a_module_cannot_take_the_kernel_platform_code() -> None:
     with pytest.raises(ModuleRegistryError, match="reserved"):
         ModuleManifest(code="kernel_platform", version="1")
+
+
+@pytest.mark.parametrize("package", ["dotmac_kernel", "dotmac_billing"])
+def test_job_package_cannot_point_at_the_kernel_or_another_module(
+    package: str,
+) -> None:
+    with pytest.raises(ModuleRegistryError, match="kernel or to another module"):
+        ModuleRegistry(
+            [
+                ModuleManifest(code="m", version="1", job_package=package),
+                ModuleManifest(code="billing", version="1"),
+            ]
+        )

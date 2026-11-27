@@ -19,10 +19,15 @@ allocation (this ships with the next allocated release).
   a route-name substring; the module code `kernel_platform` and the contract-2
   surface code `legacy` are refused. Job handlers must live in `dotmac_<code>`
   (or the new `ModuleManifest.job_package`). The reserved-path check now also covers
-  module `api_routers` under `/docs`, `/redoc`, `/openapi.json`, `/static`;
-  `/platform/...` (the platform-admin API, e.g. `/platform/tenants`), `/api/...` and
-  `/health/...` stay allowed for module APIs,
-  an exact `/health` twin is refused by the duplicate check.
+  module `api_routers` under `/docs`, `/redoc`, `/openapi.json`, `/static`, and
+  `/platform` when enabled; `/api/...` and `/health/...` stay allowed for modules.
+  `/platform` is the operator plane: a module API enters it only by assembly
+  declaration (`ProductAssemblySpec.platform_api_modules`), only behind
+  `require_platform_admin` (matched by identity) and only on a static first
+  segment the kernel's platform routes do not use. A module API route named
+  `web:...` is refused, and the root check no longer depends on a route name.
+  `job_package` may not name the kernel or another module's `dotmac_*` package. An exact `/health` twin is refused by the duplicate
+  check.
 - `dotmac_kernel.jobs` adds `JobSpec` and `ModuleManifest.jobs` (module contract
   2 only): code, handler import path, explicit plane, interval or five-field
   cron cadence, max attempts, backoff, `concurrency='single'`. `ModuleRegistry`
