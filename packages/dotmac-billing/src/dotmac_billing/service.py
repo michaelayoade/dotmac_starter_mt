@@ -9563,17 +9563,6 @@ def _import_opening_account_v2(
                 )
             )
         session.flush()
-        from dotmac_billing.migration_items import write_tax_snapshots
-
-        for basis_fact in bases:
-            if basis_fact.source.original is not None:
-                write_tax_snapshots(
-                    session,
-                    scope=scope,
-                    document_id=basis_fact.document_id,
-                    original=basis_fact.source.original,
-                )
-        session.flush()
         lots = tuple(
             OpeningCashLotFactV1(
                 scope,

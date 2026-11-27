@@ -56,6 +56,7 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningCollectionEvidenceV1,
     OpeningOriginalDocumentV1,
 )
+from dotmac_billing.opening_receivable_queries import get_opening_receivable_basis
 from dotmac_billing.opening_window_queries import (
     get_opening_hold_list,
     get_opening_window,
@@ -1170,8 +1171,11 @@ def get_open_item_tax_snapshots(
 ) -> OpenItemTaxSnapshotsV1:
     """The legacy tax evidence of one imported open item or migration debit.
 
-    Native documents are refused (they have invoice document facts). When the
-    document's tax is non-zero and no snapshot rows exist, the read refuses
+    An imported item's evidence is the verified original document stored with its
+    opening basis (the restricted opening principal writes no other tax rows); a
+    migration debit's is its per-document ``applied_tax_snapshots`` rows. Native
+    documents are refused (they have invoice document facts). When the document's
+    tax is non-zero and there are no snapshots the read refuses
     ``open_item_tax_snapshots_unavailable``; nothing is backfilled. Read-only,
     lock-free; the caller owns the transaction.
     """
@@ -1182,6 +1186,7 @@ def get_open_item_tax_snapshots(
         )
     documents = _table(scope, "documents")
     snapshots = _table(scope, "applied_tax_snapshots")
+    bases = _table(scope, "opening_receivable_bases")
     with db.no_autoflush:
         document = (
             db.execute(
@@ -1202,22 +1207,39 @@ def get_open_item_tax_snapshots(
                 "open_item_tax_snapshots_native_document",
                 "a native document's tax evidence is in its invoice document facts",
             )
-        rows = (
-            db.execute(
+        currency = (document["currency"], document["minor_units"])
+        tax_total = service._money(Decimal(document["tax_total"]), *currency)
+        found: tuple[AppliedTaxSnapshotV1, ...]
+        if mode == "imported_open_item":
+            basis_id = db.execute(
                 _scoped(
-                    select(snapshots).where(snapshots.c.document_id == document_id),
+                    select(bases.c.id).where(bases.c.document_id == document_id),
                     scope,
-                    snapshots,
+                    bases,
                 )
+            ).scalar_one_or_none()
+            if basis_id is None:
+                raise BillingRuleViolation(
+                    "open_item_tax_snapshots_unavailable",
+                    "the imported document has no opening basis",
+                )
+            original = get_opening_receivable_basis(
+                db, scope=scope, basis_id=basis_id
+            ).source.original
+            found = () if original is None else tuple(original.tax_snapshots)
+        else:
+            rows = (
+                db.execute(
+                    _scoped(
+                        select(snapshots).where(snapshots.c.document_id == document_id),
+                        scope,
+                        snapshots,
+                    )
+                )
+                .mappings()
+                .all()
             )
-            .mappings()
-            .all()
-        )
-    currency = (document["currency"], document["minor_units"])
-    tax_total = service._money(Decimal(document["tax_total"]), *currency)
-    items = tuple(
-        sorted(
-            (
+            found = tuple(
                 AppliedTaxSnapshotV1(
                     treatment_code=row["treatment_code"],
                     jurisdiction_code=row["jurisdiction_code"],
@@ -1234,7 +1256,10 @@ def get_open_item_tax_snapshots(
                     ),
                 )
                 for row in rows
-            ),
+            )
+    items = tuple(
+        sorted(
+            found,
             key=lambda s: (
                 s.treatment_code,
                 s.jurisdiction_code,

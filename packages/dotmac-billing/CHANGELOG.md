@@ -37,10 +37,13 @@ a14 is published and tagged (`dotmac-billing-v0.1.0a14`); `bi_0021` chains after
   Effect kinds `migration_debit_recorded`, `migration_credit_applied`,
   `migration_item_reversed`; one receivable effect (debit positive, credit
   negative, reversal the exact negation, linked by `reverses_fact_id`).
-- Imported open items and migration debits carry per-document
-  `applied_tax_snapshots` rows; the public read `get_open_item_tax_snapshots`
-  returns them (native documents refused; tax non-zero with no rows refused
-  `open_item_tax_snapshots_unavailable`). No backfill.
+- Public read `get_open_item_tax_snapshots` returns the legacy per-document tax
+  snapshots. For an imported open item they come from the verified original
+  document stored with its opening basis (the restricted opening principal writes
+  no new rows, and gains no grant); for a migration debit they are its
+  per-document `applied_tax_snapshots` rows. Native documents are refused; tax
+  non-zero with no snapshots is refused `open_item_tax_snapshots_unavailable`;
+  they must sum to the document tax. No backfill and no new write at import.
 - A document read `get_migration_item`. Generic `void_document`, the withholding
   freeze and `reverse_posting_group` refuse migration documents and groups.
 

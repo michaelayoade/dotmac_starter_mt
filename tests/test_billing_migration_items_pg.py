@@ -777,6 +777,8 @@ def test_append_only_forced_rls_and_exact_grants(scratch):
 
 
 def test_tax_snapshot_read_covers_both_modes_and_refuses_native_and_missing(scratch):
+    # _world imports under the restricted opening principal (which holds no
+    # grant on applied_tax_snapshots) and the read serves the stored basis evidence.
     w = _world(scratch)
     with b._session(w.url, w.scope) as db:
         for basis in ar._bases(db, w.scope, w.receipt):
