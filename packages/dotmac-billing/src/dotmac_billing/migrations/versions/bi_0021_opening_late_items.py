@@ -62,6 +62,7 @@ _EXPOSURE = "mod_billing.admit_opening_exposure()"
 _ROOM_BASE_OLD = "opening_base := backing.initial_receivable;"
 _ROOM_BASE_NEW = """opening_base := backing.initial_receivable;
       ELSIF invoice.authoring_mode = 'opening_late_item' THEN
+        -- late-items gate begin
         SELECT x.receivable_delta, x.billing_account_id, x.currency, x.minor_units, g.source_version INTO backing
           FROM mod_billing.opening_late_items x
           JOIN mod_billing.posting_groups g ON g.id = x.posting_group_id AND g.tenant_id = x.tenant_id
@@ -70,7 +71,8 @@ _ROOM_BASE_NEW = """opening_base := backing.initial_receivable;
           OR backing.minor_units <> invoice.minor_units OR backing.source_version > target_version THEN
           RAISE EXCEPTION 'opening late invoice requires its exact source-version debit' USING ERRCODE = 'check_violation';
         END IF;
-        opening_base := backing.receivable_delta;"""
+        opening_base := backing.receivable_delta;
+        -- late-items gate end"""
 _ROOM_ISSUE_OLD = (
     "IF doc.id = invoice_id AND invoice.authoring_mode = 'imported_open_item' THEN"
 )
@@ -81,27 +83,53 @@ _ROOM_ISSUE_NEW = """IF doc.id = invoice_id AND invoice.authoring_mode = 'openin
           CONTINUE;
         END IF;
         IF doc.id = invoice_id AND invoice.authoring_mode = 'imported_open_item' THEN"""
-_ROOM_UNION_OLD = "FROM mod_billing.opening_cash_effects x WHERE x.document_id = invoice_id AND x.tenant_id = tenant"
-_ROOM_UNION_NEW = """FROM mod_billing.opening_cash_effects x WHERE x.document_id = invoice_id AND x.tenant_id = tenant
-        UNION ALL SELECT x.posting_group_id, x.billing_account_id, x.currency, x.minor_units, x.receivable_delta
-          FROM mod_billing.opening_late_items x WHERE x.document_id = invoice_id AND x.kind <> 'debit' AND x.tenant_id = tenant"""
+# The late-item reads sit inside branches that run only for a caller that may read
+# the table: the opening principal never takes SELECT on opening_late_items, and a
+# plpgsql statement is planned (and its privileges checked) only when reached.
+_GATE_BEGIN = "-- late-items gate begin"
+_GATE_END = "-- late-items gate end"
+_ROOM_DECLARE_OLD = "void_at_target boolean;"
+_ROOM_DECLARE_NEW = "void_at_target boolean; late_delta numeric; late_bad bigint;"
+_ROOM_BLOCK_OLD = "IF n <> 0 THEN"
+_ROOM_BLOCK_NEW = f"""{_GATE_BEGIN}
+      -- Runs only once a seal exists, and never for the opening principal acting on
+      -- a held partition (no item can exist there before its admission).
+      IF EXISTS (SELECT 1 FROM mod_billing.opening_window_seals s WHERE s.tenant_id = tenant)
+        AND NOT EXISTS (
+          SELECT 1 FROM mod_billing.opening_windows w
+            JOIN mod_billing.opening_window_seals s ON s.window_id = w.id AND s.tenant_id = w.tenant_id
+            WHERE w.tenant_id = tenant AND w.principal_name = current_user
+              AND coalesce(s.evidence::jsonb->'command'->'held_account_ids', '[]'::jsonb) ? account_id::text)
+      THEN
+        SELECT coalesce(sum(x.receivable_delta) FILTER (WHERE g.source_version <= target_version), 0),
+            count(*) FILTER (WHERE g.id IS NULL OR g.billing_account_id <> account_id OR x.billing_account_id <> account_id
+              OR g.currency <> invoice.currency OR x.currency <> invoice.currency
+              OR g.minor_units <> invoice.minor_units OR x.minor_units <> invoice.minor_units
+              OR x.receivable_delta::text IN ('NaN', 'Infinity', '-Infinity')) INTO late_delta, late_bad
+          FROM mod_billing.opening_late_items x LEFT JOIN mod_billing.posting_groups g ON g.id = x.posting_group_id AND g.tenant_id = tenant
+          WHERE x.document_id = invoice_id AND x.kind <> 'debit' AND x.tenant_id = tenant;
+        room := room + late_delta; n := n + late_bad;
+      END IF;
+      {_GATE_END}
+      IF n <> 0 THEN"""
 _LIVE_OLD = "SELECT CASE WHEN d.authoring_mode = 'imported_open_item' THEN"
 _LIVE_NEW = """SELECT CASE WHEN d.authoring_mode = 'opening_late_item' THEN
-        EXISTS (SELECT 1 FROM mod_billing.opening_late_items x
-          JOIN mod_billing.posting_groups g ON g.id = x.posting_group_id AND g.tenant_id = x.tenant_id
-          WHERE x.document_id = invoice_id AND x.billing_account_id = account_id AND x.currency = currency_code AND x.minor_units = scale AND x.tenant_id = tenant
-            AND x.kind = 'debit' AND g.group_kind = 'opening_late_debit_recorded'
-            AND NOT EXISTS (SELECT 1 FROM mod_billing.opening_late_items r WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
+        mod_billing.has_opening_late_issuance(invoice_id, account_id, currency_code, scale, tenant)
         WHEN d.authoring_mode = 'imported_open_item' THEN"""
-_EXPOSURE_OLD = "OR EXISTS (SELECT 1 FROM mod_billing.opening_import_receipts x WHERE x.posting_group_id = grp.id AND x.original_receipt_id = basis.receipt_id AND x.tenant_id = NEW.tenant_id)"
-_EXPOSURE_ADD = """
-        OR EXISTS (SELECT 1 FROM mod_billing.opening_late_items x WHERE x.posting_group_id = grp.id AND x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id)"""  # nosec B608 -- fixed fragment, no input
-_EXPOSURE_NEW = _EXPOSURE_OLD + _EXPOSURE_ADD
+_EXPOSURE_OLD = "THEN RAISE EXCEPTION 'opening exposure group must actually affect this invoice' USING ERRCODE = 'check_violation'; END IF;"
+_EXPOSURE_NEW = f"""THEN
+        {_GATE_BEGIN}
+        IF grp.group_kind NOT IN {_KINDS} OR NOT EXISTS (
+            SELECT 1 FROM mod_billing.opening_late_items x WHERE x.posting_group_id = grp.id AND x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id)
+        THEN RAISE EXCEPTION 'opening exposure group must actually affect this invoice' USING ERRCODE = 'check_violation'; END IF;
+        {_GATE_END}
+      END IF;"""  # nosec B608 -- fixed fragment, no input
 
 HUNKS = (
     (_ROOM, _ROOM_BASE_OLD, _ROOM_BASE_NEW),
     (_ROOM, _ROOM_ISSUE_OLD, _ROOM_ISSUE_NEW),
-    (_ROOM, _ROOM_UNION_OLD, _ROOM_UNION_NEW),
+    (_ROOM, _ROOM_DECLARE_OLD, _ROOM_DECLARE_NEW),
+    (_ROOM, _ROOM_BLOCK_OLD, _ROOM_BLOCK_NEW),
     (_LIVE, _LIVE_OLD, _LIVE_NEW),
     (_EXPOSURE, _EXPOSURE_OLD, _EXPOSURE_NEW),
 )
@@ -582,6 +610,24 @@ def upgrade() -> None:
         "'imported_open_item', 'opening_late_item')",
         schema=_SCHEMA,
     )
+    # The late-document liveness lives in its own plpgsql function so the SQL
+    # function has_live_invoice_issuance names no late-item table: a caller that
+    # cannot read it (the opening principal) is never planned against it.
+    op.execute(f"""
+        CREATE FUNCTION mod_billing.has_opening_late_issuance(
+          invoice_id uuid, account_id uuid, currency_code text, scale integer, tenant uuid
+        ) RETURNS boolean AS $$
+        BEGIN
+          RETURN EXISTS (SELECT 1 FROM mod_billing.{_TABLE} x
+            JOIN mod_billing.posting_groups g ON g.id = x.posting_group_id AND g.tenant_id = x.tenant_id
+            WHERE x.document_id = invoice_id AND x.billing_account_id = account_id
+              AND x.currency = currency_code AND x.minor_units = scale AND x.tenant_id = tenant
+              AND x.kind = 'debit' AND g.group_kind = 'opening_late_debit_recorded'
+              AND NOT EXISTS (SELECT 1 FROM mod_billing.{_TABLE} r
+                WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id));
+        END;
+        $$ LANGUAGE plpgsql;
+    """)  # nosec B608 -- closed identifiers; no input reaches this DDL
     rows = _rewrite_rows()
     op.execute(f"""
     -- mod_billing function rewrites: each fragment must occur exactly once.

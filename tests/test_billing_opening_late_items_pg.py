@@ -11,6 +11,7 @@ imported open items (residuals 70.00 and 50.00; source totals 120.00 and 80.00).
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
@@ -54,7 +55,6 @@ from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
 from tests import test_billing_opening_hold_admission as hold
 from tests import test_billing_opening_receivable_import as ar
-from tests import test_billing_tax_dependency_evidence as dependency
 from tests import test_billing_withholding_frozen as frozen
 from tests import test_billing_withholding_release_pg as qf
 
@@ -876,12 +876,9 @@ def test_held_partitions_take_no_item_and_no_key_of_the_sealed_population(scratc
         db.rollback()
 
 
-def test_a_held_admission_needs_no_select_on_the_late_item_table(scratch):
-    w, admitted, held = _held_world(scratch)
-    with b._session(w.url, w.scope) as db:
-        other = cash._new_account(db, w.scope)
-        _record(db, w, _debit(w, other, "unrelated-1"))  # the table has rows
-        db.commit()
+@contextmanager
+def _principal_without_select(scratch):
+    """Revoke the opening principal's SELECT on the late-item table, this test only."""
     role = scratch.principals["tenant"][0]
     database = make_url(scratch[0]).database
     engine = create_engine(b._url_for(b._superuser_url(), database))
@@ -889,14 +886,102 @@ def test_a_held_admission_needs_no_select_on_the_late_item_table(scratch):
     try:
         with engine.begin() as connection:
             connection.execute(text(f'REVOKE SELECT ON {table} FROM "{role}"'))
-        with cash._session(scratch, w.url, w.scope) as db:
-            receipt = hold._admit(db, w.scope, held, approval_request_id=None)
-            assert receipt.billing_account_id == hold._held_id(held)
-            db.commit()
+        yield
     finally:
         with engine.begin() as connection:
             connection.execute(text(f'GRANT SELECT ON {table} TO "{role}"'))
         engine.dispose()
+
+
+def test_the_opening_principal_needs_no_select_on_the_late_item_table(scratch):
+    """First import, the sealed window's exposure V2 and a held admission all run
+    as the opening principal with no SELECT on the late-item table."""
+    with _principal_without_select(scratch):
+        w, admitted, held = _held_world(scratch)  # imports and seals as the principal
+        with b._session(w.url, w.scope) as db:
+            other = cash._new_account(db, w.scope)
+            _record(db, w, _debit(w, other, "unrelated-1"))  # the table has rows
+            db.commit()
+        with cash._session(scratch, w.url, w.scope) as db:
+            receipt = hold._admit(db, w.scope, held, approval_request_id=None)
+            assert receipt.billing_account_id == hold._held_id(held)
+            db.commit()
+
+
+def test_late_items_on_an_admitted_held_account_and_an_imported_document_count(
+    scratch,
+):
+    w, admitted, held = _held_world(scratch)
+    with cash._session(scratch, w.url, w.scope) as db:
+        receipt = hold._admit(db, w.scope, held, approval_request_id=None)
+        db.commit()
+    held_id = hold._held_id(held)
+    with b._session(w.url, w.scope) as db:
+        first, _ = ar._bases(db, w.scope, receipt)
+
+        def room(document_id):
+            return db.execute(
+                text("SELECT mod_billing.opening_invoice_room(:d, :t)"),
+                {"d": document_id, "t": w.scope.tenant_id},
+            ).scalar_one()
+
+        assert room(first.document_id) == Decimal("70")
+        credit = _apply(db, w, _credit(w, first.document_id, "adm-1", amount="20.00"))
+        assert credit.billing_account_id == held_id
+        assert room(first.document_id) == Decimal("50")
+        assert get_document_exposure(
+            db, scope=w.scope, document_id=first.document_id
+        ).collectible_receivable == b._money("50.00")
+        # Liveness of a late debit follows its reversal.
+        account = cash._new_account(db, w.scope)
+        debit = _record(db, w, _debit(w, account, "live-1"))
+
+        def live():
+            return db.execute(
+                text(
+                    "SELECT mod_billing.has_live_invoice_issuance("
+                    ":d, :a, 'NGN', 2, :t)"
+                ),
+                {"d": debit.document_id, "a": account, "t": w.scope.tenant_id},
+            ).scalar_one()
+
+        assert live() is True
+        _undo(db, w, _reverse(w, debit.item_id))
+        assert live() is False
+        db.commit()
+
+
+def test_the_late_item_table_is_named_only_in_gated_blocks_of_the_upgraded_functions(
+    scratch,
+):
+    import re
+
+    w = _world(scratch, stage="none")
+    with b._session(w.url, w.scope) as db:
+        for signature in (
+            "mod_billing.opening_invoice_room_at(uuid, uuid, bigint, uuid)",
+            "mod_billing.has_live_invoice_issuance(uuid, uuid, text, integer, uuid)",
+            "mod_billing.admit_opening_exposure()",
+        ):
+            definition = db.execute(
+                text("SELECT pg_get_functiondef(CAST(:s AS regprocedure))"),
+                {"s": signature},
+            ).scalar_one()
+            outside = re.sub(
+                r"-- late-items gate begin.*?-- late-items gate end",
+                "",
+                definition,
+                flags=re.S,
+            )
+            assert "opening_late_items" not in outside, signature
+        helper = db.execute(
+            text(
+                "SELECT pg_get_functiondef("
+                "'mod_billing.has_opening_late_issuance(uuid, uuid, text, integer, "
+                "uuid)'::regprocedure)"
+            )
+        ).scalar_one()
+        assert "opening_late_items" in helper
 
 
 def test_the_withholding_freeze_refuses_an_opening_late_debit(scratch):
@@ -904,7 +989,8 @@ def test_the_withholding_freeze_refuses_an_opening_late_debit(scratch):
     with b._session(w.url, w.scope) as db:
         account = cash._new_account(db, w.scope)
         item = _record(db, w, _debit(w, account, "frz-1"))
-        evidence = dependency._evidence(w.scope)
+        _, other_invoice, tax = frozen._v2_invoice(db, w.scope)
+        evidence = frozen._late(db, other_invoice, tax)
         db.commit()
         with pytest.raises(BillingRuleViolation) as caught:
             frozen.freeze_issued_invoice_withholding(

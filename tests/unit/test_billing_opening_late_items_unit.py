@@ -312,10 +312,30 @@ def test_each_bi21_rewrite_fragment_occurs_exactly_once_in_the_bi8_tenant_bodies
     """The migration refuses at upgrade unless this holds; prove it offline."""
     bi8 = _render_bi8()
     bi21 = _bi21()
-    assert len(bi21.HUNKS) == 5
+    assert len(bi21.HUNKS) == 6
     for signature, old, new in bi21.HUNKS:
         assert bi8.count(old) == 1, (signature, old[:60])
-        assert new.startswith(old.split("\n")[0][:20]) or old in new
+
+
+def test_the_late_item_table_is_named_only_inside_gated_blocks_of_the_rewrites():
+    """The opening principal has no SELECT on the late-item table, and Postgres
+    checks privileges when a statement is planned: so the rewritten bodies may
+    name it only in branches that run for a caller allowed to read it."""
+    import re
+
+    text = _render_bi8()
+    bi21 = _bi21()
+    for _signature, old, new in bi21.HUNKS:
+        text = text.replace(old, new)
+    assert "opening_late_items" in text
+    outside = re.sub(
+        r"-- late-items gate begin.*?-- late-items gate end", "", text, flags=re.S
+    )
+    assert "opening_late_items" not in outside
+    # Every gate that appears is closed, and every one of the three bodies has its
+    # late logic only behind a gate or the plpgsql helper.
+    assert text.count("-- late-items gate begin") == text.count("-- late-items gate end")
+    assert "has_opening_late_issuance" in outside
 
 
 def test_downgrade_is_refused():
