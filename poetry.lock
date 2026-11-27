@@ -1163,7 +1163,7 @@ url = "packages/dotmac-documents"
 
 [[package]]
 name = "dotmac-durable-timers"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1173,6 +1173,7 @@ develop = true
 
 [package.dependencies]
 dotmac-kernel = ">=0.1.0a72"
+fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 
 [package.source]
