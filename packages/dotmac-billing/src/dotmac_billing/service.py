@@ -1713,15 +1713,24 @@ def _receivable_exposure(
     else:
         financial_state = "open"
     due_at = document.due_at
+    migration_basis = None
     if migration_evidence is not None:
-        from dotmac_billing.migration_items import exposure_due_at, exposure_fields_of
+        from dotmac_billing.migration_items import exposure_due, exposure_fields_of
 
         subject_ref, service_ref, timing, service_period = exposure_fields_of(
             migration_evidence, account_id=document.billing_account_id
         )
-        due_at = exposure_due_at(migration_evidence, document.due_at)
+        due_at, migration_basis = exposure_due(
+            migration_evidence,
+            document.due_at,
+            _due_date_basis(document.due_date_basis),
+        )
     else:
-        assert obligation is not None
+        if obligation is None:
+            raise BillingConflict(
+                "exposure_obligation_missing",
+                "an invoice exposure requires rated-obligation evidence",
+            )
         subject_ref = obligation.subject_ref
         service_ref = obligation.service_ref
         timing = obligation.collection_timing
@@ -1730,7 +1739,7 @@ def _receivable_exposure(
             starts_at=obligation.period_start,
             ends_at=obligation.period_end,
         )
-    due_date_basis = _due_date_basis(document.due_date_basis)
+    due_date_basis = migration_basis or _due_date_basis(document.due_date_basis)
     collectible = _money(outstanding, document.currency, document.minor_units)
     payload = {
         "scope": scope,

@@ -2044,6 +2044,7 @@ def _migration_item_constraints() -> tuple[object, ...]:
             unique=True,
             postgresql_where=text("kind = 'debit'"),
         ),
+        Index(f"ix_{table}_document", "tenant_id", "document_id"),
         Index(
             f"uq_{table}_debit_document",
             "tenant_id",
@@ -2056,16 +2057,19 @@ def _migration_item_constraints() -> tuple[object, ...]:
             "AND ((kind = 'debit' AND receivable_delta > 0 "
             "AND reverses_item_id IS NULL AND generation >= 1 "
             "AND source_total IS NULL AND source_number IS NULL "
-            "AND collection IS NOT NULL AND evidence_ref IS NOT NULL "
+            "AND collection IS NOT NULL AND collection_digest IS NOT NULL "
+            "AND evidence_ref IS NOT NULL "
             "AND evidence_digest IS NOT NULL AND reason IS NULL) "
             "OR (kind = 'credit' AND receivable_delta < 0 "
             "AND reverses_item_id IS NULL AND generation IS NULL "
             "AND source_total > 0 AND -receivable_delta <= source_total "
             "AND source_number IS NOT NULL AND collection IS NULL "
+            "AND collection_digest IS NULL "
             "AND evidence_ref IS NOT NULL AND evidence_digest IS NOT NULL "
             "AND reason IS NULL) "
             "OR (kind = 'reversal' AND reverses_item_id IS NOT NULL "
-            "AND collection IS NULL AND evidence_ref IS NULL "
+            "AND collection IS NULL AND collection_digest IS NULL "
+            "AND evidence_ref IS NULL "
             "AND evidence_digest IS NULL AND reason IS NOT NULL))",
             name=f"ck_{table}_shape",
         ),
@@ -2081,6 +2085,7 @@ def _migration_item_constraints() -> tuple[object, ...]:
             "AND (source_number IS NULL OR length(trim(source_number)) > 0) "
             "AND (evidence_ref IS NULL OR length(trim(evidence_ref)) > 0) "
             "AND (evidence_digest IS NULL OR evidence_digest ~ '^[0-9a-f]{64}$') "
+            "AND (collection_digest IS NULL OR collection_digest ~ '^[0-9a-f]{64}$') "
             "AND (reason IS NULL OR length(trim(reason)) > 0)",
             name=f"ck_{table}_attribution",
         ),
@@ -2120,6 +2125,7 @@ class MigrationItem(Base, _TenantRow):
     minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
     reverses_item_id: Mapped[UUID | None] = mapped_column(Uuid())
     collection: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    collection_digest: Mapped[str | None] = mapped_column(String(64))
     evidence_ref: Mapped[str | None] = mapped_column(String(255))
     evidence_digest: Mapped[str | None] = mapped_column(String(64))
     reason: Mapped[str | None] = mapped_column(Text)

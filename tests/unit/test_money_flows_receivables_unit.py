@@ -345,3 +345,35 @@ def test_a_naive_terms_floor_is_refused_before_any_billing_read(monkeypatch) -> 
     with pytest.raises(ValueError, match="terms_floor_at must be timezone-aware"):
         billing.read(floor=datetime(2026, 11, 1))
     assert billing.terms_at == []
+
+
+def test_a_migration_debit_v1_exposure_reads_no_hold_without_automated_evidence(
+    monkeypatch,
+) -> None:
+    """The V1 branch turns a due date into a hold, so Billing must not supply one
+    for a migration debit whose collection evidence is unverified."""
+    from dataclasses import replace
+
+    from dotmac_billing.migration_items import exposure_due
+
+    evidence = OpeningCollectionEvidenceV1(
+        "unknown_unverified",
+        "customer:1",
+        None,
+        "arrears",
+        ServicePeriodEvidenceV1(status=ServicePeriodStatus.NOT_APPLICABLE),
+        DUE,
+        _basis(),
+        "dotmac-billing",
+        "late-item",
+        "1",
+    )
+    due_at, basis = exposure_due(evidence, DUE, _basis())
+    exposure = replace(_v1(), due_at=due_at, due_date_basis=basis)
+    billing = _Billing(monkeypatch, exposure)
+    result = billing.read()
+    assert isinstance(result, PositionReadOk)
+    assert result.position.due_at is None
+    assert result.position.due_date_status == "unknown_unverified"
+    assert result.position.access_hold_from is None
+    assert billing.terms_at == []

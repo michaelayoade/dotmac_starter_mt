@@ -96,11 +96,9 @@ _LIVE_NEW = """SELECT CASE WHEN d.authoring_mode = 'migration_item' THEN
             AND NOT EXISTS (SELECT 1 FROM mod_billing.migration_items r WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
         WHEN d.authoring_mode = 'imported_open_item' THEN"""
 _EXPOSURE_OLD = "OR EXISTS (SELECT 1 FROM mod_billing.opening_import_receipts x WHERE x.posting_group_id = grp.id AND x.original_receipt_id = basis.receipt_id AND x.tenant_id = NEW.tenant_id)"
-_EXPOSURE_NEW = (
-    _EXPOSURE_OLD
-    + """
-        OR EXISTS (SELECT 1 FROM mod_billing.migration_items x WHERE x.posting_group_id = grp.id AND x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id)"""
-)
+_EXPOSURE_ADD = """
+        OR EXISTS (SELECT 1 FROM mod_billing.migration_items x WHERE x.posting_group_id = grp.id AND x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id)"""  # nosec B608 -- fixed fragment, no input
+_EXPOSURE_NEW = _EXPOSURE_OLD + _EXPOSURE_ADD
 
 HUNKS = (
     (_ROOM, _ROOM_BASE_OLD, _ROOM_BASE_NEW),
@@ -146,6 +144,7 @@ def upgrade() -> None:
         sa.Column("minor_units", sa.Integer(), nullable=False),
         sa.Column("reverses_item_id", sa.Uuid()),
         sa.Column("collection", sa.JSON()),
+        sa.Column("collection_digest", sa.String(64)),
         sa.Column("evidence_ref", sa.String(255)),
         sa.Column("evidence_digest", sa.String(64)),
         sa.Column("reason", sa.Text()),
@@ -206,16 +205,19 @@ def upgrade() -> None:
             "AND ((kind = 'debit' AND receivable_delta > 0 "
             "AND reverses_item_id IS NULL AND generation >= 1 "
             "AND source_total IS NULL AND source_number IS NULL "
-            "AND collection IS NOT NULL AND evidence_ref IS NOT NULL "
+            "AND collection IS NOT NULL AND collection_digest IS NOT NULL "
+            "AND evidence_ref IS NOT NULL "
             "AND evidence_digest IS NOT NULL AND reason IS NULL) "
             "OR (kind = 'credit' AND receivable_delta < 0 "
             "AND reverses_item_id IS NULL AND generation IS NULL "
             "AND source_total > 0 AND -receivable_delta <= source_total "
             "AND source_number IS NOT NULL AND collection IS NULL "
+            "AND collection_digest IS NULL "
             "AND evidence_ref IS NOT NULL AND evidence_digest IS NOT NULL "
             "AND reason IS NULL) "
             "OR (kind = 'reversal' AND reverses_item_id IS NOT NULL "
-            "AND collection IS NULL AND evidence_ref IS NULL "
+            "AND collection IS NULL AND collection_digest IS NULL "
+            "AND evidence_ref IS NULL "
             "AND evidence_digest IS NULL AND reason IS NOT NULL))",
             name=f"ck_{_TABLE}_shape",
         ),
@@ -231,6 +233,7 @@ def upgrade() -> None:
             "AND (source_number IS NULL OR length(trim(source_number)) > 0) "
             "AND (evidence_ref IS NULL OR length(trim(evidence_ref)) > 0) "
             "AND (evidence_digest IS NULL OR evidence_digest ~ '^[0-9a-f]{64}$') "
+            "AND (collection_digest IS NULL OR collection_digest ~ '^[0-9a-f]{64}$') "
             "AND (reason IS NULL OR length(trim(reason)) > 0)",
             name=f"ck_{_TABLE}_attribution",
         ),
@@ -249,6 +252,12 @@ def upgrade() -> None:
         unique=True,
         schema=_SCHEMA,
         postgresql_where=sa.text("kind = 'debit'"),
+    )
+    op.create_index(
+        f"ix_{_TABLE}_document",
+        _TABLE,
+        ["tenant_id", "document_id"],
+        schema=_SCHEMA,
     )
     op.create_index(
         f"uq_{_TABLE}_debit_document",
@@ -300,6 +309,19 @@ def upgrade() -> None:
             IF NEW.source_installation_id IS DISTINCT FROM capture->>'installation_id'
                OR NEW.source_system IS DISTINCT FROM capture->>'source_system' THEN
                 RAISE EXCEPTION 'a migration item must name the sealed capture namespace'
+                  USING ERRCODE = 'check_violation';
+            END IF;
+            -- A held partition takes no item until its governed admission.
+            IF coalesce((SELECT s.evidence::jsonb->'command'->'held_account_ids'
+                           FROM mod_billing.opening_window_seals s
+                          WHERE s.window_id = win.id AND s.tenant_id = NEW.tenant_id),
+                        '[]'::jsonb) ? NEW.billing_account_id::text
+               AND NOT EXISTS (
+                    SELECT 1 FROM mod_billing.opening_hold_admissions h
+                     WHERE h.billing_account_id = NEW.billing_account_id
+                       AND h.tenant_id = NEW.tenant_id)
+            THEN
+                RAISE EXCEPTION 'a held opening partition takes no migration item before its admission'
                   USING ERRCODE = 'check_violation';
             END IF;
             SELECT * INTO doc FROM mod_billing.documents x
@@ -514,6 +536,29 @@ def upgrade() -> None:
         CREATE TRIGGER posting_groups_migration_reversal BEFORE INSERT
           ON mod_billing.posting_groups
           FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_migration_group_reversal();
+
+        -- An opening basis cannot take a legacy key with an unreversed R8 debit.
+        CREATE FUNCTION mod_billing.guard_migration_basis_key() RETURNS trigger AS $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM mod_billing.{_TABLE} x
+                 WHERE x.tenant_id = NEW.tenant_id AND x.kind = 'debit'
+                   AND x.source_installation_id = NEW.installation_id
+                   AND x.source_system = NEW.source_system
+                   AND x.source_key = NEW.source_invoice_key
+                   AND NOT EXISTS (
+                       SELECT 1 FROM mod_billing.{_TABLE} r
+                        WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
+            THEN
+                RAISE EXCEPTION 'the legacy invoice has an unreversed migration debit'
+                  USING ERRCODE = 'unique_violation';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER opening_receivable_bases_migration_key BEFORE INSERT
+          ON mod_billing.opening_receivable_bases
+          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_migration_basis_key();
 
         -- Additive: a migration document, or one carrying a net item credit,
         -- cannot be generically voided (guard_imported_owner is not replaced).

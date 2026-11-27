@@ -51,6 +51,7 @@ from alembic import command as alembic_command
 from tests import test_billing_isolation as b
 from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
+from tests import test_billing_opening_hold_admission as hold
 from tests import test_billing_opening_receivable_import as ar
 from tests import test_billing_withholding_frozen as frozen
 from tests import test_billing_withholding_release_pg as qf
@@ -800,6 +801,112 @@ def test_tax_snapshot_read_covers_both_modes_and_refuses_native_and_missing(scra
             get_open_item_tax_snapshots(db, scope=w.scope, document_id=item.document_id)
         assert _code(caught) == "open_item_tax_snapshots_unavailable"
         db.rollback()
+
+
+# Held partitions, the basis-key guard, the freeze and the cross-account race -----
+
+
+def _chain(exc: BaseException) -> str:
+    parts = []
+    while exc is not None:
+        parts.append(str(exc))
+        exc = exc.__cause__ or exc.__context__
+    return " | ".join(parts)
+
+
+def test_held_partitions_take_no_item_and_their_key_is_guarded_on_admission(scratch):
+    scope, url = noncash._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as db:
+        admitted, held = hold._two_partitions(db, scope, dual_control="off")
+        hold._import(db, scope, admitted)
+        db.commit()
+        hold._seal(db, scope, held=[hold._held_id(held)])
+        db.commit()
+    held_id = hold._held_id(held)
+    w = SimpleNamespace(
+        scope=scope, url=url, cmd=admitted, cap=admitted.manifest.capture
+    )
+    with b._session(url, scope) as db:
+        with pytest.raises(BillingRuleViolation) as caught:
+            _record(db, w, _debit(w, held_id, "held-1"))
+        assert _code(caught) == "migration_item_account_held"
+        db.rollback()
+        # Defeat the Python guard: the admission trigger still refuses.
+        with mock.patch.object(mi, "_require_not_held", lambda *a, **k: None):
+            with pytest.raises(DBAPIError) as caught:
+                _record(db, w, _debit(w, held_id, "held-2"))
+        assert "held opening partition" in str(caught.value)
+        db.rollback()
+        # A key the held partition will carry, recorded as an R8 debit elsewhere.
+        other = cash._new_account(db, scope)
+        carried = next(
+            x.source_invoice_key
+            for x in held.manifest.receivables
+            if x.partition.account_id == held_id
+        )
+        _record(db, w, _debit(w, other, carried))
+        db.commit()
+    with cash._session(scratch, url, scope) as db:
+        with pytest.raises(Exception) as caught:
+            hold._admit(db, scope, held, approval_request_id=None)
+        assert "unreversed migration debit" in _chain(caught.value)
+        db.rollback()
+
+
+def test_the_withholding_freeze_refuses_a_migration_debit(scratch):
+    w = _world(scratch)
+    with b._session(w.url, w.scope) as db:
+        account = cash._new_account(db, w.scope)
+        item = _record(db, w, _debit(w, account, "frz-1"))
+        _, _, tax = frozen._v2_invoice(db, w.scope)
+        db.commit()
+        with pytest.raises(BillingRuleViolation) as caught:
+            frozen.freeze_issued_invoice_withholding(
+                db,
+                scope=w.scope,
+                command=frozen._freeze_command(account, item.document_id, w.scope, tax),
+            )
+        assert _code(caught) == "withholding_freeze_migration_item_unavailable"
+        db.rollback()
+
+
+def test_two_accounts_racing_for_one_legacy_key_have_one_winner(scratch):
+    w = _world(scratch)
+    with b._session(w.url, w.scope) as db:
+        accounts = [cash._new_account(db, w.scope) for _ in range(2)]
+    barrier = threading.Barrier(2)
+    outcomes: list[object] = []
+
+    def attempt(n):
+        with b._session(w.url, w.scope) as db:
+            command = _debit(w, accounts[n], "race-2", command_id=f"race2-{n}")
+            barrier.wait(timeout=30)
+            try:
+                _record(db, w, command)
+                db.commit()
+                outcomes.append("ok")
+            except Exception as exc:
+                db.rollback()
+                outcomes.append(exc)
+
+    threads = [threading.Thread(target=attempt, args=(n,)) for n in (0, 1)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)
+    assert outcomes.count("ok") == 1, outcomes
+    (loser,) = (o for o in outcomes if o != "ok")
+    assert isinstance(loser, BillingConflict | DBAPIError), loser
+    with b._session(w.url, w.scope) as db:
+        assert (
+            db.scalar(
+                select(func.count()).where(
+                    models.MigrationItem.source_key == "race-2",
+                    models.MigrationItem.kind == "debit",
+                )
+            )
+            == 1
+        )
 
 
 # 12. Upgrade bi_0020 -> bi_0021 with data ---------------------------------

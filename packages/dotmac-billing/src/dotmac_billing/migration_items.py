@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal, localcontext
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
@@ -45,6 +45,7 @@ from dotmac_billing.contracts import (
     AppliedTaxSnapshotV1,
     CollectionTiming,
     DueDateBasisStatus,
+    DueDateBasisV1,
     ServicePeriodEvidenceV1,
 )
 from dotmac_billing.engine import EffectLane
@@ -56,14 +57,15 @@ from dotmac_billing.opening_receivable_contracts import (
     OpeningOriginalDocumentV1,
 )
 from dotmac_billing.opening_window_queries import (
+    get_opening_hold_list,
     get_opening_window,
     get_opening_window_seal,
 )
 
 ACCOUNTING_FACT_V7_CONTRACT = "billing.accounting.fact.v7"
-DEBIT_KIND = "migration_debit_recorded"
-CREDIT_KIND = "migration_credit_applied"
-REVERSAL_KIND = "migration_item_reversed"
+DEBIT_KIND: Literal["migration_debit_recorded"] = "migration_debit_recorded"
+CREDIT_KIND: Literal["migration_credit_applied"] = "migration_credit_applied"
+REVERSAL_KIND: Literal["migration_item_reversed"] = "migration_item_reversed"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _KIND_OF_ITEM = {
     "debit": DEBIT_KIND,
@@ -334,6 +336,25 @@ def _sealed_window(db: Session, *, scope: Scope, source: MigrationSourceV1) -> A
     return window
 
 
+def _require_not_held(db: Session, *, scope: Scope, account_id: UUID) -> None:
+    """A held partition takes no migration item until its governed admission."""
+
+    tenant = _tenant_only(scope)
+    if account_id not in get_opening_hold_list(db, scope=scope):
+        return
+    admitted = db.execute(
+        select(models.OpeningHoldAdmission.id).where(
+            models.OpeningHoldAdmission.tenant_id == tenant.tenant_id,
+            models.OpeningHoldAdmission.billing_account_id == account_id,
+        )
+    ).first()
+    if admitted is None:
+        raise BillingRuleViolation(
+            "migration_item_account_held",
+            "the account is a held opening partition that is not yet admitted",
+        )
+
+
 def _digest(value: str) -> None:
     if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
         raise BillingRuleViolation(
@@ -409,16 +430,23 @@ def migration_collection_evidence(
     """The collection evidence a migration debit document was recorded with."""
 
     tenant = _tenant_only(scope)
-    stored = db.execute(
-        select(models.MigrationItem.collection).where(
+    found = db.execute(
+        select(
+            models.MigrationItem.collection, models.MigrationItem.collection_digest
+        ).where(
             models.MigrationItem.tenant_id == tenant.tenant_id,
             models.MigrationItem.document_id == document_id,
             models.MigrationItem.kind == "debit",
         )
-    ).scalar_one_or_none()
-    if stored is None:
+    ).one_or_none()
+    if found is None or found[0] is None:
         raise BillingRuleViolation(
             "migration_item_integrity", "migration document has no debit evidence"
+        )
+    stored, collection_digest = found
+    if fingerprint_of(stored) != collection_digest:
+        raise BillingRuleViolation(
+            "migration_item_integrity", "stored collection evidence disagrees"
         )
     with localcontext(cash_decimal_context()):
         return cast(
@@ -462,11 +490,17 @@ def migration_net_credit(db: Session, *, scope: Scope, document_id: UUID) -> Dec
 def _validate_original(
     original: OpeningOriginalDocumentV1,
     *,
+    collection: OpeningCollectionEvidenceV1,
     amount: Money,
     currency: tuple[str, int],
     cutoff: datetime,
 ) -> None:
-    """The existing opening checks on a legacy document, applied standalone."""
+    """The opening validator's checks on one legacy item, applied standalone.
+
+    Mirrors ``opening_receivable_validation`` (document totals, tax evidence,
+    FX, length bounds, cutoff, and verified-but-incomplete collection evidence);
+    a parity unit test keeps the two in step.
+    """
 
     def refuse(reason: str) -> BillingRuleViolation:
         return BillingRuleViolation("migration_debit_original_invalid", reason)
@@ -479,8 +513,19 @@ def _validate_original(
         raise refuse("the legacy totals are inconsistent")
     if not 0 < residual <= total:
         raise refuse("the residual must be positive and within the legacy total")
-    if len(original.document_number) > 255:
-        raise refuse("the legacy document number is too long")
+    if (
+        len(original.document_number) > 255
+        or len(original.document_profile_code) > 120
+        or len(original.document_profile_version) > 120
+        or len(original.locale) > 40
+        or len(original.timezone) > 80
+    ):
+        raise refuse("a legacy document text field is too long")
+    if collection.status == "verified" and not collection.automated_collection_allowed:
+        raise BillingRuleViolation(
+            "migration_debit_collection_incomplete",
+            "verified collection evidence must allow automated collection",
+        )
     if sum(minor_units_of(x.tax_amount) for x in original.tax_snapshots) != tax:
         raise refuse("the legacy tax snapshots do not sum to the legacy tax")
     for snapshot in original.tax_snapshots:
@@ -558,8 +603,10 @@ def record_migration_debit(
         lock=True,
     )
     service._require_account_money(account, command.amount)
+    _require_not_held(db, scope=scope, account_id=account.id)
     _validate_original(
         command.original,
+        collection=command.collection,
         amount=command.amount,
         currency=(account.currency, account.minor_units),
         cutoff=window.manifest.capture.economic_cutoff,
@@ -618,6 +665,7 @@ def record_migration_debit(
             )
         generation = len(prior) + 1
         document_id, item_id, group_id = uuid4(), uuid4(), uuid4()
+        collection_json = service._jsonable(command.collection)
         session.add(
             plane.document(
                 **service._values(
@@ -695,7 +743,8 @@ def record_migration_debit(
                     "currency": account.currency,
                     "minor_units": account.minor_units,
                     "reverses_item_id": None,
-                    "collection": service._jsonable(command.collection),
+                    "collection": collection_json,
+                    "collection_digest": fingerprint_of(collection_json),
                     "evidence_ref": command.evidence_ref,
                     "evidence_digest": command.evidence_digest,
                     "reason": None,
@@ -781,6 +830,7 @@ def record_migration_credit(
     )
     service._require_same_money(command.amount, command.source_total)
     service._require_account_money(account, command.amount)
+    _require_not_held(db, scope=scope, account_id=account.id)
     if (
         not command.amount.is_positive
         or command.amount.amount > command.source_total.amount
@@ -834,7 +884,8 @@ def record_migration_credit(
                 "one legacy credit note stays on one account",
             )
         if any(
-            Decimal(row.source_total) != command.source_total.amount
+            row.source_total is None
+            or Decimal(row.source_total) != command.source_total.amount
             or row.source_number != source.number
             for row in siblings
         ):
@@ -879,6 +930,7 @@ def record_migration_credit(
                     "minor_units": account.minor_units,
                     "reverses_item_id": None,
                     "collection": None,
+                    "collection_digest": None,
                     "evidence_ref": command.evidence_ref,
                     "evidence_digest": command.evidence_digest,
                     "reason": None,
@@ -961,6 +1013,7 @@ def reverse_migration_item(
         row_id=original.billing_account_id,
         lock=True,
     )
+    _require_not_held(db, scope=scope, account_id=account.id)
 
     def operation(session: Session) -> dict[str, object]:
         document = service._one(
@@ -1011,7 +1064,7 @@ def reverse_migration_item(
             currency=original.currency,
             minor_units=original.minor_units,
             source_ref=f"migration-item:{item_id}",
-            occurred_at=datetime_now(),
+            occurred_at=session.execute(select(func.clock_timestamp())).scalar_one(),
             effects=((EffectLane.RECEIVABLE, -Decimal(original.receivable_delta)),),
             exposure_document_ids=(document.id,),
             reverses_group_id=original_group.id,
@@ -1034,6 +1087,7 @@ def reverse_migration_item(
                     "minor_units": original.minor_units,
                     "reverses_item_id": original.id,
                     "collection": None,
+                    "collection_digest": None,
                     "evidence_ref": None,
                     "evidence_digest": None,
                     "reason": command.reason,
@@ -1070,10 +1124,6 @@ def reverse_migration_item(
     return get_migration_item(
         db, scope=scope, item_id=UUID(str(outcome.result["item_id"]))
     )
-
-
-def datetime_now() -> datetime:
-    return datetime.now(UTC)
 
 
 # --------------------------------------------------------------------------
@@ -1312,15 +1362,26 @@ def exposure_fields_of(
     )
 
 
-def exposure_due_at(
-    evidence: OpeningCollectionEvidenceV1, due_at: datetime | None
-) -> datetime | None:
-    """An unverified due-date basis never carries a due instant."""
+def exposure_due(
+    evidence: OpeningCollectionEvidenceV1,
+    due_at: datetime | None,
+    basis: DueDateBasisV1,
+) -> tuple[datetime | None, DueDateBasisV1]:
+    """Due instant and basis a V1 exposure may carry for a migration debit.
 
-    return (
-        due_at
-        if evidence.due_date_basis.status is DueDateBasisStatus.VERIFIED
-        else None
+    Only evidence that allows automated collection (verified, with subject,
+    timing, due date and a verified basis, exactly as the V2 reader requires)
+    keeps its due instant and basis. Anything else reads as an unverified basis
+    with no due instant, so no access hold can be derived from unverified data.
+    """
+
+    if (
+        evidence.automated_collection_allowed
+        and basis.status is DueDateBasisStatus.VERIFIED
+    ):
+        return due_at, basis
+    return None, DueDateBasisV1.unknown_unverified(
+        source_authority=evidence.source_authority, evidence_ref=evidence.evidence_ref
     )
 
 
@@ -1335,7 +1396,7 @@ __all__ = [
     "RecordMigrationCreditV1",
     "RecordMigrationDebitV1",
     "ReverseMigrationItemV1",
-    "exposure_due_at",
+    "exposure_due",
     "exposure_fields_of",
     "get_accounting_fact_v7",
     "get_migration_item",

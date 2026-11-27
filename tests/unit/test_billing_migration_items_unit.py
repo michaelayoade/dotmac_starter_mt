@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -322,3 +323,112 @@ def test_each_bi21_rewrite_fragment_occurs_exactly_once_in_the_bi8_tenant_bodies
 def test_downgrade_is_refused():
     with pytest.raises(RuntimeError, match="no downgrade"):
         _bi21().downgrade()
+
+
+def test_exposure_due_keeps_a_due_date_only_for_automated_evidence():
+    from dotmac_billing.contracts import ServicePeriodEvidenceV1, ServicePeriodStatus
+    from dotmac_billing.migration_items import exposure_due
+    from dotmac_billing.opening_receivable_contracts import OpeningCollectionEvidenceV1
+
+    basis = evidence._candidate().manifest.receivables[0].collection.due_date_basis
+    verified_basis = replace(
+        basis,
+        status=type(basis.status)("verified"),
+        payment_terms_code="net_days",
+        payment_terms_version="1",
+        issued_at=NOW,
+        effective_at=NOW,
+        timezone="Africa/Lagos",
+        derivation_policy="issued_at_plus_days",
+        derivation_version="1",
+    )
+    period = ServicePeriodEvidenceV1(ServicePeriodStatus.NOT_APPLICABLE)
+
+    def collection(status, subject):
+        return OpeningCollectionEvidenceV1(
+            status,
+            subject,
+            None,
+            "arrears" if subject else None,
+            period,
+            NOW,
+            verified_basis,
+            "dotmac-billing",
+            "import",
+            "1",
+        )
+
+    due, kept = exposure_due(collection("verified", "customer:1"), NOW, verified_basis)
+    assert due == NOW and kept == verified_basis
+    for unverified in (
+        collection("unknown_unverified", None),
+        collection("unknown_unverified", "customer:1"),
+    ):
+        due, downgraded = exposure_due(unverified, NOW, verified_basis)
+        assert due is None
+        assert downgraded.status.value == "unknown_unverified"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("locale", "x" * 41),
+        ("timezone", "x" * 81),
+        ("document_profile_code", "x" * 121),
+        ("document_profile_version", "x" * 121),
+        ("document_number", "x" * 256),
+    ],
+)
+def test_the_standalone_validator_agrees_with_the_opening_validator(field, value):
+    from dotmac_billing.migration_items import _validate_original
+    from dotmac_billing.opening_receivable_validation import (
+        preview_opening_account_import_v2,
+    )
+
+    cmd = evidence._candidate()
+    first, second = cmd.manifest.receivables
+    args = {
+        "collection": first.collection,
+        "amount": _money("70.00"),
+        "currency": ("NGN", 2),
+        "cutoff": cmd.manifest.capture.economic_cutoff,
+    }
+    _validate_original(first.original, **args)  # the base case passes both
+    assert preview_opening_account_import_v2(
+        cmd, verifier=evidence.TrustedVerifier()
+    ).admissible
+    changed = replace(first, original=replace(first.original, **{field: value}))
+    manifest = replace(cmd.manifest, receivables=(changed, second))
+    assert not preview_opening_account_import_v2(
+        replace(cmd, manifest=manifest), verifier=evidence.TrustedVerifier()
+    ).admissible
+    with pytest.raises(BillingRuleViolation) as caught:
+        _validate_original(changed.original, **args)
+    assert caught.value.code.endswith("migration_debit_original_invalid")
+
+
+def test_verified_but_incomplete_collection_is_refused_by_both_validators():
+    from dotmac_billing.migration_items import _validate_original
+    from dotmac_billing.opening_receivable_validation import (
+        preview_opening_account_import_v2,
+    )
+
+    cmd = evidence._candidate()
+    first, second = cmd.manifest.receivables
+    bad = replace(first.collection, status="verified")
+    assert not bad.automated_collection_allowed
+    manifest = replace(
+        cmd.manifest, receivables=(replace(first, collection=bad), second)
+    )
+    assert not preview_opening_account_import_v2(
+        replace(cmd, manifest=manifest), verifier=evidence.TrustedVerifier()
+    ).admissible
+    with pytest.raises(BillingRuleViolation) as caught:
+        _validate_original(
+            first.original,
+            collection=bad,
+            amount=_money("70.00"),
+            currency=("NGN", 2),
+            cutoff=cmd.manifest.capture.economic_cutoff,
+        )
+    assert caught.value.code.endswith("migration_debit_collection_incomplete")
