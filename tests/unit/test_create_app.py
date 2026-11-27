@@ -50,6 +50,7 @@ from dotmac_kernel.features import FeatureManifest
 from dotmac_kernel.middleware.security_headers import _STRICT_CSP
 from dotmac_kernel.modules import UNVERSIONED
 from dotmac_kernel.permissions import PermissionSpec
+from dotmac_kernel.surface_selection import SELECT_ALL
 from dotmac_kernel.web_deps import TENANT_COOKIE_AUTHENTICATION
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
@@ -402,6 +403,7 @@ def test_product_startup_check_fails_closed_in_production(monkeypatch):
         ProductAssemblySpec(
             api_documentation=_DOCS_POLICY,
             name="invalid-product",
+            surface_selection=SELECT_ALL,
             startup_checks=(lambda: ("product contract is invalid",),),
         )
     )
