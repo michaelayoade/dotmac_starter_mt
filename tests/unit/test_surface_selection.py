@@ -455,3 +455,32 @@ def test_listed_module_cannot_take_a_kernel_platform_surface_path(path: str) -> 
     )
     with pytest.raises(ValueError, match="route composition refused"):
         create_app(spec)
+
+
+def test_only_the_built_in_surface_is_exempt_from_the_platform_root() -> None:
+    from dotmac_kernel.app_factory import _validate_route_collisions
+    from fastapi import FastAPI
+
+    built_in = "web:platform_admin:kernel_platform:control_plane:"
+    legacy = "web:staff_admin:old:legacy:"
+
+    def app_with(legacy_path: str) -> FastAPI:
+        app = FastAPI()
+        app.add_api_route(
+            "/platform/login", lambda: None, methods=["GET"], name=f"{built_in}login"
+        )
+        app.add_api_route(legacy_path, lambda: None, methods=["GET"], name=f"{legacy}x")
+        return app
+
+    def check(app: FastAPI) -> None:
+        _validate_route_collisions(
+            app,
+            platform_enabled=True,
+            exempt_prefixes=(built_in, legacy),
+            built_in_prefixes=(built_in,),
+            module_api_keys={},
+        )
+
+    with pytest.raises(ValueError, match="reserved root"):
+        check(app_with("/platform/{x}"))
+    check(app_with("/api/x"))
