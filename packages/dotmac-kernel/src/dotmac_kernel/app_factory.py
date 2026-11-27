@@ -74,7 +74,7 @@ from dotmac_kernel.middleware.security_headers import (
     compose_content_security_policy,
 )
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
-from dotmac_kernel.modules import AnyManifest, ModuleRegistry
+from dotmac_kernel.modules import AnyManifest, ModuleRegistry, ModuleRegistryError
 from dotmac_kernel.outbox_event_types import (
     OutboxEventTypeRegistry,
     install_outbox_event_types,
@@ -93,6 +93,7 @@ from dotmac_kernel.platform_auth import (
     require_platform_admin,
 )
 from dotmac_kernel.platform_web import PLATFORM_WEB_SURFACE
+from dotmac_kernel.prerequisites import PrerequisiteBinding, installed_bindings
 from dotmac_kernel.request_evidence import RequestEvidenceContextV1
 from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
@@ -403,6 +404,47 @@ def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
 def _referenced_capabilities(app: FastAPI) -> list[tuple[str, str]]:
     """Capability codes referenced by this app's mounted routes."""
     return _referenced_codes(app, CAPABILITY_CODE_ATTR)
+
+
+def _refuse_unbound_runtime_requires(
+    manifests: Sequence[AnyManifest],
+    bindings: Sequence[PrerequisiteBinding],
+) -> None:
+    """Fail the BOOT when an enabled module calls a kernel facility this assembly
+    cannot supply.
+
+    `ModuleManifest.runtime_requires` is the stateless module's declaration that
+    it CALLS a facility (`requires` orders migrations, which a stateless module
+    has none of). Each entry is resolved through `ProductAssemblySpec.
+    prerequisite_bindings`, the same binding table `requires` resolves through at
+    migration time; no environment variable is read at app runtime. When
+    bindings are ALSO installed process-wide (the migration environment, a test)
+    and differ from the spec's, boot refuses: one answer per process.
+
+    That an effect is bound is checked here; that the DATABASE has it is proven at
+    migrate time by `require_runtime_prerequisites`.
+    """
+    supplied = {binding.prerequisite for binding in bindings}
+    installed = installed_bindings()
+    if bindings and installed and set(installed) != set(bindings):
+        raise ModuleRegistryError(
+            "the prerequisite bindings installed in this process differ from "
+            "`ProductAssemblySpec.prerequisite_bindings` — one assembly, one "
+            "answer to 'who supplies each effect'"
+        )
+    unbound = sorted(
+        (str(getattr(manifest, "code", getattr(manifest, "name", "?"))), name)
+        for manifest in manifests
+        for name in getattr(manifest, "runtime_requires", ())
+        if name not in supplied
+    )
+    if unbound:
+        listed = ", ".join(f"{code} -> {name!r}" for code, name in unbound)
+        raise ModuleRegistryError(
+            "enabled module(s) call a kernel facility this assembly has not "
+            f"bound a provider for: {listed} — add a PrerequisiteBinding for "
+            "each effect to `ProductAssemblySpec.prerequisite_bindings`"
+        )
 
 
 def _validate_referenced_permissions(app: FastAPI, plan: PermissionPlan) -> None:
@@ -758,6 +800,10 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     registry = ModuleRegistry(spec.modules)
     manifests = list(registry.startup_order())
     enabled_manifests = list(registry.enabled_order(disabled))
+    # Facility use is not a surface: refuse an unbound `runtime_requires` on the
+    # ENABLED set BEFORE surface selection strips anything.
+    _refuse_unbound_runtime_requires(enabled_manifests, spec.prerequisite_bindings)
+
     unknown_platform_api = sorted(
         set(spec.platform_api_modules) - {manifest.code for manifest in manifests}
     )

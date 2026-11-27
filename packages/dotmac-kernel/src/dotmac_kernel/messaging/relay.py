@@ -32,8 +32,10 @@ Submodule-only (pulls in the DB layer): `from dotmac_kernel.messaging.relay impo
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
@@ -116,12 +118,28 @@ class FailureOutcome:
     retry_at: datetime | None
 
 
+def _claimed(rows: Iterable[Mapping[Any, Any]]) -> list[ClaimedEvent]:
+    return [
+        ClaimedEvent(
+            id=r["id"],
+            tenant_id=r["tenant_id"],
+            event_type=r["event_type"],
+            payload=dict(r["payload"] or {}),
+            attempts=r["attempts"],
+            correlation_id=r["correlation_id"],
+            last_error=r["last_error"],
+        )
+        for r in rows
+    ]
+
+
 def claim_batch(
     db: Session, *, worker_id: str, policy: RelayPolicy = RelayPolicy()
 ) -> list[ClaimedEvent]:
     """Lease up to `policy.batch_size` ready rows (pending-and-due OR stale-claimed)
     via `claim_outbox_batch`. The caller must commit to make the lease durable
-    before delivering."""
+    before delivering. Claims EVERY event type; a consumer of one type uses
+    `claim_batch_by_type`."""
     rows = (
         db.execute(
             text(
@@ -138,18 +156,48 @@ def claim_batch(
         .mappings()
         .all()
     )
-    return [
-        ClaimedEvent(
-            id=r["id"],
-            tenant_id=r["tenant_id"],
-            event_type=r["event_type"],
-            payload=dict(r["payload"] or {}),
-            attempts=r["attempts"],
-            correlation_id=r["correlation_id"],
-            last_error=r["last_error"],
+    return _claimed(rows)
+
+
+def claim_batch_by_type(
+    db: Session,
+    *,
+    worker_id: str,
+    event_types: Sequence[str],
+    policy: RelayPolicy = RelayPolicy(),
+) -> list[ClaimedEvent]:
+    """Lease ready rows of ONLY the named event types, via
+    `claim_outbox_batch_by_type` (prerequisite `outbox_typed_claim.v1`).
+
+    A separate function, not a parameter of `claim_batch`, so a type list that
+    arrives as `None` can never silently mean "every type". A foreign event is
+    never leased, not even a stale-claimed one. An empty or non-string list is
+    refused. The caller must commit to make the lease durable.
+    """
+    if isinstance(event_types, str) or not isinstance(event_types, Sequence):
+        raise ValueError("event_types must be a non-empty sequence of strings")
+    if not event_types or any(
+        not isinstance(item, str) or not item for item in event_types
+    ):
+        raise ValueError("event_types must be a non-empty sequence of strings")
+    rows = (
+        db.execute(
+            text(
+                "SELECT id, tenant_id, event_type, payload, attempts, "
+                "correlation_id, last_error "
+                "FROM claim_outbox_batch_by_type(:w, :b, :s, CAST(:t AS text[]))"
+            ),
+            {
+                "w": worker_id,
+                "b": policy.batch_size,
+                "s": policy.stale_lease_seconds,
+                "t": sorted(set(event_types)),
+            },
         )
-        for r in rows
-    ]
+        .mappings()
+        .all()
+    )
+    return _claimed(rows)
 
 
 def record_success(db: Session, *, event_id: UUID, worker_id: str) -> bool:
@@ -303,6 +351,7 @@ __all__ = [
     "FailureOutcome",
     "RelayPolicy",
     "claim_batch",
+    "claim_batch_by_type",
     "deferral_dead_letters",
     "failure_dead_letters",
     "record_dead_letter",

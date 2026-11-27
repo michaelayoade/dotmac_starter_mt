@@ -278,6 +278,18 @@ class ModuleManifest:
     # `dotmac-durable-timers` executes them. Last, to preserve every positional
     # constructor.
     jobs: Sequence[JobSpec] = field(default_factory=tuple)
+    #
+    # Kernel facilities this STATELESS module CALLS at request time, named by
+    # prerequisite (`dotmac_kernel.prerequisites`). `requires` means "order my
+    # migrations after this effect", which is meaningless for a module that has
+    # no lineage, so the registry still refuses `requires` there. Calling a
+    # facility is a different obligation: a runtime dependency that composition
+    # must refuse when the assembly cannot supply it (`create_app` checks every
+    # entry against the assembly's binding table, the same one `requires`
+    # resolves through). Legal ONLY on a stateless module: a stateful module
+    # keeps `requires` plus a verifying migration, nothing is relaxed for it.
+    # Appended last to preserve every historical positional constructor.
+    runtime_requires: Sequence[str] = field(default_factory=tuple)
     # The top-level Python package job handlers must live in. None means the
     # convention `dotmac_<code>`; set it only for a module whose package does not
     # follow it. Never inferred from another module's router or seed.
@@ -324,6 +336,7 @@ class ModuleManifest:
             "tenant_requires",
             "platform_requires",
             "jobs",
+            "runtime_requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         self._validate_jobs()
@@ -351,10 +364,12 @@ class ModuleManifest:
         validate_prerequisites(self.requires)
         validate_prerequisites(self.tenant_requires)
         validate_prerequisites(self.platform_requires)
+        validate_prerequisites(self.runtime_requires)
         prerequisite_lists = {
             "requires": set(self.requires),
             "tenant_requires": set(self.tenant_requires),
             "platform_requires": set(self.platform_requires),
+            "runtime_requires": set(self.runtime_requires),
         }
         overlap = {
             name
@@ -385,6 +400,20 @@ class ModuleManifest:
                 f"module {self.code!r} declares migration prerequisites but owns "
                 "no lineage — `requires` orders migrations, so a module with no "
                 "migrations has nothing to order"
+            )
+        if self.runtime_requires and (
+            self.short_code is not None
+            or self.migration_prefix is not None
+            or self.migration_branch is not None
+            or self.tables
+            or self.platform_tables
+        ):
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares `runtime_requires` but is "
+                "stateful (it owns a lineage, schema or tables) — "
+                "`runtime_requires` is legal only on a stateless module. A "
+                "stateful module declares `requires` and verifies the effect "
+                "in a migration"
             )
         try:
             supported = _supported_plane_sets(self)
