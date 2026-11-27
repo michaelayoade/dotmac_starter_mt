@@ -136,7 +136,9 @@ def prepare(
     install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     install_host_application(source_application)
     try:
-        catalogue = JobCatalogue.from_registry(registry, disabled)
+        catalogue = JobCatalogue.from_registry(
+            registry, disabled, module_planes=spec.module_planes
+        )
     except JobPlaneUnsupported as exc:
         raise RunnerConfigError(str(exc)) from exc
     return catalogue, sink

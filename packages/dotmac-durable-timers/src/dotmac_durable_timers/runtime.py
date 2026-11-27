@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from dotmac_kernel.planes import ModulePlane
+from dotmac_kernel.planes import ModulePlane, installed_module_plane_selections
 from fastapi import Request
 
 from dotmac_durable_timers.jobs import JobCatalogue, JobEntry
@@ -29,7 +29,9 @@ def request_catalogue(request: Request) -> JobCatalogue:
     disabled = {e.code for e in request.app.state.module_inventory if not e.enabled}
     catalogue = JobCatalogue(
         JobEntry(code, spec)
-        for code, spec in registry.jobs(disabled)
+        for code, spec in registry.jobs(
+            disabled, module_planes=installed_module_plane_selections() or None
+        )
         if spec.plane == ModulePlane.TENANT
     )
     request.app.state.durable_timers_catalogue = catalogue

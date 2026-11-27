@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.jobs import JobSpec, resolve_job_handler
-from dotmac_kernel.planes import ModulePlane
+from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -121,9 +121,18 @@ class JobCatalogue:
 
     @classmethod
     def from_registry(
-        cls, registry: ModuleRegistry, disabled: Set[str] = frozenset()
+        cls,
+        registry: ModuleRegistry,
+        disabled: Set[str] = frozenset(),
+        *,
+        module_planes: Iterable[ModulePlaneSelection] | None = None,
     ) -> JobCatalogue:
-        return cls(JobEntry(code, spec) for code, spec in registry.jobs(disabled))
+        """Pass the assembly's ``module_planes`` so a job whose plane the
+        assembly does not install for its module is not part of the catalogue."""
+        return cls(
+            JobEntry(code, spec)
+            for code, spec in registry.jobs(disabled, module_planes=module_planes)
+        )
 
     def entries(self) -> tuple[JobEntry, ...]:
         return tuple(self._entries.values())
