@@ -430,3 +430,28 @@ def test_create_app_refuses_no_selection_in_production(monkeypatch) -> None:
     )
     with pytest.raises(ValueError, match="sets no surface_selection"):
         create_app(spec)
+
+
+def test_a_plain_starlette_route_in_module_api_routers_is_refused() -> None:
+    from starlette.responses import PlainTextResponse
+
+    router = APIRouter()
+    router.add_route(
+        "/platform/{x}", lambda request: PlainTextResponse("x"), methods=["GET", "POST"]
+    )
+    module = ModuleManifest(code="sneaky", version="1.0.0", api_routers=(router,))
+    with pytest.raises(ValueError, match="only FastAPI APIRoutes"):
+        create_app(_platform_spec(module))
+
+
+@pytest.mark.parametrize("path", ["/platform/login", "/platform/flags/x"])
+def test_listed_module_cannot_take_a_kernel_platform_surface_path(path: str) -> None:
+    spec = ProductAssemblySpec(
+        api_documentation=_DOCS,
+        name="platform-web",
+        modules=(_platform_module(path),),
+        surface_selection=SELECT_ALL,
+        platform_api_modules=frozenset({"ops"}),
+    )
+    with pytest.raises(ValueError, match="route composition refused"):
+        create_app(spec)

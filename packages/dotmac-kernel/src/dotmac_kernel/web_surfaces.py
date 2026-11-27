@@ -1167,6 +1167,21 @@ class WebSurfaceRegistry:
             if surface.legacy or surface.built_in
         )
 
+    @property
+    def built_in_route_name_prefixes(self) -> tuple[str, ...]:
+        """Runtime route-name prefixes of the kernel's built-in surfaces only
+        (the one exemption that also covers the `/platform` root)."""
+        return tuple(
+            qualified_route_name(
+                surface.contribution.facet,
+                surface.owner,
+                surface.contribution.code,
+                "",
+            )
+            for surface in self.surfaces
+            if surface.built_in
+        )
+
     def _validate_entry_routes(self) -> None:
         for facet in self._facets.values():
             for reference in facet.entry_routes:

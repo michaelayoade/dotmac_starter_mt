@@ -319,7 +319,7 @@ class ProductAssemblySpec:
     # `require_platform_admin`, and the path starts with a static first segment
     # the kernel's own platform routes do not use. `create_app` refuses the boot
     # otherwise, and refuses a code that is not an installed module.
-    platform_api_modules: frozenset[str] = frozenset()
+    platform_api_modules: frozenset[str] = field(default=frozenset(), kw_only=True)
 
     def __post_init__(self) -> None:
         if self.request_evidence is not None and not isinstance(

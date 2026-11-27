@@ -32,7 +32,7 @@ import fastapi
 import starlette
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, APIWebSocketRoute
 from fastapi.staticfiles import StaticFiles
 
 from dotmac_kernel.api_documentation import (
@@ -631,11 +631,35 @@ def _platform_first_segment(path: str) -> str | None:
     return rest.split("/", 1)[0] if rest else None
 
 
+def _module_api_keys(manifests: Sequence[object]) -> dict[tuple[str, str], str]:
+    """``(method, path) -> module code`` for every module ``api_routers`` route.
+    A module router may hold only FastAPI routes: a plain Starlette ``Route``
+    (``add_route``) or ``Mount`` is copied by ``include_router`` yet invisible to
+    every route-composition check, so it is refused here."""
+    keys: dict[tuple[str, str], str] = {}
+    for manifest in manifests:
+        code = manifest.code  # type: ignore[attr-defined]
+        for router in manifest.api_routers:  # type: ignore[attr-defined]
+            for route in router.routes:
+                if isinstance(route, APIWebSocketRoute):
+                    continue
+                if not isinstance(route, APIRoute):
+                    raise ValueError(
+                        f"module {code!r}: module api_routers may contain only "
+                        f"FastAPI APIRoutes, found {type(route).__name__} "
+                        f"{getattr(route, 'path', '?')!r}"
+                    )
+                for method in route.methods or ():
+                    keys[(method, route.path)] = code
+    return keys
+
+
 def _validate_route_collisions(
     app: FastAPI,
     *,
     platform_enabled: bool,
     exempt_prefixes: Sequence[str],
+    built_in_prefixes: Sequence[str],
     module_api_keys: Mapping[tuple[str, str], str],
     platform_api_modules: Set[str] = frozenset(),
 ) -> None:
@@ -660,6 +684,7 @@ def _validate_route_collisions(
     reserved = _RESERVED_SURFACE_ROOTS + (("/platform",) if platform_enabled else ())
     api_reserved = _RESERVED_API_ROOTS + (("/platform",) if platform_enabled else ())
     exempt = tuple(exempt_prefixes)
+    built_in = tuple(built_in_prefixes)
     seen: dict[tuple[str, str], str] = {}
     problems: list[str] = []
     # First segments under /platform used by routes the kernel itself mounted.
@@ -722,8 +747,17 @@ def _validate_route_collisions(
                         "/platform but does not start with a static segment the "
                         "kernel's platform routes leave free"
                     )
-        elif route.name.startswith("web:") and not route.name.startswith(exempt):
-            if any(_under(route.path, root) for root in reserved):
+        elif route.name.startswith("web:"):
+            # Legacy (contract-1) surfaces predate the reserved-root rule, but
+            # not for `/platform`: only the kernel's built-in surface is exempt
+            # there, so a module's web router cannot capture operator routes.
+            if any(
+                _under(route.path, root)
+                and not route.name.startswith(
+                    built_in if root == "/platform" else exempt
+                )
+                for root in reserved
+            ):
                 problems.append(
                     f"surface route {route.path} ({route.name!r}) is under a "
                     "reserved root"
@@ -1150,6 +1184,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # control plane must exist even with every feature disabled.
     if spec.platform_surface_enabled:
         app.include_router(platform_auth_router)
+    module_api_keys = _module_api_keys(enabled_manifests)
     mount_features(
         app,
         manifests=enabled_manifests,
@@ -1169,14 +1204,8 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         app,
         platform_enabled=spec.platform_surface_enabled,
         exempt_prefixes=surface_registry.exempt_route_name_prefixes,
-        module_api_keys={
-            (method, route.path): manifest.code
-            for manifest in enabled_manifests
-            for router in manifest.api_routers
-            for route in router.routes
-            if isinstance(route, APIRoute)
-            for method in (route.methods or ())
-        },
+        built_in_prefixes=surface_registry.built_in_route_name_prefixes,
+        module_api_keys=module_api_keys,
         platform_api_modules=spec.platform_api_modules,
     )
 

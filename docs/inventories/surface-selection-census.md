@@ -33,3 +33,22 @@ Notes:
   `(module, surface)` pairs and the module codes whose `api_routers` it serves,
   and commits a route-inventory snapshot test
   (`dotmac_kernel.testing.route_inventory`).
+
+## `platform_api_modules` at the pin bump
+
+`/platform` is the operator plane. A module's `api_routers` may enter it only
+when the assembly lists the module in `ProductAssemblySpec.platform_api_modules`
+(a keyword-only field), every such route carries the kernel's own
+`dotmac_kernel.platform_auth.require_platform_admin` (matched by identity), and
+the path starts with a static first segment the kernel's platform routes do not
+use. A consumer-local platform guard refuses the boot (loud, not silent). A
+module's contract-1 `web_routers` may not enter `/platform` at all.
+
+| Assembly | Check at the pin bump |
+|---|---|
+| Reference app (this repo) | lists `{"tenants"}` (done) |
+| Vendor control plane | `[I]` unread for `/platform` module APIs: if any, list the module and guard with `require_platform_admin` |
+| Sub (full) | `[I]` unread: same check |
+| ERP v2 | `[I]` unread: same check; its legacy surfaces must not sit under `/platform` |
+| Sub-thin, Academy | `[I]` unread: same check |
+
