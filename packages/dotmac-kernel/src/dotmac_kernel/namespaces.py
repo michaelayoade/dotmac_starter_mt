@@ -1443,6 +1443,25 @@ WEBHOOKS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("webhooks"),
 )
 
+NOTIFICATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="notifications",
+    prefix="nf",
+    branch_label="notifications",
+    db_schema=module_schema("notify"),
+)
+REPORTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="reporting",
+    prefix="rp",
+    branch_label="reporting",
+    db_schema=module_schema("reporting"),
+)
+CUSTOM_FIELDS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="custom_fields",
+    prefix="cf",
+    branch_label="custom_fields",
+    db_schema=module_schema("custfld"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1541,6 +1560,9 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     FLEET_MIGRATION_OWNER,
     HELP_CENTRE_MIGRATION_OWNER,
     WEBHOOKS_MIGRATION_OWNER,
+    NOTIFICATIONS_MIGRATION_OWNER,
+    REPORTING_MIGRATION_OWNER,
+    CUSTOM_FIELDS_MIGRATION_OWNER,
 )
 
 
@@ -1683,7 +1705,7 @@ def migration_owner_ledger_digest(
 #: advertise a plain SHA-256 over some unstated serialization and invite a
 #: consumer to recompute the wrong thing.
 MIGRATION_OWNER_LEDGER_DIGEST: Final[str] = (
-    "cv1:344d67591f7490b024d95b841621c87b77d51b8ccf3c10caef8fed7de500d157"
+    "cv1:abb1636129b70e792473ef2a9e170d52f99fb7c181805868165462e19bd8b3cf"
 )
 
 
@@ -2100,6 +2122,9 @@ __all__ = [
     "FLEET_MIGRATION_OWNER",
     "HELP_CENTRE_MIGRATION_OWNER",
     "WEBHOOKS_MIGRATION_OWNER",
+    "NOTIFICATIONS_MIGRATION_OWNER",
+    "REPORTING_MIGRATION_OWNER",
+    "CUSTOM_FIELDS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

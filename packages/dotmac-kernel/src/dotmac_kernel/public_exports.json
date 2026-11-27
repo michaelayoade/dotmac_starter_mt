@@ -705,6 +705,7 @@
         "JobSpecError",
         "MAX_ATTEMPTS_CEILING",
         "MIN_INTERVAL_SECONDS",
+        "handler_package",
         "resolve_job_handler",
         "validate_cron"
       ],
@@ -1169,6 +1170,7 @@
         "COLLECTIONS_MIGRATION_OWNER",
         "COMPLIANCE_REPORTING_MIGRATION_OWNER",
         "CUSTOMERS_MIGRATION_OWNER",
+        "CUSTOM_FIELDS_MIGRATION_OWNER",
         "DOMAINS_MIGRATION_OWNER",
         "DURABLE_TIMERS_MIGRATION_OWNER",
         "DuplicateBranchLabelError",
@@ -1208,6 +1210,7 @@
         "MODULE_SCHEMA_PREFIX",
         "MONEY_FLOWS_MIGRATION_OWNER",
         "MigrationOwner",
+        "NOTIFICATIONS_MIGRATION_OWNER",
         "NamespaceAllocationError",
         "NamespaceError",
         "NamespaceRegistry",
@@ -1222,6 +1225,7 @@
         "REFERRALS_MIGRATION_OWNER",
         "RELEASE_CATALOG_MIGRATION_OWNER",
         "REMOTE_ACCESS_MIGRATION_OWNER",
+        "REPORTING_MIGRATION_OWNER",
         "RESELLER_MANAGEMENT_MIGRATION_OWNER",
         "RESERVED_SCHEMAS",
         "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
@@ -1813,6 +1817,7 @@
     "dotmac_kernel.surface_selection": {
       "classification": "supported",
       "exports": [
+        "LEGACY_SURFACE",
         "SELECT_ALL",
         "SurfaceSelection",
         "SurfaceSelectionError"
@@ -1893,10 +1898,16 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.testing.route_inventory": {
+      "classification": "supported",
+      "exports": [
+        "route_inventory"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.testing.surface_conformance": {
       "classification": "supported",
       "exports": [
-        "AUTH_GUARD_NAMES",
         "ConformanceReport",
         "DEFAULT_PREFIXES",
         "SurfaceConformanceError",
@@ -2385,6 +2396,7 @@
     "dotmac_kernel.testing.harness",
     "dotmac_kernel.testing.licensing",
     "dotmac_kernel.testing.provisioning",
+    "dotmac_kernel.testing.route_inventory",
     "dotmac_kernel.testing.surface_conformance",
     "dotmac_kernel.transactions",
     "dotmac_kernel.web_deps",

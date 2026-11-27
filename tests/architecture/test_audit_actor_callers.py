@@ -151,6 +151,9 @@ def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     # (bank_lifecycle._audit via the frozen BankAuditContext). Their frozen
     # contexts earn their closed vocabulary through the same construction
     # proof as RepairActor.
+    # The settings feature's three callers moved into dotmac-settings-admin, which
+    # reaches the writer through an assembly-bound seam (a stateless module cannot
+    # declare the audit prerequisite), so no direct call remains there.
     # Offline identity bootstrap adds one explicit system actor with its evidence ref.
     # The audited dead-dispatch requeue (K-5) adds one literal-`user` caller.
     # The suppression-clear operator action (K-7) adds one literal-`user` caller
@@ -159,7 +162,7 @@ def test_every_shipped_audit_writer_names_the_canonical_actor() -> None:
     # caller (the relay, not a person, decided).
     # The durable-timers job runner adds three: the staff API and staff page
     # command audits (`user`, party id) and the dead-letter hook (`system`).
-    assert len(calls) == 34, "the ratchet must change when the caller set changes"
+    assert len(calls) == 31, "the ratchet must change when the caller set changes"
 
     problems = [
         f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}: {problem}"

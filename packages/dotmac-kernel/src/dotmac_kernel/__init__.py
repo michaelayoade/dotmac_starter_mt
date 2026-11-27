@@ -493,6 +493,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.harness",
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
+        "dotmac_kernel.testing.route_inventory",
         "dotmac_kernel.testing.surface_conformance",
         "dotmac_kernel.transactions",
         "dotmac_kernel.web_deps",

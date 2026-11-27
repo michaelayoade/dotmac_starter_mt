@@ -74,6 +74,7 @@ on:
           - dotmac-document-rendering
           - dotmac-documents
           - dotmac-delivery-resend
+          - dotmac-settings-admin
           - dotmac-durable-timers
           - dotmac-entitlement-allocation
           - dotmac-expenses

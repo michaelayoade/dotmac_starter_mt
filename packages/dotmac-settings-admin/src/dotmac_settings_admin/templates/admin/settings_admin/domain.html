@@ -1,0 +1,34 @@
+{# One domain's settings. Context: `domain`, `items` (SettingView). A secret shows only set/unset. #}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:56rem;">
+  {{ ui.heading(domain) }}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    {% for item in items %}
+    <tr style="border-bottom:1px solid var(--dmui-border-default);">
+      <td style="padding:var(--dmui-space-sm);">
+        <strong>{{ item.label or item.key }}</strong><br>
+        <code>{{ item.key }}</code>
+        {% if item.description %}<br><span style="color:var(--dmui-text-muted);">{{ item.description }}</span>{% endif %}
+      </td>
+      <td style="padding:var(--dmui-space-sm);">
+        {% if item.is_secret %}<em>{{ "set" if item.is_set else "unset" }}</em>
+        {% elif item.value_type == "json" %}<code>{{ item.value | tojson }}</code>
+        {% else %}{{ item.value }}{% endif %}
+      </td>
+      <td style="padding:var(--dmui-space-sm);">{{ ui.badge(item.source) }}</td>
+      <td style="padding:var(--dmui-space-sm); text-align:right;">
+        {% if item.domain == 'branding' and item.key == 'ui_branding' %}
+        {{ ui.link(surface_url('branding_form'), "Edit") }}
+        {% else %}
+        {{ ui.link(surface_url('edit_form', domain=item.domain, key=item.key), "Edit") }}
+        {% endif %}
+        {{ ui.link(surface_url('history', domain=item.domain, key=item.key), "History") }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

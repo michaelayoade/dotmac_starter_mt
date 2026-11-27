@@ -24,15 +24,15 @@ from dotmac_kernel.models import (
     Role,
     Tenant,
 )
+
+# Import for the side effect: registers custom_fields/max_per_entity with the
+# core settings resolver (create_field resolves the per-entity limit via it).
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.features.custom_fields.router import router as custom_fields_router
-
-# Import for the side effect: registers custom_fields/max_per_entity with the
-# core settings resolver (create_field resolves the per-entity limit via it).
-from app.features.settings import spec as _settings_spec  # noqa: F401
 
 
 @pytest.fixture()

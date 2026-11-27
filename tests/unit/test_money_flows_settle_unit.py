@@ -731,3 +731,54 @@ def test_the_withholding_entry_point_refuses_another_accounts_document(monkeypat
             ports=_ports(ACCOUNT),
         )
     assert caught.value.code == "document_account_mismatch"
+
+
+def test_the_release_entry_point_refuses_another_accounts_document(monkeypatch):
+    from dotmac_money_flows import WithholdingReleasedV1
+
+    monkeypatch.setattr(
+        flows,
+        "get_document_exposure",
+        lambda *a, **k: SimpleNamespace(billing_account_id=uuid4()),
+    )
+
+    def boom(*args, **kwargs):
+        raise AssertionError("the account lock was taken for a mismatched account")
+
+    monkeypatch.setattr(flows, "get_funding_availability", boom)
+    with pytest.raises(BalancePassFailed) as caught:
+        flows.apply_balance_on_withholding_released(
+            None,
+            scope=TenantScope(uuid4()),
+            request=WithholdingReleasedV1(uuid4(), uuid4(), uuid4(), NOW),
+            ports=_ports(ACCOUNT),
+        )
+    assert caught.value.code == "document_account_mismatch"
+
+
+def test_the_release_entry_point_floors_dating_and_keys_refs_on_the_release(
+    monkeypatch,
+):
+    from dotmac_money_flows import WithholdingReleasedV1
+
+    seen = {}
+
+    def capture(db, **kwargs):
+        seen.update(kwargs)
+        return "outcome"
+
+    monkeypatch.setattr(flows, "_balance_pass", capture)
+    request = WithholdingReleasedV1(uuid4(), uuid4(), uuid4(), NOW)
+    assert (
+        flows.apply_balance_on_withholding_released(
+            None, scope=TenantScope(uuid4()), request=request, ports=_ports(ACCOUNT)
+        )
+        == "outcome"
+    )
+    assert seen["trigger"] == request.document_id
+    assert seen["expected_account"] == request.billing_account_id
+    assert seen["not_before"] == NOW
+    assert seen["ref_prefix"] == (
+        f"money-flows:settle:release:{request.release_id}:{request.document_id}"
+    )
+    assert not seen["ref_prefix"].startswith("money-flows:settle:issue:")

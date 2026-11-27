@@ -10,13 +10,22 @@ makes the assembly state, per module, which ``api_routers`` and which named
   module codes whose ``api_routers`` are served.
 * :data:`SELECT_ALL` is the explicit "everything the installed modules
   declare" sentinel (the reference app uses it deliberately).
+* Contract-1 ``web_routers``/``nav`` are selected with the surface code
+  ``"legacy"`` (``("module", "legacy")``), valid only for a module that has
+  ``web_routers``.  Under an explicit selection they mount only if named.
 * ``None`` on the spec keeps the pre-selection behaviour for assemblies that
   have not adopted this contract yet (a logged, visible compatibility mode, not
   a safe default).  An assembly that sets a selection is fail-closed: an entry
   naming an absent module, surface or router set refuses the boot, and
   unselected surfaces and routers are never mounted.
 
-Contract-1 ``web_routers``/``nav`` are frozen and outside this declaration.
+Granularity (known limitation).  API routers are selected per MODULE and routes
+per SURFACE: a new module, a new surface, or a surface/module the assembly never
+named adds nothing, but a new route or router inside a module or surface that IS
+selected mounts.  That residue is caught by the assembly's committed
+route-inventory snapshot test (``dotmac_kernel.testing.route_inventory``).
+Named router sets are a later contract-generation item, recorded here on
+purpose.
 
 Import-safe: pure data over manifests; no engine, no I/O, no FastAPI.
 """
@@ -30,6 +39,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dotmac_kernel.modules import ModuleManifest
+
+
+#: The surface code naming a module's contract-1 `web_routers`/`nav`.
+LEGACY_SURFACE = "legacy"
 
 
 class SurfaceSelectionError(ValueError):
@@ -87,6 +100,12 @@ class SurfaceSelection:
             manifest = by_code.get(module)
             if manifest is None:
                 problems.append(f"surface {module}/{surface}: module not installed")
+            elif surface == LEGACY_SURFACE:
+                if not manifest.web_routers:
+                    problems.append(
+                        f"surface {module}/{surface}: module has no contract-1 "
+                        "web_routers"
+                    )
             elif surface not in {s.code for s in manifest.web_surfaces}:
                 problems.append(
                     f"surface {module}/{surface}: module has no such surface"
@@ -114,14 +133,23 @@ class SurfaceSelection:
                 if (manifest.code, s.code) in self.surfaces
             )
             routers = manifest.api_routers if manifest.code in self.api_routers else ()
-            if surfaces == tuple(manifest.web_surfaces) and routers == tuple(
-                manifest.api_routers
+            legacy = (manifest.code, LEGACY_SURFACE) in self.surfaces
+            web_routers = manifest.web_routers if legacy else ()
+            nav = manifest.nav if legacy else ()
+            if (
+                surfaces == tuple(manifest.web_surfaces)
+                and routers == tuple(manifest.api_routers)
+                and web_routers == tuple(manifest.web_routers)
             ):
                 reduced.append(manifest)
             else:
                 reduced.append(
                     dataclasses.replace(
-                        manifest, web_surfaces=surfaces, api_routers=routers
+                        manifest,
+                        web_surfaces=surfaces,
+                        api_routers=routers,
+                        web_routers=web_routers,
+                        nav=nav,
                     )
                 )
         return reduced
@@ -134,6 +162,10 @@ class SurfaceSelection:
         for manifest in manifests:
             if manifest.api_routers and manifest.code not in self.api_routers:
                 out.append(f"{manifest.code}:api")
+            if manifest.web_routers and (manifest.code, LEGACY_SURFACE) not in (
+                self.surfaces
+            ):
+                out.append(f"{manifest.code}/{LEGACY_SURFACE}")
             out.extend(
                 f"{manifest.code}/{s.code}"
                 for s in manifest.web_surfaces
@@ -145,6 +177,7 @@ class SurfaceSelection:
 SELECT_ALL = SurfaceSelection(select_all=True)
 
 __all__ = [
+    "LEGACY_SURFACE",
     "SELECT_ALL",
     "SurfaceSelection",
     "SurfaceSelectionError",
