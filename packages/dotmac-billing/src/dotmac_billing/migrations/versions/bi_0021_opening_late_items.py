@@ -1,12 +1,12 @@
-"""Migration items: post-seal legacy debits and credits (R8; tenant plane only).
+"""Opening late items: post-seal source debits and credits (R8; tenant plane only).
 
-After the opening is sealed, Finance can find a legacy open invoice the opening
-did not carry (a debit) or a legacy credit note that was never applied (a credit
-against one open invoice). This revision adds the append-only ``migration_items``
+After the opening is sealed, Finance can find a source open invoice the opening
+did not carry (a debit) or a source credit note that was never applied (a credit
+against one open invoice). This revision adds the append-only ``opening_late_items``
 table: one typed row per recorded debit, credit or exact reversal, with a signed
 ``receivable_delta`` (debit positive, credit negative, reversal the exact
 negation). No revenue and no tax is booked: the debit document is an issued
-invoice with ``authoring_mode = 'migration_item'`` and no issuance posting.
+invoice with ``authoring_mode = 'opening_late_item'`` and no issuance posting.
 
 The database, not only Python, bounds the online role (which holds INSERT):
 
@@ -17,7 +17,7 @@ The database, not only Python, bounds the online role (which holds INSERT):
   only while untouched". A credit also stays within the room not claimed by a
   frozen expected-withholding component;
 * a debit key carried by the opening, or by an unreversed debit, is refused;
-  the credits of one legacy credit note stay on one account and within its total;
+  the credits of one source credit note stay on one account and within its total;
 * a deferred check requires, for every R8 posting group, exactly one item, one
   V7 accounting fact and one matching receivable effect.
 
@@ -25,13 +25,13 @@ Three bi_0008 functions are rewritten by replacing exactly one occurrence of a
 fixed fragment in their stored definition (the bi_0019 precedent), so everything
 else in each body is byte-identical to bi_0008:
 
-* ``opening_invoice_room_at``: base and issuance for a migration document, and
+* ``opening_invoice_room_at``: base and issuance for an opening late document, and
   the non-debit item rows as contributions;
-* ``has_live_invoice_issuance``: a migration document is live while its debit is
+* ``has_live_invoice_issuance``: an opening late document is live while its debit is
   unreversed;
 * ``admit_opening_exposure``: a group recorded by an item affects its document.
 
-Two additive triggers refuse a generic void of a migration document (or of a
+Two additive triggers refuse a generic void of an opening late document (or of a
 document carrying a net item credit) and a generic reversal of an R8 group.
 
 Tenant plane only; nothing is backfilled. No downgrade.
@@ -46,15 +46,13 @@ from dotmac_kernel.planes import ModulePlane, selected_module_planes
 
 from alembic import op
 
-revision = "bi_0021_migration_items"
+revision = "bi_0021_opening_late_items"
 down_revision = "bi_0020_withholding_releases"
 branch_labels = None
 depends_on = None
 _SCHEMA = "mod_billing"
-_TABLE = "migration_items"
-_KINDS = (
-    "('migration_debit_recorded','migration_credit_applied','migration_item_reversed')"
-)
+_TABLE = "opening_late_items"
+_KINDS = "('opening_late_debit_recorded','opening_late_credit_applied','opening_late_item_reversed')"
 
 # (signature, exactly-one old fragment, replacement). Applied in order.
 _ROOM = "mod_billing.opening_invoice_room_at(uuid, uuid, bigint, uuid)"
@@ -63,22 +61,22 @@ _EXPOSURE = "mod_billing.admit_opening_exposure()"
 
 _ROOM_BASE_OLD = "opening_base := backing.initial_receivable;"
 _ROOM_BASE_NEW = """opening_base := backing.initial_receivable;
-      ELSIF invoice.authoring_mode = 'migration_item' THEN
+      ELSIF invoice.authoring_mode = 'opening_late_item' THEN
         SELECT x.receivable_delta, x.billing_account_id, x.currency, x.minor_units, g.source_version INTO backing
-          FROM mod_billing.migration_items x
+          FROM mod_billing.opening_late_items x
           JOIN mod_billing.posting_groups g ON g.id = x.posting_group_id AND g.tenant_id = x.tenant_id
           WHERE x.document_id = invoice_id AND x.kind = 'debit' AND x.tenant_id = tenant;
         IF backing.receivable_delta IS NULL OR backing.billing_account_id <> account_id OR backing.currency <> invoice.currency
           OR backing.minor_units <> invoice.minor_units OR backing.source_version > target_version THEN
-          RAISE EXCEPTION 'migration invoice requires its exact source-version debit' USING ERRCODE = 'check_violation';
+          RAISE EXCEPTION 'opening late invoice requires its exact source-version debit' USING ERRCODE = 'check_violation';
         END IF;
         opening_base := backing.receivable_delta;"""
 _ROOM_ISSUE_OLD = (
     "IF doc.id = invoice_id AND invoice.authoring_mode = 'imported_open_item' THEN"
 )
-_ROOM_ISSUE_NEW = """IF doc.id = invoice_id AND invoice.authoring_mode = 'migration_item' THEN
+_ROOM_ISSUE_NEW = """IF doc.id = invoice_id AND invoice.authoring_mode = 'opening_late_item' THEN
           IF EXISTS (SELECT 1 FROM mod_billing.document_events x WHERE x.document_id = invoice_id AND x.event_kind = 'voided' AND x.tenant_id = tenant) THEN
-            RAISE EXCEPTION 'migration invoice cannot be generically voided' USING ERRCODE = 'check_violation';
+            RAISE EXCEPTION 'opening late invoice cannot be generically voided' USING ERRCODE = 'check_violation';
           END IF;
           CONTINUE;
         END IF;
@@ -86,18 +84,18 @@ _ROOM_ISSUE_NEW = """IF doc.id = invoice_id AND invoice.authoring_mode = 'migrat
 _ROOM_UNION_OLD = "FROM mod_billing.opening_cash_effects x WHERE x.document_id = invoice_id AND x.tenant_id = tenant"
 _ROOM_UNION_NEW = """FROM mod_billing.opening_cash_effects x WHERE x.document_id = invoice_id AND x.tenant_id = tenant
         UNION ALL SELECT x.posting_group_id, x.billing_account_id, x.currency, x.minor_units, x.receivable_delta
-          FROM mod_billing.migration_items x WHERE x.document_id = invoice_id AND x.kind <> 'debit' AND x.tenant_id = tenant"""
+          FROM mod_billing.opening_late_items x WHERE x.document_id = invoice_id AND x.kind <> 'debit' AND x.tenant_id = tenant"""
 _LIVE_OLD = "SELECT CASE WHEN d.authoring_mode = 'imported_open_item' THEN"
-_LIVE_NEW = """SELECT CASE WHEN d.authoring_mode = 'migration_item' THEN
-        EXISTS (SELECT 1 FROM mod_billing.migration_items x
+_LIVE_NEW = """SELECT CASE WHEN d.authoring_mode = 'opening_late_item' THEN
+        EXISTS (SELECT 1 FROM mod_billing.opening_late_items x
           JOIN mod_billing.posting_groups g ON g.id = x.posting_group_id AND g.tenant_id = x.tenant_id
           WHERE x.document_id = invoice_id AND x.billing_account_id = account_id AND x.currency = currency_code AND x.minor_units = scale AND x.tenant_id = tenant
-            AND x.kind = 'debit' AND g.group_kind = 'migration_debit_recorded'
-            AND NOT EXISTS (SELECT 1 FROM mod_billing.migration_items r WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
+            AND x.kind = 'debit' AND g.group_kind = 'opening_late_debit_recorded'
+            AND NOT EXISTS (SELECT 1 FROM mod_billing.opening_late_items r WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
         WHEN d.authoring_mode = 'imported_open_item' THEN"""
 _EXPOSURE_OLD = "OR EXISTS (SELECT 1 FROM mod_billing.opening_import_receipts x WHERE x.posting_group_id = grp.id AND x.original_receipt_id = basis.receipt_id AND x.tenant_id = NEW.tenant_id)"
 _EXPOSURE_ADD = """
-        OR EXISTS (SELECT 1 FROM mod_billing.migration_items x WHERE x.posting_group_id = grp.id AND x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id)"""  # nosec B608 -- fixed fragment, no input
+        OR EXISTS (SELECT 1 FROM mod_billing.opening_late_items x WHERE x.posting_group_id = grp.id AND x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id)"""  # nosec B608 -- fixed fragment, no input
 _EXPOSURE_NEW = _EXPOSURE_OLD + _EXPOSURE_ADD
 
 HUNKS = (
@@ -191,7 +189,10 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", "id", name=f"uq_{_TABLE}_id"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "reverses_item_id"],
-            ["mod_billing.migration_items.tenant_id", "mod_billing.migration_items.id"],
+            [
+                "mod_billing.opening_late_items.tenant_id",
+                "mod_billing.opening_late_items.id",
+            ],
             name=f"fk_{_TABLE}_reverses",
             ondelete="RESTRICT",
         ),
@@ -280,7 +281,7 @@ def upgrade() -> None:
           FOR EACH ROW EXECUTE FUNCTION mod_billing.refuse_mutation();
     """)  # nosec B608 -- closed table identifiers; no input reaches this DDL
     op.execute(f"""
-        CREATE FUNCTION mod_billing.admit_migration_item() RETURNS trigger AS $$
+        CREATE FUNCTION mod_billing.admit_opening_late_item() RETURNS trigger AS $$
         DECLARE
             win record; doc record; grp record; orig record;
             capture jsonb; room numeric; base numeric; undischarged numeric;
@@ -298,17 +299,17 @@ def upgrade() -> None:
                 SELECT 1 FROM mod_billing.opening_window_seals s
                  WHERE s.window_id = win.id AND s.tenant_id = NEW.tenant_id)
             THEN
-                RAISE EXCEPTION 'a migration item needs the sealed opening window'
+                RAISE EXCEPTION 'an opening late item needs the sealed opening window'
                   USING ERRCODE = 'check_violation';
             END IF;
             IF coalesce(win.evidence::jsonb->'window'->>'dual_control', 'on') <> 'off' THEN
-                RAISE EXCEPTION 'migration items are unsupported while the window binds dual control on'
+                RAISE EXCEPTION 'opening late items are unsupported while the window binds dual control on'
                   USING ERRCODE = 'check_violation';
             END IF;
             capture := win.evidence::jsonb->'window'->'manifest'->'capture';
             IF NEW.source_installation_id IS DISTINCT FROM capture->>'installation_id'
                OR NEW.source_system IS DISTINCT FROM capture->>'source_system' THEN
-                RAISE EXCEPTION 'a migration item must name the sealed capture namespace'
+                RAISE EXCEPTION 'an opening late item must name the sealed capture namespace'
                   USING ERRCODE = 'check_violation';
             END IF;
             -- A held partition takes no item until its governed admission.
@@ -321,7 +322,7 @@ def upgrade() -> None:
                      WHERE h.billing_account_id = NEW.billing_account_id
                        AND h.tenant_id = NEW.tenant_id)
             THEN
-                RAISE EXCEPTION 'a held opening partition takes no migration item before its admission'
+                RAISE EXCEPTION 'a held opening partition takes no opening late item before its admission'
                   USING ERRCODE = 'check_violation';
             END IF;
             SELECT * INTO doc FROM mod_billing.documents x
@@ -337,11 +338,11 @@ def upgrade() -> None:
                OR grp.currency <> NEW.currency OR grp.minor_units <> NEW.minor_units
                OR NEW.receivable_delta <> round(NEW.receivable_delta, NEW.minor_units)
                OR grp.group_kind <> (CASE NEW.kind
-                    WHEN 'debit' THEN 'migration_debit_recorded'
-                    WHEN 'credit' THEN 'migration_credit_applied'
-                    ELSE 'migration_item_reversed' END)
+                    WHEN 'debit' THEN 'opening_late_debit_recorded'
+                    WHEN 'credit' THEN 'opening_late_credit_applied'
+                    ELSE 'opening_late_item_reversed' END)
             THEN
-                RAISE EXCEPTION 'a migration item needs its issued invoice, group and exact money'
+                RAISE EXCEPTION 'an opening late item needs its issued invoice, group and exact money'
                   USING ERRCODE = 'check_violation';
             END IF;
             IF EXISTS (
@@ -349,14 +350,14 @@ def upgrade() -> None:
                  WHERE e.document_id = NEW.document_id
                    AND e.tenant_id = NEW.tenant_id AND e.event_kind = 'voided'
             ) THEN
-                RAISE EXCEPTION 'a voided invoice cannot take a migration item'
+                RAISE EXCEPTION 'a voided invoice cannot take an opening late item'
                   USING ERRCODE = 'check_violation';
             END IF;
 
             IF NEW.kind = 'debit' THEN
-                IF doc.authoring_mode <> 'migration_item' OR doc.obligation_id IS NOT NULL
+                IF doc.authoring_mode <> 'opening_late_item' OR doc.obligation_id IS NOT NULL
                    OR doc.grand_total < NEW.receivable_delta THEN
-                    RAISE EXCEPTION 'a migration debit needs its migration document'
+                    RAISE EXCEPTION 'an opening late debit needs its opening late document'
                       USING ERRCODE = 'check_violation';
                 END IF;
                 IF EXISTS (
@@ -366,26 +367,26 @@ def upgrade() -> None:
                        AND b.source_system = NEW.source_system
                        AND b.source_invoice_key = NEW.source_key
                 ) THEN
-                    RAISE EXCEPTION 'the legacy invoice is carried by the opening'
+                    RAISE EXCEPTION 'the source invoice is carried by the opening'
                       USING ERRCODE = 'unique_violation';
                 END IF;
                 SELECT count(*) INTO n
-                  FROM mod_billing.migration_items x
+                  FROM mod_billing.opening_late_items x
                  WHERE x.tenant_id = NEW.tenant_id AND x.kind = 'debit'
                    AND x.source_installation_id = NEW.source_installation_id
                    AND x.source_system = NEW.source_system
                    AND x.source_key = NEW.source_key;
                 SELECT count(*) INTO open_n
-                  FROM mod_billing.migration_items x
+                  FROM mod_billing.opening_late_items x
                  WHERE x.tenant_id = NEW.tenant_id AND x.kind = 'debit'
                    AND x.source_installation_id = NEW.source_installation_id
                    AND x.source_system = NEW.source_system
                    AND x.source_key = NEW.source_key
                    AND NOT EXISTS (
-                       SELECT 1 FROM mod_billing.migration_items r
+                       SELECT 1 FROM mod_billing.opening_late_items r
                         WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id);
                 IF open_n > 0 OR NEW.generation <> n + 1 THEN
-                    RAISE EXCEPTION 'the legacy invoice already has an unreversed migration debit'
+                    RAISE EXCEPTION 'the source invoice already has an unreversed opening late debit'
                       USING ERRCODE = 'unique_violation';
                 END IF;
                 RETURN NEW;
@@ -393,8 +394,8 @@ def upgrade() -> None:
 
             -- Credit or reversal: the room after the insert lies in [0, base].
             base := (CASE doc.authoring_mode
-                WHEN 'migration_item' THEN (
-                    SELECT d.receivable_delta FROM mod_billing.migration_items d
+                WHEN 'opening_late_item' THEN (
+                    SELECT d.receivable_delta FROM mod_billing.opening_late_items d
                      WHERE d.document_id = doc.id AND d.kind = 'debit'
                        AND d.tenant_id = NEW.tenant_id)
                 WHEN 'imported_open_item' THEN (
@@ -404,7 +405,7 @@ def upgrade() -> None:
             room := mod_billing.opening_invoice_room(NEW.document_id, NEW.tenant_id);
             IF base IS NULL OR room IS NULL
                OR room + NEW.receivable_delta < 0 OR room + NEW.receivable_delta > base THEN
-                RAISE EXCEPTION 'a migration item must keep the invoice room between zero and its base'
+                RAISE EXCEPTION 'an opening late item must keep the invoice room between zero and its base'
                   USING ERRCODE = 'check_violation';
             END IF;
 
@@ -412,7 +413,7 @@ def upgrade() -> None:
                 IF NOT mod_billing.has_live_invoice_issuance(
                     NEW.document_id, NEW.billing_account_id, NEW.currency, NEW.minor_units, NEW.tenant_id)
                 THEN
-                    RAISE EXCEPTION 'a migration credit needs a live invoice'
+                    RAISE EXCEPTION 'an opening late credit needs a live invoice'
                       USING ERRCODE = 'check_violation';
                 END IF;
                 -- Frozen expected withholding not yet discharged or released
@@ -426,10 +427,10 @@ def upgrade() -> None:
                                  WHERE r.document_id = NEW.document_id AND r.tenant_id = NEW.tenant_id), 0),
                     0) INTO undischarged;
                 IF -NEW.receivable_delta > room - undischarged THEN
-                    RAISE EXCEPTION 'a migration credit exceeds the non-withholding room'
+                    RAISE EXCEPTION 'an opening late credit exceeds the non-withholding room'
                       USING ERRCODE = 'check_violation';
                 END IF;
-                -- One legacy credit note: one account, one total, never over it.
+                -- One source credit note: one account, one total, never over it.
                 PERFORM pg_advisory_xact_lock(hashtextextended(
                     NEW.tenant_id::text || '|' || NEW.source_installation_id || '|'
                     || NEW.source_system || '|credit|' || NEW.source_key, 0));
@@ -438,20 +439,20 @@ def upgrade() -> None:
                                            OR x.source_number IS DISTINCT FROM NEW.source_number),
                        coalesce(sum(-x.receivable_delta), 0)
                   INTO other_n, applied
-                  FROM mod_billing.migration_items x
+                  FROM mod_billing.opening_late_items x
                  WHERE x.tenant_id = NEW.tenant_id AND x.generation IS NULL
                    AND x.source_installation_id = NEW.source_installation_id
                    AND x.source_system = NEW.source_system
                    AND x.source_key = NEW.source_key;
                 IF other_n > 0 OR applied - NEW.receivable_delta > NEW.source_total THEN
-                    RAISE EXCEPTION 'a migration credit stays on one account and within its credit note total'
+                    RAISE EXCEPTION 'an opening late credit stays on one account and within its credit note total'
                       USING ERRCODE = 'check_violation';
                 END IF;
                 RETURN NEW;
             END IF;
 
             -- Reversal: the exact negation of an unreversed debit or credit.
-            SELECT * INTO orig FROM mod_billing.migration_items o
+            SELECT * INTO orig FROM mod_billing.opening_late_items o
              WHERE o.id = NEW.reverses_item_id AND o.tenant_id = NEW.tenant_id;
             IF orig.id IS NULL OR orig.kind = 'reversal'
                OR NEW.receivable_delta <> -orig.receivable_delta
@@ -464,18 +465,18 @@ def upgrade() -> None:
                OR NEW.generation IS DISTINCT FROM orig.generation
                OR NEW.source_total IS DISTINCT FROM orig.source_total
             THEN
-                RAISE EXCEPTION 'a migration reversal must be the exact negation of its item'
+                RAISE EXCEPTION 'an opening late reversal must be the exact negation of its item'
                   USING ERRCODE = 'check_violation';
             END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
         CREATE TRIGGER {_TABLE}_admission BEFORE INSERT ON mod_billing.{_TABLE}
-          FOR EACH ROW EXECUTE FUNCTION mod_billing.admit_migration_item();
+          FOR EACH ROW EXECUTE FUNCTION mod_billing.admit_opening_late_item();
     """)  # nosec B608 -- closed identifiers; no input reaches this DDL
     # Every R8 group completes at commit: one item, one V7 fact, one effect.
     op.execute(f"""
-        CREATE FUNCTION mod_billing.check_migration_group_complete() RETURNS trigger AS $$
+        CREATE FUNCTION mod_billing.check_opening_late_group_complete() RETURNS trigger AS $$
         DECLARE item record;
         BEGIN
             SELECT * INTO item FROM mod_billing.{_TABLE} x
@@ -501,44 +502,44 @@ def upgrade() -> None:
                        AND e.billing_account_id = item.billing_account_id
                        AND e.currency = item.currency AND e.minor_units = item.minor_units)
             THEN
-                RAISE EXCEPTION 'a migration group needs exactly one item, one V7 fact and its receivable effect'
+                RAISE EXCEPTION 'an opening late group needs exactly one item, one V7 fact and its receivable effect'
                   USING ERRCODE = 'check_violation';
             END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-        CREATE CONSTRAINT TRIGGER posting_groups_migration_complete
+        CREATE CONSTRAINT TRIGGER posting_groups_opening_late_complete
           AFTER INSERT ON mod_billing.posting_groups
           DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
           WHEN (NEW.group_kind IN {_KINDS})
-          EXECUTE FUNCTION mod_billing.check_migration_group_complete();
+          EXECUTE FUNCTION mod_billing.check_opening_late_group_complete();
 
         -- An R8 group is reversed only by R8, and only R8 reverses it.
-        CREATE FUNCTION mod_billing.guard_migration_group_reversal() RETURNS trigger AS $$
+        CREATE FUNCTION mod_billing.guard_opening_late_group_reversal() RETURNS trigger AS $$
         DECLARE original text;
         BEGIN
             IF NEW.reverses_group_id IS NOT NULL THEN
                 SELECT g.group_kind INTO original FROM mod_billing.posting_groups g
                  WHERE g.id = NEW.reverses_group_id AND g.tenant_id = NEW.tenant_id;
             END IF;
-            IF (original IN ('migration_debit_recorded', 'migration_credit_applied', 'migration_item_reversed')
-                AND NEW.group_kind <> 'migration_item_reversed')
-               OR (NEW.group_kind = 'migration_item_reversed'
+            IF (original IN ('opening_late_debit_recorded', 'opening_late_credit_applied', 'opening_late_item_reversed')
+                AND NEW.group_kind <> 'opening_late_item_reversed')
+               OR (NEW.group_kind = 'opening_late_item_reversed'
                    AND (original IS NULL
-                        OR original NOT IN ('migration_debit_recorded', 'migration_credit_applied')))
+                        OR original NOT IN ('opening_late_debit_recorded', 'opening_late_credit_applied')))
             THEN
-                RAISE EXCEPTION 'a migration group is reversed only by its own owner'
+                RAISE EXCEPTION 'an opening late group is reversed only by its own owner'
                   USING ERRCODE = 'check_violation';
             END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-        CREATE TRIGGER posting_groups_migration_reversal BEFORE INSERT
+        CREATE TRIGGER posting_groups_opening_late_reversal BEFORE INSERT
           ON mod_billing.posting_groups
-          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_migration_group_reversal();
+          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_opening_late_group_reversal();
 
-        -- An opening basis cannot take a legacy key with an unreversed R8 debit.
-        CREATE FUNCTION mod_billing.guard_migration_basis_key() RETURNS trigger AS $$
+        -- An opening basis cannot take a source key with an unreversed R8 debit.
+        CREATE FUNCTION mod_billing.guard_opening_late_basis_key() RETURNS trigger AS $$
         BEGIN
             IF EXISTS (
                 SELECT 1 FROM mod_billing.{_TABLE} x
@@ -550,37 +551,37 @@ def upgrade() -> None:
                        SELECT 1 FROM mod_billing.{_TABLE} r
                         WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
             THEN
-                RAISE EXCEPTION 'the legacy invoice has an unreversed migration debit'
+                RAISE EXCEPTION 'the source invoice has an unreversed opening late debit'
                   USING ERRCODE = 'unique_violation';
             END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-        CREATE TRIGGER opening_receivable_bases_migration_key BEFORE INSERT
+        CREATE TRIGGER opening_receivable_bases_opening_late_key BEFORE INSERT
           ON mod_billing.opening_receivable_bases
-          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_migration_basis_key();
+          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_opening_late_basis_key();
 
-        -- Additive: a migration document, or one carrying a net item credit,
+        -- Additive: an opening late document, or one carrying a net item credit,
         -- cannot be generically voided (guard_imported_owner is not replaced).
-        CREATE FUNCTION mod_billing.guard_migration_void() RETURNS trigger AS $$
+        CREATE FUNCTION mod_billing.guard_opening_late_void() RETURNS trigger AS $$
         BEGIN
             IF NEW.event_kind = 'voided' AND (
                 EXISTS (SELECT 1 FROM mod_billing.documents d
                          WHERE d.id = NEW.document_id AND d.tenant_id = NEW.tenant_id
-                           AND d.authoring_mode = 'migration_item')
+                           AND d.authoring_mode = 'opening_late_item')
                 OR (SELECT coalesce(sum(x.receivable_delta), 0) FROM mod_billing.{_TABLE} x
                      WHERE x.document_id = NEW.document_id AND x.tenant_id = NEW.tenant_id
                        AND x.kind <> 'debit') <> 0)
             THEN
-                RAISE EXCEPTION 'a migration document, or one with a net migration credit, cannot be voided'
+                RAISE EXCEPTION 'an opening late document, or one with a net opening late credit, cannot be voided'
                   USING ERRCODE = 'check_violation';
             END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-        CREATE TRIGGER document_events_migration_void BEFORE INSERT
+        CREATE TRIGGER document_events_opening_late_void BEFORE INSERT
           ON mod_billing.document_events
-          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_migration_void();
+          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_opening_late_void();
     """)  # nosec B608 -- closed identifiers; no input reaches this DDL
     op.drop_constraint(
         "ck_documents_authoring_mode", "documents", schema=_SCHEMA, type_="check"
@@ -589,7 +590,7 @@ def upgrade() -> None:
         "ck_documents_authoring_mode",
         "documents",
         "authoring_mode IN ('legacy_single', 'explicit_multiline', "
-        "'imported_open_item', 'migration_item')",
+        "'imported_open_item', 'opening_late_item')",
         schema=_SCHEMA,
     )
     rows = _rewrite_rows()
@@ -615,5 +616,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "Migration items are append-only financial evidence; no downgrade"
+        "Opening late items are append-only financial evidence; no downgrade"
     )

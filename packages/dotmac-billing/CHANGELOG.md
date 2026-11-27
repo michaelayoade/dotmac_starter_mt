@@ -4,48 +4,52 @@ All notable changes follow Semantic Versioning.
 
 ## 0.1.0a15 — UNRELEASED
 
-Post-seal migration items (R8; design approved by Michael 2026-11-27 with the
-trim, rulings R-1 to R-3) and per-document tax snapshots for imported open items.
+Post-seal opening late items (R8; design approved by Michael 2026-11-27) and a
+public read of the source tax snapshots of imported open items.
 a14 is published and tagged (`dotmac-billing-v0.1.0a14`); `bi_0021` chains after
 `bi_0020_withholding_releases`.
 
-- `bi_0021_migration_items`: append-only `migration_items` (tenant plane only,
+- `bi_0021_opening_late_items`: append-only `opening_late_items` (tenant plane only,
   forced RLS, `SELECT, INSERT` for the online role, `refuse_mutation`). A row is a
-  debit (a late legacy open invoice, positive `receivable_delta`), a credit (a
-  legacy credit note applied to one open invoice, negative) or the exact negation
-  that reverses one. Legacy identity is typed (installation, source system, key,
+  debit (a late source open invoice, positive `receivable_delta`), a credit (a
+  source credit note applied to one open invoice, negative) or the exact negation
+  that reverses one. Source identity is typed (installation, source system, key,
   number). The admission trigger requires the sealed window and its capture
   namespace and `dual_control = 'off'`, locks the account then the document, and
   keeps the invoice room within `[0, base]` (so a credit stays within the room and
   a debit is reversible only while untouched). A credit also stays within the room
   not claimed by undischarged frozen expected withholding. A debit key carried by
   the opening or by an unreversed debit is refused; re-recording takes the next
-  generation. The credits of one legacy note stay on one account within its total.
+  generation. The credits of one source note stay on one account within its total.
   A deferred check requires one item, one V7 fact and one receivable effect per
-  R8 posting group. `authoring_mode` gains `migration_item`.
+  R8 posting group. `authoring_mode` gains `opening_late_item`.
 - `opening_invoice_room_at`, `has_live_invoice_issuance` and
   `admit_opening_exposure` are rewritten by replacing exactly one occurrence of a
   fixed fragment (the `bi_0019` precedent); the rest of each body is byte-identical
-  to `bi_0008`. Additive triggers refuse a generic void of a migration document (or
-  one with a net migration credit) and a generic reversal of an R8 group.
-- `record_migration_debit`, `record_migration_credit`, `reverse_migration_item`
-  (module `dotmac_billing.migration_items`), tenant scope only, behind permission
-  `billing.migration_item.record` (no default role; ERP grants it to its
-  holding-release role). Billing books no revenue and no VAT; an R8 credit posts
+  to `bi_0008`. Additive triggers refuse a generic void of an opening late document (or
+  one with a net opening late credit) and a generic reversal of an R8 group.
+- `record_opening_late_debit`, `record_opening_late_credit`, `reverse_opening_late_item`
+  (module `dotmac_billing.opening_late_items`), tenant scope only, behind permission
+  `billing.opening_late_item.record` (default role `admin`, like
+  `billing.withholding.release`). Billing books no revenue and no VAT; an R8 credit posts
   no VAT.
 - `AccountingFactV7` (`billing.accounting.fact.v7`), getter `get_accounting_fact_v7`.
-  Effect kinds `migration_debit_recorded`, `migration_credit_applied`,
-  `migration_item_reversed`; one receivable effect (debit positive, credit
+  Effect kinds `opening_late_debit_recorded`, `opening_late_credit_applied`,
+  `opening_late_item_reversed`; one receivable effect (debit positive, credit
   negative, reversal the exact negation, linked by `reverses_fact_id`).
-- Public read `get_open_item_tax_snapshots` returns the legacy per-document tax
+- Public read `get_open_item_tax_snapshots` returns the source per-document tax
   snapshots. For an imported open item they come from the verified original
   document stored with its opening basis (the restricted opening principal writes
-  no new rows, and gains no grant); for a migration debit they are its
+  no new rows, and gains no grant); for an opening late debit they are its
   per-document `applied_tax_snapshots` rows. Native documents are refused; tax
   non-zero with no snapshots is refused `open_item_tax_snapshots_unavailable`;
   they must sum to the document tax. No backfill and no new write at import.
-- A document read `get_migration_item`. Generic `void_document`, the withholding
-  freeze and `reverse_posting_group` refuse migration documents and groups.
+- Current limitation (not a design choice): a window that binds
+  `dual_control = 'on'` refuses every opening late item
+  (`opening_late_item_dual_control_unsupported`); two-person approval for these
+  items is not built yet.
+- A document read `get_opening_late_item`. Generic `void_document`, the withholding
+  freeze and `reverse_posting_group` refuse opening late documents and groups.
 
 ## 0.1.0a14 — UNRELEASED
 

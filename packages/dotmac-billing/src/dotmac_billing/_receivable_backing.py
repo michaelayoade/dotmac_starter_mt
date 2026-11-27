@@ -70,7 +70,7 @@ def resolve_receivable_backing(
             .one_or_none()
         )
         imported = document["authoring_mode"] == "imported_open_item"
-        migration = document["authoring_mode"] == "migration_item"
+        late = document["authoring_mode"] == "opening_late_item"
         if imported != (basis is not None):
             raise BillingRuleViolation(
                 "receivable_backing_integrity", "document backing mode disagrees"
@@ -107,11 +107,13 @@ def resolve_receivable_backing(
                 )
             ).scalar_one()
         )
-        if migration:
-            # Only the tenant plane has migration documents (platform CHECK).
-            from dotmac_billing.migration_items import migration_debit_initial
+        if late:
+            # Only the tenant plane has opening late documents (platform CHECK).
+            from dotmac_billing.opening_late_items import opening_late_debit_initial
 
-            initial = migration_debit_initial(db, scope=scope, document_id=document_id)
+            initial = opening_late_debit_initial(
+                db, scope=scope, document_id=document_id
+            )
         else:
             initial = Decimal(
                 document["grand_total"]

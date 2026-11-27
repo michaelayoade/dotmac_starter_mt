@@ -60,6 +60,17 @@ module = ModuleManifest(
             default_roles=("admin",),
         ),
         PermissionSpec(
+            code="billing.opening_late_item.record",
+            description=(
+                "Record, apply or reverse a post-seal opening late item: a source "
+                "open invoice the opening did not carry, or a source credit note "
+                "applied to one open invoice. Books no revenue and no tax. "
+                "Append-only; the actor, command id and evidence are recorded on "
+                "every row."
+            ),
+            default_roles=("admin",),
+        ),
+        PermissionSpec(
             code="billing.withholding.release",
             description=(
                 "Tax correction: release expected withholding the customer did "

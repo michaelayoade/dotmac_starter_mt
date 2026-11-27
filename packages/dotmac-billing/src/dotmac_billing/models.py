@@ -248,7 +248,7 @@ class BillingDocument(Base, _TenantRow, _DocumentColumns):
     __table_args__ = (
         CheckConstraint(
             "authoring_mode IN ('legacy_single', 'explicit_multiline', "
-            "'imported_open_item', 'migration_item')",
+            "'imported_open_item', 'opening_late_item')",
             name="ck_documents_authoring_mode",
         ),
         ForeignKeyConstraint(
@@ -1995,8 +1995,8 @@ class WithholdingRelease(Base, _TenantRow):
     )
 
 
-def _migration_item_constraints() -> tuple[object, ...]:
-    table = "migration_items"
+def _opening_late_item_constraints() -> tuple[object, ...]:
+    table = "opening_late_items"
     return (
         ForeignKeyConstraint(
             ["tenant_id", "window_id"],
@@ -2093,20 +2093,20 @@ def _migration_item_constraints() -> tuple[object, ...]:
     )
 
 
-class MigrationItem(Base, _TenantRow):
-    """A post-seal legacy item the opening did not carry (R8; tenant plane only).
+class OpeningLateItem(Base, _TenantRow):
+    """A post-seal source item the opening did not carry (R8; tenant plane only).
 
-    One typed, append-only row per recorded debit (a late legacy open invoice
-    brought in as a receivable), credit (a legacy credit note applied to one open
+    One typed, append-only row per recorded debit (a late source open invoice
+    brought in as a receivable), credit (a source credit note applied to one open
     invoice) or exact reversal. ``receivable_delta`` is signed: a debit is
     positive, a credit negative, a reversal the exact negation of the row it
     reverses. Billing books no revenue and no tax for any of them. The unique
-    claim indexes and the admission trigger bind the legacy identity to the sealed
+    claim indexes and the admission trigger bind the source identity to the sealed
     capture namespace; ``recorded_at`` is stamped by the database clock.
     """
 
-    __tablename__ = "migration_items"
-    __table_args__ = _migration_item_constraints()
+    __tablename__ = "opening_late_items"
+    __table_args__ = _opening_late_item_constraints()
 
     id: Mapped[UUID] = uuid_pk()
     window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
@@ -3735,7 +3735,7 @@ TENANT_TABLES = (
     "withholding_discharges",
     "document_withholding_components",
     "withholding_releases",
-    "migration_items",
+    "opening_late_items",
     "billing_account_terms_versions",
     "billing_terms_defaults_versions",
     "billing_accounts",
@@ -3836,7 +3836,7 @@ __all__ = [
     "DocumentWithholdingComponent",
     "PlatformDocumentWithholdingComponent",
     "WithholdingRelease",
-    "MigrationItem",
+    "OpeningLateItem",
     "BillingAccountTermsVersion",
     "PlatformBillingAccountTermsVersion",
     "BillingTermsDefaultsVersion",

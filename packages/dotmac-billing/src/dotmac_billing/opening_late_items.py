@@ -1,20 +1,26 @@
-"""R8: post-seal migration items (tenant plane, Billing alone).
+"""R8: post-seal opening late items (tenant plane, Billing alone).
 
-After the opening window is sealed, Finance can find a legacy open invoice the
-opening did not carry (a *debit*) or a legacy credit note never applied (a
-*credit* against one open invoice). ``record_migration_debit``,
-``record_migration_credit`` and ``reverse_migration_item`` append one typed
-``migration_items`` row, one posting group with a single receivable effect, one
+After the opening window is sealed, Finance can find a source open invoice the
+opening did not carry (a *debit*) or a source credit note never applied (a
+*credit* against one open invoice). ``record_opening_late_debit``,
+``record_opening_late_credit`` and ``reverse_opening_late_item`` append one typed
+``opening_late_items`` row, one posting group with a single receivable effect, one
 ``AccountingFactV7`` (``billing.accounting.fact.v7``) and the usual position and
 exposure facts. Billing books no revenue and no tax: the debit document carries
-the legacy totals and per-document tax snapshots as evidence only, and an
-ERP-side rule maps the fact (Dr/Cr AR against its migration clearing account).
+the source totals and per-document tax snapshots as evidence only; an
+accounting consumer maps the fact (receivable against its clearing account).
 
-Permission ``billing.migration_item.record`` (no default role) is checked
-through the wired ``ActorPermissionReader``; the database independently bounds
+Permission ``billing.opening_late_item.record`` (default role ``admin``, like
+``billing.withholding.release``) is checked through the wired
+``ActorPermissionReader`` by the actor that holds it; the database independently bounds
 the amount, the sealed window and namespace, ``dual_control = 'off'``, the room
 after every insert and the withholding room (bi_0021). Commands run in the
 caller's transaction and never commit.
+
+Current limitation: a window that binds ``dual_control = 'on'`` refuses every
+item (``opening_late_item_dual_control_unsupported``); two-person approval for
+these items is not built yet. This is a gap to close when a tenant needs it, not a
+design choice.
 """
 
 from __future__ import annotations
@@ -39,7 +45,7 @@ from dotmac_billing._opening_values import (
     cash_decimal_context,
     minor_units_of,
 )
-from dotmac_billing.commands import MIGRATION_ITEM_PERMISSION, ActorPermissionReader
+from dotmac_billing.commands import OPENING_LATE_ITEM_PERMISSION, ActorPermissionReader
 from dotmac_billing.contracts import (
     AccountingEffectV1,
     AppliedTaxSnapshotV1,
@@ -64,9 +70,9 @@ from dotmac_billing.opening_window_queries import (
 )
 
 ACCOUNTING_FACT_V7_CONTRACT = "billing.accounting.fact.v7"
-DEBIT_KIND: Literal["migration_debit_recorded"] = "migration_debit_recorded"
-CREDIT_KIND: Literal["migration_credit_applied"] = "migration_credit_applied"
-REVERSAL_KIND: Literal["migration_item_reversed"] = "migration_item_reversed"
+DEBIT_KIND: Literal["opening_late_debit_recorded"] = "opening_late_debit_recorded"
+CREDIT_KIND: Literal["opening_late_credit_applied"] = "opening_late_credit_applied"
+REVERSAL_KIND: Literal["opening_late_item_reversed"] = "opening_late_item_reversed"
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _KIND_OF_ITEM = {
     "debit": DEBIT_KIND,
@@ -82,10 +88,10 @@ ItemKind = Literal["debit", "credit", "reversal"]
 
 
 @dataclass(frozen=True, slots=True)
-class MigrationSourceV1(OpeningCashValue):
-    """The typed legacy identity inside the sealed source namespace.
+class OpeningLateSourceV1(OpeningCashValue):
+    """The typed source identity inside the sealed source namespace.
 
-    ``key`` is the legacy invoice key (debit) or legacy credit-note key
+    ``key`` is the source invoice key (debit) or source credit-note key
     (credit). ``number`` is the credit note's number; a debit takes its number
     from ``original.document_number``.
     """
@@ -97,12 +103,12 @@ class MigrationSourceV1(OpeningCashValue):
 
 
 @dataclass(frozen=True, slots=True)
-class RecordMigrationDebitV1(OpeningCashValue):
-    """Bring in the residual of a legacy open invoice the opening did not carry."""
+class RecordOpeningLateDebitV1(OpeningCashValue):
+    """Bring in the residual of a source open invoice the opening did not carry."""
 
     scope: Scope
     billing_account_id: UUID
-    source: MigrationSourceV1
+    source: OpeningLateSourceV1
     original: OpeningOriginalDocumentV1
     amount: Money
     collection: OpeningCollectionEvidenceV1
@@ -114,11 +120,11 @@ class RecordMigrationDebitV1(OpeningCashValue):
 
 
 @dataclass(frozen=True, slots=True)
-class RecordMigrationCreditV1(OpeningCashValue):
-    """Apply part of a legacy credit note to one open invoice (no VAT is posted)."""
+class RecordOpeningLateCreditV1(OpeningCashValue):
+    """Apply part of a source credit note to one open invoice (no VAT is posted)."""
 
     scope: Scope
-    source: MigrationSourceV1
+    source: OpeningLateSourceV1
     source_total: Money
     target_document_id: UUID
     amount: Money
@@ -130,7 +136,7 @@ class RecordMigrationCreditV1(OpeningCashValue):
 
 
 @dataclass(frozen=True, slots=True)
-class ReverseMigrationItemV1(OpeningCashValue):
+class ReverseOpeningLateItemV1(OpeningCashValue):
     """Full reversal of one debit (while untouched) or credit."""
 
     scope: Scope
@@ -146,12 +152,12 @@ class ReverseMigrationItemV1(OpeningCashValue):
 
 
 @dataclass(frozen=True, slots=True)
-class MigrationItemFactBlockV1(OpeningCashValue):
+class OpeningLateItemFactBlockV1(OpeningCashValue):
     item_id: UUID
     window_id: UUID
     kind: Literal["debit", "credit", "reversal"]
     document_id: UUID
-    legacy_source: MigrationSourceV1
+    source_identity: OpeningLateSourceV1
     reverses_item_id: UUID | None
     actor_ref: str
     evidence_digest: str | None
@@ -159,7 +165,7 @@ class MigrationItemFactBlockV1(OpeningCashValue):
 
 @dataclass(frozen=True, slots=True)
 class AccountingFactV7(OpeningCashValue):
-    """``billing.accounting.fact.v7``: one migration item on its own posting group.
+    """``billing.accounting.fact.v7``: one opening late item on its own posting group.
 
     ``effects`` holds exactly one receivable effect: positive for a debit,
     negative for a credit, and for a reversal the exact negation of the item it
@@ -177,14 +183,14 @@ class AccountingFactV7(OpeningCashValue):
     source_ref: str
     source_authority: Literal["internal"]
     effect_kind: Literal[
-        "migration_debit_recorded",
-        "migration_credit_applied",
-        "migration_item_reversed",
+        "opening_late_debit_recorded",
+        "opening_late_credit_applied",
+        "opening_late_item_reversed",
     ]
     occurred_at: datetime
     committed_at: datetime
     effects: tuple[AccountingEffectV1, ...]
-    item: MigrationItemFactBlockV1
+    item: OpeningLateItemFactBlockV1
     reverses_fact_id: UUID | None
 
     def __post_init__(self) -> None:
@@ -202,18 +208,18 @@ class AccountingFactV7(OpeningCashValue):
         )
         if (
             self.source_system != "dotmac-billing"
-            or self.source_ref != f"migration-item:{self.item.item_id}"
+            or self.source_ref != f"opening-late-item:{self.item.item_id}"
             or _KIND_OF_ITEM[self.item.kind] != self.effect_kind
             or not sign_ok
             or (self.reverses_fact_id is not None) != (self.item.kind == "reversal")
             or (self.item.reverses_item_id is not None)
             != (self.item.kind == "reversal")
         ):
-            raise OpeningEvidenceError("migration fact is internally inconsistent")
+            raise OpeningEvidenceError("opening late fact is internally inconsistent")
 
 
 @dataclass(frozen=True, slots=True)
-class MigrationItemV1:
+class OpeningLateItemV1:
     """A stored item as read back (typed; ``receivable_delta`` is signed)."""
 
     item_id: UUID
@@ -223,7 +229,7 @@ class MigrationItemV1:
     document_id: UUID
     posting_group_id: UUID
     receivable_delta: Money
-    legacy_source: MigrationSourceV1
+    source_identity: OpeningLateSourceV1
     generation: int | None
     source_total: Money | None
     reverses_item_id: UUID | None
@@ -237,16 +243,16 @@ class MigrationItemV1:
 
 @dataclass(frozen=True, slots=True)
 class OpenItemTaxSnapshotsV1:
-    """Per-document tax evidence of an imported open item or a migration debit.
+    """Per-document tax evidence of an imported open item or an opening late debit.
 
     Evidence only: Billing derives and posts nothing from it. ``snapshots`` are
-    the legacy as-recorded rate and basis per component; their tax sums to
+    the source as-recorded rate and basis per component; their tax sums to
     ``tax_total``.
     """
 
     scope: Scope
     document_id: UUID
-    authoring_mode: Literal["imported_open_item", "migration_item"]
+    authoring_mode: Literal["imported_open_item", "opening_late_item"]
     tax_total: Money
     snapshots: tuple[AppliedTaxSnapshotV1, ...]
     contract_version: Literal["billing.open.item.tax.snapshots.v1"] = (
@@ -255,11 +261,11 @@ class OpenItemTaxSnapshotsV1:
 
 
 @dataclass(frozen=True, slots=True)
-class MigrationPosting:
+class OpeningLatePosting:
     """What ``_post_group`` needs to persist one item row and build its V7 fact."""
 
     row: dict[str, object]
-    fact: MigrationItemFactBlockV1
+    fact: OpeningLateItemFactBlockV1
 
 
 # --------------------------------------------------------------------------
@@ -270,8 +276,8 @@ class MigrationPosting:
 def _tenant_only(scope: Scope) -> TenantScope:
     if not isinstance(scope, TenantScope):
         raise BillingRuleViolation(
-            "migration_item_platform_unsupported",
-            "migration items are tenant-plane only; the platform plane stays "
+            "opening_late_item_platform_unsupported",
+            "opening late items are tenant-plane only; the platform plane stays "
             "fail-closed",
         )
     return scope
@@ -288,41 +294,42 @@ def _authorize(
     tenant = _tenant_only(scope)
     if permissions is None:
         raise BillingRuleViolation(
-            "migration_item_permission_unavailable",
+            "opening_late_item_permission_unavailable",
             "no permission reader is wired; the item cannot be authorized",
         )
     service._require_scope_matches(routed=scope, declared=declared)
     for text, maximum in texts:
         if not isinstance(text, str) or not text.strip() or len(text) > maximum:
             raise BillingRuleViolation(
-                "migration_item_evidence_required",
-                "a migration item requires bounded command, actor and evidence text",
+                "opening_late_item_evidence_required",
+                "an opening late item requires bounded command, actor and evidence "
+                "text",
             )
     if not permissions.holds(
-        scope=scope, actor_ref=actor_ref, code=MIGRATION_ITEM_PERMISSION
+        scope=scope, actor_ref=actor_ref, code=OPENING_LATE_ITEM_PERMISSION
     ):
         raise BillingRuleViolation(
-            "migration_item_permission_denied",
-            "the actor does not hold the migration item permission",
+            "opening_late_item_permission_denied",
+            "the actor does not hold the opening late item permission",
         )
     return tenant
 
 
-def _sealed_window(db: Session, *, scope: Scope, source: MigrationSourceV1) -> Any:
+def _sealed_window(db: Session, *, scope: Scope, source: OpeningLateSourceV1) -> Any:
     window = get_opening_window(db, scope=scope)
     if window is None:
         raise BillingRuleViolation(
-            "migration_item_window_missing", "no opening window exists"
+            "opening_late_item_window_missing", "no opening window exists"
         )
     if get_opening_window_seal(db, scope=scope) is None:
         raise BillingRuleViolation(
-            "migration_item_window_not_sealed",
-            "migration items exist only after the opening window is sealed",
+            "opening_late_item_window_not_sealed",
+            "opening late items exist only after the opening window is sealed",
         )
     if window.dual_control != "off":
         raise BillingRuleViolation(
-            "migration_item_dual_control_unsupported",
-            "this window binds two-person approval, which migration items do not "
+            "opening_late_item_dual_control_unsupported",
+            "this window binds two-person approval, which opening late items do not "
             "support yet",
         )
     capture = window.manifest.capture
@@ -331,14 +338,14 @@ def _sealed_window(db: Session, *, scope: Scope, source: MigrationSourceV1) -> A
         capture.source_system,
     ):
         raise BillingRuleViolation(
-            "migration_item_namespace_mismatch",
-            "the legacy identity is outside the sealed capture namespace",
+            "opening_late_item_namespace_mismatch",
+            "the source identity is outside the sealed capture namespace",
         )
     return window
 
 
 def _require_not_held(db: Session, *, scope: Scope, account_id: UUID) -> None:
-    """A held partition takes no migration item until its governed admission."""
+    """A held partition takes no opening late item until its governed admission."""
 
     tenant = _tenant_only(scope)
     if account_id not in get_opening_hold_list(db, scope=scope):
@@ -351,7 +358,7 @@ def _require_not_held(db: Session, *, scope: Scope, account_id: UUID) -> None:
     ).first()
     if admitted is None:
         raise BillingRuleViolation(
-            "migration_item_account_held",
+            "opening_late_item_account_held",
             "the account is a held opening partition that is not yet admitted",
         )
 
@@ -359,7 +366,7 @@ def _require_not_held(db: Session, *, scope: Scope, account_id: UUID) -> None:
 def _digest(value: str) -> None:
     if not isinstance(value, str) or _DIGEST.fullmatch(value) is None:
         raise BillingRuleViolation(
-            "migration_item_evidence_required",
+            "opening_late_item_evidence_required",
             "the evidence digest must be a lowercase sha-256 hex digest",
         )
 
@@ -372,8 +379,8 @@ def _tenant_row_sum(db: Session, column: Any, *where: Any) -> Decimal:
     )
 
 
-def _view(row: models.MigrationItem) -> MigrationItemV1:
-    return MigrationItemV1(
+def _view(row: models.OpeningLateItem) -> OpeningLateItemV1:
+    return OpeningLateItemV1(
         item_id=row.id,
         window_id=row.window_id,
         billing_account_id=row.billing_account_id,
@@ -383,7 +390,7 @@ def _view(row: models.MigrationItem) -> MigrationItemV1:
         receivable_delta=service._money(
             Decimal(row.receivable_delta), row.currency, row.minor_units
         ),
-        legacy_source=MigrationSourceV1(
+        source_identity=OpeningLateSourceV1(
             row.source_installation_id,
             row.source_system,
             row.source_key,
@@ -407,47 +414,49 @@ def _view(row: models.MigrationItem) -> MigrationItemV1:
     )
 
 
-def get_migration_item(db: Session, *, scope: Scope, item_id: UUID) -> MigrationItemV1:
+def get_opening_late_item(
+    db: Session, *, scope: Scope, item_id: UUID
+) -> OpeningLateItemV1:
     """Read one stored item (its ``recorded_at`` is the database's)."""
 
     tenant = _tenant_only(scope)
     row = db.execute(
-        select(models.MigrationItem).where(
-            models.MigrationItem.tenant_id == tenant.tenant_id,
-            models.MigrationItem.id == item_id,
+        select(models.OpeningLateItem).where(
+            models.OpeningLateItem.tenant_id == tenant.tenant_id,
+            models.OpeningLateItem.id == item_id,
         )
     ).scalar_one_or_none()
     if row is None:
         raise BillingRuleViolation(
-            "not_found", "MigrationItem was not found", row_id=str(item_id)
+            "not_found", "OpeningLateItem was not found", row_id=str(item_id)
         )
     db.refresh(row)
     return _view(row)
 
 
-def migration_collection_evidence(
+def opening_late_collection_evidence(
     db: Session, *, scope: Scope, document_id: UUID
 ) -> OpeningCollectionEvidenceV1:
-    """The collection evidence a migration debit document was recorded with."""
+    """The collection evidence an opening late debit document was recorded with."""
 
     tenant = _tenant_only(scope)
     found = db.execute(
         select(
-            models.MigrationItem.collection, models.MigrationItem.collection_digest
+            models.OpeningLateItem.collection, models.OpeningLateItem.collection_digest
         ).where(
-            models.MigrationItem.tenant_id == tenant.tenant_id,
-            models.MigrationItem.document_id == document_id,
-            models.MigrationItem.kind == "debit",
+            models.OpeningLateItem.tenant_id == tenant.tenant_id,
+            models.OpeningLateItem.document_id == document_id,
+            models.OpeningLateItem.kind == "debit",
         )
     ).one_or_none()
     if found is None or found[0] is None:
         raise BillingRuleViolation(
-            "migration_item_integrity", "migration document has no debit evidence"
+            "opening_late_item_integrity", "opening late document has no debit evidence"
         )
     stored, collection_digest = found
     if fingerprint_of(stored) != collection_digest:
         raise BillingRuleViolation(
-            "migration_item_integrity", "stored collection evidence disagrees"
+            "opening_late_item_integrity", "stored collection evidence disagrees"
         )
     with localcontext(cash_decimal_context()):
         return cast(
@@ -455,30 +464,32 @@ def migration_collection_evidence(
         )
 
 
-def migration_debit_initial(db: Session, *, scope: Scope, document_id: UUID) -> Decimal:
-    """The debit row's amount: the base of a migration document's room."""
+def opening_late_debit_initial(
+    db: Session, *, scope: Scope, document_id: UUID
+) -> Decimal:
+    """The debit row's amount: the base of an opening late document's room."""
 
     tenant = _tenant_only(scope)
     value = db.execute(
-        select(models.MigrationItem.receivable_delta).where(
-            models.MigrationItem.tenant_id == tenant.tenant_id,
-            models.MigrationItem.document_id == document_id,
-            models.MigrationItem.kind == "debit",
+        select(models.OpeningLateItem.receivable_delta).where(
+            models.OpeningLateItem.tenant_id == tenant.tenant_id,
+            models.OpeningLateItem.document_id == document_id,
+            models.OpeningLateItem.kind == "debit",
         )
     ).scalar_one_or_none()
     if value is None:
         raise BillingRuleViolation(
-            "receivable_backing_integrity", "migration document has no debit row"
+            "receivable_backing_integrity", "opening late document has no debit row"
         )
     return Decimal(value)
 
 
-def migration_net_credit(db: Session, *, scope: Scope, document_id: UUID) -> Decimal:
+def opening_late_net_credit(db: Session, *, scope: Scope, document_id: UUID) -> Decimal:
     """Signed net of the document's non-debit items (negative = credited)."""
 
     if not isinstance(scope, TenantScope):
         return Decimal(0)
-    m = models.MigrationItem
+    m = models.OpeningLateItem
     return _tenant_row_sum(
         db,
         m.receivable_delta,
@@ -496,7 +507,7 @@ def _validate_original(
     currency: tuple[str, int],
     cutoff: datetime,
 ) -> None:
-    """The opening validator's checks on one legacy item, applied standalone.
+    """The opening validator's checks on one source item, applied standalone.
 
     Mirrors ``opening_receivable_validation`` (document totals, tax evidence,
     FX, length bounds, cutoff, and verified-but-incomplete collection evidence);
@@ -504,16 +515,16 @@ def _validate_original(
     """
 
     def refuse(reason: str) -> BillingRuleViolation:
-        return BillingRuleViolation("migration_debit_original_invalid", reason)
+        return BillingRuleViolation("opening_late_debit_original_invalid", reason)
 
     amounts = (original.subtotal, original.tax_total, original.grand_total, amount)
     if any((x.currency.code, x.currency.minor_units) != currency for x in amounts):
-        raise refuse("the legacy document and amount must use the account currency")
+        raise refuse("the source document and amount must use the account currency")
     subtotal, tax, total, residual = (minor_units_of(x) for x in amounts)
     if min(subtotal, tax, total) < 0 or subtotal + tax != total:
-        raise refuse("the legacy totals are inconsistent")
+        raise refuse("the source totals are inconsistent")
     if not 0 < residual <= total:
-        raise refuse("the residual must be positive and within the legacy total")
+        raise refuse("the residual must be positive and within the source total")
     if (
         len(original.document_number) > 255
         or len(original.document_profile_code) > 120
@@ -521,14 +532,14 @@ def _validate_original(
         or len(original.locale) > 40
         or len(original.timezone) > 80
     ):
-        raise refuse("a legacy document text field is too long")
+        raise refuse("a source document text field is too long")
     if collection.status == "verified" and not collection.automated_collection_allowed:
         raise BillingRuleViolation(
-            "migration_debit_collection_incomplete",
+            "opening_late_debit_collection_incomplete",
             "verified collection evidence must allow automated collection",
         )
     if sum(minor_units_of(x.tax_amount) for x in original.tax_snapshots) != tax:
-        raise refuse("the legacy tax snapshots do not sum to the legacy tax")
+        raise refuse("the source tax snapshots do not sum to the source tax")
     for snapshot in original.tax_snapshots:
         if (
             not snapshot.rate.is_finite()
@@ -540,15 +551,15 @@ def _validate_original(
             != currency
             or snapshot.tax_amount.currency != snapshot.taxable_basis.currency
         ):
-            raise refuse("a legacy tax snapshot is invalid")
+            raise refuse("a source tax snapshot is invalid")
     if original.fx_snapshot is not None and (
         not original.fx_snapshot.rate.is_finite() or original.fx_snapshot.rate <= 0
     ):
-        raise refuse("the legacy FX evidence is invalid")
+        raise refuse("the source FX evidence is invalid")
     if original.issued_at > cutoff:
         raise BillingRuleViolation(
-            "migration_debit_after_cutoff",
-            "a legacy invoice issued after the capture cutoff is not an opening miss",
+            "opening_late_debit_after_cutoff",
+            "a source invoice issued after the capture cutoff is not an opening miss",
         )
 
 
@@ -558,26 +569,26 @@ def _validate_original(
 
 
 @service._exact_cash_operation
-def record_migration_debit(
+def record_opening_late_debit(
     db: Session,
     *,
     scope: Scope,
-    command: RecordMigrationDebitV1,
+    command: RecordOpeningLateDebitV1,
     permissions: ActorPermissionReader | None = None,
-) -> MigrationItemV1:
-    """Record a late legacy open invoice as a receivable (Dr AR; no revenue, no tax).
+) -> OpeningLateItemV1:
+    """Record a late source open invoice as a receivable (Dr AR; no revenue, no tax).
 
     Refusals, in order: platform scope; no reader wired or permission denied;
     blank or unbounded text; no sealed window, a window binding two-person
-    approval, or a legacy identity outside the sealed capture namespace; an
-    invalid legacy document or residual; a key carried by the opening or by an
+    approval, or a source identity outside the sealed capture namespace; an
+    invalid source document or residual; a key carried by the opening or by an
     unreversed debit. Idempotent on ``command_id``: the same body returns the
     stored item, a different body is a conflict.
     """
 
-    if type(command) is not RecordMigrationDebitV1:
+    if type(command) is not RecordOpeningLateDebitV1:
         raise BillingRuleViolation(
-            "migration_item_command_invalid", "expected RecordMigrationDebitV1"
+            "opening_late_item_command_invalid", "expected RecordOpeningLateDebitV1"
         )
     tenant = _authorize(
         scope=scope,
@@ -614,14 +625,14 @@ def record_migration_debit(
     )
     if command.source.number is not None:
         raise BillingRuleViolation(
-            "migration_item_command_invalid",
-            "a debit takes its number from the legacy document",
+            "opening_late_item_command_invalid",
+            "a debit takes its number from the source document",
         )
 
     def operation(session: Session) -> dict[str, object]:
         original = command.original
         source = command.source
-        m = models.MigrationItem
+        m = models.OpeningLateItem
         carried = session.execute(
             select(models.OpeningReceivableBasis.id).where(
                 models.OpeningReceivableBasis.tenant_id == tenant.tenant_id,
@@ -632,8 +643,8 @@ def record_migration_debit(
         ).first()
         if carried is not None:
             raise BillingConflict(
-                "migration_debit_key_carried",
-                "the legacy invoice is carried by the opening",
+                "opening_late_debit_key_carried",
+                "the source invoice is carried by the opening",
             )
         prior = (
             session.execute(
@@ -661,8 +672,8 @@ def record_migration_debit(
         )
         if any(item not in reversed_ids for item in prior):
             raise BillingConflict(
-                "migration_debit_key_claimed",
-                "the legacy invoice already has an unreversed migration debit",
+                "opening_late_debit_key_claimed",
+                "the source invoice already has an unreversed opening late debit",
             )
         generation = len(prior) + 1
         document_id, item_id, group_id = uuid4(), uuid4(), uuid4()
@@ -675,7 +686,7 @@ def record_migration_debit(
                         "id": document_id,
                         "billing_account_id": account.id,
                         "obligation_id": None,
-                        "authoring_mode": "migration_item",
+                        "authoring_mode": "opening_late_item",
                         "document_kind": "invoice",
                         "lifecycle": "issued",
                         "series_code": None,
@@ -709,7 +720,7 @@ def record_migration_debit(
             session, scope=scope, document_id=document_id, original=original
         )
         session.flush()
-        legacy = MigrationSourceV1(
+        identity = OpeningLateSourceV1(
             source.installation_id,
             source.source_system,
             source.key,
@@ -722,12 +733,12 @@ def record_migration_debit(
             kind=DEBIT_KIND,
             currency=account.currency,
             minor_units=account.minor_units,
-            source_ref=f"migration-item:{item_id}",
+            source_ref=f"opening-late-item:{item_id}",
             occurred_at=command.occurred_at,
             effects=((EffectLane.RECEIVABLE, command.amount.amount),),
             exposure_document_ids=(document_id,),
             opening_group_id=group_id,
-            migration=MigrationPosting(
+            opening_late=OpeningLatePosting(
                 row={
                     "id": item_id,
                     "window_id": window.window_id,
@@ -752,12 +763,12 @@ def record_migration_debit(
                     "actor_ref": command.actor_ref,
                     "command_id": command.command_id,
                 },
-                fact=MigrationItemFactBlockV1(
+                fact=OpeningLateItemFactBlockV1(
                     item_id,
                     window.window_id,
                     "debit",
                     document_id,
-                    legacy,
+                    identity,
                     None,
                     command.actor_ref,
                     command.evidence_digest,
@@ -769,37 +780,38 @@ def record_migration_debit(
     outcome = service._idempotent(
         db,
         scope=scope,
-        operation_scope="billing.migration_item.debit",
+        operation_scope="billing.opening_late_item.debit",
         key=command.command_id,
         fingerprint=fingerprint_of(service._jsonable(command)),
         operation=operation,
     )
-    return get_migration_item(
+    return get_opening_late_item(
         db, scope=scope, item_id=UUID(str(outcome.result["item_id"]))
     )
 
 
 @service._exact_cash_operation
-def record_migration_credit(
+def record_opening_late_credit(
     db: Session,
     *,
     scope: Scope,
-    command: RecordMigrationCreditV1,
+    command: RecordOpeningLateCreditV1,
     permissions: ActorPermissionReader | None = None,
-) -> MigrationItemV1:
-    """Apply part of a legacy credit note to one open invoice (Cr AR; no VAT).
+) -> OpeningLateItemV1:
+    """Apply part of a source credit note to one open invoice (Cr AR; no VAT).
 
-    The target is an issued, live invoice (native, imported or a migration
+    The target is an issued, live invoice (native, imported or an opening late
     debit). The amount may not exceed the target's outstanding less its
-    undischarged frozen withholding (``migration_credit_exceeds_non_withholding_room``);
-    the credits of one legacy credit note stay on one account and within its
+    undischarged frozen withholding
+    (``opening_late_credit_exceeds_non_withholding_room``);
+    the credits of one source credit note stay on one account and within its
     total. Finance can credit into a withholding expectation only after a
     governed release.
     """
 
-    if type(command) is not RecordMigrationCreditV1:
+    if type(command) is not RecordOpeningLateCreditV1:
         raise BillingRuleViolation(
-            "migration_item_command_invalid", "expected RecordMigrationCreditV1"
+            "opening_late_item_command_invalid", "expected RecordOpeningLateCreditV1"
         )
     tenant = _authorize(
         scope=scope,
@@ -837,8 +849,8 @@ def record_migration_credit(
         or command.amount.amount > command.source_total.amount
     ):
         raise BillingRuleViolation(
-            "migration_credit_amount_invalid",
-            "the credit must be positive and within the legacy credit note total",
+            "opening_late_credit_amount_invalid",
+            "the credit must be positive and within the source credit note total",
         )
 
     def operation(session: Session) -> dict[str, object]:
@@ -861,11 +873,11 @@ def record_migration_credit(
         )
         if command.amount.amount > room:
             raise BillingRuleViolation(
-                "migration_credit_exceeds_non_withholding_room",
+                "opening_late_credit_exceeds_non_withholding_room",
                 "the credit exceeds the invoice's room outside its expected "
                 "withholding; release the expectation first",
             )
-        m = models.MigrationItem
+        m = models.OpeningLateItem
         siblings = (
             session.execute(
                 select(m).where(
@@ -881,8 +893,8 @@ def record_migration_credit(
         )
         if any(row.billing_account_id != account.id for row in siblings):
             raise BillingRuleViolation(
-                "migration_credit_source_spread",
-                "one legacy credit note stays on one account",
+                "opening_late_credit_source_spread",
+                "one source credit note stays on one account",
             )
         if any(
             row.source_total is None
@@ -891,14 +903,14 @@ def record_migration_credit(
             for row in siblings
         ):
             raise BillingRuleViolation(
-                "migration_credit_source_total_differs",
-                "every credit of one legacy note carries the same total and number",
+                "opening_late_credit_source_total_differs",
+                "every credit of one source note carries the same total and number",
             )
         applied = -sum((Decimal(row.receivable_delta) for row in siblings), Decimal(0))
         if applied + command.amount.amount > command.source_total.amount:
             raise BillingRuleViolation(
-                "migration_credit_exceeds_source_total",
-                "the credits of this legacy note would exceed its total",
+                "opening_late_credit_exceeds_source_total",
+                "the credits of this source note would exceed its total",
             )
         item_id, group_id = uuid4(), uuid4()
         service._post_group(
@@ -908,12 +920,12 @@ def record_migration_credit(
             kind=CREDIT_KIND,
             currency=account.currency,
             minor_units=account.minor_units,
-            source_ref=f"migration-item:{item_id}",
+            source_ref=f"opening-late-item:{item_id}",
             occurred_at=command.occurred_at,
             effects=((EffectLane.RECEIVABLE, -command.amount.amount),),
             exposure_document_ids=(target.id,),
             opening_group_id=group_id,
-            migration=MigrationPosting(
+            opening_late=OpeningLatePosting(
                 row={
                     "id": item_id,
                     "window_id": window.window_id,
@@ -938,7 +950,7 @@ def record_migration_credit(
                     "actor_ref": command.actor_ref,
                     "command_id": command.command_id,
                 },
-                fact=MigrationItemFactBlockV1(
+                fact=OpeningLateItemFactBlockV1(
                     item_id,
                     window.window_id,
                     "credit",
@@ -955,35 +967,35 @@ def record_migration_credit(
     outcome = service._idempotent(
         db,
         scope=scope,
-        operation_scope="billing.migration_item.credit",
+        operation_scope="billing.opening_late_item.credit",
         key=command.command_id,
         fingerprint=fingerprint_of(service._jsonable(command)),
         operation=operation,
     )
-    return get_migration_item(
+    return get_opening_late_item(
         db, scope=scope, item_id=UUID(str(outcome.result["item_id"]))
     )
 
 
 @service._exact_cash_operation
-def reverse_migration_item(
+def reverse_opening_late_item(
     db: Session,
     *,
     scope: Scope,
-    command: ReverseMigrationItemV1,
+    command: ReverseOpeningLateItemV1,
     permissions: ActorPermissionReader | None = None,
-) -> MigrationItemV1:
+) -> OpeningLateItemV1:
     """Reverse one debit (only while its invoice is untouched) or credit in full.
 
     Appends the exact negation and a reversing posting group linked to the
     original group and V7 fact. A corrected amount is a new item (a debit for
-    the same legacy key takes the next generation). The generic void and posting
+    the same source key takes the next generation). The generic void and posting
     reversal refuse these documents and groups.
     """
 
-    if type(command) is not ReverseMigrationItemV1:
+    if type(command) is not ReverseOpeningLateItemV1:
         raise BillingRuleViolation(
-            "migration_item_command_invalid", "expected ReverseMigrationItemV1"
+            "opening_late_item_command_invalid", "expected ReverseOpeningLateItemV1"
         )
     tenant = _authorize(
         scope=scope,
@@ -998,14 +1010,14 @@ def reverse_migration_item(
     )
     plane = service._models(scope)
     original = db.execute(
-        select(models.MigrationItem).where(
-            models.MigrationItem.tenant_id == tenant.tenant_id,
-            models.MigrationItem.id == command.item_id,
+        select(models.OpeningLateItem).where(
+            models.OpeningLateItem.tenant_id == tenant.tenant_id,
+            models.OpeningLateItem.id == command.item_id,
         )
     ).scalar_one_or_none()
     if original is None:
         raise BillingRuleViolation(
-            "not_found", "MigrationItem was not found", row_id=str(command.item_id)
+            "not_found", "OpeningLateItem was not found", row_id=str(command.item_id)
         )
     account = service._one(
         db,
@@ -1026,9 +1038,9 @@ def reverse_migration_item(
         )
         if original.kind == "reversal":
             raise BillingRuleViolation(
-                "migration_item_reversal_terminal", "a reversal cannot be reversed"
+                "opening_late_item_reversal_terminal", "a reversal cannot be reversed"
             )
-        m = models.MigrationItem
+        m = models.OpeningLateItem
         if (
             session.execute(
                 select(m.id).where(
@@ -1038,19 +1050,20 @@ def reverse_migration_item(
             is not None
         ):
             raise BillingRuleViolation(
-                "migration_item_already_reversed", "the item already has its reversal"
+                "opening_late_item_already_reversed",
+                "the item already has its reversal",
             )
         if original.kind == "debit" and service._document_outstanding(
             session, scope=scope, document=document
         ) != Decimal(original.receivable_delta):
             raise BillingRuleViolation(
-                "migration_debit_touched",
+                "opening_late_debit_touched",
                 "a debit is reversible only while its invoice is untouched",
             )
         window = get_opening_window(session, scope=scope)
         if window is None or window.window_id != original.window_id:
             raise BillingRuleViolation(
-                "migration_item_window_missing", "the item's window is unavailable"
+                "opening_late_item_window_missing", "the item's window is unavailable"
             )
         original_group = service._one(
             session, scope=scope, model=plane.group, row_id=original.posting_group_id
@@ -1064,13 +1077,13 @@ def reverse_migration_item(
             kind=REVERSAL_KIND,
             currency=original.currency,
             minor_units=original.minor_units,
-            source_ref=f"migration-item:{item_id}",
+            source_ref=f"opening-late-item:{item_id}",
             occurred_at=session.execute(select(func.clock_timestamp())).scalar_one(),
             effects=((EffectLane.RECEIVABLE, -Decimal(original.receivable_delta)),),
             exposure_document_ids=(document.id,),
             reverses_group_id=original_group.id,
             opening_group_id=group_id,
-            migration=MigrationPosting(
+            opening_late=OpeningLatePosting(
                 row={
                     "id": item_id,
                     "window_id": original.window_id,
@@ -1095,12 +1108,12 @@ def reverse_migration_item(
                     "actor_ref": command.actor_ref,
                     "command_id": command.command_id,
                 },
-                fact=MigrationItemFactBlockV1(
+                fact=OpeningLateItemFactBlockV1(
                     item_id,
                     original.window_id,
                     "reversal",
                     document.id,
-                    MigrationSourceV1(
+                    OpeningLateSourceV1(
                         original.source_installation_id,
                         original.source_system,
                         original.source_key,
@@ -1117,18 +1130,18 @@ def reverse_migration_item(
     outcome = service._idempotent(
         db,
         scope=scope,
-        operation_scope="billing.migration_item.reverse",
+        operation_scope="billing.opening_late_item.reverse",
         key=command.command_id,
         fingerprint=fingerprint_of(service._jsonable(command)),
         operation=operation,
     )
-    return get_migration_item(
+    return get_opening_late_item(
         db, scope=scope, item_id=UUID(str(outcome.result["item_id"]))
     )
 
 
 # --------------------------------------------------------------------------
-# Per-document tax evidence (imported open items and migration debits)
+# Per-document tax evidence (imported open items and opening late debits)
 # --------------------------------------------------------------------------
 
 
@@ -1139,7 +1152,7 @@ def write_tax_snapshots(
     document_id: UUID,
     original: OpeningOriginalDocumentV1,
 ) -> None:
-    """One ``applied_tax_snapshots`` row per legacy tax component (document parent)."""
+    """One ``applied_tax_snapshots`` row per source tax component (document parent)."""
 
     plane = service._models(scope)
     for snapshot in original.tax_snapshots:
@@ -1169,11 +1182,11 @@ def write_tax_snapshots(
 def get_open_item_tax_snapshots(
     db: Session, *, scope: Scope, document_id: UUID
 ) -> OpenItemTaxSnapshotsV1:
-    """The legacy tax evidence of one imported open item or migration debit.
+    """The source tax evidence of one imported open item or opening late debit.
 
     An imported item's evidence is the verified original document stored with its
     opening basis (the restricted opening principal writes no other tax rows); a
-    migration debit's is its per-document ``applied_tax_snapshots`` rows. Native
+    opening late debit's is its per-document ``applied_tax_snapshots`` rows. Native
     documents are refused (they have invoice document facts). When the document's
     tax is non-zero and there are no snapshots the read refuses
     ``open_item_tax_snapshots_unavailable``; nothing is backfilled. Read-only,
@@ -1202,7 +1215,7 @@ def get_open_item_tax_snapshots(
         if document is None:
             raise BillingRuleViolation("not_found", "document was not found")
         mode = document["authoring_mode"]
-        if mode not in ("imported_open_item", "migration_item"):
+        if mode not in ("imported_open_item", "opening_late_item"):
             raise BillingRuleViolation(
                 "open_item_tax_snapshots_native_document",
                 "a native document's tax evidence is in its invoice document facts",
@@ -1293,7 +1306,7 @@ def get_open_item_tax_snapshots(
 def get_accounting_fact_v7(
     db: Session, *, scope: Scope, fact_id: UUID
 ) -> AccountingFactV7:
-    """Read one stored V7 (migration item) accounting fact by id.
+    """Read one stored V7 (opening late item) accounting fact by id.
 
     Digest, envelope, posting group, receivable effect and the item row are
     cross-checked; a fact of another version, tenant or an unknown id is
@@ -1332,9 +1345,9 @@ def get_accounting_fact_v7(
                     AccountingFactV7, _decode(row["fact_payload"], AccountingFactV7)
                 )
             item = db.execute(
-                select(models.MigrationItem).where(
-                    models.MigrationItem.tenant_id == tenant.tenant_id,
-                    models.MigrationItem.posting_group_id == fact.posting_group_id,
+                select(models.OpeningLateItem).where(
+                    models.OpeningLateItem.tenant_id == tenant.tenant_id,
+                    models.OpeningLateItem.posting_group_id == fact.posting_group_id,
                 )
             ).scalar_one_or_none()
             group = db.execute(
@@ -1373,7 +1386,7 @@ def get_accounting_fact_v7(
 def exposure_fields_of(
     evidence: OpeningCollectionEvidenceV1, *, account_id: UUID
 ) -> tuple[str, str | None, CollectionTiming, ServicePeriodEvidenceV1]:
-    """Exposure identity fields a migration debit takes from its collection evidence.
+    """Exposure identity fields an opening late debit takes from its evidence.
 
     An unverified item has no subject or timing; the account subject convention
     and ``arrears`` stand in (the same default the money-flows reader applies).
@@ -1392,7 +1405,7 @@ def exposure_due(
     due_at: datetime | None,
     basis: DueDateBasisV1,
 ) -> tuple[datetime | None, DueDateBasisV1]:
-    """Due instant and basis a V1 exposure may carry for a migration debit.
+    """Due instant and basis a V1 exposure may carry for an opening late debit.
 
     Only evidence that allows automated collection (verified, with subject,
     timing, due date and a verified basis, exactly as the V2 reader requires)
@@ -1413,24 +1426,24 @@ def exposure_due(
 __all__ = [
     "ACCOUNTING_FACT_V7_CONTRACT",
     "AccountingFactV7",
-    "MigrationItemFactBlockV1",
-    "MigrationItemV1",
-    "MigrationPosting",
-    "MigrationSourceV1",
+    "OpeningLateItemFactBlockV1",
+    "OpeningLateItemV1",
+    "OpeningLatePosting",
+    "OpeningLateSourceV1",
     "OpenItemTaxSnapshotsV1",
-    "RecordMigrationCreditV1",
-    "RecordMigrationDebitV1",
-    "ReverseMigrationItemV1",
+    "RecordOpeningLateCreditV1",
+    "RecordOpeningLateDebitV1",
+    "ReverseOpeningLateItemV1",
     "exposure_due",
     "exposure_fields_of",
     "get_accounting_fact_v7",
-    "get_migration_item",
+    "get_opening_late_item",
     "get_open_item_tax_snapshots",
-    "migration_collection_evidence",
-    "migration_debit_initial",
-    "migration_net_credit",
-    "record_migration_credit",
-    "record_migration_debit",
-    "reverse_migration_item",
+    "opening_late_collection_evidence",
+    "opening_late_debit_initial",
+    "opening_late_net_credit",
+    "record_opening_late_credit",
+    "record_opening_late_debit",
+    "reverse_opening_late_item",
     "write_tax_snapshots",
 ]

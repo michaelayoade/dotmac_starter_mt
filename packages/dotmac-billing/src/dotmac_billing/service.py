@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, SessionTransaction
 
 if TYPE_CHECKING:
-    from dotmac_billing.migration_items import MigrationPosting
+    from dotmac_billing.opening_late_items import OpeningLatePosting
 
 from dotmac_billing import models
 from dotmac_billing._document_facts import _decode
@@ -279,9 +279,9 @@ from dotmac_billing.tax_evidence import (
 )
 
 _AccountingEffectKind = Literal[
-    "migration_debit_recorded",
-    "migration_credit_applied",
-    "migration_item_reversed",
+    "opening_late_debit_recorded",
+    "opening_late_credit_applied",
+    "opening_late_item_reversed",
     "opening_account_imported",
     "opening_account_import_reversed",
     "opening_variance_recorded",
@@ -1649,13 +1649,13 @@ def _receivable_exposure(
             "exposure_document_invalid",
             "a receivable exposure requires one issued invoice",
         )
-    migration_evidence = None
-    if document.authoring_mode == "migration_item":
-        # A migration debit has no obligation: the exposure fields come from the
+    opening_late_evidence = None
+    if document.authoring_mode == "opening_late_item":
+        # An opening late debit has no obligation: the exposure fields come from the
         # collection evidence recorded with its item.
-        from dotmac_billing.migration_items import migration_collection_evidence
+        from dotmac_billing.opening_late_items import opening_late_collection_evidence
 
-        migration_evidence = migration_collection_evidence(
+        opening_late_evidence = opening_late_collection_evidence(
             db, scope=scope, document_id=document.id
         )
         obligation = None
@@ -1703,7 +1703,7 @@ def _receivable_exposure(
     outstanding = backing.remaining
     resolved_amount = backing.initial_amount - outstanding
     financial_state: FinancialState
-    if voided or (migration_evidence is not None and not backing.active):
+    if voided or (opening_late_evidence is not None and not backing.active):
         outstanding = Decimal("0")
         financial_state = "cancelled"
     elif outstanding == 0:
@@ -1713,15 +1713,15 @@ def _receivable_exposure(
     else:
         financial_state = "open"
     due_at = document.due_at
-    migration_basis = None
-    if migration_evidence is not None:
-        from dotmac_billing.migration_items import exposure_due, exposure_fields_of
+    opening_late_basis = None
+    if opening_late_evidence is not None:
+        from dotmac_billing.opening_late_items import exposure_due, exposure_fields_of
 
         subject_ref, service_ref, timing, service_period = exposure_fields_of(
-            migration_evidence, account_id=document.billing_account_id
+            opening_late_evidence, account_id=document.billing_account_id
         )
-        due_at, migration_basis = exposure_due(
-            migration_evidence,
+        due_at, opening_late_basis = exposure_due(
+            opening_late_evidence,
             document.due_at,
             _due_date_basis(document.due_date_basis),
         )
@@ -1739,7 +1739,7 @@ def _receivable_exposure(
             starts_at=obligation.period_start,
             ends_at=obligation.period_end,
         )
-    due_date_basis = migration_basis or _due_date_basis(document.due_date_basis)
+    due_date_basis = opening_late_basis or _due_date_basis(document.due_date_basis)
     collectible = _money(outstanding, document.currency, document.minor_units)
     payload = {
         "scope": scope,
@@ -2081,10 +2081,10 @@ def _post_group(
     cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
     corrects_posting_group_id: UUID | None = None,
     variance_fact: VarianceFactRequest | None = None,
-    migration: MigrationPosting | None = None,
+    opening_late: OpeningLatePosting | None = None,
     _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
-    from dotmac_billing.migration_items import AccountingFactV7
+    from dotmac_billing.opening_late_items import AccountingFactV7
 
     plane = _models(scope)
     if reverses_group_id is not None:
@@ -2141,13 +2141,13 @@ def _post_group(
         effects=opening_effects,
     )
     _persist_opening_receivables(db, scope=scope, bases=opening_bases)
-    if migration is not None:
+    if opening_late is not None:
         # The item row follows its group (FK) and precedes every derivation that
-        # reads it: the room function takes a migration debit's base from it.
+        # reads it: the room function takes an opening late debit's base from it.
         db.add(
-            models.MigrationItem(
+            models.OpeningLateItem(
                 **{
-                    **migration.row,
+                    **opening_late.row,
                     "tenant_id": cast(TenantScope, scope).tenant_id,
                     "posting_group_id": group_id,
                 }
@@ -2498,7 +2498,7 @@ def _post_group(
         | AccountingFactV6
         | AccountingFactV7
     )
-    if migration is not None:
+    if opening_late is not None:
         typed_fact = AccountingFactV7(
             scope,
             "dotmac-billing",
@@ -2517,7 +2517,7 @@ def _post_group(
                 )
                 for row in effect_rows
             ),
-            migration.fact,
+            opening_late.fact,
             reverses_fact_id,
         )
     elif variance_fact is not None:
@@ -3710,10 +3710,10 @@ def freeze_issued_invoice_withholding(
                 "an opening-imported invoice cannot be frozen yet: it has no line "
                 "source and billing holds no party mapping for its account",
             )
-        if document.authoring_mode == "migration_item":
+        if document.authoring_mode == "opening_late_item":
             raise BillingRuleViolation(
-                "withholding_freeze_migration_item_unavailable",
-                "a migration debit never had a native issue: no withholding "
+                "withholding_freeze_opening_late_item_unavailable",
+                "an opening late debit never had a native issue: no withholding "
                 "expectation can be frozen on it",
             )
         _require_credit_target(
@@ -4189,10 +4189,11 @@ def void_document(
                 "opening_account_owner_required",
                 "imported principal requires its full opening unwind owner",
             )
-        if document.authoring_mode == "migration_item":
+        if document.authoring_mode == "opening_late_item":
             raise BillingRuleViolation(
-                "migration_item_owner_required",
-                "a migration debit is reversed only through reverse_migration_item",
+                "opening_late_item_owner_required",
+                "an opening late debit is reversed only through "
+                "reverse_opening_late_item",
             )
         if document.issued_at is None:
             raise BillingRuleViolation(
@@ -4214,12 +4215,12 @@ def void_document(
             raise BillingRuleViolation(
                 "void_has_allocations", "deallocate the document before voiding it"
             )
-        from dotmac_billing.migration_items import migration_net_credit
+        from dotmac_billing.opening_late_items import opening_late_net_credit
 
-        if migration_net_credit(session, scope=scope, document_id=document_id) != 0:
+        if opening_late_net_credit(session, scope=scope, document_id=document_id) != 0:
             raise BillingRuleViolation(
-                "void_has_migration_credit",
-                "reverse the document's migration credits before voiding it",
+                "void_has_opening_late_credit",
+                "reverse the document's opening late credits before voiding it",
             )
         if document.document_kind == "invoice" and _document_credited(
             session, scope=scope, document_id=document_id
@@ -7279,13 +7280,13 @@ def _require_opening_reversal_owner(
             "use the complete opening cash correction owner",
         )
     if original.group_kind in {
-        "migration_debit_recorded",
-        "migration_credit_applied",
-        "migration_item_reversed",
+        "opening_late_debit_recorded",
+        "opening_late_credit_applied",
+        "opening_late_item_reversed",
     }:
         raise BillingRuleViolation(
-            "migration_item_owner_required",
-            "a migration group is reversed only through reverse_migration_item",
+            "opening_late_item_owner_required",
+            "an opening late group is reversed only through reverse_opening_late_item",
         )
 
 

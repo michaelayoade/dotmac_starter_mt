@@ -1,9 +1,9 @@
-"""R8: post-seal migration items (bi_0021), PostgreSQL.
+"""R8: post-seal opening late items (bi_0021), PostgreSQL.
 
 Every scenario runs in its own tenant, with its own provisioned and sealed
 opening window (``dual_control`` off unless a test says otherwise), as the real
 ordinary role. The opening import supplies the sealed capture namespace and two
-imported open items (residuals 70.00 and 50.00; legacy totals 120.00 and 80.00).
+imported open items (residuals 70.00 and 50.00; source totals 120.00 and 80.00).
 """
 
 # SQL identifiers below are fixed Billing-owned table names.
@@ -18,25 +18,25 @@ from uuid import uuid4
 
 import pytest
 from dotmac_billing import list_open_receivable_documents, models
-from dotmac_billing import migration_items as mi
+from dotmac_billing import opening_late_items as mi
 from dotmac_billing import service as s
 from dotmac_billing.commands import (
-    MIGRATION_ITEM_PERMISSION,
+    OPENING_LATE_ITEM_PERMISSION,
     AllocationCommand,
     ReversePostingGroupCommand,
 )
 from dotmac_billing.document_queries import get_document_exposure
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
-from dotmac_billing.migration_items import (
-    MigrationSourceV1,
-    RecordMigrationCreditV1,
-    RecordMigrationDebitV1,
-    ReverseMigrationItemV1,
+from dotmac_billing.opening_late_items import (
+    OpeningLateSourceV1,
+    RecordOpeningLateCreditV1,
+    RecordOpeningLateDebitV1,
+    ReverseOpeningLateItemV1,
     get_accounting_fact_v7,
     get_open_item_tax_snapshots,
-    record_migration_credit,
-    record_migration_debit,
-    reverse_migration_item,
+    record_opening_late_credit,
+    record_opening_late_debit,
+    reverse_opening_late_item,
 )
 from dotmac_billing.withholding_release import (
     release_withholding_component,
@@ -56,7 +56,7 @@ from tests import test_billing_opening_receivable_import as ar
 from tests import test_billing_withholding_frozen as frozen
 from tests import test_billing_withholding_release_pg as qf
 
-ACTOR = "holding-release:fixture"
+ACTOR = "actor:fixture"
 NOW = ar.evidence.NOW
 
 
@@ -65,7 +65,7 @@ class _Reader:
         self.actors = set(actors)
 
     def holds(self, *, scope, actor_ref, code) -> bool:
-        return actor_ref in self.actors and code == MIGRATION_ITEM_PERMISSION
+        return actor_ref in self.actors and code == OPENING_LATE_ITEM_PERMISSION
 
 
 PERMS = _Reader(ACTOR)
@@ -108,9 +108,9 @@ def _world(scratch, *, dual="off", stage="sealed"):
     return world
 
 
-def _source(world, key, number=None) -> MigrationSourceV1:
+def _source(world, key, number=None) -> OpeningLateSourceV1:
     cap = world.cap
-    return MigrationSourceV1(cap.installation_id, cap.source_system, key, number)
+    return OpeningLateSourceV1(cap.installation_id, cap.source_system, key, number)
 
 
 def _debit(world, account, key, *, amount="70.00", index=0, **changes):
@@ -129,7 +129,7 @@ def _debit(world, account, key, *, amount="70.00", index=0, **changes):
         "occurred_at": NOW,
     }
     fields.update(changes)
-    return RecordMigrationDebitV1(**fields)
+    return RecordOpeningLateDebitV1(**fields)
 
 
 def _credit(world, document_id, key, *, amount="10.00", total="50.00", **changes):
@@ -146,29 +146,29 @@ def _credit(world, document_id, key, *, amount="10.00", total="50.00", **changes
         "occurred_at": NOW,
     }
     fields.update(changes)
-    return RecordMigrationCreditV1(**fields)
+    return RecordOpeningLateCreditV1(**fields)
 
 
 def _reverse(world, item_id, *, reason="entered in error"):
-    return ReverseMigrationItemV1(
+    return ReverseOpeningLateItemV1(
         world.scope, item_id, ACTOR, f"reverse:{uuid4()}", reason
     )
 
 
 def _record(db, world, command):
-    return record_migration_debit(
+    return record_opening_late_debit(
         db, scope=world.scope, command=command, permissions=PERMS
     )
 
 
 def _apply(db, world, command):
-    return record_migration_credit(
+    return record_opening_late_credit(
         db, scope=world.scope, command=command, permissions=PERMS
     )
 
 
 def _undo(db, world, command):
-    return reverse_migration_item(
+    return reverse_opening_late_item(
         db, scope=world.scope, command=command, permissions=PERMS
     )
 
@@ -225,23 +225,23 @@ def test_debit_books_a_receivable_with_evidence_and_no_revenue_or_tax(scratch):
         item = _record(db, w, command)
         assert item.kind == "debit" and item.generation == 1
         assert item.receivable_delta == b._money("70.00")
-        assert item.legacy_source == _source(w, "late-1")
+        assert item.source_identity == _source(w, "late-1")
         assert item.recorded_at is not None
 
         document = db.get(models.BillingDocument, item.document_id)
         original = command.original
-        assert document.authoring_mode == "migration_item"
+        assert document.authoring_mode == "opening_late_item"
         assert document.document_number == original.document_number
         assert document.document_kind == "invoice" and document.issued_at is not None
         assert document.series_code is None and document.obligation_id is None
         assert document.grand_total == original.grand_total.amount
         assert document.tax_total == original.tax_total.amount
 
-        # Evidence only: the legacy snapshots, summing to the legacy tax.
+        # Evidence only: the source snapshots, summing to the source tax.
         tax = get_open_item_tax_snapshots(
             db, scope=w.scope, document_id=item.document_id
         )
-        assert tax.authoring_mode == "migration_item"
+        assert tax.authoring_mode == "opening_late_item"
         assert tax.tax_total == original.tax_total
         assert len(tax.snapshots) == len(original.tax_snapshots) == 1
         assert sum(x.tax_amount.amount for x in tax.snapshots) == (
@@ -250,7 +250,7 @@ def test_debit_books_a_receivable_with_evidence_and_no_revenue_or_tax(scratch):
 
         # One receivable effect, one V7 fact and the usual position facts.
         group = db.get(models.PostingGroup, item.posting_group_id)
-        assert group.group_kind == "migration_debit_recorded"
+        assert group.group_kind == "opening_late_debit_recorded"
         effects = (
             db.execute(
                 select(models.PostingEffect).where(
@@ -264,9 +264,9 @@ def test_debit_books_a_receivable_with_evidence_and_no_revenue_or_tax(scratch):
             ("receivable", Decimal("70.00"))
         ]
         fact = get_accounting_fact_v7(db, scope=w.scope, fact_id=_fact_id(db, group.id))
-        assert fact.effect_kind == "migration_debit_recorded"
+        assert fact.effect_kind == "opening_late_debit_recorded"
         assert fact.effects[0].amount_delta == b._money("70.00")
-        assert fact.item.legacy_source.number == original.document_number
+        assert fact.item.source_identity.number == original.document_number
         assert fact.item.document_id == item.document_id
         assert fact.reverses_fact_id is None
         assert (
@@ -308,36 +308,36 @@ def test_debit_refusals(scratch):
 
         def refused(command, perms=PERMS):
             with pytest.raises(BillingRuleViolation) as caught:
-                record_migration_debit(
+                record_opening_late_debit(
                     db, scope=w.scope, command=command, permissions=perms
                 )
             db.rollback()
             return _code(caught)
 
         assert refused(_debit(w, account, "k1"), _Reader()) == (
-            "migration_item_permission_denied"
+            "opening_late_item_permission_denied"
         )
         assert refused(_debit(w, account, "k2"), None) == (
-            "migration_item_permission_unavailable"
+            "opening_late_item_permission_unavailable"
         )
-        wrong = MigrationSourceV1("installation:elsewhere", "legacy", "k3")
+        wrong = OpeningLateSourceV1("installation:elsewhere", "other-system", "k3")
         assert refused(_debit(w, account, "k3", source=wrong)) == (
-            "migration_item_namespace_mismatch"
+            "opening_late_item_namespace_mismatch"
         )
         carried = w.cmd.manifest.receivables[0].source_invoice_key
         with pytest.raises(BillingConflict) as caught:
             _record(db, w, _debit(w, account, carried))
-        assert _code(caught) == "migration_debit_key_carried"
+        assert _code(caught) == "opening_late_debit_key_carried"
         db.rollback()
-        # More than the legacy invoice's own total.
+        # More than the source invoice's own total.
         assert refused(_debit(w, account, "k4", amount="120.01")) == (
-            "migration_debit_original_invalid"
+            "opening_late_debit_original_invalid"
         )
         first = _record(db, w, _debit(w, account, "k5"))
         db.commit()
         with pytest.raises(BillingConflict) as caught:
             _record(db, w, _debit(w, account, "k5"))
-        assert _code(caught) == "migration_debit_key_claimed"
+        assert _code(caught) == "opening_late_debit_key_claimed"
         db.rollback()
         assert first.generation == 1
 
@@ -349,12 +349,12 @@ def test_debit_needs_a_sealed_off_window(scratch):
         account = cash._new_account(db, unsealed.scope)
         with pytest.raises(BillingRuleViolation) as caught:
             _record(db, unsealed, _debit(unsealed, account, "u1"))
-        assert _code(caught) == "migration_item_window_not_sealed"
+        assert _code(caught) == "opening_late_item_window_not_sealed"
     with b._session(on.url, on.scope) as db:
         account = cash._new_account(db, on.scope)
         with pytest.raises(BillingRuleViolation) as caught:
             _record(db, on, _debit(on, account, "o1"))
-        assert _code(caught) == "migration_item_dual_control_unsupported"
+        assert _code(caught) == "opening_late_item_dual_control_unsupported"
     # No window at all: a tenant that never provisioned one, with a donor's shapes.
     donor = _world(scratch)
     other = _world(scratch, stage="none")
@@ -363,7 +363,7 @@ def test_debit_needs_a_sealed_off_window(scratch):
         account = cash._new_account(db, other.scope)
         with pytest.raises(BillingRuleViolation) as caught:
             _record(db, other, _debit(other, account, "n1"))
-        assert _code(caught) == "migration_item_window_missing"
+        assert _code(caught) == "opening_late_item_window_missing"
 
 
 def test_a_raw_online_insert_cannot_skip_the_database_rules(scratch):
@@ -386,13 +386,13 @@ def test_a_raw_online_insert_cannot_skip_the_database_rules(scratch):
                 "INSERT INTO mod_billing.posting_groups (id, tenant_id, "
                 "billing_account_id, group_kind, currency, minor_units, source_ref, "
                 "source_version, occurred_at) VALUES (:id, :t, :a, "
-                "'migration_credit_applied', 'NGN', 2, :ref, :v, now())"
+                "'opening_late_credit_applied', 'NGN', 2, :ref, :v, now())"
             ),
             {
                 "id": uuid4(),
                 "t": w.scope.tenant_id,
                 "a": account,
-                "ref": f"migration-item:{uuid4()}",
+                "ref": f"opening-late-item:{uuid4()}",
                 "v": version,
             },
         )
@@ -409,7 +409,7 @@ def test_a_raw_online_insert_cannot_skip_the_database_rules(scratch):
                     item.posting_group_id, NOW, f"raw-reverse-{uuid4()}"
                 ),
             )
-        assert _code(refused) == "migration_item_owner_required"
+        assert _code(refused) == "opening_late_item_owner_required"
         db.rollback()
 
 
@@ -460,12 +460,12 @@ def test_debit_reversal_while_untouched_then_rerecord_at_generation_two(scratch)
         fact = get_accounting_fact_v7(
             db, scope=w.scope, fact_id=_fact_id(db, reversal.posting_group_id)
         )
-        assert fact.effect_kind == "migration_item_reversed"
+        assert fact.effect_kind == "opening_late_item_reversed"
         assert fact.reverses_fact_id == _fact_id(db, first.posting_group_id)
         db.commit()
         with pytest.raises(BillingRuleViolation) as caught:
             _undo(db, w, _reverse(w, first.item_id))
-        assert _code(caught) == "migration_item_already_reversed"
+        assert _code(caught) == "opening_late_item_already_reversed"
         db.rollback()
         second = _record(db, w, _debit(w, account, "rev-1", amount="60.00"))
         assert second.generation == 2
@@ -485,7 +485,7 @@ def test_debit_reversal_after_a_payment_is_refused_by_python_and_by_the_database
         db.commit()
         with pytest.raises(BillingRuleViolation) as caught:
             _undo(db, w, _reverse(w, item.item_id))
-        assert _code(caught) == "migration_debit_touched"
+        assert _code(caught) == "opening_late_debit_touched"
         db.rollback()
         # Defeat the Python guard: the admission trigger still refuses.
         with mock.patch.object(
@@ -528,8 +528,8 @@ def test_two_concurrent_records_of_one_key_have_one_winner(scratch):
         assert (
             db.scalar(
                 select(func.count()).where(
-                    models.MigrationItem.source_key == "race-1",
-                    models.MigrationItem.kind == "debit",
+                    models.OpeningLateItem.source_key == "race-1",
+                    models.OpeningLateItem.kind == "debit",
                 )
             )
             == 1
@@ -555,13 +555,13 @@ def test_credit_against_imported_native_and_debit_targets_split_and_bounded(scra
             db, scope=w.scope, fact_id=_fact_id(db, a.posting_group_id)
         )
         assert fact.effects[0].amount_delta == b._money("-20.00")
-        # The same legacy note split over a second invoice, up to its total.
+        # The same source note split over a second invoice, up to its total.
         _apply(db, w, _credit(w, second.document_id, "cn-1", amount="30.00"))
         assert ar._remaining(db, w.scope, second) == Decimal("20.00")
         db.commit()
         with pytest.raises(BillingRuleViolation) as caught:
             _apply(db, w, _credit(w, second.document_id, "cn-1", amount="0.01"))
-        assert _code(caught) == "migration_credit_exceeds_source_total"
+        assert _code(caught) == "opening_late_credit_exceeds_source_total"
         db.rollback()
     with b._session(w.url, w.scope) as db:
         # A differing total, then a second account, for the same note.
@@ -572,16 +572,16 @@ def test_credit_against_imported_native_and_debit_targets_split_and_bounded(scra
                 w,
                 _credit(w, second.document_id, "cn-1", amount="1.00", total="60.00"),
             )
-        assert _code(caught) == "migration_credit_source_total_differs"
+        assert _code(caught) == "opening_late_credit_source_total_differs"
         db.rollback()
         other = cash._new_account(db, w.scope)
         native = cash._invoice(db, w.scope, other)
         db.commit()
         with pytest.raises(BillingRuleViolation) as caught:
             _apply(db, w, _credit(w, native.id, "cn-1", amount="1.00"))
-        assert _code(caught) == "migration_credit_source_spread"
+        assert _code(caught) == "opening_late_credit_source_spread"
         db.rollback()
-        # Native target (120.00) and a migration debit target.
+        # Native target (120.00) and an opening late debit target.
         credit = _apply(db, w, _credit(w, native.id, "cn-2", amount="20.00"))
         assert credit.document_id == native.id
         assert get_document_exposure(
@@ -619,7 +619,7 @@ def test_a_credit_stays_out_of_the_withholding_room_until_a_governed_release(
                 w,
                 _credit(w, invoice_id, "qf-1", amount="95.01", total="200.00"),
             )
-        assert _code(caught) == "migration_credit_exceeds_non_withholding_room"
+        assert _code(caught) == "opening_late_credit_exceeds_non_withholding_room"
         db.rollback()
         # The database refuses it too when Python is defeated.
         with mock.patch.object(
@@ -689,7 +689,7 @@ def test_the_debit_document_is_reversed_only_through_r8(scratch):
                 occurred_at=NOW,
                 source_ref=str(uuid4()),
             )
-        assert _code(caught) == "migration_item_owner_required"
+        assert _code(caught) == "opening_late_item_owner_required"
         db.rollback()
         # SQL refuses a voided event on it as well.
         db.add(
@@ -731,8 +731,8 @@ def test_append_only_forced_rls_and_exact_grants(scratch):
         item = _record(db, w, _debit(w, account, "ao-1"))
         db.commit()
         for statement in (
-            "UPDATE mod_billing.migration_items SET reason = 'x'",
-            "DELETE FROM mod_billing.migration_items",
+            "UPDATE mod_billing.opening_late_items SET reason = 'x'",
+            "DELETE FROM mod_billing.opening_late_items",
         ):
             with pytest.raises(DBAPIError):
                 db.execute(text(statement))
@@ -742,7 +742,7 @@ def test_append_only_forced_rls_and_exact_grants(scratch):
                 text(
                     "SELECT privilege_type FROM information_schema.role_table_grants "
                     "WHERE table_schema = 'mod_billing' "
-                    "AND table_name = 'migration_items' "
+                    "AND table_name = 'opening_late_items' "
                     "AND grantee = current_user"
                 )
             ).scalars()
@@ -751,26 +751,26 @@ def test_append_only_forced_rls_and_exact_grants(scratch):
         assert db.execute(
             text(
                 "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class "
-                "WHERE oid = 'mod_billing.migration_items'::regclass"
+                "WHERE oid = 'mod_billing.opening_late_items'::regclass"
             )
         ).scalar_one()
         assert not db.execute(
             text(
                 "SELECT has_table_privilege('platform_api', "
-                "'mod_billing.migration_items', 'SELECT,INSERT')"
+                "'mod_billing.opening_late_items', 'SELECT,INSERT')"
             )
         ).scalar_one()
         assert (
             db.execute(
-                text("SELECT to_regclass('mod_billing.platform_migration_items')")
+                text("SELECT to_regclass('mod_billing.platform_opening_late_items')")
             ).scalar_one()
             is None
         )
     other = TenantScope(b._create_tenants(scratch[0], 1)[0])
     with b._session(w.url, other) as db:
-        assert db.scalar(select(func.count()).select_from(models.MigrationItem)) == 0
+        assert db.scalar(select(func.count()).select_from(models.OpeningLateItem)) == 0
     with b._session(w.url, w.scope) as db:
-        assert db.get(models.MigrationItem, item.item_id) is not None
+        assert db.get(models.OpeningLateItem, item.item_id) is not None
 
 
 # 13. Tax evidence ---------------------------------------------------------
@@ -831,7 +831,7 @@ def test_held_partitions_take_no_item_and_their_key_is_guarded_on_admission(scra
     with b._session(url, scope) as db:
         with pytest.raises(BillingRuleViolation) as caught:
             _record(db, w, _debit(w, held_id, "held-1"))
-        assert _code(caught) == "migration_item_account_held"
+        assert _code(caught) == "opening_late_item_account_held"
         db.rollback()
         # Defeat the Python guard: the admission trigger still refuses.
         with mock.patch.object(mi, "_require_not_held", lambda *a, **k: None):
@@ -851,11 +851,11 @@ def test_held_partitions_take_no_item_and_their_key_is_guarded_on_admission(scra
     with cash._session(scratch, url, scope) as db:
         with pytest.raises(Exception) as caught:
             hold._admit(db, scope, held, approval_request_id=None)
-        assert "unreversed migration debit" in _chain(caught.value)
+        assert "unreversed opening late debit" in _chain(caught.value)
         db.rollback()
 
 
-def test_the_withholding_freeze_refuses_a_migration_debit(scratch):
+def test_the_withholding_freeze_refuses_an_opening_late_debit(scratch):
     w = _world(scratch)
     with b._session(w.url, w.scope) as db:
         account = cash._new_account(db, w.scope)
@@ -868,11 +868,11 @@ def test_the_withholding_freeze_refuses_a_migration_debit(scratch):
                 scope=w.scope,
                 command=frozen._freeze_command(account, item.document_id, w.scope, tax),
             )
-        assert _code(caught) == "withholding_freeze_migration_item_unavailable"
+        assert _code(caught) == "withholding_freeze_opening_late_item_unavailable"
         db.rollback()
 
 
-def test_two_accounts_racing_for_one_legacy_key_have_one_winner(scratch):
+def test_two_accounts_racing_for_one_source_key_have_one_winner(scratch):
     w = _world(scratch)
     with b._session(w.url, w.scope) as db:
         accounts = [cash._new_account(db, w.scope) for _ in range(2)]
@@ -903,8 +903,8 @@ def test_two_accounts_racing_for_one_legacy_key_have_one_winner(scratch):
         assert (
             db.scalar(
                 select(func.count()).where(
-                    models.MigrationItem.source_key == "race-2",
-                    models.MigrationItem.kind == "debit",
+                    models.OpeningLateItem.source_key == "race-2",
+                    models.OpeningLateItem.kind == "debit",
                 )
             )
             == 1
@@ -914,7 +914,7 @@ def test_two_accounts_racing_for_one_legacy_key_have_one_winner(scratch):
 # 12. Upgrade bi_0020 -> bi_0021 with data ---------------------------------
 
 PREDECESSOR = "bi_0020_withholding_releases"
-TARGET = "bi_0021_migration_items"
+TARGET = "bi_0021_opening_late_items"
 
 
 @pytest.fixture
@@ -942,7 +942,7 @@ def _room_and_live(db, tenant_id, document_id, account_id):
     ).one()
 
 
-def test_upgrade_with_data_keeps_every_room_and_then_admits_a_migration_credit(
+def test_upgrade_with_data_keeps_every_room_and_then_admits_a_opening_late_credit(
     at_predecessor,
 ):
     scratch, upgrade = at_predecessor
@@ -987,13 +987,13 @@ def test_upgrade_with_data_keeps_every_room_and_then_admits_a_migration_credit(
                 text(
                     "SELECT count(*) FROM information_schema.tables "
                     "WHERE table_schema = 'mod_billing' "
-                    "AND table_name = 'migration_items'"
+                    "AND table_name = 'opening_late_items'"
                 )
             )
             == 1
         )
         world = SimpleNamespace(scope=scope, cap=cmd.manifest.capture)
-        credit = record_migration_credit(
+        credit = record_opening_late_credit(
             db,
             scope=scope,
             command=_credit(world, imported[0].document_id, "up-1", amount="20.00"),

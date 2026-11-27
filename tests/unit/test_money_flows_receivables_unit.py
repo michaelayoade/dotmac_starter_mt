@@ -347,14 +347,14 @@ def test_a_naive_terms_floor_is_refused_before_any_billing_read(monkeypatch) -> 
     assert billing.terms_at == []
 
 
-def test_a_migration_debit_v1_exposure_reads_no_hold_without_automated_evidence(
+def test_a_opening_late_debit_v1_exposure_reads_no_hold_without_automated_evidence(
     monkeypatch,
 ) -> None:
     """The V1 branch turns a due date into a hold, so Billing must not supply one
-    for a migration debit whose collection evidence is unverified."""
+    for an opening late debit whose collection evidence is unverified."""
     from dataclasses import replace
 
-    from dotmac_billing.migration_items import exposure_due
+    from dotmac_billing.opening_late_items import exposure_due
 
     evidence = OpeningCollectionEvidenceV1(
         "unknown_unverified",
