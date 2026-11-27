@@ -2707,6 +2707,52 @@ def _step_due_at(case_row: _CaseRow, progress: _StepProgress) -> datetime:
     return anchor + timedelta(seconds=step.offset_seconds)
 
 
+_LADDER_HALT_REASON = "policy_ladder_halted_no_anchor"
+
+
+def _record_ladder_halt(
+    db: Session, *, scope: Scope, case_row: _CaseRow, at: datetime
+) -> None:
+    """Record, once per case, that the policy ladder stopped for want of an anchor.
+
+    The transition table has no unique key beyond the ordinal, so idempotency is
+    the existence check: the halt is a property of the case's published ladder (a
+    skipped step followed by a step counted from a receipt that cannot exist), so
+    one row per case covers resume, hold-lift re-arm and redelivery alike. The
+    caller holds the case lock, which serialises the check against a concurrent
+    writer.
+    """
+
+    if case_row.lifecycle != "active":
+        return
+    model = _models(scope).case_transition
+    already = db.scalar(
+        _where_scope(
+            select(model.id)
+            .where(
+                model.case_id == case_row.id,
+                model.reason_code == _LADDER_HALT_REASON,
+            )
+            .limit(1),
+            scope,
+            model,
+        )
+    )
+    if already is not None:
+        return
+    _append_transition(
+        db,
+        scope=scope,
+        row=case_row,
+        from_state="active",
+        to_state="active",
+        reason_code=_LADDER_HALT_REASON,
+        actor_ref="system:collections.policy_ladder",
+        transitioned_at=at,
+    )
+    db.flush()
+
+
 def _schedule_next_policy_step(
     db: Session,
     *,
@@ -2723,7 +2769,9 @@ def _schedule_next_policy_step(
         return
     if progress.skipped and _step_anchor(case_row, progress) is None:
         # The successor counts from evidence a skipped step cannot supply: the
-        # ladder stops here rather than raising and redelivering for ever.
+        # ladder stops here rather than raising and redelivering for ever. The
+        # stop is recorded once on the case so it is not silent.
+        _record_ladder_halt(db, scope=scope, case_row=case_row, at=recorded_at)
         return
     _schedule_case_timer(
         db,

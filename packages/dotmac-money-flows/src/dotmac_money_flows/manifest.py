@@ -18,7 +18,7 @@ INSTANCE_TABLE_ALLOWLIST = frozenset({"settle_instances", "funded_charge_instanc
 
 module = ModuleManifest(
     code="money_flows",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="mflows",
     migration_prefix="mf",

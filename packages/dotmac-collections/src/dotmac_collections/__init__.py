@@ -147,7 +147,7 @@ from dotmac_collections.timers import (
     assert_collections_timer_conformance,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "ACCESS_HOLD_DUE_EVENT_TYPE",

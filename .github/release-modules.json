@@ -2231,8 +2231,8 @@
         "receivable-observation contract, read by receivables.py) through their",
         "top-level public exports, so those four are allowed wheel requirements.",
         "kernel_floor is a110: the first published kernel that allocates mod_mflows /",
-        "mf / money_flows and ships communication-dispatch migration 0032 and the",
-        "0033/0034 append-only receipts the composition relies on."
+        "mf / money_flows. Flows needs only the three manifest prerequisites",
+        "(module database roles, outbox relay, tenant scope catalog)."
       ],
       "package_dir": "packages/dotmac-money-flows",
       "import_name": "dotmac_money_flows",
@@ -2250,6 +2250,8 @@
           "dotmac_money_flows/settle.py",
           "dotmac_money_flows/funded_charge.py",
           "dotmac_money_flows/receivables.py",
+          "dotmac_money_flows/_credit_dating.py",
+          "dotmac_money_flows/_service_period.py",
           "dotmac_money_flows/migrations/__init__.py",
           "dotmac_money_flows/migrations/versions/mf_0001_settle_instances.py",
           "dotmac_money_flows/migrations/versions/mf_0002_funded_charge_instances.py",
