@@ -284,6 +284,9 @@ Duties of the caller (Sub-thin) beyond the Collections README:
    `PositionUnavailable("account_terms_missing")` and Collections blocks the exposure
    (no case, no retry): record the terms and the next Billing event re-assesses it.
    Treat any other raised failure as redelivery, not as a queue item.
-4. An open prepaid exposure is an anomaly: the reader refuses it (`not_postpaid`) and
+4. Validate `terms_floor_at` at entry: it must be timezone-aware. The reader refuses a
+   naive value (`receivables.py`), so a naive entry is a deploy fault, not a runtime
+   fallback.
+5. An open prepaid exposure is an anomaly: the reader refuses it (`not_postpaid`) and
    it goes to the manual exceptions review, not a script.
 
