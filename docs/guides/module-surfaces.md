@@ -47,7 +47,7 @@ jobs = (
 - `ModuleRegistry` refuses, at boot: a duplicate job code in one module, a malformed cadence, an unknown plane, and a handler that does not import or does not accept three positional arguments.
 - `concurrency` is `"single"`, the only mode: one run of a job at a time per scope.
 - The plane must be real: a `platform` job needs declared `platform_tables`, a `tenant` job needs tenant tables (or a stateless module). `ModuleRegistry.jobs(module_planes=...)` returns only jobs whose plane the assembly installs.
-- The handler must be a plain synchronous function (no coroutines, classes or builtins) defined in your own package, never the kernel, the standard library or another module.
+- The handler must be a plain synchronous function (no coroutines, classes or builtins) defined in your own package (`dotmac_<code>`, or the manifest's `job_package`), never the kernel, the standard library or another module.
 - Jobs require module contract 2. The runner is a separate process and is not part of the kernel.
 
 ## Selecting surfaces (assemblies)
@@ -69,7 +69,7 @@ ProductAssemblySpec(
 - An entry naming an absent module, surface, or a module with no API routers refuses the boot.
 - `None` (the default) is the compatibility mode: every enabled module's API routers and surfaces are mounted, and `create_app` logs a warning. Declare a selection. The default will become a refusal in a later contract generation.
 - Contract-1 `web_routers` mount only when `(module, "legacy")` is selected, valid only for a module that has `web_routers`.
-- `None` becomes a fatal startup error in production before the Wave 0 kernel release is tagged. Add the selection in the PR that bumps your kernel pin.
+- `None` is a warning in development and a fatal startup error in production. Add the selection in the PR that bumps your kernel pin (census: `docs/inventories/surface-selection-census.md`).
 
 ### Commit a route-inventory snapshot
 

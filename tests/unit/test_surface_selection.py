@@ -285,3 +285,35 @@ def test_api_route_twin_of_a_surface_route_is_refused() -> None:
     )
     with pytest.raises(Exception, match="mounted twice|claimed by"):
         create_app(spec)
+
+
+def test_a_v2_surface_cannot_be_called_legacy() -> None:
+    surface = _surface("legacy")
+    with pytest.raises(Exception, match="reserved"):
+        create_app(_spec(_module(surface), surface_selection=SELECT_ALL))
+
+
+def test_no_selection_is_fatal_in_production_and_a_warning_elsewhere() -> None:
+    from dotmac_kernel.app_factory import _note_absent_surface_selection
+
+    with pytest.raises(ValueError, match="sets no surface_selection"):
+        _note_absent_surface_selection("x", production=True)
+    _note_absent_surface_selection("x", production=False)
+
+
+def test_module_api_route_under_a_kernel_owned_root_is_refused() -> None:
+    module = ModuleManifest(
+        code="demo",
+        version="1.0.0",
+        api_routers=(_router("/static/steal", "steal"),),
+    )
+    with pytest.raises(ValueError, match="kernel-owned root"):
+        create_app(
+            ProductAssemblySpec(
+                api_documentation=_DOCS,
+                name="api-reserved",
+                modules=(module,),
+                platform_surface_enabled=False,
+                surface_selection=SELECT_ALL,
+            )
+        )

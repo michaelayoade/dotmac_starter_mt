@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import dataclasses
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -543,6 +544,9 @@ class RegisteredWebSurface:
     contribution: WebSurfaceContribution
     navigation: tuple[RegisteredWebNavItem, ...]
     legacy: bool = False
+    # A kernel-owned surface (the platform control plane) registered through
+    # `built_in_surfaces`, never by a module. Exempt from rules that predate it.
+    built_in: bool = False
 
     @property
     def identity(self) -> tuple[str, str]:
@@ -875,7 +879,11 @@ class WebSurfaceRegistry:
                 surfaces.append(_legacy_surface(manifest, staff, ui_contract_version))
         for owner, contribution in built_in_surfaces:
             _validate_code(owner, field_name="built-in surface owner")
-            surfaces.append(self._register_new(owner, contribution))
+            surfaces.append(
+                dataclasses.replace(
+                    self._register_new(owner, contribution), built_in=True
+                )
+            )
 
         self._validate_surfaces(surfaces)
         self.surfaces = tuple(surfaces)
@@ -1019,6 +1027,11 @@ class WebSurfaceRegistry:
     def _register_new(
         self, owner: str, contribution: WebSurfaceContribution
     ) -> RegisteredWebSurface:
+        if contribution.code == "legacy":
+            raise WebSurfaceError(
+                f"surface {owner}.legacy: the surface code 'legacy' is reserved "
+                "for contract-1 web_routers"
+            )
         facet = self._facets.get(contribution.facet)
         if facet is None:
             raise UnknownFacetError(
@@ -1113,11 +1126,7 @@ class WebSurfaceRegistry:
                         continue
                     # The kernel's own platform surface predates this rule and is
                     # only ever mounted under its non-root `/platform` prefix.
-                    if (
-                        not surface.legacy
-                        and surface.owner != "kernel_platform"
-                        and route.path == ""
-                    ):
+                    if not surface.legacy and not surface.built_in and route.path == "":
                         raise RouteCompositionError(
                             f"surface {surface.owner}.{surface.contribution.code} "
                             f"route {route.name!r} has an empty path; v2 routes "
@@ -1141,6 +1150,22 @@ class WebSurfaceRegistry:
                                 f"{identity}"
                             )
                         route_keys[key] = identity
+
+    @property
+    def exempt_route_name_prefixes(self) -> tuple[str, ...]:
+        """Runtime route-name prefixes of surfaces that predate the reserved-root
+        rule: contract-1 (`legacy`) and kernel built-in surfaces. Derived from
+        the surfaces' own flags, never from a substring of a route name."""
+        return tuple(
+            qualified_route_name(
+                surface.contribution.facet,
+                surface.owner,
+                surface.contribution.code,
+                "",
+            )
+            for surface in self.surfaces
+            if surface.legacy or surface.built_in
+        )
 
     def _validate_entry_routes(self) -> None:
         for facet in self._facets.values():

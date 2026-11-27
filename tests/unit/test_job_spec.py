@@ -97,8 +97,13 @@ def test_duplicate_job_code_within_module_refused() -> None:
 def test_same_code_in_two_modules_is_allowed_and_listed_in_order() -> None:
     reg = ModuleRegistry(
         [
-            ModuleManifest(code="a", version="1", jobs=[_job()]),
-            ModuleManifest(code="b", version="1", jobs=[_job(), _job(code="other")]),
+            ModuleManifest(code="a", version="1", job_package="tests", jobs=[_job()]),
+            ModuleManifest(
+                code="b",
+                version="1",
+                job_package="tests",
+                jobs=[_job(), _job(code="other")],
+            ),
         ]
     )
     assert [(m, j.code) for m, j in reg.jobs()] == [
@@ -129,7 +134,9 @@ def test_same_code_in_two_modules_is_allowed_and_listed_in_order() -> None:
 def test_unresolvable_handler_fails_registry_construction(
     handler: str, message: str
 ) -> None:
-    manifest = ModuleManifest(code="m", version="1", jobs=[_job(handler=handler)])
+    manifest = ModuleManifest(
+        code="m", version="1", job_package="tests", jobs=[_job(handler=handler)]
+    )
     with pytest.raises(ModuleRegistryError, match=message):
         ModuleRegistry([manifest])
 
@@ -163,6 +170,7 @@ def test_jobs_are_filtered_by_the_assemblys_installed_planes() -> None:
 
     both = ModuleManifest(
         code="files",
+        job_package="tests",
         version="1",
         short_code="files",
         migration_prefix="fi",
@@ -175,3 +183,16 @@ def test_jobs_are_filtered_by_the_assemblys_installed_planes() -> None:
     tenant_only = [ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,))]
     assert [j.code for _, j in reg.jobs(module_planes=tenant_only)] == ["t"]
     assert [j.code for _, j in reg.jobs()] == ["t", "p"]
+
+
+def test_handler_package_must_follow_the_module_code_or_job_package() -> None:
+    with pytest.raises(ModuleRegistryError, match="expected 'dotmac_m'"):
+        ModuleRegistry([ModuleManifest(code="m", version="1", jobs=[_job()])])
+    ModuleRegistry(
+        [ModuleManifest(code="m", version="1", job_package="tests", jobs=[_job()])]
+    )
+
+
+def test_a_module_cannot_take_the_kernel_platform_code() -> None:
+    with pytest.raises(ModuleRegistryError, match="reserved"):
+        ModuleManifest(code="kernel_platform", version="1")

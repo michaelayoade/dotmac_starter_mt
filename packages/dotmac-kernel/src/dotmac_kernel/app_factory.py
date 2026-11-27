@@ -542,19 +542,61 @@ _RESERVED_SURFACE_ROOTS: Final[tuple[str, ...]] = (
     "/static",
     "/api",
 )
+# A module's JSON `api_routers` may legitimately live under `/api` (and under
+# `/health/...`, e.g. a product readiness probe next to the kernel's exact
+# `/health`); the exact-twin check already refuses a module taking `/health`
+# itself. These subtrees belong to the kernel and may not be entered.
+_RESERVED_API_ROOTS: Final[tuple[str, ...]] = (
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/static",
+)
 
 
-def _validate_route_collisions(app: FastAPI, *, platform_enabled: bool) -> None:
+def _note_absent_surface_selection(name: str, *, production: bool) -> None:
+    """`surface_selection=None` is a development convenience only: fatal in
+    production (the assembly must say what it serves), a warning elsewhere."""
+    if production:
+        raise ValueError(
+            f"ProductAssemblySpec {name!r} sets no surface_selection: in "
+            "production every assembly must state which module API routers and "
+            "web surfaces it serves (use SELECT_ALL to say 'everything' "
+            "explicitly)"
+        )
+    logger.warning(
+        "ProductAssemblySpec %r sets no surface_selection: every enabled "
+        "module's API routers and web surfaces are mounted (compatibility "
+        "mode; fatal in production). Declare an explicit selection.",
+        name,
+    )
+
+
+def _under(path: str, root: str) -> bool:
+    return path == root or path.startswith(f"{root}/")
+
+
+def _validate_route_collisions(
+    app: FastAPI,
+    *,
+    platform_enabled: bool,
+    exempt_prefixes: Sequence[str],
+    module_api_keys: Set[tuple[str, str]],
+) -> None:
     """Refuse silent shadowing across the whole composed app.
 
-    Two checks, both after every mount: (1) no two routes share a
-    ``(method, path shape)`` - Starlette resolves such twins by first match, so
-    one silently shadows the other; (2) no composed browser surface route sits
-    under a reserved root (health, docs, static, ``/api``, and ``/platform``
-    when the platform surface is enabled). Under a ``/`` facet the facet prefix
-    no longer shields module routes from these.
+    After every mount: (1) no two routes share a ``(method, path shape)`` -
+    Starlette resolves such twins by first match, so one silently shadows the
+    other; (2) no composed browser surface route sits under a reserved root
+    (health, docs, static, ``/api``, and ``/platform`` when the platform surface
+    is enabled); (3) no module ``api_routers`` route enters a kernel-owned
+    subtree. Under a ``/`` facet the facet prefix no longer shields module
+    routes. Contract-1 and kernel built-in surfaces are exempt from (2) by their
+    registered flags (``exempt_prefixes``), not by anything in a route name.
     """
     reserved = _RESERVED_SURFACE_ROOTS + (("/platform",) if platform_enabled else ())
+    api_reserved = _RESERVED_API_ROOTS + (("/platform",) if platform_enabled else ())
+    exempt = tuple(exempt_prefixes)
     seen: dict[tuple[str, str], str] = {}
     problems: list[str] = []
     for route in app.routes:
@@ -570,19 +612,20 @@ def _validate_route_collisions(app: FastAPI, *, platform_enabled: bool) -> None:
                 )
             else:
                 seen[key] = route.name
-        # Legacy (contract-1) and kernel built-in surfaces predate the rule.
-        if (
-            route.name.startswith("web:")
-            and ":legacy:" not in route.name
-            and ":kernel_platform:" not in route.name
-            and any(
-                route.path == root or route.path.startswith(f"{root}/")
-                for root in reserved
-            )
-        ):
+        if route.name.startswith("web:"):
+            if not route.name.startswith(exempt) and any(
+                _under(route.path, root) for root in reserved
+            ):
+                problems.append(
+                    f"surface route {route.path} ({route.name!r}) is under a "
+                    "reserved root"
+                )
+        elif any(
+            (method, route.path) in module_api_keys for method in (route.methods or ())
+        ) and any(_under(route.path, root) for root in api_reserved):
             problems.append(
-                f"surface route {route.path} ({route.name!r}) is under a "
-                "reserved root"
+                f"module API route {route.path} ({route.name!r}) is under a "
+                "kernel-owned root"
             )
     if problems:
         raise ValueError(
@@ -659,7 +702,8 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # Assembly surface selection (fail-closed). Validated against every
     # INSTALLED manifest so an entry naming an absent module/surface refuses
     # the boot; applied to the enabled set so an unselected API router set or
-    # web surface is never mounted. None = pre-selection compatibility mode.
+    # web surface is never mounted. None = pre-selection compatibility mode,
+    # allowed in development only.
     if spec.surface_selection is not None:
         spec.surface_selection.validate_against(manifests)
         not_selected = spec.surface_selection.unselected(enabled_manifests)
@@ -669,18 +713,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             )
         enabled_manifests = spec.surface_selection.apply(enabled_manifests)
     else:
-        # TODO(R0 decision 1): `None` is acceptable for the integration merge
-        # only. Before the Wave 0 kernel release is tagged it follows the
-        # environment policy (warning in development, FATAL in production), and
-        # at the next contract generation it refuses everywhere. Every
-        # ProductAssemblySpec consumer adds an explicit selection in the PR
-        # that bumps its kernel pin.
-        logger.warning(
-            "ProductAssemblySpec %r sets no surface_selection: every enabled "
-            "module's API routers and web surfaces are mounted (compatibility "
-            "mode). Declare an explicit selection.",
-            spec.name,
-        )
+        _note_absent_surface_selection(spec.name, production=settings.is_production)
     logger.info(
         "Module startup order (%d of %d enabled): %s",
         len(enabled_manifests),
@@ -1019,7 +1052,19 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             stylesheets=tuple(spec.stylesheets),
         )
 
-    _validate_route_collisions(app, platform_enabled=spec.platform_surface_enabled)
+    _validate_route_collisions(
+        app,
+        platform_enabled=spec.platform_surface_enabled,
+        exempt_prefixes=surface_registry.exempt_route_name_prefixes,
+        module_api_keys={
+            (method, route.path)
+            for manifest in enabled_manifests
+            for router in manifest.api_routers
+            for route in router.routes
+            if isinstance(route, APIRoute)
+            for method in (route.methods or ())
+        },
+    )
 
     # Inspect the effective, post-include dependency tree (including lazy
     # FastAPI route contexts). An earlier parent/global yield dependency would
