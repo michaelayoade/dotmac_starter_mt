@@ -508,7 +508,9 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-        CREATE CONSTRAINT TRIGGER posting_groups_opening_late_complete
+        -- Named to sort before the noncash completeness trigger, so this refusal is the
+        -- one a caller sees for an incomplete group.
+        CREATE CONSTRAINT TRIGGER posting_groups_late_item_complete
           AFTER INSERT ON mod_billing.posting_groups
           DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
           WHEN (NEW.group_kind IN {_KINDS})

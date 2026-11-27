@@ -2124,7 +2124,10 @@ class OpeningLateItem(Base, _TenantRow):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
     reverses_item_id: Mapped[UUID | None] = mapped_column(Uuid())
-    collection: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    # SQL NULL (not JSON null) when absent: the shape CHECK tests IS NULL.
+    collection: Mapped[dict[str, object] | None] = mapped_column(
+        JSON(none_as_null=True)
+    )
     collection_digest: Mapped[str | None] = mapped_column(String(64))
     evidence_ref: Mapped[str | None] = mapped_column(String(255))
     evidence_digest: Mapped[str | None] = mapped_column(String(64))

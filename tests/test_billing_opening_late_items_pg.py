@@ -53,6 +53,7 @@ from tests import test_billing_non_cash_credit as noncash
 from tests import test_billing_opening_cash_import as cash
 from tests import test_billing_opening_hold_admission as hold
 from tests import test_billing_opening_receivable_import as ar
+from tests import test_billing_tax_dependency_evidence as dependency
 from tests import test_billing_withholding_frozen as frozen
 from tests import test_billing_withholding_release_pg as qf
 
@@ -860,13 +861,15 @@ def test_the_withholding_freeze_refuses_an_opening_late_debit(scratch):
     with b._session(w.url, w.scope) as db:
         account = cash._new_account(db, w.scope)
         item = _record(db, w, _debit(w, account, "frz-1"))
-        _, _, tax = frozen._v2_invoice(db, w.scope)
+        evidence = dependency._evidence(w.scope)
         db.commit()
         with pytest.raises(BillingRuleViolation) as caught:
             frozen.freeze_issued_invoice_withholding(
                 db,
                 scope=w.scope,
-                command=frozen._freeze_command(account, item.document_id, w.scope, tax),
+                command=frozen._freeze_command(
+                    account, item.document_id, w.scope, evidence
+                ),
             )
         assert _code(caught) == "withholding_freeze_opening_late_item_unavailable"
         db.rollback()
@@ -942,7 +945,7 @@ def _room_and_live(db, tenant_id, document_id, account_id):
     ).one()
 
 
-def test_upgrade_with_data_keeps_every_room_and_then_admits_a_opening_late_credit(
+def test_upgrade_with_data_keeps_every_room_and_then_admits_an_opening_late_credit(
     at_predecessor,
 ):
     scratch, upgrade = at_predecessor
