@@ -724,7 +724,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac dual-plane collections policy and case owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1516,7 +1516,7 @@ url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-money-flows"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 optional = false
 python-versions = ">=3.11,<3.14"

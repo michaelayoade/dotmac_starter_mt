@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-money-flows"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 authors = ["DotMac"]
 readme = "README.md"

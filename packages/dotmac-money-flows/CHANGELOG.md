@@ -1,5 +1,17 @@
 # Changelog — dotmac-money-flows
 
+## 0.1.0a4 — source candidate, not yet published (GAP-4 follow-up: database faults redeliver)
+
+Source only. a3 is published and tagged `dotmac-money-flows-v0.1.0a3`; released
+`mf_0001`..`mf_0003` bytes are unchanged. No migration, no Billing requirement
+change, and the `dotmac-collections >=0.1.0a3` floor stays (the Collections a4
+change is internal to Collections).
+
+- A charge-source read failure that is a `sqlalchemy.exc.DBAPIError` (a database fault) is
+  re-raised so the message redelivers, instead of becoming a per-row
+  `charge_source_error` step failure. Every other source error stays a per-row step
+  failure, including ORM usage errors such as `NoResultFound`. Applies to the four reads: the issue command, the funded and terms re-checks, and retry.
+
 ## 0.1.0a3 — released, tag `dotmac-money-flows-v0.1.0a3` (C2b: several deductions on one MANUAL confirmation)
 
 One additive migration. a2 is released and tagged.
