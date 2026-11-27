@@ -179,6 +179,7 @@ def test_web_enabled_false_drops_web_but_keeps_json_api():
             api_documentation=_DOCS_POLICY,
             name="api",
             modules=manifest_modules,
+            platform_api_modules=frozenset({\"tenants\"}),
             web_enabled=False,
         )
     )
@@ -193,6 +194,7 @@ def test_web_enabled_false_drops_web_but_keeps_json_api():
             api_documentation=_DOCS_POLICY,
             name="web",
             modules=manifest_modules,
+            platform_api_modules=frozenset({\"tenants\"}),
             web_enabled=True,
             **_secured_legacy_web_kwargs(),
         )
@@ -230,6 +232,7 @@ def test_disabled_module_routes_are_absent():
             api_documentation=_DOCS_POLICY,
             name="d",
             modules=modules,
+            platform_api_modules=frozenset({\"tenants\"}),
             disabled_modules=frozenset({"parties"}),
             **_secured_legacy_web_kwargs(),
         )
@@ -539,6 +542,7 @@ def test_health_does_not_disclose_the_module_inventory():
             api_documentation=_DOCS_POLICY,
             name="h",
             modules=_reference_modules(),
+            platform_api_modules=frozenset({\"tenants\"}),
             web_enabled=False,
         )
     )
@@ -554,6 +558,7 @@ def test_disabled_module_is_installed_but_not_enabled_in_the_inventory():
             api_documentation=_DOCS_POLICY,
             name="d",
             modules=modules,
+            platform_api_modules=frozenset({\"tenants\"}),
             disabled_modules=frozenset({"parties"}),
             web_enabled=False,
         )
