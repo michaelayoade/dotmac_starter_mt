@@ -380,6 +380,15 @@ def test_deactivate_suspends_access_and_reactivate_restores_held_grants(
         == 200
     )
     assert "access_admin.user.reactivate" in _actions(admin_session, tenant_a, uid)
+    admin_session.rollback()
+    details = admin_session.execute(
+        text(
+            "SELECT details::text FROM audit_events WHERE tenant_id = :t "
+            "AND entity_id = :e AND action = 'access_admin.user.reactivate'"
+        ),
+        {"t": str(tenant_a.id), "e": uid},
+    ).scalar_one()
+    assert '"role_slug": "admin"' in details and '"grants_held": 1' in details
 
 
 def test_leaver_revoke_removes_grants_then_reactivation_restores_none(
@@ -570,3 +579,24 @@ def test_leaver_revoke_rolls_back_completely_when_an_audit_write_fails(
     )
     # ...and the leaver's token still works.
     assert c.get(f"{BASE}/users", headers=_h(leaver)).status_code == 200
+
+
+def test_you_cannot_grant_a_role_to_yourself(
+    app_client: TestClient, admin_session: Session, tenant_a
+) -> None:
+    c = client_for(app_client, tenant_a.slug)
+    email = "selfgrant@tenant-a.example.com"
+    admin = provision_and_login(admin_session, tenant_a, c, email)
+    me = next(
+        u["id"]
+        for u in c.get(f"{BASE}/users?q=selfgrant", headers=_h(admin)).json()
+        if u["email"] == email
+    )
+    role = c.post(
+        f"{BASE}/roles", headers=_h(admin), json={"slug": "extra", "name": "Extra"}
+    ).json()["id"]
+    refused = c.post(
+        f"{BASE}/grants", headers=_h(admin), json={"party_id": me, "role_id": role}
+    )
+    assert refused.status_code == 409
+    assert "access_admin.grant.add" not in _actions(admin_session, tenant_a, me)

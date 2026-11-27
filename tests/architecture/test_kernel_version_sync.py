@@ -287,12 +287,13 @@ CAPABILITY_RAISED_FLOORS = {
     # again to published a106; a13 still records the namespace allocation.
     "dotmac-template-studio": ("0.1.0a106", "0.1.0a13"),
     # Stateless (no namespace), so the second value is only the first tag that
-    # ships the `transactions` surface it consumes. The floor stays a107 (the
-    # first tag shipping `identity_storage`, the storage `identity_admin`
-    # wraps) as the truthful lower bound, but `dotmac_kernel.identity_admin` is
-    # unreleased: when the release allocation publishes it, move the floor to
-    # that tag and add its path to LATER_SURFACES_RAISING_THE_FLOOR. Until then
-    # the transaction-floor test below is red for this one module by design.
+    # ships the `transactions` surface it consumes. The floor a107 is a
+    # PLACEHOLDER and is FALSE: `dotmac_kernel.identity_admin` and
+    # `ModuleManifest.runtime_requires` first ship in the Wave 0 kernel release,
+    # so the module cannot import on a107. Merge waits for that tag; then move
+    # the floor to it, add identity_admin.py to
+    # LATER_SURFACES_RAISING_THE_FLOOR and add the package to
+    # scripts/module_floor_check.sh.
     "dotmac-access-admin": ("0.1.0a107", "0.1.0a98"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest

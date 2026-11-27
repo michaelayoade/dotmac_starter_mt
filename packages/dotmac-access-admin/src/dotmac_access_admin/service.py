@@ -1,15 +1,15 @@
 """Access administration over the kernel identity tables.
 
 Every mutation here runs in ONE conflict SAVEPOINT of the caller's transaction,
-takes the kernel's Party-first lock order, uses the kernel identity-storage
-primitives for grants and sessions, and writes its audit events before the
-SAVEPOINT is released. So a failure anywhere (including the audit write) rolls
-the whole operation back, and the request's transaction never commits half a
-leaver revoke.
+takes the kernel's Party-first lock order, uses the kernel `identity_admin`
+commands for people, grants, sessions and roles, and writes its audit events
+before the SAVEPOINT is released. So a failure anywhere (including the audit
+write) rolls the whole operation back, and the request's transaction never
+commits half a leaver revoke.
 
-Order inside a savepoint matters: the identity-storage primitives refuse pending
-ORM state (`db.new`/`dirty`/`deleted`), so ORM attribute changes and audit rows
-come AFTER the storage calls.
+Order inside a savepoint matters: the `identity_admin` commands refuse pending
+ORM state (`db.new`/`dirty`/`deleted`), so audit rows come AFTER the command
+calls.
 """
 
 from __future__ import annotations
@@ -459,6 +459,18 @@ def reactivate_user(
         if fact.is_active:
             raise ConflictError("User is already active")
         held = lock_grants(db, tenant_id=tenant.id, party_ids=(party_id,))
+        slug_by_role: dict[UUID, str] = {}
+        for rid, slug in db.execute(
+            select(Role.id, Role.slug).where(Role.tenant_id == tenant.id)
+        ).all():
+            slug_by_role[rid] = slug
+        restored = [
+            {
+                "role_id": str(grant.role_id),
+                "role_slug": slug_by_role.get(grant.role_id, ""),
+            }
+            for grant in held
+        ]
         _set_active(db, tenant, party_id, True)
         _audit(
             db,
@@ -467,7 +479,7 @@ def reactivate_user(
             "access_admin.user.reactivate",
             "party",
             str(party_id),
-            {"grants_held": len(held)},
+            {"grants_held": len(held), "restored_roles": restored},
         )
     return get_user(db, tenant, party_id)
 
@@ -547,7 +559,12 @@ def leaver_revoke(
 def grant_role(
     db: Session, tenant: Tenant, actor: Party, *, party_id: UUID, role_id: UUID
 ) -> GrantOutcome:
-    """Grant a role (audited). SoD pairs produce WARNINGS, never a refusal."""
+    """Grant a role (audited). SoD pairs produce WARNINGS, never a refusal.
+
+    Granting yourself a role is refused: it is the escalation path once a
+    custom role can hold `access_admin.grants.manage`.
+    """
+    _refuse_self(actor, party_id, "grant a role to")
     with conflict_savepoint(db):
         fact = _locked_person(db, tenant, party_id)
         if not fact.is_active:
