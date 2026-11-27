@@ -313,7 +313,7 @@ def test_each_bi21_rewrite_fragment_occurs_exactly_once_in_the_bi8_tenant_bodies
     bi8 = _render_bi8()
     bi21 = _bi21()
     assert len(bi21.HUNKS) == 6
-    for signature, old, new in bi21.HUNKS:
+    for signature, old, _new in bi21.HUNKS:
         assert bi8.count(old) == 1, (signature, old[:60])
 
 
@@ -334,7 +334,9 @@ def test_the_late_item_table_is_named_only_inside_gated_blocks_of_the_rewrites()
     assert "opening_late_items" not in outside
     # Every gate that appears is closed, and every one of the three bodies has its
     # late logic only behind a gate or the plpgsql helper.
-    assert text.count("-- late-items gate begin") == text.count("-- late-items gate end")
+    assert text.count("-- late-items gate begin") == text.count(
+        "-- late-items gate end"
+    )
     assert "has_opening_late_issuance" in outside
 
 
