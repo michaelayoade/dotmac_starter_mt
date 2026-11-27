@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 import tomllib
 from dataclasses import fields
 from pathlib import Path
@@ -21,11 +22,27 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-durable-timers"
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/dt_0001_durable_timers.py"
+JOB_STATES_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0002_job_states.py"
+TYPED_CLAIM_MIGRATION = MODULE_ROOT / "migrations/versions/dt_0003_typed_claim.py"
+
+# The composition roots, named so the canary below can state EXACTLY what each
+# may do that the rest of the module may not:
+#  - dispatch.py is a relay transport; like the kernel's own transports it
+#    commits the failure record inside `deliver` before telling the relay to
+#    retry, because the worker rolls back on raise;
+#  - run.py is the process entrypoint: it alone reads the ambient clock;
+#  - runtime.py holds the staff surface's single request clock read;
+#  - probe.py is the health-probe command, which compares file ages to now.
+COMMIT_ALLOWED = frozenset({"dispatch.py"})
+CLOCK_ALLOWED = frozenset({"run.py", "runtime.py", "probe.py"})
 
 
-def _module_source() -> str:
+def _module_source(exclude: frozenset[str] = frozenset()) -> str:
+    # Exemptions are matched by path relative to the module root, not basename.
     return "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted(MODULE_ROOT.rglob("*.py"))
+        path.read_text(encoding="utf-8")
+        for path in sorted(MODULE_ROOT.rglob("*.py"))
+        if path.relative_to(MODULE_ROOT).as_posix() not in exclude
     )
 
 
@@ -61,8 +78,15 @@ def test_manifest_matches_the_permanent_namespace_allocation() -> None:
 def test_manifest_declares_both_selectable_planes_and_the_relay_prerequisite() -> None:
     assert module.tables == models.TENANT_TABLES
     assert module.platform_tables == models.PLATFORM_TABLES
-    assert module.requires == ("module_database_roles.v1", "outbox_relay.v1")
-    assert module.tenant_requires == ("tenant_scope_catalog.v1",)
+    assert module.requires == (
+        "module_database_roles.v1",
+        "outbox_relay.v1",
+        "outbox_typed_claim.v1",
+    )
+    assert module.tenant_requires == (
+        "tenant_scope_catalog.v1",
+        "tenant_audit_log.v1",
+    )
     assert {frozenset(planes) for planes in module.supported_plane_sets} == {
         frozenset((ModulePlane.TENANT,)),
         frozenset((ModulePlane.PLATFORM,)),
@@ -70,23 +94,39 @@ def test_manifest_declares_both_selectable_planes_and_the_relay_prerequisite() -
     }
 
 
-def test_migration_declares_exactly_the_manifest_prerequisites() -> None:
-    tree = ast.parse(MIGRATION.read_text(encoding="utf-8"))
-    assignments: dict[str, tuple[str, ...]] = {}
+def _declared_requires(path: Path) -> dict[str, tuple[str, ...]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: dict[str, tuple[str, ...]] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or not isinstance(
-            node.targets[0], ast.Name
-        ):
-            continue
-        if node.targets[0].id in {
+        target = (
+            node.target
+            if isinstance(node, ast.AnnAssign)
+            else node.targets[0]
+            if isinstance(node, ast.Assign)
+            else None
+        )
+        if isinstance(target, ast.Name) and target.id in {
             "COMMON_REQUIRES",
             "TENANT_REQUIRES",
             "PLATFORM_REQUIRES",
         }:
-            assignments[node.targets[0].id] = tuple(ast.literal_eval(node.value))
-    assert assignments["COMMON_REQUIRES"] == module.requires
-    assert assignments["TENANT_REQUIRES"] == module.tenant_requires
-    assert assignments["PLATFORM_REQUIRES"] == module.platform_requires
+            assert node.value is not None
+            found[target.id] = tuple(ast.literal_eval(node.value))
+    return found
+
+
+def test_migrations_declare_exactly_the_manifest_prerequisites() -> None:
+    declared = [
+        _declared_requires(path)
+        for path in (MIGRATION, JOB_STATES_MIGRATION, TYPED_CLAIM_MIGRATION)
+    ]
+
+    def joined(key: str) -> tuple[str, ...]:
+        return tuple(item for one in declared for item in one[key])
+
+    assert joined("COMMON_REQUIRES") == module.requires
+    assert joined("TENANT_REQUIRES") == module.tenant_requires
+    assert joined("PLATFORM_REQUIRES") == module.platform_requires
 
 
 def test_planes_are_declared_disjoint_and_never_cross_linked() -> None:
@@ -109,10 +149,10 @@ def test_planes_are_declared_disjoint_and_never_cross_linked() -> None:
 
 
 def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> None:
-    source = _module_source()
-    assert _clock_reads(source) == set()
+    assert _clock_reads(_module_source(CLOCK_ALLOWED)) == set()
+    assert _module_source(CLOCK_ALLOWED) != _module_source()
+    source = _module_source(COMMIT_ALLOWED)
     for forbidden in (
-        "claim_outbox_batch",
         "claim_platform_outbox_batch",
         "SKIP LOCKED",
         "skip_locked",
@@ -122,6 +162,32 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
         ".rollback(",
     ):
         assert forbidden not in source
+    # The exemptions are narrow: the transports still never claim or build a
+    # session, and the entrypoint never builds one directly either (it goes
+    # through the kernel's DatabaseRuntime).
+    for forbidden in (
+        "claim_platform_outbox_batch",
+        "SKIP LOCKED",
+        "skip_locked",
+        "SessionLocal(",
+        "sessionmaker(",
+        "create_engine(",
+        ".rollback(",
+    ):
+        assert forbidden not in _module_source()
+    # The kernel's all-types entry points are never used (the `*_by_type`
+    # spellings are the only legal ones; the opening parenthesis keeps them so).
+    for forbidden in ("run_once(", "claim_batch("):
+        assert forbidden not in _module_source()
+    # The all-types kernel claim by name (the typed `claim_outbox_batch_by_type`
+    # is the one legal spelling, and the boot role check must name it).
+    assert not re.search(r"claim_outbox_batch(?!_by_type)", _module_source())
+    for node in ast.walk(ast.parse(_module_source())):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "dotmac_kernel.messaging"
+        ):
+            names = {alias.name for alias in node.names}
+            assert not names & {"run_once", "run_forever", "claim_batch"}, names
 
 
 def test_clock_guard_has_a_sensitivity_proof() -> None:

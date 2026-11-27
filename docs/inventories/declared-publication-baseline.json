@@ -137,6 +137,11 @@
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. Released a1 remains unchanged. Candidate a2 adds separate Billing-shaped V2 rendering with honest recorded provenance, shared Kernel a103 canonical encoding and strict in-memory PDF validation. Hosted acceptance, authorized publication and install-back verification precede product qualification; no Sub pin, official-artifact authority or financial writer activation changes here.",
       "state": "declared-unpublished"
     },
+    "dotmac-durable-timers": {
+      "declared": "0.1.0a3",
+      "reason": "dotmac-durable-timers 0.1.0a3 is source preparation only (a2 is published and immutable); it adds the Wave 0 job runner and is not to be built or published until the Wave 0 train.",
+      "state": "declared-unpublished"
+    },
     "dotmac-files": {
       "declared": "0.1.0a8",
       "reason": "ALLOCATED SOURCE CANDIDATE, NOT YET PUBLISHED. 0.1.0a7 remains published and tagged as dotmac-files-v0.1.0a7. 0.1.0a8 adds a same-scope, bounded, verified read: read_verified refuses a foreign-scope target, reads at most limit+1 bytes, and checks the recorded size, sha256 and content-detected media type, with a canonical-UUID-only file reference. The release track publishes and tags it after merge.",
