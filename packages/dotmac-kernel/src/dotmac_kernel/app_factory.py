@@ -590,12 +590,17 @@ def _validate_route_collisions(
     other; (2) no composed browser surface route sits under a reserved root
     (health, docs, static, ``/api``, and ``/platform`` when the platform surface
     is enabled); (3) no module ``api_routers`` route enters a kernel-owned
-    subtree. Under a ``/`` facet the facet prefix no longer shields module
+    subtree (docs, redoc, openapi.json, static; ``/platform``, ``/api`` and
+    ``/health/...`` stay open to module APIs). Under a ``/`` facet the facet prefix no longer shields module
     routes. Contract-1 and kernel built-in surfaces are exempt from (2) by their
     registered flags (``exempt_prefixes``), not by anything in a route name.
     """
     reserved = _RESERVED_SURFACE_ROOTS + (("/platform",) if platform_enabled else ())
-    api_reserved = _RESERVED_API_ROOTS + (("/platform",) if platform_enabled else ())
+    # `/platform` is reserved for browser surfaces only: the platform-admin API
+    # (e.g. the reference `tenants` module's `/platform/tenants`) is a module API
+    # that legitimately lives there, and a real clash with a platform surface
+    # route is still refused by the (method, shape) twin check above.
+    api_reserved = _RESERVED_API_ROOTS
     exempt = tuple(exempt_prefixes)
     seen: dict[tuple[str, str], str] = {}
     problems: list[str] = []
