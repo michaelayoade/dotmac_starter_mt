@@ -41,7 +41,7 @@ from dotmac_money_flows.contracts import (
 )
 from dotmac_money_flows.models import FundedChargeInstance
 from sqlalchemy import create_engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 NGN = Currency("NGN", 2)
@@ -1059,6 +1059,19 @@ def test_a_charge_source_failure_on_one_row_is_a_step_failure_for_that_row(
     assert failed.value.code == "charge_source_error"
 
 
+def test_a_database_fault_reading_a_charge_propagates_for_redelivery(monkeypatch):
+    class Down(_Charges):
+        def read(self, db, *, scope, key):
+            raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    row = _pending_row()
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(Down()), FundedChargePolicyV1("p1")
+    )
+    with pytest.raises(OperationalError):
+        flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE))
+
+
 # --------------------------------------------------------------------------
 # Per-account terms re-check (D3)
 # --------------------------------------------------------------------------
@@ -1177,6 +1190,16 @@ def test_a_source_failure_is_a_step_failure_for_that_row(monkeypatch):
         _recheck(monkeypatch, rows, charges=Broken())
     assert failed.value.instance_id == rows[0][0].id
     assert failed.value.code == "charge_source_error"
+
+
+def test_a_database_fault_reading_a_charge_in_the_recheck_propagates(monkeypatch):
+    class Down(_Charges):
+        def read(self, db, *, scope, key):
+            raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    rows = [_pending("1.00", 1)]
+    with pytest.raises(OperationalError):
+        _recheck(monkeypatch, rows, charges=Down())
 
 
 def test_a_billing_refusal_is_a_step_failure_with_its_code(monkeypatch):

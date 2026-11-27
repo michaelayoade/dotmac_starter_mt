@@ -1,9 +1,20 @@
 # Changelog
 
-## UNRELEASED — 0.1.0a3 proposal (GAP-4: the per-account access hold)
+## 0.1.0a4 — source candidate, not yet published (GAP-4 follow-up: the halted ladder is recorded)
 
-Source only; not built or published. a2 is published and its `cl_0001` migration is
-unchanged.
+Source only. a3 is published and tagged `dotmac-collections-v0.1.0a3`; no migration
+changes and the released `cl_0001`/`cl_0002` bytes are unchanged.
+
+- When the policy ladder stops because the next step counts from a receipt that a
+  skipped step cannot supply, the case now records one `active` to `active`
+  transition with reason code `policy_ladder_halted_no_anchor` instead of stopping
+  silently. At most one per case: resume, hold-lift re-arm and redelivery find the
+  existing transition and record nothing more. No schema, contract or allowlist
+  change.
+
+## 0.1.0a3 — released, tag `dotmac-collections-v0.1.0a3` (GAP-4: the per-account access hold)
+
+a2 is published and its `cl_0001` migration is unchanged.
 
 - Migration `cl_0002_collection_holds` (both planes): the nullable
   `collection_cases.access_hold_from`, the insert-only `collection_holds` and
@@ -82,7 +93,7 @@ unchanged.
 - Policy values (due days, grace, notice offsets) stay settings of the adopter and
   of Billing's account terms; nothing is hard-coded here.
 
-## UNRELEASED — 0.1.0a2 proposal
+## 0.1.0a2 — released, tag `dotmac-collections-v0.1.0a2`
 
 Proposed successor for a fresh build through the modern release provenance
 lane, pending review and Michael's source/release authorization after the

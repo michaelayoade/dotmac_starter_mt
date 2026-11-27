@@ -13,7 +13,7 @@ from dotmac_collections.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="collections",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="coll",
     migration_prefix="cl",
