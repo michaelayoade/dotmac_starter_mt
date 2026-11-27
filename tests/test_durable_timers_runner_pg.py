@@ -894,13 +894,18 @@ def login_roles(env) -> Iterator[object]:
     dbname = env.scratch["admin"].rpartition("/")[2]
     created: list[str] = []
 
-    def make(*member_of: str) -> str:
+    def make(*member_of: str, noinherit: bool = False) -> str:
         import uuid
 
         name = f"jr_login_{uuid.uuid4().hex[:10]}"
         with server.connect() as connection:
             connection.execute(
-                text(f'CREATE ROLE "{name}" LOGIN IN ROLE ' + ", ".join(member_of))
+                text(
+                    f'CREATE ROLE "{name}" LOGIN '
+                    + ("NOINHERIT " if noinherit else "")
+                    + "IN ROLE "
+                    + ", ".join(member_of)
+                )
             )
             connection.execute(
                 text(f'GRANT CONNECT ON DATABASE "{dbname}" TO "{name}"')
@@ -1043,3 +1048,20 @@ def test_a_failing_audit_in_the_dead_letter_hook_never_reruns_the_handler(
     state = _state(env, tenant_id, env.flaky)
     # Every handler run records a failure; none more was recorded.
     assert state is not None and state.consecutive_failures == failures_after_final
+
+
+def test_a_noinherit_membership_in_the_dispatcher_group_is_still_refused(
+    env, login_roles
+) -> None:
+    # USAGE would read false here (nothing is inherited) but the handler could
+    # reach the group with SET ROLE; MEMBER refuses it.
+    runtime = _runtime(login_roles("app_user", "outbox_dispatcher", noinherit=True))
+    try:
+        with pytest.raises(RoleSplitError, match="member of 'outbox_dispatcher'"):
+            verify_role_split(
+                tenant_factory=runtime.session_factory,
+                dispatcher_factory=env.dispatcher.session_factory,
+            )
+    finally:
+        runtime.engine.dispose()
+        runtime.platform_engine.dispose()
