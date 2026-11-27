@@ -354,6 +354,50 @@ PARTY_PERSON_CATALOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
+#: The storage `dotmac_kernel.identity_admin` reads and writes. A STATELESS
+#: module that calls those governed commands declares it in
+#: `ModuleManifest.runtime_requires` (it owns no lineage, so `requires` is
+#: refused for it). The frozen `identity_storage` primitives stay frozen with
+#: empty caller sets: modules call the governed commands, never the primitives.
+IDENTITY_ADMIN_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="identity_admin.v1",
+    summary=(
+        "public.parties, public.party_persons, public.party_role_grants, "
+        "public.roles and public.auth_sessions with the kernel identity "
+        "contract: the unique functional index uq_parties_tenant_lower_email "
+        "over (tenant_id, lower(email)) and the unique constraint "
+        "uq_party_role_grants_member over (tenant_id, party_id, role_id); "
+        "ENABLE and FORCE row-level security on each of the five tables; and "
+        "app_user (NOSUPERUSER, NOBYPASSRLS) holding exactly the privileges "
+        "the commands use — SELECT, INSERT and row-lock (UPDATE) on parties, "
+        "SELECT and INSERT on party_persons, SELECT, INSERT, DELETE and "
+        "row-lock (UPDATE) on party_role_grants, SELECT and INSERT on roles, "
+        "and UPDATE of parties.is_active, roles.name and "
+        "auth_sessions.revoked_at (plus SELECT on auth_sessions). Supplies the storage "
+        "dotmac_kernel.identity_admin commands write; it does not decide who "
+        "may call them or what any role confers."
+    ),
+)
+
+#: The event-type-scoped claim `dotmac_kernel.messaging.relay.claim_batch_by_type`
+#: calls. A separate effect from `outbox_relay.v1` (whose contract it leaves
+#: unchanged): a database at kernel 0011 or later satisfies the relay and still
+#: lacks this function, and the dispatcher's EXECUTE on it is a later grant.
+OUTBOX_TYPED_CLAIM_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="outbox_typed_claim.v1",
+    summary=(
+        "outbox_relay.v1 holds, and "
+        "public.claim_outbox_batch_by_type(text, integer, integer, text[]) "
+        "exists, is SECURITY DEFINER with search_path pinned to the empty "
+        "string, is owned by app_admin, and carries EXECUTE for "
+        "outbox_dispatcher and for no other role: not PUBLIC, not app_user, "
+        "not platform_api. It applies the existing claim's predicate plus "
+        "event_type = ANY(array) to both claim arms. Supplies the typed claim a "
+        "single-type consumer (the durable-timers job runner) uses so a foreign "
+        "event is never leased."
+    ),
+)
+
 KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     TENANT_SCOPE_CATALOG_V1,
     MODULE_DATABASE_ROLES_V1,
@@ -362,6 +406,8 @@ KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     PLATFORM_AUDIT_LOG_V1,
     TENANT_AUDIT_LOG_V1,
     PARTY_PERSON_CATALOG_V1,
+    IDENTITY_ADMIN_V1,
+    OUTBOX_TYPED_CLAIM_V1,
 )
 
 
@@ -647,8 +693,10 @@ __all__ = [
     "all_bound",
     "autoload_bindings",
     "IDEMPOTENCY_LEDGER_V1",
+    "IDENTITY_ADMIN_V1",
     "MODULE_DATABASE_ROLES_V1",
     "OUTBOX_RELAY_V1",
+    "OUTBOX_TYPED_CLAIM_V1",
     "PARTY_PERSON_CATALOG_V1",
     "PLATFORM_AUDIT_LOG_V1",
     "TENANT_AUDIT_LOG_V1",

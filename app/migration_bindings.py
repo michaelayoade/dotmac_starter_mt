@@ -25,8 +25,10 @@ from typing import Final
 
 from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
+    IDENTITY_ADMIN_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    OUTBOX_TYPED_CLAIM_V1,
     PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
     TENANT_AUDIT_LOG_V1,
@@ -99,6 +101,23 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=TENANT_AUDIT_LOG_V1.name,
         provider_revision="0029_audit_history_shape",
+        provider_owner="kernel",
+    ),
+    # The identity storage `dotmac_kernel.identity_admin` writes: parties and
+    # person subtype (0003), role grants with `uq_party_role_grants_member`
+    # (0022) and the session provenance columns on `auth_sessions` (0025). No
+    # later kernel revision changes any of the five tables, so `0025` is the
+    # revision after which the whole effect is true.
+    PrerequisiteBinding(
+        prerequisite=IDENTITY_ADMIN_V1.name,
+        provider_revision="0025_session_provenance",
+        provider_owner="kernel",
+    ),
+    # The event-type-scoped claim exists at `0035`, but the dispatcher may only
+    # EXECUTE it after `0036`'s grant, so the effect is true at `0036`.
+    PrerequisiteBinding(
+        prerequisite=OUTBOX_TYPED_CLAIM_V1.name,
+        provider_revision="0036_typed_claim_grant",
         provider_owner="kernel",
     ),
 )

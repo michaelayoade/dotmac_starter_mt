@@ -71,6 +71,62 @@ allocation (this ships with the next allocated release).
   its digest. Pinned digest
   `b746eb0073de9d148cc659dd3e7282a19d40e1e0296ade4a8ec8223ba651be52`, tested in
   `tests/unit/test_email_send_contract.py`. A schema change is a new `.vN` id.
+- **`Party.is_active` is honoured at authentication** (review R3 Q1).
+  `deps.authenticate_request` returns `None` for an inactive party (bearer and
+  cookie share the seam), `deps._holds_any_role` joins `Party` and requires
+  `is_active` (so `authorize_party` is false for an inactive party that still
+  holds grant rows), and the reference `app.features.auth.service.login` sends
+  an inactive party down the existing constant-work miss path (one dummy
+  verification, identical `Invalid credentials`) under the party `FOR UPDATE`
+  lock, so a login racing a deactivation re-reads `is_active` and issues no
+  session. Behaviour change: a deactivated party can no longer authenticate.
+- **`ModuleManifest.runtime_requires`** (R3 Q3), appended last. Legal ONLY on a
+  stateless module (a stateful module is refused); validated like `requires` and
+  included in the overlap check. The refusal of `requires` on a stateless module
+  and every migration gate are unchanged. `ProductAssemblySpec.prerequisite_bindings`
+  (keyword-only) carries the SAME tuple the migration environment installs;
+  `create_app` resolves every ENABLED module's `runtime_requires` through it (no
+  environment variable at app runtime) and refuses to boot when bindings are also
+  installed process-wide and differ. `migrations.verify.require_runtime_prerequisites`
+  proves those effects against the live database; the reference `alembic/env.py`
+  calls it after the upgrade, so a deploy refuses a database lacking what a
+  stateless module calls. Adopters call it the same way.
+- **`dotmac_kernel.identity_admin`** and prerequisite **`identity_admin.v1`**
+  (`IDENTITY_ADMIN_V1`, `verify_identity_admin`; the reference assembly binds it
+  to `0025_session_provenance`). Governed commands `create_person`,
+  `ensure_grant`, `find_party_normalized_email`, `lock_grants`, `lock_parties`,
+  `remove_grants`, `revoke_party_sessions`, plus `set_party_active` (the one
+  governed writer of `Party.is_active`, under the held party lock) and
+  `create_tenant_role` / `rename_tenant_role` (refuse a slug a declared
+  permission binds through `default_roles`). They enforce Party-first lock order
+  (`lock_parties` once per scope), refuse drift, a non-normalised email, a grant
+  to an inactive party, and lock the session cohort before revoking it. The
+  verifier proves the exact `app_user` privileges, including roles INSERT and
+  UPDATE of `parties.is_active` and `roles.name`. The frozen `identity_storage`
+  primitives stay frozen with empty module-caller sets. Additive; no root export
+  changes. Deviation from R3 Q3.2, recorded: audit actions and the leaver
+  composite stay in the calling module for Wave 0.
+- **Event-type-filtered outbox claim** (R2 F1). New
+  `messaging.relay.claim_batch_by_type(db, *, worker_id, event_types, policy)`
+  (a separate function: `claim_batch` is unchanged and takes no filter, so a
+  `None` list can never mean "all types"), It calls the SECURITY DEFINER
+  `public.claim_outbox_batch_by_type(text, integer, integer, text[])`
+  (migration `0035_outbox_typed_claim`, with the partial index
+  `ix_outbox_events_type_available`), which applies the existing claim's
+  predicate plus `event_type = ANY(...)` to BOTH arms, so a foreign event is
+  never leased, even a stale-claimed one. New prerequisite
+  `outbox_typed_claim.v1` (`verify_outbox_typed_claim`: signature, SECURITY
+  DEFINER, empty search_path, owner, EXECUTE for `outbox_dispatcher` only), bound
+  to `0036_typed_claim_grant`; `outbox_relay.v1` is unchanged. **Policy change:**
+  `0036_typed_claim_grant` grants EXECUTE on it to `outbox_dispatcher` (narrower
+  than the all-types claim it already holds). The worker gains `run_once_by_type`
+  / `run_forever_by_type` with a REQUIRED `event_types` (MAPPED to
+  `outbox_typed_claim.v1`; `run_once`/`run_forever` take no filter, so `None`
+  cannot mean every type). `create_tenant_role`/`rename_tenant_role` refuse when
+  the permission catalogue is not installed (a CLI or job process).
+  **Release note:** `0035` builds `ix_outbox_events_type_available` without
+  CONCURRENTLY, so the build briefly blocks writes to `outbox_events`; run it in
+  a quiet window.
 
 ## 0.1.0a110 — Release inventory
 
