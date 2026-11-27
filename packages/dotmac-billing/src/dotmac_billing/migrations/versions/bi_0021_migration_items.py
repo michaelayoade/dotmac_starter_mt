@@ -232,8 +232,8 @@ def upgrade() -> None:
             "AND length(trim(source_system)) > 0 AND length(trim(source_key)) > 0 "
             "AND (source_number IS NULL OR length(trim(source_number)) > 0) "
             "AND (evidence_ref IS NULL OR length(trim(evidence_ref)) > 0) "
-            "AND (evidence_digest IS NULL OR evidence_digest ~ '^[0-9a-f]{64}$') "
-            "AND (collection_digest IS NULL OR collection_digest ~ '^[0-9a-f]{64}$') "
+            "AND (evidence_digest IS NULL OR length(evidence_digest) = 64) "
+            "AND (collection_digest IS NULL OR length(collection_digest) = 64) "
             "AND (reason IS NULL OR length(trim(reason)) > 0)",
             name=f"ck_{_TABLE}_attribution",
         ),
