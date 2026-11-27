@@ -360,6 +360,22 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         # Academy's learning core is reserved before implementation/cutover.
         "learning",
         "money_flows",
+        # Starter parity programme Wave 0 (D3): allocation only.
+        "staff_loans",
+        "leave",
+        "leases",
+        "attendance",
+        "hr_lifecycle",
+        "performance",
+        "recruitment",
+        "employee_relations",
+        "calendar",
+        "fleet",
+        "help_centre",
+        "webhooks",
+        "notifications",
+        "reporting",
+        "custom_fields",
         # The two Cloud service-lifecycle owners (ADR-0030 amendment
         # 2026-08-23). `domains` takes `dn`, NOT the `do` its candidate tree
         # carried: `documents` holds `do` permanently and an allocation is
@@ -1025,3 +1041,38 @@ def test_the_uniqueness_check_survives_the_digest() -> None:
     duplicated = [*MIGRATION_OWNER_LEDGER, MIGRATION_OWNER_LEDGER[-1]]
     with pytest.raises(NamespaceError):
         NamespaceRegistry.from_manifests([], ledger=duplicated)
+
+
+def test_parity_programme_d3_allocations_are_exactly_these() -> None:
+    """Wave 0 (D3) reserved identity for the new STATEFUL modules only.
+
+    Stateless D3 packages (settings-admin, access-admin, account, audit-viewer)
+    own no lineage and have no row. notifications, reporting and custom_fields
+    were allocated by the R0 ruling (decision 2, 2026-11-25); moving the
+    existing custom-fields tables out of `public` is Wave 5 migration design,
+    not part of this allocation.
+    """
+    allocations = {
+        owner.owner: (owner.db_schema, owner.prefix, owner.branch_label)
+        for owner in MIGRATION_OWNER_LEDGER
+    }
+    expected = {
+        "staff_loans": ("mod_sloans", "sl", "staff_loans"),
+        "leave": ("mod_leave", "lv", "leave"),
+        "leases": ("mod_leases", "le", "leases"),
+        "attendance": ("mod_attend", "atn", "attendance"),
+        "hr_lifecycle": ("mod_hrlife", "hl", "hr_lifecycle"),
+        "performance": ("mod_perf", "pf", "performance"),
+        "recruitment": ("mod_recruit", "rt", "recruitment"),
+        "employee_relations": ("mod_emprel", "er", "employee_relations"),
+        "calendar": ("mod_calendar", "cd", "calendar"),
+        "fleet": ("mod_fleet", "fl", "fleet"),
+        "help_centre": ("mod_helpctr", "hc", "help_centre"),
+        "webhooks": ("mod_webhooks", "wh", "webhooks"),
+        "notifications": ("mod_notify", "nf", "notifications"),
+        "reporting": ("mod_reporting", "rp", "reporting"),
+        "custom_fields": ("mod_custfld", "cf", "custom_fields"),
+    }
+    assert {name: allocations[name] for name in expected} == expected
+    for stateless in ("settings_admin", "access_admin", "account", "audit_viewer"):
+        assert stateless not in allocations

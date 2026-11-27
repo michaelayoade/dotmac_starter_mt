@@ -59,6 +59,7 @@ from dotmac_kernel.platform_auth import (
     PLATFORM_COOKIE,
     PLATFORM_COOKIE_AUTHENTICATION,
 )
+from dotmac_kernel.surface_selection import SELECT_ALL
 from dotmac_kernel.web_deps import TENANT_COOKIE_AUTHENTICATION
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
@@ -154,6 +155,11 @@ async def _seed_setting_defaults() -> None:
 
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
+    # The reference product serves every API router and web surface its own
+    # installed modules declare. Stated explicitly (never inferred) so a module
+    # release that adds a surface is an informed decision here, not a silent
+    # mount; a product that wants less lists (module, surface) pairs instead.
+    surface_selection=SELECT_ALL,
     # The assembly's own features, plus every INSTALLED MODULE it composes.
     #
     # `dotmac_template_studio.module` is a `ModuleManifest`, not a

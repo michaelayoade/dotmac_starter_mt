@@ -14,6 +14,7 @@
 - [Choose features and brand your product](guides/build-a-product.md).
 - [Add a custom field](guides/custom-fields.md).
 - [Apply database migrations](guides/migrations.md).
+- [Ship a module's surfaces, jobs and selection](guides/module-surfaces.md).
 - [Understand testing and checks](guides/testing.md).
 - [Deploy to production](guides/deploy.md).
 
