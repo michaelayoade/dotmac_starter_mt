@@ -591,8 +591,8 @@ def _validate_route_collisions(
     (health, docs, static, ``/api``, and ``/platform`` when the platform surface
     is enabled); (3) no module ``api_routers`` route enters a kernel-owned
     subtree (docs, redoc, openapi.json, static; ``/platform``, ``/api`` and
-    ``/health/...`` stay open to module APIs). Under a ``/`` facet the facet prefix no longer shields module
-    routes. Contract-1 and kernel built-in surfaces are exempt from (2) by their
+    ``/health/...`` stay open to module APIs). Under a ``/`` facet the facet
+    prefix no longer shields module routes. Contract-1 and kernel built-in surfaces are exempt from (2) by their
     registered flags (``exempt_prefixes``), not by anything in a route name.
     """
     reserved = _RESERVED_SURFACE_ROOTS + (("/platform",) if platform_enabled else ())
