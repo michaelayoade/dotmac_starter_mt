@@ -124,14 +124,14 @@ def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
 def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     app_client: TestClient, tenant_a, admin_session: Session
 ) -> None:
-    """(b) Web duplicate role-grant conflict — rbac.
+    """(b) Web duplicate role-grant conflict — access-admin.
 
-    Granting the same role to the same party twice must raise
+    Granting the same role to the same user twice must raise
     `ConflictError("Role already assigned")`, and the web handler must
-    re-render `/admin/role-grants` at 200 with that error AND the recent-
-    grants list still populated (non-empty) — proving `list_recent_grants`
-    (a fresh query, not a re-load of an already-loaded object) still saw
-    tenant data after the conflict, i.e. RLS tenant context was not wiped.
+    re-render the user page at 200 with that error AND the user still
+    populated (non-empty) — proving the follow-up reads (a fresh query, not a
+    re-load of an already-loaded object) still saw tenant data after the
+    conflict, i.e. RLS tenant context was not wiped.
     """
     a = client_for(app_client, tenant_a.slug)
     admin_email = "conflict-rbac-admin@tenant-a.example.com"
@@ -152,12 +152,12 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     party_id = create_resp.headers["location"].rsplit("/", 1)[-1]
 
     role_resp = a.post(
-        "/admin/roles",
+        "/admin/access/roles",
         data={"slug": "manager", "name": "Manager"},
         headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
-    assert role_resp.status_code == 302, role_resp.text
+    assert role_resp.status_code == 303, role_resp.text
 
     role = admin_session.scalars(
         select(Role).where(Role.tenant_id == tenant_a.id, Role.slug == "manager")
@@ -166,18 +166,18 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     role_id = str(role.id)
 
     first_grant = a.post(
-        "/admin/role-grants",
-        data={"party_id": party_id, "role_id": role_id},
+        f"/admin/access/{party_id}/grants",
+        data={"role_id": role_id},
         headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
-    assert first_grant.status_code == 302, first_grant.text
+    assert first_grant.status_code == 200, first_grant.text
 
     # Grant the SAME role to the SAME party again -> IntegrityError ->
     # ConflictError("Role already assigned").
     dup_grant = a.post(
-        "/admin/role-grants",
-        data={"party_id": party_id, "role_id": role_id},
+        f"/admin/access/{party_id}/grants",
+        data={"role_id": role_id},
         headers={CSRF_HEADER: csrf},
         follow_redirects=False,
     )
@@ -188,8 +188,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
         f"{dup_grant.text[:2000]}"
     )
     assert "Role already assigned" in dup_grant.text
-    # The recent-grants list (a FRESH query, run after the conflict) must
-    # still show tenant data — proves `list_recent_grants`/`list_roles`/
-    # `list_grantable_parties` did not run under a context-less session.
-    assert "Manager" in dup_grant.text
+    # The user page (FRESH queries, run after the conflict) must still show
+    # tenant data — proves the reads did not run under a context-less session.
+    assert "manager" in dup_grant.text
     assert "Grant Target" in dup_grant.text

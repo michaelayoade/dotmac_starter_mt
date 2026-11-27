@@ -1,0 +1,21 @@
+{# New user. No password field exists: a recovery intent is issued instead. #}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<div style="max-width:40rem;">
+  <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-lg);">New user</h1>
+  {% if error %}<div role="alert" style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md); border:1px solid var(--dmui-status-negative-border); background:var(--dmui-status-negative-surface); color:var(--dmui-status-negative-foreground); border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">{{ error }}</div>{% endif %}
+  <p style="font-size:var(--dmui-font-size-sm);">
+    The user gets no password from you. A recovery request is issued so they set their own.
+  </p>
+  <form method="post" action="{{ surface_url('create') }}"
+        style="display:flex; flex-direction:column; gap:var(--dmui-space-md);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Email <input type="text" name="email" value="{{ form.get('email', '') }}" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);"></label>
+    <label>First name <input type="text" name="first_name" value="{{ form.get('first_name', '') }}" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);"></label>
+    <label>Last name <input type="text" name="last_name" value="{{ form.get('last_name', '') }}" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);"></label>
+    <div><button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Create</button>
+    <a href="{{ surface_url('list') }}">Cancel</a></div>
+  </form>
+</div>
+{% endblock %}

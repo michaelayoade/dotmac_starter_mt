@@ -87,6 +87,8 @@ def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
         "platform_audit_log.v1",
         "tenant_audit_log.v1",
         "party_person_catalog.v1",
+        "identity_admin.v1",
+        "outbox_typed_claim.v1",
     }
 
 

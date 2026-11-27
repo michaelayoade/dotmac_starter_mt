@@ -35,7 +35,7 @@ what `dotmac_kernel.prerequisites` refuses to do.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, NoReturn
 
@@ -47,8 +47,10 @@ from dotmac_kernel.migrations.catalog import DEFAULT_APP_ROLE
 from dotmac_kernel.namespaces import HOST_SCHEMA
 from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
+    IDENTITY_ADMIN_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    OUTBOX_TYPED_CLAIM_V1,
     PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
     TENANT_AUDIT_LOG_V1,
@@ -1554,6 +1556,240 @@ def _verify_relay_function(
         )
 
 
+# ── identity_admin.v1 ───────────────────────────────────────────────────────
+
+_IDENTITY_ADMIN_TABLES: Final[tuple[str, ...]] = (
+    "parties",
+    "party_persons",
+    "party_role_grants",
+    "roles",
+    "auth_sessions",
+)
+
+#: `(table, privilege)` the commands use through the tenant application role.
+#: `UPDATE` on `parties` and `party_role_grants` is the row-lock privilege
+#: (`SELECT ... FOR UPDATE` needs it), checked as any-column because the locks
+#: do not write a column.
+_IDENTITY_ADMIN_TABLE_PRIVILEGES: Final[tuple[tuple[str, str], ...]] = (
+    ("parties", "SELECT"),
+    ("parties", "INSERT"),
+    ("party_persons", "SELECT"),
+    ("party_persons", "INSERT"),
+    ("party_role_grants", "SELECT"),
+    ("party_role_grants", "INSERT"),
+    ("party_role_grants", "DELETE"),
+    ("roles", "SELECT"),
+    ("roles", "INSERT"),
+    ("auth_sessions", "SELECT"),
+)
+#: Column-level UPDATE the commands perform: session revocation, the governed
+#: `set_party_active`, and `rename_tenant_role`.
+_IDENTITY_ADMIN_COLUMN_UPDATES: Final[tuple[tuple[str, str], ...]] = (
+    ("auth_sessions", "revoked_at"),
+    ("parties", "is_active"),
+    ("roles", "name"),
+)
+_IDENTITY_ADMIN_LOCK_TABLES: Final[tuple[str, ...]] = ("parties", "party_role_grants")
+
+
+def verify_identity_admin(bind: Connection) -> None:
+    """Prove the storage the `identity_admin` commands write, and who may write it.
+
+    Checks the unique indexes the commands rely on for collision and idempotency
+    (`uq_parties_tenant_lower_email`, `uq_party_role_grants_member`), FORCEd
+    row-level security on every table, and the exact tenant-role privileges. A
+    provider that supplies the tables with the right columns but no email
+    uniqueness lets two writers create the same login; one that lacks a FORCEd
+    policy lets the owner role skip tenant isolation.
+    """
+    name = IDENTITY_ADMIN_V1.name
+    inspector = sa.inspect(bind)
+    for table in _IDENTITY_ADMIN_TABLES:
+        if not inspector.has_table(table, schema=HOST_SCHEMA):
+            _fail(name, f"{HOST_SCHEMA}.{table} does not exist")
+
+    if bind.dialect.name != "postgresql":
+        return
+
+    # Read from the PostgreSQL catalogue: an expression index is not reliably
+    # reflected by the generic inspector, and the name is the contract.
+    email_index = bind.scalar(
+        sa.text(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = :schema "
+            "AND tablename = 'parties' AND indexname = "
+            "'uq_parties_tenant_lower_email'"
+        ),
+        {"schema": HOST_SCHEMA},
+    )
+    if (
+        email_index is None
+        or "UNIQUE" not in str(email_index)
+        or "lower(" not in str(email_index)
+    ):
+        _fail(
+            name,
+            f"{HOST_SCHEMA}.parties has no unique lower(email) index named "
+            "uq_parties_tenant_lower_email — email collisions would not be "
+            "refused at the database",
+        )
+
+    member_columns = bind.scalar(
+        sa.text(
+            "SELECT array_agg(a.attname::text ORDER BY a.attname::text) "
+            "FROM pg_constraint k "
+            "JOIN pg_class c ON c.oid = k.conrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "JOIN pg_attribute a ON a.attrelid = k.conrelid "
+            "AND a.attnum = ANY (k.conkey) "
+            "WHERE n.nspname = :schema AND c.relname = 'party_role_grants' "
+            "AND k.contype = 'u' AND k.conname = 'uq_party_role_grants_member'"
+        ),
+        {"schema": HOST_SCHEMA},
+    )
+    if list(member_columns or ()) != ["party_id", "role_id", "tenant_id"]:
+        _fail(
+            name,
+            f"{HOST_SCHEMA}.party_role_grants lacks unique constraint "
+            "uq_party_role_grants_member over (tenant_id, party_id, role_id)",
+        )
+
+    for table in _IDENTITY_ADMIN_TABLES:
+        enabled, forced = bind.execute(
+            sa.text(
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = :schema AND c.relname = :table"
+            ),
+            {"schema": HOST_SCHEMA, "table": table},
+        ).one()
+        if not (bool(enabled) and bool(forced)):
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{table} must have FORCEd row-level security "
+                f"(enabled={bool(enabled)}, forced={bool(forced)})",
+            )
+
+    role = bind.execute(
+        sa.text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = :r"),
+        {"r": DEFAULT_APP_ROLE},
+    ).one_or_none()
+    if role is None or bool(role[0]) or bool(role[1]):
+        _fail(
+            name,
+            f"role {DEFAULT_APP_ROLE!r} must exist and be NOSUPERUSER and "
+            "NOBYPASSRLS — the commands rely on its row-level security",
+        )
+
+    for table, privilege in _IDENTITY_ADMIN_TABLE_PRIVILEGES:
+        if not bind.scalar(
+            sa.text(
+                "SELECT has_table_privilege("
+                "CAST(:role AS name), CAST(:table AS text), CAST(:priv AS text))"
+            ),
+            {
+                "role": DEFAULT_APP_ROLE,
+                "table": f"{HOST_SCHEMA}.{table}",
+                "priv": privilege,
+            },
+        ):
+            _fail(
+                name,
+                f"role {DEFAULT_APP_ROLE!r} lacks {privilege} on "
+                f"{HOST_SCHEMA}.{table}",
+            )
+    for table in _IDENTITY_ADMIN_LOCK_TABLES:
+        if not bind.scalar(
+            sa.text(
+                "SELECT has_any_column_privilege("
+                "CAST(:role AS name), CAST(:table AS text), 'UPDATE')"
+            ),
+            {"role": DEFAULT_APP_ROLE, "table": f"{HOST_SCHEMA}.{table}"},
+        ):
+            _fail(
+                name,
+                f"role {DEFAULT_APP_ROLE!r} cannot row-lock "
+                f"{HOST_SCHEMA}.{table} (no UPDATE privilege on any column)",
+            )
+    for table, column in _IDENTITY_ADMIN_COLUMN_UPDATES:
+        if not bind.scalar(
+            sa.text(
+                "SELECT has_column_privilege("
+                "CAST(:role AS name), CAST(:table AS text), "
+                "CAST(:column AS text), 'UPDATE')"
+            ),
+            {
+                "role": DEFAULT_APP_ROLE,
+                "table": f"{HOST_SCHEMA}.{table}",
+                "column": column,
+            },
+        ):
+            _fail(
+                name,
+                f"role {DEFAULT_APP_ROLE!r} cannot UPDATE "
+                f"{HOST_SCHEMA}.{table}.{column}",
+            )
+
+
+# ── outbox_typed_claim.v1 ───────────────────────────────────────────────────
+
+_TYPED_CLAIM_SIGNATURE: Final[str] = (
+    "claim_outbox_batch_by_type(text, integer, integer, text[])"
+)
+
+
+def verify_outbox_typed_claim(bind: Connection) -> None:
+    """Prove the typed claim exists, is hardened, and is reachable by the
+    dispatcher and by nobody else. `outbox_relay.v1` must hold too."""
+    name = OUTBOX_TYPED_CLAIM_V1.name
+    verify_outbox_relay(bind)
+    if bind.dialect.name != "postgresql":
+        return
+    qualified = f"{HOST_SCHEMA}.{_TYPED_CLAIM_SIGNATURE}"
+    facts = bind.execute(
+        sa.text(
+            """
+            SELECT p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner),
+                   has_function_privilege(
+                       CAST(:dispatcher AS name), p.oid, 'EXECUTE'),
+                   EXISTS (
+                       SELECT 1 FROM aclexplode(COALESCE(
+                              p.proacl, acldefault(CAST('f' AS "char"), p.proowner))) a
+                        WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'),
+                   COALESCE((
+                       SELECT string_agg(r.rolname::text, ', ' ORDER BY r.rolname)
+                         FROM pg_roles r
+                        WHERE NOT r.rolsuper
+                          AND r.oid <> p.proowner
+                          AND r.rolname <> CAST(:dispatcher AS name)
+                          AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+                   ), '')
+              FROM pg_proc p
+             WHERE p.oid = to_regprocedure(CAST(:signature AS text))
+            """
+        ),
+        {"dispatcher": "outbox_dispatcher", "signature": qualified},
+    ).one_or_none()
+    if facts is None:
+        _fail(name, f"{qualified} does not exist")
+    secdef, proconfig, owner, dispatcher, public, others = facts
+    if not bool(secdef):
+        _fail(name, f"{qualified} is not SECURITY DEFINER")
+    if not _search_path_is_empty(proconfig):
+        _fail(name, f"{qualified} lacks an empty pinned search_path")
+    if str(owner) != _DEFINER_OWNER:
+        _fail(name, f"{qualified} is owned by {str(owner)!r}, expected app_admin")
+    if not bool(dispatcher):
+        _fail(name, f"outbox_dispatcher cannot EXECUTE {qualified}")
+    if bool(public):
+        _fail(name, f"EXECUTE on {qualified} is granted to PUBLIC")
+    if others:
+        _fail(
+            name,
+            f"EXECUTE on {qualified} reaches role(s) other than outbox_dispatcher "
+            f"and its owner (direct or inherited): {others}",
+        )
+
+
 # ── Dispatch ────────────────────────────────────────────────────────────────
 
 #: A prerequisite's verifier. Takes the migration's bind; raises to refuse.
@@ -1572,6 +1808,8 @@ _VERIFIERS: dict[str, Verifier] = {
     PLATFORM_AUDIT_LOG_V1.name: verify_platform_audit_log,
     TENANT_AUDIT_LOG_V1.name: verify_tenant_audit_log,
     PARTY_PERSON_CATALOG_V1.name: verify_party_person_catalog,
+    IDENTITY_ADMIN_V1.name: verify_identity_admin,
+    OUTBOX_TYPED_CLAIM_V1.name: verify_outbox_typed_claim,
 }
 
 
@@ -1648,6 +1886,47 @@ def require_prerequisites(bind: Connection, names: Sequence[str]) -> None:
         verifier(bind)
 
 
+def require_runtime_prerequisites(bind: Connection, manifests: Sequence[Any]) -> None:
+    """Prove, against the live database, every effect the ENABLED modules call.
+
+    A stateless module has no migration, so nothing else ever runs the verifier
+    for its `runtime_requires` and the effect would be trusted on the binding
+    alone. Call this from the assembly's migration environment after the upgrade
+    (`alembic/env.py`), over the enabled manifests, so a deploy refuses a
+    database that lacks what a stateless module calls. Modules without
+    `runtime_requires` (including feature manifests) contribute nothing.
+    """
+    names = sorted(
+        {name for m in manifests for name in getattr(m, "runtime_requires", ())}
+    )
+    if names:
+        require_prerequisites(bind, names)
+
+
+def require_runtime_prerequisites_at_heads(
+    bind: Connection,
+    manifests: Sequence[Any],
+    *,
+    current_heads: Iterable[str],
+    script_heads: Iterable[str],
+) -> bool:
+    """`require_runtime_prerequisites`, but only once the database is COMPLETE.
+
+    A partial upgrade (to a named predecessor revision, a downgrade, a scratch
+    database built to an earlier point) legitimately lacks storage a later
+    revision creates, so proving a stateless module's effects there would fail
+    for the wrong reason. The proof runs only when the database is at every head
+    of the composed graph after the migration; returns whether it ran. Call it
+    from the migration environment with `MigrationContext.get_current_heads()`
+    and `context.get_head_revisions()`.
+    """
+    current = set(current_heads)
+    if not current or current != set(script_heads):
+        return False
+    require_runtime_prerequisites(bind, manifests)
+    return True
+
+
 __all__ = [
     "PrerequisiteNotSatisfiedError",
     "PrerequisiteVerifierMissingError",
@@ -1655,10 +1934,14 @@ __all__ = [
     "register_verifier",
     "registered_verifiers",
     "require_prerequisites",
+    "require_runtime_prerequisites",
+    "require_runtime_prerequisites_at_heads",
     "role_violations",
     "verify_idempotency_ledger",
+    "verify_identity_admin",
     "verify_module_database_roles",
     "verify_outbox_relay",
+    "verify_outbox_typed_claim",
     "verify_platform_audit_log",
     "verify_party_person_catalog",
     "verify_tenant_scope_catalog",

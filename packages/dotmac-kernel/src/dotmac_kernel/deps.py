@@ -105,6 +105,13 @@ def authenticate_request(request: Request, db: Session, *, token: str) -> Party 
     party = db.get(Party, party_id)
     if party is None or party.party_type != PartyType.person:
         return None
+    # A deactivated party (leaver, suspension) fails on the very next request
+    # even though its session row is unrevoked: `Party.is_active` is read on
+    # every request, never cached, so deactivation does not depend on the
+    # session cohort having been revoked as well. Same `None` as every other
+    # failure — the caller cannot tell why.
+    if not party.is_active:
+        return None
     return party
 
 
@@ -142,7 +149,12 @@ def _holds_any_role(
     `require_permission` (the declared permission's `default_roles`). One
     implementation on purpose: a fix to the tenant scoping or the join lands
     once and both guards get it, exactly as `authenticate_request` is the one
-    token/session seam behind both the bearer and cookie flows."""
+    token/session seam behind both the bearer and cookie flows.
+
+    An INACTIVE party holds no role here, whatever grant rows it still has:
+    `Party.is_active` is joined and required, as defence in depth for
+    `authorize_party` calls made outside a route (jobs, services) where
+    `authenticate_request` never ran."""
     return (
         db.scalars(
             select(PartyRoleGrant)
@@ -151,8 +163,15 @@ def _holds_any_role(
                 (Role.id == PartyRoleGrant.role_id)
                 & (Role.tenant_id == PartyRoleGrant.tenant_id),
             )
+            .join(
+                Party,
+                (Party.id == PartyRoleGrant.party_id)
+                & (Party.tenant_id == PartyRoleGrant.tenant_id),
+            )
             .where(PartyRoleGrant.tenant_id == tenant.id)
             .where(PartyRoleGrant.party_id == party.id)
+            .where(Party.tenant_id == tenant.id)
+            .where(Party.is_active.is_(True))
             .where(Role.tenant_id == tenant.id)
             .where(Role.slug.in_(tuple(role_slugs)))
         ).first()

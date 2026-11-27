@@ -32,6 +32,7 @@ from dotmac_kernel.planes import (
     ModulePlaneSelection,
     validate_module_plane_selections,
 )
+from dotmac_kernel.prerequisites import PrerequisiteBinding
 from dotmac_kernel.request_evidence import TrustedProxyPolicy
 from dotmac_kernel.session_runtime import DatabaseRuntime
 from dotmac_kernel.web_surfaces import (
@@ -296,6 +297,15 @@ class ProductAssemblySpec:
     # they never expand the product-wide capability/source union.
     browser_document_policies: Sequence[BrowserDocumentPolicyV1] = ()
 
+    # The assembly's answer to "who supplies each prerequisite", the SAME tuple
+    # its migration environment installs (`install_prerequisite_bindings`).
+    # `create_app` resolves every enabled module's `runtime_requires` through it,
+    # so the app process needs no environment variable, and refuses to boot when
+    # bindings are also installed process-wide and differ (one answer per process).
+    prerequisite_bindings: Sequence[PrerequisiteBinding] = field(
+        default=(), kw_only=True
+    )
+
     def __post_init__(self) -> None:
         if self.request_evidence is not None and not isinstance(
             self.request_evidence, RequestEvidenceConfigurationV1
@@ -321,6 +331,9 @@ class ProductAssemblySpec:
         object.__setattr__(self, "web_facets", tuple(self.web_facets))
         object.__setattr__(
             self, "browser_document_policies", tuple(self.browser_document_policies)
+        )
+        object.__setattr__(
+            self, "prerequisite_bindings", tuple(self.prerequisite_bindings)
         )
         object.__setattr__(
             self, "authentication_profiles", tuple(self.authentication_profiles)

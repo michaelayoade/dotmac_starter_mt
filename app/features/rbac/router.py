@@ -1,100 +1,27 @@
-"""Tenant-scoped RBAC and audit endpoints.
+"""Tenant-scoped audit endpoint (the only RBAC route left in the reference app).
 
-Guarded by `require_permission`, not `require_role` (module control-plane
-directive step 3): each route names the authorization DECISION it needs, as a
-permission code its own manifest declares and owns
-(`app/features/rbac/feature.py`). Which roles satisfy a code is the
-declaration's business, not the route's — today every rbac permission's
-`default_roles` is `("admin",)`, so behavior is identical to the
-`require_role("admin")` guards these replaced. Other features still use
-`require_role` and migrate one at a time, exactly as `FeatureManifest` ->
-`ModuleManifest` does.
+Role and grant administration moved to `dotmac-access-admin`; the writers are
+gone from here so there is one owning writer per state. Guarded by
+`require_permission("rbac.audit.read")`, a code this feature declares.
 """
 
 from __future__ import annotations
 
-from dotmac_kernel.audit import AuditEvent, write_audit_event
+from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.deps import get_db, require_permission, require_tenant
-from dotmac_kernel.models import Party, Role, Tenant
-from fastapi import APIRouter, Depends, Query, status
+from dotmac_kernel.models import Party, Tenant
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.features.rbac import service as rbac_service
-from app.features.rbac.schemas import (
-    AuditEventRead,
-    RoleCreate,
-    RoleGrantRequest,
-    RoleRead,
-)
+from app.features.rbac.schemas import AuditEventRead
 
-DEFAULT_ROLES_LIMIT = 50
-MAX_ROLES_LIMIT = 200
 DEFAULT_AUDIT_LIMIT = 50
 MAX_AUDIT_LIMIT = 200
 
 router = APIRouter(
     prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)]
 )
-
-
-@router.post(
-    "/roles",
-    response_model=RoleRead,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_role(
-    payload: RoleCreate,
-    db: Session = Depends(get_db),
-    tenant: Tenant = Depends(require_tenant),
-    actor: Party = Depends(require_permission("rbac.roles.manage")),
-) -> Role:
-    role = rbac_service.create_role(db, tenant, payload)
-    write_audit_event(
-        db,
-        tenant_id=tenant.id,
-        actor_party_id=actor.id,
-        actor_type="user",
-        actor_id=str(actor.id),
-        action="role.create",
-        entity_type="role",
-        entity_id=str(role.id),
-        details={"slug": role.slug},
-    )
-    return role
-
-
-@router.get("/roles", response_model=list[RoleRead])
-def list_roles(
-    limit: int = Query(default=DEFAULT_ROLES_LIMIT, ge=0, le=MAX_ROLES_LIMIT),
-    offset: int = Query(default=0, ge=0),
-    db: Session = Depends(get_db),
-    tenant: Tenant = Depends(require_tenant),
-    _: Party = Depends(require_permission("rbac.roles.read")),
-) -> list[Role]:
-    return rbac_service.list_roles(db, tenant, limit=limit, offset=offset)
-
-
-@router.post(
-    "/role-grants", status_code=status.HTTP_204_NO_CONTENT, response_model=None
-)
-def grant_role(
-    payload: RoleGrantRequest,
-    db: Session = Depends(get_db),
-    tenant: Tenant = Depends(require_tenant),
-    actor: Party = Depends(require_permission("rbac.grants.manage")),
-) -> None:
-    party_role = rbac_service.assign_role(db, tenant, payload)
-    write_audit_event(
-        db,
-        tenant_id=tenant.id,
-        actor_party_id=actor.id,
-        actor_type="user",
-        actor_id=str(actor.id),
-        action="role.grant",
-        entity_type="party_role",
-        entity_id=str(party_role.party_id),
-        details={"role_id": str(party_role.role_id)},
-    )
 
 
 @router.get("/audit-events", response_model=list[AuditEventRead])

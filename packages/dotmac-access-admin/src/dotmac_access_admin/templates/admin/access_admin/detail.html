@@ -1,0 +1,50 @@
+{# One user. Context: user, roles (grantable), error, notice. #}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-lg);">{{ user.display_name }}</h1>
+{% if error %}<div role="alert" style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md); border:1px solid var(--dmui-status-negative-border); background:var(--dmui-status-negative-surface); color:var(--dmui-status-negative-foreground); border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">{{ error }}</div>{% endif %}
+{% if notice %}<div style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md); border:1px solid var(--dmui-border-default); background:var(--dmui-surface-elevated); color:var(--dmui-text-primary); border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">{{ notice }}</div>{% endif %}
+<p style="font-size:var(--dmui-font-size-sm);">{{ user.email or '' }} · {% if user.is_active %}Active{% else %}Inactive{% endif %}</p>
+
+<h2>Roles held</h2>
+<ul>
+{% for slug in user.roles %}<li>{{ slug }}</li>{% else %}<li>None</li>{% endfor %}
+</ul>
+{% for r in roles %}{% if r.slug in user.roles %}
+<form method="post" action="{{ surface_url('revoke_grant', party_id=user.id, role_id=r.id) }}" style="display:inline;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Revoke {{ r.slug }}</button>
+</form>
+{% endif %}{% endfor %}
+
+{% if user.is_active %}
+<h2>Grant a role</h2>
+<form method="post" action="{{ surface_url('grant', party_id=user.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <select name="role_id" style="padding:var(--dmui-space-xs) var(--dmui-space-sm); border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md); background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+    {% for r in roles %}{% if r.slug not in user.roles %}<option value="{{ r.id }}">{{ r.slug }}</option>{% endif %}{% endfor %}
+  </select>
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Grant</button>
+</form>
+{% endif %}
+
+<h2>Leaver</h2>
+<form method="post" action="{{ surface_url('leaver_revoke', party_id=user.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="confirm" value="yes">
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Revoke all access and end all sessions</button>
+</form>
+{% if user.is_active %}
+<form method="post" action="{{ surface_url('deactivate', party_id=user.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Deactivate (suspend; grants are kept)</button>
+</form>
+{% else %}
+<form method="post" action="{{ surface_url('reactivate', party_id=user.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" style="border-radius:var(--dmui-radius-lg); background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on); padding:var(--dmui-space-xs) var(--dmui-space-md); border:none; font-size:var(--dmui-font-size-sm); cursor:pointer;">Reactivate (held grants take effect again)</button>
+</form>
+{% endif %}
+<p style="font-size:var(--dmui-font-size-xs);"><a href="{{ surface_url('list') }}">Back to users</a></p>
+{% endblock %}

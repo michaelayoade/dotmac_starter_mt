@@ -140,6 +140,56 @@
     "everything stayed green."
   ],
   "modules": {
+    "dotmac-access-admin": {
+      "$comment": [
+        "Tenant access administration: users, roles, grants and leaver revoke over",
+        "the kernel identity tables. Stateless with no migrations: db_schema null is",
+        "an asserted release shape, as for dotmac-document-rendering.",
+        "",
+        "kernel_floor a107 is the first published kernel shipping identity_storage",
+        "(grant removal and session revocation); the transactions surface (a98),",
+        "contract-2 surfaces (a97) and the credential lifecycle (a99) are earlier.",
+        "",
+        "This row means the module MAY be published once its own gates pass. It",
+        "claims no adoption, moves no authority and retires no writer."
+      ],
+      "package_dir": "packages/dotmac-access-admin",
+      "import_name": "dotmac_access_admin",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a107",
+      "db_schema": null,
+      "tag_prefix": "dotmac-access-admin-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_access_admin/__init__.py",
+          "dotmac_access_admin/manifest.py",
+          "dotmac_access_admin/provisioning.py",
+          "dotmac_access_admin/py.typed",
+          "dotmac_access_admin/roles.py",
+          "dotmac_access_admin/router.py",
+          "dotmac_access_admin/schemas.py",
+          "dotmac_access_admin/service.py",
+          "dotmac_access_admin/templates/admin/access_admin/create.html",
+          "dotmac_access_admin/templates/admin/access_admin/detail.html",
+          "dotmac_access_admin/templates/admin/access_admin/index.html",
+          "dotmac_access_admin/templates/admin/access_admin/roles.html",
+          "dotmac_access_admin/web.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "fastapi",
+          "pydantic",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-accounting": {
       "$comment": [
         "Tenant double-entry ledger, journals, periods and trial balance.",

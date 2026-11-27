@@ -505,6 +505,26 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-access-admin"
+version = "0.1.0a1"
+description = "DotMac access administration: users, roles, grants and leaver revoke over the kernel identity tables (stateless; contract-2 surfaces)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a107"
+fastapi = ">=0.111,<0.116"
+pydantic = ">=2.7.4,<3.0"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-access-admin"
+
+[[package]]
 name = "dotmac-accounting"
 version = "0.1.0a3"
 description = "Tenant chart, fiscal-period and immutable balanced-ledger authority"
@@ -4617,4 +4637,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "533d129cb4d5bb97bd0849932cf145b37841823de5ddf73aedd3f9fedcb13863"
+content-hash = "bc6ffb3c7e36b5420c8113f714812d9dc23ff2889c4846b1c9d1b21ef389e358"

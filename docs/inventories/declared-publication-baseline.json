@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-access-admin": {
+      "declared": "0.1.0a1",
+      "reason": "Unpublished stateless access-administration module (users, roles, grants, leaver revoke) awaiting architect review R3, the Wave 0 release train and the protected release lifecycle; source only, not publication or adoption evidence.",
+      "state": "never-published"
+    },
     "dotmac-ai-operations": {
       "declared": "0.1.0a2",
       "reason": "ALLOCATED DEVELOPMENT VERSION, NOT YET PUBLISHED. 0.1.0a1 IS published and tagged (dotmac-ai-operations-v0.1.0a1). 0.1.0a2 adds the stateless advisory-protocol contracts (AIAdvisoryInvocation/AIAdvisoryResult/AIActionProposal/AIActionDecision/AIExecutionObservation/AICapabilityExposureRef) and hardens capability-id/digest binding, so src/ no longer matches the bytes that the a1 tag names and a bare 0.1.0a1 would make one version name two importable surfaces. Remove this row only after an authorized 0.1.0a2 publication is tagged from the exact protected revision; allocation is not publication.",

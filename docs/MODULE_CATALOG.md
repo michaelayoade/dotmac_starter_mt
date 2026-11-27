@@ -44,6 +44,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
+| [`dotmac-access-admin`](../packages/dotmac-access-admin/README.md) | optional module | [`audit-complete`](../packages/dotmac-access-admin/EXTRACTION.toml) | [stateless](../packages/dotmac-access-admin/src/dotmac_access_admin/manifest.py) | — | — | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a107` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-accounting`](../packages/dotmac-accounting/README.md) | optional module | [`audit-complete`](../packages/dotmac-accounting/EXTRACTION.toml) | [tenant · `mod_accounting`](../packages/dotmac-accounting/src/dotmac_accounting/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a98` | — | `dotmac_erp` |
 | [`dotmac-ai-operations`](../packages/dotmac-ai-operations/README.md) | optional module | [`audit-complete`](../packages/dotmac-ai-operations/EXTRACTION.toml) | [tenant · `mod_aiops`](../packages/dotmac-ai-operations/src/dotmac_ai_operations/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a88` | — | `dotmac_sub` |
 | [`dotmac-analytics`](../packages/dotmac-analytics/README.md) | optional module | [`audit-complete`](../packages/dotmac-analytics/EXTRACTION.toml) | [tenant · `mod_analytics`](../packages/dotmac-analytics/src/dotmac_analytics/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_academy_app`, `dotmac_crm`, `dotmac_erp` |
@@ -155,6 +156,14 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 The dossier linked from each entry remains authoritative for source
 paths, parity tests, first cutover, drift proof, local-copy retirement
 and the next gate.
+
+### [`dotmac-access-admin`](../packages/dotmac-access-admin/README.md)
+
+- **Owner:** Tenant access administration over the kernel identity tables: users, role administration, grants and leaver revoke. It owns no table, schema, lineage, credential material or authorization decision
+- **Contract:** Create a person through CredentialLifecycle.provision (no password material accepted, generated-and-returned or logged; a refs-only recovery intent is enqueued on the kernel outbox); deactivate and reactivate; revoke every grant and every session of a person in one transaction with one audit event per grant plus a summary; administer tenant roles while showing assembly-declared code roles read-only; grant and revoke roles with an audit event each and separation-of-duties pair warnings only. A role composition may reference only declared PermissionSpecs. Enforcement of separation of duties stays the tenant dual-control policy, default off.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-access-admin/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-accounting`](../packages/dotmac-accounting/README.md)
 

@@ -1,4 +1,4 @@
-"""RBAC and audit isolation canaries."""
+"""Role/grant (access-admin) and audit isolation canaries."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_cross_tenant_role_assignment_returns_404(
     b_party_id = str(b_party.id)
 
     response = a.post(
-        "/rbac/role-grants",
+        "/access-admin/grants",
         headers={"Authorization": f"Bearer {a_token}"},
         json={"party_id": b_party_id, "role_id": role_id},
     )
@@ -59,7 +59,9 @@ def test_roles_from_tenant_a_invisible_to_tenant_b(
     )
     _create_role(a, a_token, "editor")
 
-    a_roles = a.get("/rbac/roles", headers={"Authorization": f"Bearer {a_token}"})
+    a_roles = a.get(
+        "/access-admin/roles", headers={"Authorization": f"Bearer {a_token}"}
+    )
     assert a_roles.status_code == 200
     # "admin" was created by `provision_owner` when the tenant's owner was
     # provisioned; "editor" is the one we made via the API.
@@ -69,7 +71,9 @@ def test_roles_from_tenant_a_invisible_to_tenant_b(
     b_token = provision_and_login(
         admin_session, tenant_b, b, "roles-b@tenant-b.example.org"
     )
-    b_roles = b.get("/rbac/roles", headers={"Authorization": f"Bearer {b_token}"})
+    b_roles = b.get(
+        "/access-admin/roles", headers={"Authorization": f"Bearer {b_token}"}
+    )
     assert b_roles.status_code == 200
     b_slugs = {role["slug"] for role in b_roles.json()}
     assert b_slugs == {"admin"}
@@ -92,7 +96,9 @@ def test_audit_events_from_tenant_a_invisible_to_tenant_b(
         "/rbac/audit-events", headers={"Authorization": f"Bearer {a_token}"}
     )
     assert a_events.status_code == 200
-    assert [event["action"] for event in a_events.json()] == ["role.create"]
+    assert [event["action"] for event in a_events.json()] == [
+        "access_admin.role.create"
+    ]
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     b_token = provision_and_login(
@@ -153,7 +159,7 @@ def test_audit_events_are_bounded_by_tenant_retention_days_setting(
         assert events.status_code == 200, events.text
         actions = [event["action"] for event in events.json()]
         assert "old.event" not in actions
-        assert "role.create" in actions
+        assert "access_admin.role.create" in actions
     finally:
         admin_session.execute(
             text("DELETE FROM audit_events WHERE id = :id"), {"id": str(old_event_id)}
@@ -163,7 +169,7 @@ def test_audit_events_are_bounded_by_tenant_retention_days_setting(
 
 def _create_role(client: TestClient, token: str, slug: str) -> dict[str, object]:
     response = client.post(
-        "/rbac/roles",
+        "/access-admin/roles",
         headers={"Authorization": f"Bearer {token}"},
         json={"slug": slug, "name": slug.replace("-", " ").title()},
     )

@@ -37,6 +37,7 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import dotmac_access_admin
 import dotmac_template_studio
 import dotmac_ticketing
 import dotmac_ui
@@ -68,6 +69,7 @@ from dotmac_kernel.web_surfaces import (
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
 
 
 def _staff_landing_route(disabled_modules: frozenset[str]) -> WebRouteRef | None:
@@ -122,6 +124,9 @@ _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
 
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
+    # The same tuple `alembic/env.py` installs; `create_app` resolves enabled
+    # modules' `runtime_requires` through it.
+    prerequisite_bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     # The assembly's own features, plus every INSTALLED MODULE it composes.
     #
     # `dotmac_template_studio.module` is a `ModuleManifest`, not a
@@ -135,6 +140,7 @@ assembly = ProductAssemblySpec(
         *load_manifests(FEATURE_MODULES),
         dotmac_template_studio.module,
         dotmac_ticketing.module,
+        dotmac_access_admin.module,
     ],
     role_definitions=(RoleDefinition("admin"),),
     # Exact compatibility shadow of today's PermissionSpec.default_roles
@@ -148,10 +154,13 @@ assembly = ProductAssemblySpec(
             version=1,
             grants=(
                 RoleGrant("admin", "web.portal.staff.access"),
-                RoleGrant("admin", "rbac.roles.read"),
-                RoleGrant("admin", "rbac.roles.manage"),
-                RoleGrant("admin", "rbac.grants.manage"),
                 RoleGrant("admin", "rbac.audit.read"),
+                RoleGrant("admin", "access_admin.users.read"),
+                RoleGrant("admin", "access_admin.users.manage"),
+                RoleGrant("admin", "access_admin.users.revoke"),
+                RoleGrant("admin", "access_admin.roles.read"),
+                RoleGrant("admin", "access_admin.roles.manage"),
+                RoleGrant("admin", "access_admin.grants.manage"),
                 RoleGrant("admin", "template_studio.templates.read"),
                 RoleGrant("admin", "template_studio.templates.manage"),
                 RoleGrant("admin", "template_studio.templates.publish"),

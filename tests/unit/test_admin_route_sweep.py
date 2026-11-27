@@ -35,6 +35,11 @@ import re
 from collections.abc import Generator
 
 import pytest
+
+# Installed MODULE web routers are swept too — the sweep enumerates from the
+# production app, so a module route omitted here would 404 on this minimal
+# app and read as a failure rather than as a missing mount.
+from dotmac_access_admin import module as access_admin_module
 from dotmac_kernel.capabilities import CapabilityCatalogue, install_capabilities
 from dotmac_kernel.deps import get_db
 from dotmac_kernel.errors import register_error_handlers
@@ -59,10 +64,6 @@ from dotmac_kernel.web_surfaces import (
     WebRouteRef,
     WebSurfaceRegistry,
 )
-
-# Installed MODULE web routers are swept too — the sweep enumerates from the
-# production app, so a module route omitted here would 404 on this minimal
-# app and read as a failure rather than as a missing mount.
 from dotmac_template_studio import module as template_studio_module
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
@@ -219,6 +220,7 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
             permissions=comms_feature.permissions,
         ),
         template_studio_module,
+        access_admin_module,
     )
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_capabilities(CapabilityCatalogue.from_manifests(manifests))
@@ -298,8 +300,7 @@ def test_sweep_covers_at_least_one_route_per_admin_feature() -> None:
     routes = _admin_mutating_routes()
     prefixes = {
         "/admin/parties",
-        "/admin/roles",
-        "/admin/role-grants",
+        "/admin/access",
         "/admin/settings",
         "/admin/custom-fields",
         "/admin/templates",

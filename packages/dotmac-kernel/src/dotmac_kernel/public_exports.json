@@ -634,6 +634,27 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.identity_admin": {
+      "classification": "supported",
+      "exports": [
+        "GrantFact",
+        "IdentityAdminRefusal",
+        "NewPersonValues",
+        "PartyFact",
+        "RoleFact",
+        "create_person",
+        "create_tenant_role",
+        "ensure_grant",
+        "find_party_normalized_email",
+        "lock_grants",
+        "lock_parties",
+        "remove_grants",
+        "rename_tenant_role",
+        "revoke_party_sessions",
+        "set_party_active"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.identity_provisioning": {
       "classification": "supported",
       "exports": [
@@ -877,6 +898,7 @@
         "FailureOutcome",
         "RelayPolicy",
         "claim_batch",
+        "claim_batch_by_type",
         "deferral_dead_letters",
         "failure_dead_letters",
         "record_dead_letter",
@@ -894,7 +916,9 @@
         "LoggingTransport",
         "SessionFactory",
         "run_forever",
-        "run_once"
+        "run_forever_by_type",
+        "run_once",
+        "run_once_by_type"
       ],
       "status": "declared"
     },
@@ -1041,10 +1065,14 @@
         "register_verifier",
         "registered_verifiers",
         "require_prerequisites",
+        "require_runtime_prerequisites",
+        "require_runtime_prerequisites_at_heads",
         "role_violations",
         "verify_idempotency_ledger",
+        "verify_identity_admin",
         "verify_module_database_roles",
         "verify_outbox_relay",
+        "verify_outbox_typed_claim",
         "verify_party_person_catalog",
         "verify_platform_audit_log",
         "verify_tenant_audit_log",
@@ -1296,11 +1324,13 @@
         "DuplicateBindingError",
         "DuplicatePrerequisiteError",
         "IDEMPOTENCY_LEDGER_V1",
+        "IDENTITY_ADMIN_V1",
         "InvalidPrerequisiteNameError",
         "InvalidRevisionReferenceError",
         "KERNEL_PREREQUISITES",
         "MODULE_DATABASE_ROLES_V1",
         "OUTBOX_RELAY_V1",
+        "OUTBOX_TYPED_CLAIM_V1",
         "PARTY_PERSON_CATALOG_V1",
         "PLATFORM_AUDIT_LOG_V1",
         "PrerequisiteBinding",
@@ -2231,6 +2261,7 @@
     "dotmac_kernel.idempotency",
     "dotmac_kernel.idempotency_models",
     "dotmac_kernel.identity",
+    "dotmac_kernel.identity_admin",
     "dotmac_kernel.identity_provisioning",
     "dotmac_kernel.identity_storage",
     "dotmac_kernel.licensing",
