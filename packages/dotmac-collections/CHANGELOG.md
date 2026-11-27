@@ -95,10 +95,8 @@ a2 is published and its `cl_0001` migration is unchanged.
 
 ## 0.1.0a2 — released, tag `dotmac-collections-v0.1.0a2`
 
-Proposed successor for a fresh build through the modern release provenance
-lane, pending review and Michael's source/release authorization after the
-Kernel a105 publication record is accepted. This version has not been built
-or published.
+Successor built through the modern release provenance lane after the Kernel
+a105 publication record was accepted. Published and tagged.
 
 - Runtime behavior, public API and migrations remain unchanged from the
   published a1 source; the Kernel floor remains `>=0.1.0a89`.
@@ -120,7 +118,7 @@ or published.
   request) on first read and on replay until Billing publishes a verified
   due-date basis.
 
-## 0.1.0a1 - Unreleased
+## 0.1.0a1 — released, tag `dotmac-collections-v0.1.0a1`
 
 - Publish the complete typed adopter surface at `dotmac_collections` while
   keeping ORM persistence private.

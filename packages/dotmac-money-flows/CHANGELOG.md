@@ -7,10 +7,10 @@ Source only. a3 is published and tagged `dotmac-money-flows-v0.1.0a3`; released
 change, and the `dotmac-collections >=0.1.0a3` floor stays (the Collections a4
 change is internal to Collections).
 
-- A charge-source read failure that is a `sqlalchemy.exc.SQLAlchemyError` is
+- A charge-source read failure that is a `sqlalchemy.exc.DBAPIError` (a database fault) is
   re-raised so the message redelivers, instead of becoming a per-row
   `charge_source_error` step failure. Every other source error stays a per-row step
-  failure. Applies to the four reads: the issue command, the funded and terms re-checks, and retry.
+  failure, including ORM usage errors such as `NoResultFound`. Applies to the four reads: the issue command, the funded and terms re-checks, and retry.
 
 ## 0.1.0a3 — released, tag `dotmac-money-flows-v0.1.0a3` (C2b: several deductions on one MANUAL confirmation)
 

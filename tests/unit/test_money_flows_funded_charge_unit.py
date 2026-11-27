@@ -42,6 +42,7 @@ from dotmac_money_flows.contracts import (
 from dotmac_money_flows.models import FundedChargeInstance
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 NGN = Currency("NGN", 2)
@@ -1376,3 +1377,77 @@ def test_the_continuation_cursor_clause_is_in_the_query_only_when_set(
     marker = str(after.id).replace("-", "")
     assert (marker in sql.replace("-", "")) is with_cursor
     assert ("created_at >" in sql) is with_cursor
+
+
+def _db_fault():
+    return OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+
+def test_an_orm_usage_error_reading_a_charge_stays_a_per_row_step_failure():
+    class Misuse(_Charges):
+        def read(self, db, *, scope, key):
+            raise NoResultFound("no row")
+
+    row = _pending_row()
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(Misuse()), FundedChargePolicyV1("p1")
+    )
+    with pytest.raises(FundedChargeStepFailed) as failed:
+        flows._reevaluate(ctx, row, SimpleNamespace(observed_at=DUE))
+    assert failed.value.code == "charge_source_error"
+
+
+def test_a_database_fault_building_the_issue_command_propagates(monkeypatch):
+    monkeypatch.setattr(flows, "_is_prepaid", lambda *a, **k: True)
+    monkeypatch.setattr(flows, "issue_rated_invoice", _boom)
+    charges = _Charges(_charge())
+
+    def down(*a, **k):
+        raise _db_fault()
+
+    charges.issue_command = down
+    ctx = flows._Ctx(
+        None, SCOPE, SCOPE.tenant_id, _ports(charges), FundedChargePolicyV1("p1")
+    )
+    with pytest.raises(OperationalError):
+        flows._discharge(
+            ctx,
+            _pending_row(),
+            _charge(),
+            charge_ref=flows.charge_ref_for(KEY),
+            issue_at=DUE,
+            funding_settlement_id=None,
+        )
+
+
+def test_a_database_fault_reading_a_charge_on_retry_propagates(monkeypatch):
+    _spy_discharge(monkeypatch)
+    row = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=SCOPE.tenant_id,
+        version=2,
+        state="attention_required",
+        charge_ref=flows.charge_ref_for(KEY),
+        service_ref="service:one",
+        billing_account_id=ACCOUNT,
+        funding_settlement_id=None,
+        reason_code="x",
+        document_id=None,
+    )
+    monkeypatch.setattr(flows, "_find_id", lambda *a, **k: row)
+    monkeypatch.setattr(flows, "get_funding_availability", lambda *a, **k: None)
+    monkeypatch.setattr(flows, "_fits", lambda *a, **k: True)
+
+    class Down(_Charges):
+        def read(self, db, *, scope, key):
+            raise _db_fault()
+
+    with pytest.raises(OperationalError):
+        flows.retry_funded_charge(
+            None,
+            scope=SCOPE,
+            instance_id=row.id,
+            expected_version=2,
+            actor_ref="staff:1",
+            ports=_ports(Down()),
+        )
