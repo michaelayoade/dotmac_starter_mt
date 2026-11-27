@@ -121,7 +121,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
             is getattr(importlib.import_module(owner), exported),
             "Installed root owner identity differs",
         )
-    require(len(dotmac_kernel.__all__) == 281, "Kernel export extent differs")
+    require(len(dotmac_kernel.__all__) == 286, "Kernel export extent differs")
     for owner, names in {
         "dotmac_kernel.identity_storage": (
             "create_tenant",
@@ -225,7 +225,7 @@ def installed_packages(expected: dict, receipt: dict) -> None:
     receipt.update(
         wheels=wheels,
         learning_exports=603,
-        kernel_exports=281,
+        kernel_exports=286,
         owner_binding_sha256=hashlib.sha256(
             json.dumps(expected["bindings"], sort_keys=True).encode()
         ).hexdigest(),

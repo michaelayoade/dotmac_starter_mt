@@ -697,6 +697,20 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.jobs": {
+      "classification": "supported",
+      "exports": [
+        "JOB_CONCURRENCY_SINGLE",
+        "JobSpec",
+        "JobSpecError",
+        "MAX_ATTEMPTS_CEILING",
+        "MIN_INTERVAL_SECONDS",
+        "handler_package",
+        "resolve_job_handler",
+        "validate_cron"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.licensing": {
       "classification": "supported",
       "exports": [
@@ -1150,25 +1164,32 @@
         "APPLICATION_DIRECTORY_MIGRATION_OWNER",
         "APPROVALS_MIGRATION_OWNER",
         "ASSEMBLY_MIGRATION_OWNER",
+        "ATTENDANCE_MIGRATION_OWNER",
         "BILLING_MIGRATION_OWNER",
+        "CALENDAR_MIGRATION_OWNER",
         "CAMPAIGNS_MIGRATION_OWNER",
         "COLLECTIONS_MIGRATION_OWNER",
         "COMPLIANCE_REPORTING_MIGRATION_OWNER",
         "CUSTOMERS_MIGRATION_OWNER",
+        "CUSTOM_FIELDS_MIGRATION_OWNER",
         "DOMAINS_MIGRATION_OWNER",
         "DURABLE_TIMERS_MIGRATION_OWNER",
         "DuplicateBranchLabelError",
         "DuplicateMigrationPrefixError",
         "DuplicateSchemaError",
         "DuplicateTableOwnerError",
+        "EMPLOYEE_RELATIONS_MIGRATION_OWNER",
         "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
         "FILES_MIGRATION_OWNER",
+        "FLEET_MIGRATION_OWNER",
         "FORMS_MIGRATION_OWNER",
         "FULFILLMENT_MIGRATION_OWNER",
         "FX_POLICY_MIGRATION_OWNER",
+        "HELP_CENTRE_MIGRATION_OWNER",
         "HOSTING_MIGRATION_OWNER",
         "HOST_MIGRATION_OWNERS",
         "HOST_SCHEMA",
+        "HR_LIFECYCLE_MIGRATION_OWNER",
         "HostSchemaClaimError",
         "IMPORTS_MIGRATION_OWNER",
         "INBOX_OPERATIONS_MIGRATION_OWNER",
@@ -1178,6 +1199,8 @@
         "InvalidSchemaError",
         "KERNEL_MIGRATION_OWNER",
         "LEARNING_MIGRATION_OWNER",
+        "LEASES_MIGRATION_OWNER",
+        "LEAVE_MIGRATION_OWNER",
         "LedgerDigestError",
         "MAX_IDENTIFIER_LENGTH",
         "MAX_MIGRATION_PREFIX_LENGTH",
@@ -1188,6 +1211,7 @@
         "MODULE_SCHEMA_PREFIX",
         "MONEY_FLOWS_MIGRATION_OWNER",
         "MigrationOwner",
+        "NOTIFICATIONS_MIGRATION_OWNER",
         "NamespaceAllocationError",
         "NamespaceError",
         "NamespaceRegistry",
@@ -1195,11 +1219,14 @@
         "ORDERS_MIGRATION_OWNER",
         "PAYMENTS_MIGRATION_OWNER",
         "PEOPLE_MIGRATION_OWNER",
+        "PERFORMANCE_MIGRATION_OWNER",
         "PLATFORM_HEALTH_MIGRATION_OWNER",
         "QUALIFICATION_MIGRATION_OWNER",
+        "RECRUITMENT_MIGRATION_OWNER",
         "REFERRALS_MIGRATION_OWNER",
         "RELEASE_CATALOG_MIGRATION_OWNER",
         "REMOTE_ACCESS_MIGRATION_OWNER",
+        "REPORTING_MIGRATION_OWNER",
         "RESELLER_MANAGEMENT_MIGRATION_OWNER",
         "RESERVED_SCHEMAS",
         "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
@@ -1210,12 +1237,14 @@
         "SERVICE_CATALOG_MIGRATION_OWNER",
         "SERVICE_CHANGES_MIGRATION_OWNER",
         "SERVICE_ORDERS_MIGRATION_OWNER",
+        "STAFF_LOANS_MIGRATION_OWNER",
         "SUBSCRIPTIONS_MIGRATION_OWNER",
         "SUPPORT_ACCESS_MIGRATION_OWNER",
         "TICKETING_MIGRATION_OWNER",
         "USAGE_MIGRATION_OWNER",
         "USAGE_RATING_MIGRATION_OWNER",
         "UnallocatedNamespaceError",
+        "WEBHOOKS_MIGRATION_OWNER",
         "WEB_ANALYTICS_MIGRATION_OWNER",
         "WORKFLOW_RUNTIME_MIGRATION_OWNER",
         "WORKFORCE_MIGRATION_OWNER",
@@ -1786,6 +1815,16 @@
       ],
       "status": "declared"
     },
+    "dotmac_kernel.surface_selection": {
+      "classification": "supported",
+      "exports": [
+        "LEGACY_SURFACE",
+        "SELECT_ALL",
+        "SurfaceSelection",
+        "SurfaceSelectionError"
+      ],
+      "status": "declared"
+    },
     "dotmac_kernel.templating": {
       "classification": "supported",
       "exports": [
@@ -1857,6 +1896,24 @@
       "exports": [
         "FakeProvisioningProvider",
         "check_provisioning_provider_contract"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing.route_inventory": {
+      "classification": "supported",
+      "exports": [
+        "route_inventory"
+      ],
+      "status": "declared"
+    },
+    "dotmac_kernel.testing.surface_conformance": {
+      "classification": "supported",
+      "exports": [
+        "ConformanceReport",
+        "DEFAULT_PREFIXES",
+        "SurfaceConformanceError",
+        "assert_surface_conformance",
+        "check_surface_conformance"
       ],
       "status": "declared"
     },
@@ -2041,6 +2098,8 @@
     "InvalidRevisionIdError",
     "InvalidSchemaError",
     "InvalidSourceApplicationError",
+    "JobSpec",
+    "JobSpecError",
     "KERNEL_MODULE_CONTRACT_VERSION",
     "LocalizedText",
     "MACHINE_KEY_SECRET_NAME",
@@ -2120,6 +2179,7 @@
     "RoleGrant",
     "RoleGrantProfile",
     "RotationStateError",
+    "SELECT_ALL",
     "SUPPORTED_MODULES",
     "SUPPORTED_MODULE_CONTRACT_VERSIONS",
     "SettingDomain",
@@ -2130,6 +2190,8 @@
     "SourceApplicationsNotInstalledError",
     "StaticPackage",
     "SurfaceContext",
+    "SurfaceSelection",
+    "SurfaceSelectionError",
     "TemplatePackage",
     "TemplateRef",
     "Tenant",
@@ -2264,6 +2326,7 @@
     "dotmac_kernel.identity_admin",
     "dotmac_kernel.identity_provisioning",
     "dotmac_kernel.identity_storage",
+    "dotmac_kernel.jobs",
     "dotmac_kernel.licensing",
     "dotmac_kernel.logging",
     "dotmac_kernel.machine_auth",
@@ -2326,6 +2389,7 @@
     "dotmac_kernel.settings_shadow",
     "dotmac_kernel.source_applications",
     "dotmac_kernel.source_import",
+    "dotmac_kernel.surface_selection",
     "dotmac_kernel.templating",
     "dotmac_kernel.tenancy",
     "dotmac_kernel.testing",
@@ -2333,6 +2397,8 @@
     "dotmac_kernel.testing.harness",
     "dotmac_kernel.testing.licensing",
     "dotmac_kernel.testing.provisioning",
+    "dotmac_kernel.testing.route_inventory",
+    "dotmac_kernel.testing.surface_conformance",
     "dotmac_kernel.transactions",
     "dotmac_kernel.web_deps",
     "dotmac_kernel.web_surfaces"

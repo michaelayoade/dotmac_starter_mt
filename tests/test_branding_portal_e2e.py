@@ -48,11 +48,12 @@ def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant
             "logo_url": "",
             "primary_color": "#112233",
             "accent_color": "",
+            "reason": "e2e branding",
         },
         headers={CSRF_HEADER: csrf_a},
         follow_redirects=False,
     )
-    assert branding_resp.status_code == 302, branding_resp.text
+    assert branding_resp.status_code == 303, branding_resp.text
 
     # Train 3: the same resolved brand is projected into token CSS on a public
     # tenant-scoped route, so it is available to the pre-auth login page too.

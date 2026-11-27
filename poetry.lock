@@ -667,7 +667,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a13"
+version = "0.1.0a14"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1516,7 +1516,7 @@ url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-money-flows"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1525,7 +1525,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-billing = ">=0.1.0a13"
+dotmac-billing = ">=0.1.0a14"
 dotmac-collections = ">=0.1.0a3"
 dotmac-kernel = ">=0.1.0a110"
 dotmac-payments = ">=0.1.0a4"
@@ -2142,6 +2142,26 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-services"
+
+[[package]]
+name = "dotmac-settings-admin"
+version = "0.1.0a1"
+description = "Generic, stateless settings administration for DotMac products: every declared setting domain is editable, audited, restorable and exportable"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a110"
+fastapi = ">=0.111,<0.116"
+pydantic = ">=2.7.4,<3.0"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-settings-admin"
 
 [[package]]
 name = "dotmac-sites"
@@ -4617,4 +4637,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "533d129cb4d5bb97bd0849932cf145b37841823de5ddf73aedd3f9fedcb13863"
+content-hash = "8e37e33d04100876b0701f5739b1b742d60cb2107f296b01e271bc86cdbfefee"

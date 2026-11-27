@@ -415,7 +415,14 @@ def mount_web_surfaces(
                 dependencies.append(Depends(context_dependency))
                 app.include_router(
                     one,
-                    prefix="" if surface.legacy else facet.url_prefix,
+                    # A root facet ("/") mounts with an EMPTY include prefix:
+                    # FastAPI refuses a prefix ending in "/", and the surface's
+                    # relative routes already start with one.
+                    prefix=(
+                        ""
+                        if surface.legacy or facet.url_prefix == "/"
+                        else facet.url_prefix
+                    ),
                     dependencies=dependencies,
                 )
 

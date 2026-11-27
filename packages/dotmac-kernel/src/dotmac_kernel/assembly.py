@@ -35,6 +35,7 @@ from dotmac_kernel.planes import (
 from dotmac_kernel.prerequisites import PrerequisiteBinding
 from dotmac_kernel.request_evidence import TrustedProxyPolicy
 from dotmac_kernel.session_runtime import DatabaseRuntime
+from dotmac_kernel.surface_selection import SurfaceSelection
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
     BrowserCapabilityProvision,
@@ -234,6 +235,13 @@ class ProductAssemblySpec:
     web_facets: Sequence[WebFacetMount] = ()
     authentication_profiles: Sequence[AuthenticationProfileBinding] = ()
     browser_capabilities: Sequence[BrowserCapabilityProvision] = ()
+    # Which module API routers and web surfaces this assembly SERVES.  Set it
+    # and the assembly is fail-closed: unselected surfaces/routers are never
+    # mounted, and an entry naming something absent refuses the boot.  Use
+    # `SELECT_ALL` to say "everything installed" explicitly.  None keeps the
+    # pre-selection behaviour (every enabled module's API routers and surfaces)
+    # for assemblies that have not adopted the contract; `create_app` logs it.
+    surface_selection: SurfaceSelection | None = field(default=None, kw_only=True)
     # Product-specific configuration checks. Each returns human-readable
     # errors and follows the kernel's existing environment policy: warnings in
     # development, fatal startup errors in production.
@@ -313,6 +321,10 @@ class ProductAssemblySpec:
             raise TypeError(
                 "request_evidence must be RequestEvidenceConfigurationV1 or None"
             )
+        if self.surface_selection is not None and not isinstance(
+            self.surface_selection, SurfaceSelection
+        ):
+            raise TypeError("surface_selection must be a SurfaceSelection or None")
         object.__setattr__(self, "modules", tuple(self.modules))
         object.__setattr__(self, "role_definitions", tuple(self.role_definitions))
         object.__setattr__(self, "role_grant_profiles", tuple(self.role_grant_profiles))

@@ -63,6 +63,8 @@ STATEMENT_KEYS: Final = frozenset(
     {"dispatch_id", "target_ref", "product_code", "environment", "plan_digest"}
 )
 MAX_LEASE_TTL: Final = 3600
+#: Total a plan may hold one lease across renewals (Control's hard maximum).
+MAX_LEASE_SECONDS: Final = 10800
 
 
 @dataclass(frozen=True)
@@ -378,7 +380,9 @@ def parse_materials(
         raise Refusal("lease_ttl_invalid")
     roles = plan_roles(snapshot)
     lease_max = binding.get("lease_max_seconds")
-    if lease_max is not None and (type(lease_max) is not int or lease_max < ttl):
+    if lease_max is not None and (
+        type(lease_max) is not int or not ttl <= lease_max <= MAX_LEASE_SECONDS
+    ):
         raise Refusal("lease_ttl_invalid")
     jobs = plan_jobs(snapshot)  # definitions: nothing runs from them
     if verified.operation not in ("deploy", "rollback", "run_job"):

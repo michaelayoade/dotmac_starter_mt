@@ -1589,8 +1589,8 @@ app/                             the reference assembly
                    + /admin/parties/* web screens (list/detail/create/edit)
     rbac/          roles, role grants, audit-event read endpoint
                    + /admin/roles, /admin/role-grants, /admin/audit web screens
-    settings/      tenant settings admin API (spec declarations, seed, router)
-                   + /admin/settings web screens (generic editor + branding editor)
+    (settings admin moved to the installable module `dotmac-settings-admin`:
+     spec declarations, seed, /settings API and /admin/settings screens)
     presentation/  stateless assembly adapter: resolved kernel brand data ->
                    dotmac-ui token CSS at GET /branding/theme.css
     custom_fields/ field definitions CRUD + values on a registered entity's
@@ -1751,9 +1751,9 @@ organization), with profile data on the subtype tables. `DomainSetting`
 (`dotmac_kernel/settings_resolver.py`) live in core for the same reason, one
 level removed: the `custom_fields` feature must call `resolve_value`
 directly (the per-entity field limit), and features may never import each
-other, so the shared mechanics sit in core while the `settings` feature
-keeps only what nothing else needs (spec declarations, seed, router,
-schemas). `CustomFieldDefinition` stays feature-local
+other, so the shared mechanics sit in core while the `dotmac-settings-admin`
+module (which replaced the `settings` feature) keeps only what nothing else
+needs (spec declarations, seed, router, schemas). `CustomFieldDefinition` stays feature-local
 (`app/features/custom_fields/models.py`) — nothing outside `custom_fields`
 touches it. Everything not needed outside its own feature stays
 feature-local: `UserCredential` (password hashes) lives in
@@ -1850,9 +1850,10 @@ owner, and make a database restore fail to reproduce it. (`dotmac_sub`
 reached this rule first; the kernel has been brought to it.)
 
 **Spec registration**: `SettingSpec` instances are declared in a feature's
-own module (today only `app/features/settings/spec.py`) and registered into
+own module (the settings-admin module's `dotmac_settings_admin/specs.py` for
+`branding`/`display`/`organisation`/`settings_admin`) and registered into
 the core registry via `register_specs([...])` as an import-time side
-effect — importing the `settings` feature package registers them. Nothing
+effect — importing the module registers them. Nothing
 enforces *where* a spec is declared beyond "some feature module, at import
 time" — this is the extension point other features use to add their own
 settings (see `CLAUDE.md`'s Extension points section). The
@@ -1868,13 +1869,14 @@ remains an open string, and the manifest declaration tests require every member
 to be both unique and consumed. Adding a product-owned domain therefore needs
 no kernel enum or CHECK migration (ADR-0008).
 
-Write path: `PUT /settings/{domain}/{key}` → `settings/service.py::
-update_setting` → `validate_spec_value` (raises `BadRequestError` on any
+Write path: `PUT /settings/{domain}/{key}` (body carries a required `reason`) →
+`dotmac_settings_admin.service.write_setting` → `validate_spec_value` (raises `BadRequestError` on any
 violation, never silently coerces on write — unlike the read-path
 degradation above) → `settings_resolver.upsert_by_key` (always writes the
 TENANT row; only a platform-role session can pass `tenant_id=None`) → an
-audit event (`settings.update`, domain/key only — never the value, in case
-it's a secret) written by the router, not the service.
+audit event (`settings_admin.setting.update`, domain/key/reason only — never
+the value, in case it's a secret) written by the service through the
+assembly-bound audit writer.
 
 ## Party family + subtype RLS
 
@@ -2354,7 +2356,7 @@ docstring):
   **A tenant cannot contribute CSS (2026-08-13, ADR-0006 D8).** `custom_css`
   was accepted, regex-sanitized on read, and rendered `| safe` into a `<style>`
   block. The field and `sanitize_branding_css` are both gone. A write naming a
-  retired key is REFUSED by the shared `settings_service.update_setting`
+  retired key is REFUSED by the shared `dotmac_settings_admin.service.write_setting`
   write owner. The generic JSON editor and settings API pass their raw values
   to it; the friendly form preserves any injected retired key when it composes
   the declared fields so the same owner can refuse it. A legacy stored value is
@@ -2398,7 +2400,7 @@ removing it is the phase-3 settings-cache ticket
 (`docs/superpowers/phase2-backlog.md`'s "Added during phase 2a execution"
 section) — not needed to ship this fix.
 
-`GET`/`POST /admin/settings/branding` (`app.features.settings.web`) still
+`GET`/`POST /admin/settings/branding` (`dotmac_settings_admin.web`) still
 calls `load_branding` directly for its own live-preview render (its context
 explicitly sets `brand`, which is why the precedence rule above lets a
 route override the per-request value) — it renders the CURRENT effective
@@ -2427,12 +2429,12 @@ Write path: `POST /admin/settings/branding` composes the submitted
 sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/`accent_color`) back
 into the `ui_branding` dict, preserving the presence of any injected retired
 key solely so it cannot be silently dropped, and calls the SAME
-`settings_service.update_setting(db, tenant, "branding", "ui_branding",
-raw)` the generic per-key editor (`POST /admin/settings/{domain}/{key}/edit`)
+`settings_admin.service.write_setting(db, tenant.id, ..., domain="branding",
+key="ui_branding", value=raw, reason=...)` the generic per-key editor (`POST /admin/settings/{domain}/{key}/edit`)
 and the JSON `PUT /settings/{domain}/{key}` API all call — one write path,
 three presentation surfaces (generic web editor, friendly branding editor,
 JSON API), each ending in the same audit event
-(`settings.update`, domain/key only, never the value).
+(`settings_admin.setting.update`, domain/key/reason only, never the value).
 
 ### Runtime brand projection: assembly adapter, generated CSS
 
@@ -2475,7 +2477,7 @@ consent, channel choice, delivery, or document generation.
 ### Display settings: tenant timezone + date/datetime formats
 
 Three specs registered on a new `SettingDomain.display`
-(`app/features/settings/spec.py`), resolved through the same
+(`dotmac_settings_admin/specs.py`), resolved through the same
 tenant→platform→spec-default resolver every other setting uses — no
 dedicated screen or bespoke storage; they auto-appear in the registry-driven
 `/admin/settings` index like any other spec:
@@ -2891,9 +2893,9 @@ write:
 | External media observation facts and projections | `dotmac_media_observations.service` is the only package writer: declaration and `record_*` functions append normalized facts/receipts/restatements; `_refresh_projections` and `reconcile_projections` alone replace disposable current rows. A connector emits typed commands but never writes these tables. No product composes the module while adoption is paused (ADR-0034). |
 | Communication suppressions | `dotmac_kernel.consent.suppress`, `unsuppress`, and `unsuppress_marketing`; delivery never writes the table directly — a suppressing provider receipt delegates to `consent.suppress` in the same transaction |
 | Communication delivery receipts | `dotmac_kernel.delivery.record_receipt` — the only constructor/writer; it preserves each provider status transition, deduplicates repeated callbacks, and delegates suppressing consequences to the consent owner |
-| Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
+| Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `dotmac_settings_admin.service.write_setting` / `restore_setting` / `transfer.apply_import` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all ending in the same function with a required actor and reason, the history row and the same `settings_admin.setting.update` audit event) and `ensure_by_key` (platform-default seeding only, via `dotmac_settings_admin.seed.seed_platform_defaults`, bound by the reference assembly's `startup_hooks` and gated on `SEED_ON_STARTUP`, idempotent — never overwrites an existing row) |
 | Notification channel-policy setting | Same canonical `DomainSetting` writers as above; `dotmac_kernel.channel_policy.resolve_channels` is the typed reader and the legacy per-event shadow setting is not supported |
-| `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, whose resolved colour fields are projected by `app.features.presentation.service.project_brand_stylesheet` through `dotmac_ui.render_brand_css`. Template Studio is not an owner or writer |
+| `ui_branding` setting specifically | same writer as above (`write_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, whose resolved colour fields are projected by `app.features.presentation.service.project_brand_stylesheet` through `dotmac_ui.render_brand_css`. Template Studio is not an owner or writer |
 | Runtime brand stylesheet projection | `app.features.presentation.service.project_brand_stylesheet` is the sole composer: kernel-resolved brand data in, public `dotmac_ui` generator out. `web.py` only guards scope and applies response policy; templates only link the route. No stored CSS, parallel renderer, or Template Studio writer exists |
 | Reusable map-frame presentation | `dotmac_ui.components.MAP_FRAME` owns only the inert canvas/state markup, token-native CSS and accessibility contract. A composing product owns the state transition and every provider, tile, viewport, endpoint, poll, location datum, layer, popup, control, fallback and domain decision. The contract is audit-complete with zero product adopters; no product-local owner is retired yet. |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
@@ -2937,7 +2939,7 @@ write:
 | Durable service-change requests and their checkpoints | `dotmac_service_changes.service` — `open_service_change`, `decide_service_change`, `cancel_service_change`, `record_checkpoint` and `advance_execution` are the only writers. `advance_execution` is the single guard on the execution chain the source spread across several handlers. |
 | Escalation policy versions, instances and settlement | `dotmac_operational_escalations.service` — `register_policy`, `draft_policy_version`, `activate_policy_version`, `raise_escalation`, `acknowledge_escalation`, `resolve_escalation` and `cancel_escalation` are the only writers. Cooldown is enforced as a refusal to raise, because whether an escalation should exist is this owner's decision and not a transport's. |
 | Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
-| Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
+| Display formats (timezone/date_format/datetime_format) | owner: `settings_admin` (display domain) — same `write_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
 ### Learning assessment, delivery and read continuation (prepared source)
 

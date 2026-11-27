@@ -350,11 +350,11 @@ def test_tenant_a_put_max_per_entity_does_not_affect_tenant_b(
     put_resp = a.put(
         "/settings/custom_fields/max_per_entity",
         headers={"Authorization": f"Bearer {a_token}"},
-        json={"value": 5},
+        json={"value": 5, "reason": "integration test"},
     )
     assert put_resp.status_code == 200, put_resp.text
-    assert put_resp.json()["value"] == 5
-    assert put_resp.json()["source"] == "tenant"
+    assert put_resp.json()["setting"]["value"] == 5
+    assert put_resp.json()["setting"]["source"] == "tenant"
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     b_token = provision_and_login(

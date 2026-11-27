@@ -11,6 +11,66 @@ here.
 No version is bumped or allocated here; kernel releases are owned by the release
 allocation (this ships with the next allocated release).
 
+- `dotmac_kernel.jobs` adds `JobSpec` and `ModuleManifest.jobs` (module contract
+  2 only): code, handler import path, explicit plane, interval or five-field
+  cron cadence, max attempts, backoff, `concurrency='single'`. `ModuleRegistry`
+  refuses a duplicate code within a module, a malformed cadence, and a handler
+  that does not import or accept `(session, scope, run_context)`; it exposes
+  `jobs()` for the runner (`jobs(module_planes=...)` filters by installed planes). Declaration only: the runner lands in
+  `dotmac-durable-timers`. Additive; contract-1 manifests are unchanged.
+- `ProductAssemblySpec.surface_selection` (`dotmac_kernel.surface_selection`:
+  `SurfaceSelection`, `SELECT_ALL`, `SurfaceSelectionError`). An assembly lists
+  the `(module, surface)` pairs and the module API-router sets it serves;
+  a module or surface that is not listed adds nothing (routes added inside a
+  listed one still mount; see the R0 note below), and an entry naming an absent
+  module, surface or router set refuses the boot. `None` (default) keeps today's
+  behaviour and logs a warning; `SELECT_ALL` states "everything" explicitly. The
+  reference assembly selects `SELECT_ALL`.
+- `create_app` now mounts contract-2 surfaces of a facet whose `url_prefix` is
+  `/` (previously FastAPI refused the `/` include prefix at boot).
+- `dotmac_kernel.testing.surface_conformance`: the module-author conformance kit
+  (two-prefix boot, guard on every route, CSRF on mutations, named-route
+  navigation, no absolute template URLs, template namespace isolation), run over
+  Template Studio in the reference tests.
+- Ledger rows (allocation only, no source) for the Wave 0 / D3 stateful modules
+  `staff_loans`, `leave`, `leases`, `attendance`, `hr_lifecycle`, `performance`,
+  `recruitment`, `employee_relations`, `calendar`, `fleet`, `help_centre`,
+  `webhooks`, `notifications`, `reporting` and `custom_fields`; `MIGRATION_OWNER_LEDGER_DIGEST` restamped.
+- `public_exports.json` regenerated with `derive_public_exports`: adds
+  `dotmac_kernel.jobs`, `dotmac_kernel.surface_selection` and
+  `dotmac_kernel.testing.surface_conformance`, and the top-level names
+  `JobSpec`, `JobSpecError`, `SELECT_ALL`, `SurfaceSelection`,
+  `SurfaceSelectionError`.
+- R0 review fixes (2026-11-25). Selection granularity is stated honestly: a new
+  module or surface adds nothing, but a new route inside a selected module or
+  surface mounts, so each assembly commits a route-inventory snapshot test
+  (`dotmac_kernel.testing.route_inventory`); named router sets are a known later
+  item. Contract-1 `web_routers` mount only when `(module, "legacy")` is
+  selected. `create_app` refuses duplicate `(method, path)` routes and surface
+  routes under `/health`, `/docs`, `/redoc`, `/openapi.json`, `/static`, `/api`
+  (and `/platform` when enabled); an empty v2 route path is refused. The
+  conformance kit requires the kernel permission (or machine-scope) dependency by
+  function identity, checks `api_routers`, takes `public_routes=`, and no longer
+  exports `AUTH_GUARD_NAMES`. A PLATFORM `JobSpec` requires declared platform
+  tables, `ModuleRegistry.jobs(module_planes=...)` filters by installed planes,
+  and handlers must be plain synchronous functions in the declaring module's own
+  package (not coroutines, classes, the kernel, the stdlib or another module).
+  Ledger rows added for `notifications`, `reporting` and `custom_fields`.
+- NOTE: `surface_selection=None` (pre-selection behaviour) is accepted for the
+  integration merge only. It becomes a fatal startup error in production before
+  the Wave 0 kernel release is tagged, and refuses everywhere at the next
+  contract generation; every `ProductAssemblySpec` consumer adds an explicit
+  selection in the PR that bumps its kernel pin.
+- `dotmac_kernel.delivery_providers` publishes the `email.send.v1` payload
+  contract for the delivery domain: `EMAIL_SEND_CAPABILITY_ID` and
+  `EMAIL_SEND_COMMAND_SCHEMA` (one rendered message: `dispatch_id`, `address`,
+  `text`/`html`, `subject`, the five allowlisted `headers`, attachments by
+  reference). Definition only: the kernel does not import `dotmac-integration`
+  and installs nothing; the composing assembly declares the contract (owner
+  `starter/delivery`, command schema, no result schema) and a connector claims
+  its digest. Pinned digest
+  `b746eb0073de9d148cc659dd3e7282a19d40e1e0296ade4a8ec8223ba651be52`, tested in
+  `tests/unit/test_email_send_contract.py`. A schema change is a new `.vN` id.
 - **`Party.is_active` is honoured at authentication** (review R3 Q1).
   `deps.authenticate_request` returns `None` for an inactive party (bearer and
   cookie share the seam), `deps._holds_any_role` joins `Party` and requires
@@ -49,8 +109,7 @@ allocation (this ships with the next allocated release).
 - **Event-type-filtered outbox claim** (R2 F1). New
   `messaging.relay.claim_batch_by_type(db, *, worker_id, event_types, policy)`
   (a separate function: `claim_batch` is unchanged and takes no filter, so a
-  `None` list can never mean "all types"), and `event_types=` on the worker's
-  `run_once` / `run_forever`. It calls the SECURITY DEFINER
+  `None` list can never mean "all types"), It calls the SECURITY DEFINER
   `public.claim_outbox_batch_by_type(text, integer, integer, text[])`
   (migration `0035_outbox_typed_claim`, with the partial index
   `ix_outbox_events_type_available`), which applies the existing claim's

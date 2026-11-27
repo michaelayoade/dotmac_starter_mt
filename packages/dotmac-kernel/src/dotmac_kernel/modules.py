@@ -54,6 +54,12 @@ from typing import TYPE_CHECKING, Final
 from fastapi import APIRouter
 
 from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.jobs import (
+    JobSpec,
+    JobSpecError,
+    handler_package,
+    resolve_job_handler,
+)
 from dotmac_kernel.namespaces import (
     HOST_SCHEMA,
     MigrationOwner,
@@ -66,6 +72,7 @@ from dotmac_kernel.namespaces import (
 from dotmac_kernel.permissions import PermissionSpec
 from dotmac_kernel.planes import (
     ModulePlane,
+    ModulePlaneSelection,
     ModulePlaneSelectionError,
     declared_planes,
 )
@@ -261,6 +268,13 @@ class ModuleManifest:
     # this contribution is accepted only when it describes that declaration
     # exactly. It is last to preserve every historical positional constructor.
     database_catalog: ModuleDatabaseCatalogContributionV1 | None = None
+    # Background jobs this module owns (contract 2). Declaration only: the
+    # kernel validates them (unique code per module, cadence, explicit plane,
+    # handler path resolvable at registry construction); the runner in
+    # `dotmac-durable-timers` executes them. Last, to preserve every positional
+    # constructor.
+    jobs: Sequence[JobSpec] = field(default_factory=tuple)
+    #
     # Kernel facilities this STATELESS module CALLS at request time, named by
     # prerequisite (`dotmac_kernel.prerequisites`). `requires` means "order my
     # migrations after this effect", which is meaningless for a module that has
@@ -308,9 +322,11 @@ class ModuleManifest:
             "requires",
             "tenant_requires",
             "platform_requires",
+            "jobs",
             "runtime_requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        self._validate_jobs()
         if self.web_surfaces and (self.web_routers or self.nav):
             raise ModuleRegistryError(
                 f"module {self.code!r} declares both legacy and v2 web surfaces; "
@@ -410,6 +426,45 @@ class ModuleManifest:
             object.__setattr__(self, "supported_plane_sets", supported)
         self._validate_namespace()
         self._validate_database_catalog()
+
+    def _validate_jobs(self) -> None:
+        if not self.jobs:
+            return
+        if self.contract_version < 2:
+            raise ModuleRegistryError(
+                f"module {self.code!r} uses module contract "
+                f"{self.contract_version}; `jobs` requires contract 2"
+            )
+        seen: set[str] = set()
+        for job in self.jobs:
+            if not isinstance(job, JobSpec):
+                raise ModuleRegistryError(
+                    f"module {self.code!r} `jobs` entries must be JobSpec, "
+                    f"got {type(job).__name__}"
+                )
+            if job.code in seen:
+                raise ModuleRegistryError(
+                    f"module {self.code!r} declares job {job.code!r} twice"
+                )
+            seen.add(job.code)
+            declared = declared_planes(self)
+            if (
+                job.plane == ModulePlane.PLATFORM
+                and ModulePlane.PLATFORM not in declared
+            ):
+                raise ModuleRegistryError(
+                    f"module {self.code!r} job {job.code!r} runs on the PLATFORM "
+                    "plane but the module declares no platform_tables"
+                )
+            if (
+                job.plane == ModulePlane.TENANT
+                and declared
+                and ModulePlane.TENANT not in declared
+            ):
+                raise ModuleRegistryError(
+                    f"module {self.code!r} job {job.code!r} runs on the TENANT "
+                    "plane but the module owns only platform tables"
+                )
 
     def _validate_namespace(self) -> None:
         """Stateful and stateless are the only two coherent shapes (D1).
@@ -690,6 +745,7 @@ class ModuleRegistry:
         self._check_unique_codes(declared)
         self._check_contract_versions(declared, supported_contract_versions)
         self._check_dependencies_installed(declared)
+        self._check_job_handlers(declared)
         self._namespaces: NamespaceRegistry = NamespaceRegistry.from_manifests(declared)
         self._order: tuple[ModuleManifest, ...] = self._topological_order(declared)
         self._by_code: dict[str, ModuleManifest] = {m.code: m for m in self._order}
@@ -743,6 +799,50 @@ class ModuleRegistry:
             raise MissingModuleDependencyError(
                 f"module dependency not installed: {listed}"
             )
+
+    @staticmethod
+    def _check_job_handlers(manifests: Sequence[ModuleManifest]) -> None:
+        """Every declared job handler must import, be a plain synchronous
+        function, accept the contract signature, and live in the declaring
+        module's own package, so a typo or a cross-module import fails the
+        start, not the first due run."""
+        owned: dict[str, set[str]] = {}
+        for manifest in manifests:
+            packages: set[str] = set()
+            routers = [
+                *manifest.api_routers,
+                *(r for s in manifest.web_surfaces for r in s.routers),
+            ]
+            for router in routers:
+                for route in getattr(router, "routes", ()):
+                    endpoint = getattr(route, "endpoint", None)
+                    module_name = getattr(endpoint, "__module__", "") or ""
+                    if module_name:
+                        packages.add(module_name.partition(".")[0])
+            seed_module = getattr(manifest.seed, "__module__", "") or ""
+            if seed_module:
+                packages.add(seed_module.partition(".")[0])
+            owned[manifest.code] = packages
+        for manifest in manifests:
+            for job in manifest.jobs:
+                try:
+                    resolve_job_handler(job)
+                except JobSpecError as exc:
+                    raise ModuleRegistryError(
+                        f"module {manifest.code!r}: {exc}"
+                    ) from exc
+                package = handler_package(job.handler)
+                for other_code, packages in owned.items():
+                    if (
+                        other_code != manifest.code
+                        and package in packages
+                        and package not in owned[manifest.code]
+                    ):
+                        raise ModuleRegistryError(
+                            f"module {manifest.code!r}: job {job.code!r} handler "
+                            f"{job.handler!r} belongs to module {other_code!r}'s "
+                            "package; modules never import each other"
+                        )
 
     @staticmethod
     def _topological_order(
@@ -869,6 +969,35 @@ class ModuleRegistry:
                 f"enabled module depends on a module that is not enabled: {listed}"
             )
         return tuple(m for m in self._order if m.code in enabled)
+
+    def jobs(
+        self,
+        disabled: Set[str] = frozenset(),
+        *,
+        module_planes: Iterable[ModulePlaneSelection] | None = None,
+    ) -> tuple[tuple[str, JobSpec], ...]:
+        """`(module code, JobSpec)` for every job of an ENABLED module, in
+        startup order then declaration order - what the job runner reads.
+
+        Pass the assembly's ``module_planes`` so a job is returned only when its
+        plane is one the assembly installs for that module (for example `files`
+        installed tenant-only yields no platform job). Without it every declared
+        plane is assumed installed.
+        """
+        enabled = self.enabled_codes(disabled)
+        selected: dict[str, frozenset[ModulePlane]] = {}
+        if module_planes is not None:
+            for selection in module_planes:
+                selected[selection.module] = frozenset(
+                    ModulePlane(plane) for plane in selection.planes
+                )
+        return tuple(
+            (m.code, job)
+            for m in self._order
+            if m.code in enabled
+            for job in m.jobs
+            if m.code not in selected or ModulePlane(job.plane) in selected[m.code]
+        )
 
     # ── Inventory (health / diagnostics) ────────────────────────────────────
 

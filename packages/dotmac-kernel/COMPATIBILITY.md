@@ -285,6 +285,8 @@ Two rules travel with it:
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
+| `dotmac_kernel.jobs` | `JobSpec`, `JobSpecError`, `validate_cron`, `resolve_job_handler`, `handler_package`, `JOB_CONCURRENCY_SINGLE`, `MIN_INTERVAL_SECONDS`, `MAX_ATTEMPTS_CEILING` (background-job declaration carried by `ModuleManifest.jobs`, contract 2 only; declaration and boot validation only, the runner lives in `dotmac-durable-timers`; also top-level `JobSpec`, `JobSpecError`) |
+| `dotmac_kernel.surface_selection` | `SurfaceSelection`, `SurfaceSelectionError`, `SELECT_ALL`, `LEGACY_SURFACE` (`ProductAssemblySpec.surface_selection`: which module API routers (per module), web surfaces (per surface) and contract-1 `web_routers` (surface code `legacy`) an assembly serves; fail-closed when set, `None` keeps the pre-selection compatibility mode and becomes fatal in production before the Wave 0 release is tagged; routes added inside a selected module/surface are caught by the assembly's route-inventory snapshot test; named router sets are a known later item; also top-level) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
 | `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`), `MIGRATION_OWNER_LEDGER_DIGEST`, `MIGRATION_OWNER_LEDGER_DIGEST_DOMAIN`, `LedgerDigestError`, `migration_owner_ledger_digest`, `verify_migration_owner_ledger_digest`, `encode_migration_owner`, `encode_migration_owner_ledger` (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
@@ -313,6 +315,8 @@ Two rules travel with it:
 | `dotmac_kernel.testing.fakes` | `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding` |
 | `dotmac_kernel.testing.licensing` | `FakeLicenceSigner` (ephemeral in-memory Ed25519 test signer — the ONLY signer in the kernel; needs the `cryptography` dependency at instantiation) |
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
+| `dotmac_kernel.testing.route_inventory` | `route_inventory` (sorted `(method, path, name)` of every mounted route, for an assembly's committed snapshot test) |
+| `dotmac_kernel.testing.surface_conformance` | `assert_surface_conformance`, `check_surface_conformance`, `ConformanceReport`, `SurfaceConformanceError`, `DEFAULT_PREFIXES` (boots a module's surfaces under `/admin` and `/` facets; kernel permission/machine-scope guard on every route matched by function identity, CSRF on mutations, named-route navigation, no absolute template URLs, template namespace isolation; `public_routes=` for declared entry routes) |
 | `dotmac_kernel.web_deps` | `require_web_party`, `require_web_auth`, `require_web_permission`, `TENANT_COOKIE_AUTHENTICATION`, `TenantCookieAuthenticationProvider`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
 | `dotmac_kernel.web_surfaces` | The interactive-browser composition contract: `WebFacetMount`, `WebSurfaceContribution`, `WebSurfaceRegistry`, `AuthenticationProfileBinding`, `BrowserAuthenticationProvider`, `BrowserCredentialTransport`, `BrowserSecurityPlane`, `BrowserSessionPolicy`, `InlineScriptHashV1`, `BrowserDocumentPolicyV1`, browser-capability, template/static namespace, navigation, route-reference and request `SurfaceContext` types, their validation errors, plus `qualified_route_name`, `surface_route_name` and `surface_path` |
 
@@ -468,6 +472,21 @@ retired prefix is never reused.
 | `template_studio` | `mod_tstudio` | `ts` | `template_studio` |
 | `learning` | `mod_learning` | `lr` | `learning` |
 | `money_flows` | `mod_mflows` | `mf` | `money_flows` |
+| `staff_loans` | `mod_sloans` | `sl` | `staff_loans` |
+| `leave` | `mod_leave` | `lv` | `leave` |
+| `leases` | `mod_leases` | `le` | `leases` |
+| `attendance` | `mod_attend` | `atn` | `attendance` |
+| `hr_lifecycle` | `mod_hrlife` | `hl` | `hr_lifecycle` |
+| `performance` | `mod_perf` | `pf` | `performance` |
+| `recruitment` | `mod_recruit` | `rt` | `recruitment` |
+| `employee_relations` | `mod_emprel` | `er` | `employee_relations` |
+| `calendar` | `mod_calendar` | `cd` | `calendar` |
+| `fleet` | `mod_fleet` | `fl` | `fleet` |
+| `help_centre` | `mod_helpctr` | `hc` | `help_centre` |
+| `webhooks` | `mod_webhooks` | `wh` | `webhooks` |
+| `notifications` | `mod_notify` | `nf` | `notifications` |
+| `reporting` | `mod_reporting` | `rp` | `reporting` |
+| `custom_fields` | `mod_custfld` | `cf` | `custom_fields` |
 | `ticketing` | `mod_tkt` | `tk` | `ticketing` |
 | `release_catalog` | `mod_rel` | `rl` | `release_catalog` |
 | `entitlement_allocation` | `mod_ealloc` | `ea` | `entitlement_allocation` |

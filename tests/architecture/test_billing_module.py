@@ -37,6 +37,21 @@ KERNEL_VERSIONS = (
     REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
 )
 
+_TENANT_ONLY_RELATIONS = (
+    (
+        "withholding_releases",
+        ("component_id", "billing_account_id", "document_id"),
+        "document_withholding_components",
+        ("id", "billing_account_id", "document_id"),
+    ),
+    (
+        "withholding_releases",
+        ("reverses_release_id", "component_id"),
+        "withholding_releases",
+        ("id", "component_id"),
+    ),
+)
+
 _INTERNAL_RELATIONS = (
     ("settlement_earmarks", ("billing_account_id",), "billing_accounts", ("id",)),
     (
@@ -560,6 +575,9 @@ def _expected_internal_foreign_keys() -> set[tuple[object, ...]]:
                 remote,
             )
         )
+    # Tenant-plane-only tables (Q-F withholding releases) have no platform twin.
+    for source, local, target, remote in _TENANT_ONLY_RELATIONS:
+        expected.add((source, ("tenant_id", *local), target, ("tenant_id", *remote)))
     return expected
 
 
@@ -688,6 +706,15 @@ def test_every_billing_reference_is_database_enforced_on_both_planes() -> None:
     """No service convention may be the only thing preventing dangling facts."""
 
     assert _model_internal_foreign_keys() == _expected_internal_foreign_keys()
+
+
+def test_every_tenant_only_relation_source_has_no_platform_twin() -> None:
+    """A tenant-only table is expected only by its tenant edges, never a twin's."""
+
+    for source, *_rest in _TENANT_ONLY_RELATIONS:
+        assert source in models.TENANT_TABLES
+        assert f"platform_{source}" not in models.PLATFORM_TABLES
+        assert f"{models.SCHEMA}.platform_{source}" not in models.Base.metadata.tables
 
 
 def test_internal_reference_guard_is_sensitive_to_one_missing_edge() -> None:

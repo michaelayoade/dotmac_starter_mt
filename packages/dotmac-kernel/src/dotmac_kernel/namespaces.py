@@ -1367,6 +1367,101 @@ MONEY_FLOWS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("mflows"),
 )
 
+# Starter parity programme Wave 0 (decision D3, 2026-11-24): physical identity
+# reserved for the new stateful modules BEFORE any of their source exists.
+# Allocation only - no data, writer authority or package is transferred.
+STAFF_LOANS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="staff_loans",
+    prefix="sl",
+    branch_label="staff_loans",
+    db_schema=module_schema("sloans"),
+)
+LEAVE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="leave",
+    prefix="lv",
+    branch_label="leave",
+    db_schema=module_schema("leave"),
+)
+LEASES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="leases",
+    prefix="le",
+    branch_label="leases",
+    db_schema=module_schema("leases"),
+)
+ATTENDANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="attendance",
+    prefix="atn",
+    branch_label="attendance",
+    db_schema=module_schema("attend"),
+)
+HR_LIFECYCLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="hr_lifecycle",
+    prefix="hl",
+    branch_label="hr_lifecycle",
+    db_schema=module_schema("hrlife"),
+)
+PERFORMANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="performance",
+    prefix="pf",
+    branch_label="performance",
+    db_schema=module_schema("perf"),
+)
+RECRUITMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="recruitment",
+    prefix="rt",
+    branch_label="recruitment",
+    db_schema=module_schema("recruit"),
+)
+EMPLOYEE_RELATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="employee_relations",
+    prefix="er",
+    branch_label="employee_relations",
+    db_schema=module_schema("emprel"),
+)
+CALENDAR_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="calendar",
+    prefix="cd",
+    branch_label="calendar",
+    db_schema=module_schema("calendar"),
+)
+FLEET_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fleet",
+    prefix="fl",
+    branch_label="fleet",
+    db_schema=module_schema("fleet"),
+)
+HELP_CENTRE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="help_centre",
+    prefix="hc",
+    branch_label="help_centre",
+    db_schema=module_schema("helpctr"),
+)
+WEBHOOKS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="webhooks",
+    prefix="wh",
+    branch_label="webhooks",
+    db_schema=module_schema("webhooks"),
+)
+
+NOTIFICATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="notifications",
+    prefix="nf",
+    branch_label="notifications",
+    db_schema=module_schema("notify"),
+)
+REPORTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="reporting",
+    prefix="rp",
+    branch_label="reporting",
+    db_schema=module_schema("reporting"),
+)
+CUSTOM_FIELDS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="custom_fields",
+    prefix="cf",
+    branch_label="custom_fields",
+    db_schema=module_schema("custfld"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1453,6 +1548,21 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     RESPONSE_OBLIGATIONS_MIGRATION_OWNER,
     LEARNING_MIGRATION_OWNER,
     MONEY_FLOWS_MIGRATION_OWNER,
+    STAFF_LOANS_MIGRATION_OWNER,
+    LEAVE_MIGRATION_OWNER,
+    LEASES_MIGRATION_OWNER,
+    ATTENDANCE_MIGRATION_OWNER,
+    HR_LIFECYCLE_MIGRATION_OWNER,
+    PERFORMANCE_MIGRATION_OWNER,
+    RECRUITMENT_MIGRATION_OWNER,
+    EMPLOYEE_RELATIONS_MIGRATION_OWNER,
+    CALENDAR_MIGRATION_OWNER,
+    FLEET_MIGRATION_OWNER,
+    HELP_CENTRE_MIGRATION_OWNER,
+    WEBHOOKS_MIGRATION_OWNER,
+    NOTIFICATIONS_MIGRATION_OWNER,
+    REPORTING_MIGRATION_OWNER,
+    CUSTOM_FIELDS_MIGRATION_OWNER,
 )
 
 
@@ -1595,7 +1705,7 @@ def migration_owner_ledger_digest(
 #: advertise a plain SHA-256 over some unstated serialization and invite a
 #: consumer to recompute the wrong thing.
 MIGRATION_OWNER_LEDGER_DIGEST: Final[str] = (
-    "cv1:4bdbdbc6b69841de17532951e679bfd7fc8d61e81a43c30b82692e695c82adcc"
+    "cv1:abb1636129b70e792473ef2a9e170d52f99fb7c181805868165462e19bd8b3cf"
 )
 
 
@@ -2000,6 +2110,21 @@ __all__ = [
     "RESPONSE_OBLIGATIONS_MIGRATION_OWNER",
     "LEARNING_MIGRATION_OWNER",
     "MONEY_FLOWS_MIGRATION_OWNER",
+    "STAFF_LOANS_MIGRATION_OWNER",
+    "LEAVE_MIGRATION_OWNER",
+    "LEASES_MIGRATION_OWNER",
+    "ATTENDANCE_MIGRATION_OWNER",
+    "HR_LIFECYCLE_MIGRATION_OWNER",
+    "PERFORMANCE_MIGRATION_OWNER",
+    "RECRUITMENT_MIGRATION_OWNER",
+    "EMPLOYEE_RELATIONS_MIGRATION_OWNER",
+    "CALENDAR_MIGRATION_OWNER",
+    "FLEET_MIGRATION_OWNER",
+    "HELP_CENTRE_MIGRATION_OWNER",
+    "WEBHOOKS_MIGRATION_OWNER",
+    "NOTIFICATIONS_MIGRATION_OWNER",
+    "REPORTING_MIGRATION_OWNER",
+    "CUSTOM_FIELDS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

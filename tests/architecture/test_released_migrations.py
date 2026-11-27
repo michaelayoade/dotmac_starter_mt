@@ -2082,6 +2082,72 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-billing ──
+    "dotmac-billing-v0.1.0a14": (
+        "dotmac-billing",
+        "f3bd5a8a222ca849d60741d62c1e181d0644724b",
+        {
+            "bi_0001_billing.py": (
+                "f82a962e7c0745cf11e2c8187042a5af412dd80a254be5b2e0975d0c7aa36373"
+            ),
+            "bi_0002_multiline.py": (
+                "08fd8d9e2c4f5586180066a831df93dc61b153178e61b7c07aa41aac8ea019c9"
+            ),
+            "bi_0003_issued_line_freeze.py": (
+                "ffcd0231cce9a4c7a0b1db668b258e8728d44e74a63d876ff5bbd9c574ed6f8f"
+            ),
+            "bi_0004_withholding_discharge.py": (
+                "348eb9a16c9eb84dca542a3ab004445d1ff52c3a74f5ef4427d073cdfb9fc9a3"
+            ),
+            "bi_0005_non_cash_credit.py": (
+                "2179d2fc20f2ea24378255f70d4da21223dcf9d2b3dc12b738334c483c338c3f"
+            ),
+            "bi_0006_cash_source_claim.py": (
+                "a9d26132d0825532831d463e5f0a661a866780c68ec6f69c7b307e4b7f0acff5"
+            ),
+            "bi_0007_opening_cash.py": (
+                "5e1cba7a3674fb03d6ed0b349c04a992e03a1bc9230ddcd44c004484b172f654"
+            ),
+            "bi_0008_opening_receivables.py": (
+                "d9b70b73c1265e1f9713c0751bbedbade65b0a26702ec1c162149f4e0d133ba1"
+            ),
+            "bi_0009_opening_window.py": (
+                "04e32fd5fa1e90ebf98c50d577349aa82feb4bf2453cd3b3dcc79ad3d9cd7f47"
+            ),
+            "bi_0010_line_source_key.py": (
+                "1ebbc2ef6ffc34abfb9789f51230321dc2ca977f1643f58de4cf2203c8d8a4fe"
+            ),
+            "bi_0011_settlement_earmarks.py": (
+                "0ce8eea45e33d38267884a860ae9550cc72f170dd71972385d2fe549e9bb1913"
+            ),
+            "bi_0012_tax_evidence.py": (
+                "47b6becfaa74ce741d31e453a036f54734f737284aadee8ec2aadca709d00ab8"
+            ),
+            "bi_0013_opening_hold_admission.py": (
+                "b4aee71233f5469ddc4a8f426e550b4febb7422a441bb4c4d07d4e98c12e8671"
+            ),
+            "bi_0014_opening_variance_ledger.py": (
+                "3e9ee0f6297b1449f93eb4208e66862ada215a16615ff35cbee286a0e6b7b6d9"
+            ),
+            "bi_0015_line_price_version_fk.py": (
+                "fef1c8a13b40955afa128c5c0c3896a1e2a8ae2fcdcff4acc94391609723348b"
+            ),
+            "bi_0016_withholding_components.py": (
+                "7f19b4fed9ae6f922c80afc7530d4ccdfd81432faf53d9d12034630842b2ab54"
+            ),
+            "bi_0017_open_documents_index.py": (
+                "f8fc37a43af6315e007630d4acdadad27f6e1036bbad9ea2e6d1db88964b3679"
+            ),
+            "bi_0018_account_terms.py": (
+                "b4ff57dae90c0e9ace5cad345066d48e06c88f051fcf26bf748b7c2383d385b0"
+            ),
+            "bi_0019_opening_dual_control.py": (
+                "7d992490cd879f7ca10c26d2c005455a1cec55d21d55d394dc6f754782d63033"
+            ),
+            "bi_0020_withholding_releases.py": (
+                "ec003339e6a127fa59db03add0407c8a9c5c19aee777e75c0b06118885d9f25b"
+            ),
+        },
+    ),
     "dotmac-billing-v0.1.0a13": (
         "dotmac-billing",
         "1eff7918c0449e2f3e2f63f15d35fdfde1d1487a",
@@ -8938,6 +9004,21 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         },
     ),
     # ── dotmac-money-flows ──
+    "dotmac-money-flows-v0.1.0a3": (
+        "dotmac-money-flows",
+        "7e6ef54c9bab444db6327485f6997f254b152bdb",
+        {
+            "mf_0001_settle_instances.py": (
+                "fa10195f884f7e6d7404e03af52d90003d24b91b7813f6c93ee1ea0c2f3ea03e"
+            ),
+            "mf_0002_funded_charge_instances.py": (
+                "f33b75e1ce84a3cfea69bd535067ea640dc614da4d61a575eb6c89c2f327842e"
+            ),
+            "mf_0003_settle_discharge_list.py": (
+                "9a9da4c71ced5f586806f965936113616701f5aa7caaba5a8aa0bf798b120a88"
+            ),
+        },
+    ),
     "dotmac-money-flows-v0.1.0a2": (
         "dotmac-money-flows",
         "d26951c1452567767fc977e0f76929818efc1ceb",
@@ -9134,7 +9215,8 @@ UNRELEASED: dict[str, frozenset[str]] = {
     ),
     # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
     # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
-    # two-person policy) are a13's, editable until a13 is tagged.
+    # two-person policy) shipped in a13 (tagged) and are frozen. `bi_0020` (Q-F
+    # withholding releases) is a14's, editable until a14 is tagged.
     "dotmac-billing": frozenset(),
     # `cl_0002` adds the per-account access hold (a3); editable until a3 is tagged.
     "dotmac-collections": frozenset(),
@@ -9232,6 +9314,8 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-ticketing": frozenset(),
     "dotmac-deployment-control": frozenset(),
     "dotmac-learning": frozenset(),
+    # `mf_0003` adds the nullable JSON list of discharge references (C2b);
+    # still editable until `dotmac-money-flows` 0.1.0a3 is tagged.
     "dotmac-money-flows": frozenset(),
 }
 

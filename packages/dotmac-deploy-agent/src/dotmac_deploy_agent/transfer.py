@@ -49,11 +49,13 @@ from .refusal import Refusal
 
 LOOPBACK: Final = "127.0.0.1"
 _PLANNED: Final = re.compile(r"127\.0\.0\.1:([0-9]{4,5})/([a-z0-9][a-z0-9._/-]*)")
+_IMAGE_ID: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _REPO_PATH: Final = re.compile(r"[^/]+/(.+)")
 READY_SECONDS: Final = 15.0
+OCI_INDEX: Final = "application/vnd.oci.image.index.v1+json"
 INDEX_MEDIA_TYPES: Final = frozenset(
     {
-        "application/vnd.oci.image.index.v1+json",
+        OCI_INDEX,
         "application/vnd.docker.distribution.manifest.list.v2+json",
     }
 )
@@ -315,10 +317,17 @@ class ImageTransfer:
         if "sha256:" + sha256_hex(raw) != image.release_digest:
             raise Refusal("transfer_digest_mismatch")
         try:
-            media_type = json.loads(raw).get("mediaType")
+            document = json.loads(raw)
+            media_type = document.get("mediaType")
         except (ValueError, AttributeError):
             raise Refusal("transfer_digest_mismatch") from None
-        return media_type if isinstance(media_type, str) else "unknown"
+        if isinstance(media_type, str) and media_type:
+            return media_type
+        # An OCI index may omit `mediaType`; without `--all` its digest would be
+        # lost on copy, so a document that lists `manifests` is treated as one.
+        if isinstance(document.get("manifests"), list):
+            return OCI_INDEX
+        return "unknown"
 
     def _await_ready(self, handle: RegistryHandle, port: int, deadline: float) -> None:
         limit = min(READY_SECONDS, self._remaining(deadline))
@@ -357,6 +366,7 @@ class ImageTransfer:
             raise Refusal("transfer_digest_mismatch") from None
         if (
             not isinstance(image_id, str)
+            or not _IMAGE_ID.fullmatch(image_id)
             or not isinstance(repo_digests, list)
             or reference not in repo_digests
         ):
