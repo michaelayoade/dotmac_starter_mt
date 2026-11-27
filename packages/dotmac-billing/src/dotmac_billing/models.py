@@ -248,7 +248,7 @@ class BillingDocument(Base, _TenantRow, _DocumentColumns):
     __table_args__ = (
         CheckConstraint(
             "authoring_mode IN ('legacy_single', 'explicit_multiline', "
-            "'imported_open_item')",
+            "'imported_open_item', 'migration_item')",
             name="ck_documents_authoring_mode",
         ),
         ForeignKeyConstraint(
@@ -1995,6 +1995,142 @@ class WithholdingRelease(Base, _TenantRow):
     )
 
 
+def _migration_item_constraints() -> tuple[object, ...]:
+    table = "migration_items"
+    return (
+        ForeignKeyConstraint(
+            ["tenant_id", "window_id"],
+            [f"{SCHEMA}.opening_windows.tenant_id", f"{SCHEMA}.opening_windows.id"],
+            name=f"fk_{table}_window",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "document_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.documents.tenant_id",
+                f"{SCHEMA}.documents.id",
+                f"{SCHEMA}.documents.billing_account_id",
+            ],
+            name=f"fk_{table}_document",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "posting_group_id", "billing_account_id"],
+            [
+                f"{SCHEMA}.posting_groups.tenant_id",
+                f"{SCHEMA}.posting_groups.id",
+                f"{SCHEMA}.posting_groups.billing_account_id",
+            ],
+            name=f"fk_{table}_group",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "reverses_item_id"],
+            [f"{SCHEMA}.{table}.tenant_id", f"{SCHEMA}.{table}.id"],
+            name=f"fk_{table}_reverses",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("tenant_id", "id", name=f"uq_{table}_id"),
+        UniqueConstraint("tenant_id", "command_id", name=f"uq_{table}_command"),
+        UniqueConstraint("tenant_id", "reverses_item_id", name=f"uq_{table}_reversal"),
+        UniqueConstraint("tenant_id", "posting_group_id", name=f"uq_{table}_group"),
+        Index(
+            f"uq_{table}_debit_claim",
+            "tenant_id",
+            "source_installation_id",
+            "source_system",
+            "source_key",
+            "generation",
+            unique=True,
+            postgresql_where=text("kind = 'debit'"),
+        ),
+        Index(
+            f"uq_{table}_debit_document",
+            "tenant_id",
+            "document_id",
+            unique=True,
+            postgresql_where=text("kind = 'debit'"),
+        ),
+        CheckConstraint(
+            "kind IN ('debit', 'credit', 'reversal') AND receivable_delta <> 0 "
+            "AND ((kind = 'debit' AND receivable_delta > 0 "
+            "AND reverses_item_id IS NULL AND generation >= 1 "
+            "AND source_total IS NULL AND source_number IS NULL "
+            "AND collection IS NOT NULL AND evidence_ref IS NOT NULL "
+            "AND evidence_digest IS NOT NULL AND reason IS NULL) "
+            "OR (kind = 'credit' AND receivable_delta < 0 "
+            "AND reverses_item_id IS NULL AND generation IS NULL "
+            "AND source_total > 0 AND -receivable_delta <= source_total "
+            "AND source_number IS NOT NULL AND collection IS NULL "
+            "AND evidence_ref IS NOT NULL AND evidence_digest IS NOT NULL "
+            "AND reason IS NULL) "
+            "OR (kind = 'reversal' AND reverses_item_id IS NOT NULL "
+            "AND collection IS NULL AND evidence_ref IS NULL "
+            "AND evidence_digest IS NULL AND reason IS NOT NULL))",
+            name=f"ck_{table}_shape",
+        ),
+        CheckConstraint(
+            "currency = upper(currency) AND length(currency) = 3 "
+            "AND minor_units BETWEEN 0 AND 6",
+            name=f"ck_{table}_currency",
+        ),
+        CheckConstraint(
+            "length(trim(command_id)) > 0 AND length(trim(actor_ref)) > 0 "
+            "AND length(trim(source_installation_id)) > 0 "
+            "AND length(trim(source_system)) > 0 AND length(trim(source_key)) > 0 "
+            "AND (source_number IS NULL OR length(trim(source_number)) > 0) "
+            "AND (evidence_ref IS NULL OR length(trim(evidence_ref)) > 0) "
+            "AND (evidence_digest IS NULL OR evidence_digest ~ '^[0-9a-f]{64}$') "
+            "AND (reason IS NULL OR length(trim(reason)) > 0)",
+            name=f"ck_{table}_attribution",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+
+class MigrationItem(Base, _TenantRow):
+    """A post-seal legacy item the opening did not carry (R8; tenant plane only).
+
+    One typed, append-only row per recorded debit (a late legacy open invoice
+    brought in as a receivable), credit (a legacy credit note applied to one open
+    invoice) or exact reversal. ``receivable_delta`` is signed: a debit is
+    positive, a credit negative, a reversal the exact negation of the row it
+    reverses. Billing books no revenue and no tax for any of them. The unique
+    claim indexes and the admission trigger bind the legacy identity to the sealed
+    capture namespace; ``recorded_at`` is stamped by the database clock.
+    """
+
+    __tablename__ = "migration_items"
+    __table_args__ = _migration_item_constraints()
+
+    id: Mapped[UUID] = uuid_pk()
+    window_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    billing_account_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_installation_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_number: Mapped[str | None] = mapped_column(String(255))
+    generation: Mapped[int | None] = mapped_column(Integer)
+    source_total: Mapped[Decimal | None] = money_column(nullable=True)
+    document_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    posting_group_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    receivable_delta: Mapped[Decimal] = money_column()
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    reverses_item_id: Mapped[UUID | None] = mapped_column(Uuid())
+    collection: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    evidence_ref: Mapped[str | None] = mapped_column(String(255))
+    evidence_digest: Mapped[str | None] = mapped_column(String(64))
+    reason: Mapped[str | None] = mapped_column(Text)
+    actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    command_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Stamped by the database admission trigger; never a caller value.
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
+
+
 class _TermsTail:
     @declared_attr
     def recorded_at(cls) -> Mapped[datetime]:
@@ -3593,6 +3729,7 @@ TENANT_TABLES = (
     "withholding_discharges",
     "document_withholding_components",
     "withholding_releases",
+    "migration_items",
     "billing_account_terms_versions",
     "billing_terms_defaults_versions",
     "billing_accounts",
@@ -3693,6 +3830,7 @@ __all__ = [
     "DocumentWithholdingComponent",
     "PlatformDocumentWithholdingComponent",
     "WithholdingRelease",
+    "MigrationItem",
     "BillingAccountTermsVersion",
     "PlatformBillingAccountTermsVersion",
     "BillingTermsDefaultsVersion",

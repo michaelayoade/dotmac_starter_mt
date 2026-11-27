@@ -14,7 +14,7 @@ from dotmac_billing.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="billing",
-    version="0.1.0a14",
+    version="0.1.0a15",
     core=False,
     short_code="billing",
     migration_prefix="bi",
@@ -30,6 +30,7 @@ module = ModuleManifest(
         "billing.withholding.released.v1",
         "billing.settlement.earmarked.v1",
         "billing.settlement.earmark.changed.v1",
+        "billing.accounting.fact.v7",
         "billing.accounting.fact.v6",
         "billing.accounting.fact.v5",
         "billing.receivable.exposure.v2",

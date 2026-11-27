@@ -9216,8 +9216,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
     # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
     # two-person policy) shipped in a13 (tagged) and are frozen. `bi_0020` (Q-F
-    # withholding releases) is a14's, editable until a14 is tagged.
-    "dotmac-billing": frozenset(),
+    # withholding releases) shipped in a14 (tagged) and is frozen. `bi_0021`
+    # (R8 migration items) is a15's, editable until a15 is tagged.
+    "dotmac-billing": frozenset({"bi_0021_migration_items.py"}),
     # `cl_0002` adds the per-account access hold (a3); editable until a3 is tagged.
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),

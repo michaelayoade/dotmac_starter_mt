@@ -37,6 +37,7 @@ from dotmac_billing.tax_dependency_evidence import (
 
 WITHHOLDING_FREEZE_PERMISSION = "billing.withholding.freeze"
 WITHHOLDING_RELEASE_PERMISSION = "billing.withholding.release"
+MIGRATION_ITEM_PERMISSION = "billing.migration_item.record"
 
 
 class ActorPermissionReader(Protocol):
@@ -464,6 +465,7 @@ __all__ = [
     "ReleaseWithholdingComponent",
     "ReverseWithholdingRelease",
     "WITHHOLDING_RELEASE_PERMISSION",
+    "MIGRATION_ITEM_PERMISSION",
     "AllocationCommand",
     "ApplyAvailableCreditCommand",
     "CreateDraftDocument",

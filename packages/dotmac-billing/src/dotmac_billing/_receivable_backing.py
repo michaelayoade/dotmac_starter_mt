@@ -70,6 +70,7 @@ def resolve_receivable_backing(
             .one_or_none()
         )
         imported = document["authoring_mode"] == "imported_open_item"
+        migration = document["authoring_mode"] == "migration_item"
         if imported != (basis is not None):
             raise BillingRuleViolation(
                 "receivable_backing_integrity", "document backing mode disagrees"
@@ -106,9 +107,17 @@ def resolve_receivable_backing(
                 )
             ).scalar_one()
         )
-        initial = Decimal(
-            document["grand_total"] if basis is None else basis["initial_receivable"]
-        )
+        if migration:
+            # Only the tenant plane has migration documents (platform CHECK).
+            from dotmac_billing.migration_items import migration_debit_initial
+
+            initial = migration_debit_initial(db, scope=scope, document_id=document_id)
+        else:
+            initial = Decimal(
+                document["grand_total"]
+                if basis is None
+                else basis["initial_receivable"]
+            )
         if not remaining.is_finite() or remaining < 0 or remaining > initial:
             raise BillingRuleViolation(
                 "invoice_room_integrity", "invoice resolution exceeds exact backing"

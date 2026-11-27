@@ -185,6 +185,9 @@ ISSUE_CALLERS: frozenset[str] = frozenset({"funded_charge.py"})
 # Q-F: releasing an expected withholding is a staff Tax correction on Billing,
 # never a flow. No money-flows module may call it.
 WITHHOLDING_RELEASE_CALLERS: frozenset[str] = frozenset()
+# R8: a post-seal migration item is recorded or reversed by the ERP holding-release
+# adapter on Billing, never by a flow. No money-flows module may call it.
+MIGRATION_ITEM_CALLERS: frozenset[str] = frozenset()
 RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "apply_available_credit": CREDIT_DRAW_CALLERS,
     "ApplyAvailableCreditCommand": CREDIT_DRAW_CALLERS,
@@ -198,6 +201,7 @@ RESTRICTED_CALLERS: Mapping[str, frozenset[str]] = {
     "reverse_withholding_discharge": F5_REVERSAL_CALLERS,
     "release_withholding_component": WITHHOLDING_RELEASE_CALLERS,
     "reverse_withholding_release": WITHHOLDING_RELEASE_CALLERS,
+    "reverse_migration_item": MIGRATION_ITEM_CALLERS,
 }
 FORBIDDEN_BUILTINS = frozenset(
     {

@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, DecimalException, localcontext
 from enum import Enum
 from functools import wraps
-from typing import Any, Literal, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, ParamSpec, TypeVar, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -27,6 +27,9 @@ from dotmac_kernel.transactions import conflict_savepoint_requires_rollback
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, SessionTransaction
+
+if TYPE_CHECKING:
+    from dotmac_billing.migration_items import MigrationPosting
 
 from dotmac_billing import models
 from dotmac_billing._document_facts import _decode
@@ -276,6 +279,9 @@ from dotmac_billing.tax_evidence import (
 )
 
 _AccountingEffectKind = Literal[
+    "migration_debit_recorded",
+    "migration_credit_applied",
+    "migration_item_reversed",
     "opening_account_imported",
     "opening_account_import_reversed",
     "opening_variance_recorded",
@@ -1643,36 +1649,47 @@ def _receivable_exposure(
             "exposure_document_invalid",
             "a receivable exposure requires one issued invoice",
         )
-    if document.obligation_id is None:
-        raise BillingConflict(
-            "exposure_obligation_missing",
-            "an invoice exposure requires rated-obligation evidence",
+    migration_evidence = None
+    if document.authoring_mode == "migration_item":
+        # A migration debit has no obligation: the exposure fields come from the
+        # collection evidence recorded with its item.
+        from dotmac_billing.migration_items import migration_collection_evidence
+
+        migration_evidence = migration_collection_evidence(
+            db, scope=scope, document_id=document.id
         )
-    obligation = _one(
-        db,
-        scope=scope,
-        model=plane.obligation,
-        row_id=document.obligation_id,
-    )
-    line_obligation_ids = tuple(
-        db.execute(
-            _where_scope(
-                select(plane.line.obligation_id).where(
-                    plane.line.document_id == document.id,
-                    plane.line.obligation_id.is_not(None),
-                ),
-                scope,
-                plane.line,
+        obligation = None
+    else:
+        if document.obligation_id is None:
+            raise BillingConflict(
+                "exposure_obligation_missing",
+                "an invoice exposure requires rated-obligation evidence",
             )
-        ).scalars()
-    )
-    if line_obligation_ids:
-        _require_single_exposure_service(
-            tuple(
-                _one(db, scope=scope, model=plane.obligation, row_id=identity)
-                for identity in dict.fromkeys(line_obligation_ids)
-            )
+        obligation = _one(
+            db,
+            scope=scope,
+            model=plane.obligation,
+            row_id=document.obligation_id,
         )
+        line_obligation_ids = tuple(
+            db.execute(
+                _where_scope(
+                    select(plane.line.obligation_id).where(
+                        plane.line.document_id == document.id,
+                        plane.line.obligation_id.is_not(None),
+                    ),
+                    scope,
+                    plane.line,
+                )
+            ).scalars()
+        )
+        if line_obligation_ids:
+            _require_single_exposure_service(
+                tuple(
+                    _one(db, scope=scope, model=plane.obligation, row_id=identity)
+                    for identity in dict.fromkeys(line_obligation_ids)
+                )
+            )
     void_statement = select(plane.event.id).where(
         plane.event.document_id == document.id,
         plane.event.event_kind == "voided",
@@ -1686,7 +1703,7 @@ def _receivable_exposure(
     outstanding = backing.remaining
     resolved_amount = backing.initial_amount - outstanding
     financial_state: FinancialState
-    if voided:
+    if voided or (migration_evidence is not None and not backing.active):
         outstanding = Decimal("0")
         financial_state = "cancelled"
     elif outstanding == 0:
@@ -1695,11 +1712,24 @@ def _receivable_exposure(
         financial_state = "partially_resolved"
     else:
         financial_state = "open"
-    service_period = ServicePeriodEvidenceV1(
-        status=ServicePeriodStatus(obligation.service_period_status),
-        starts_at=obligation.period_start,
-        ends_at=obligation.period_end,
-    )
+    due_at = document.due_at
+    if migration_evidence is not None:
+        from dotmac_billing.migration_items import exposure_due_at, exposure_fields_of
+
+        subject_ref, service_ref, timing, service_period = exposure_fields_of(
+            migration_evidence, account_id=document.billing_account_id
+        )
+        due_at = exposure_due_at(migration_evidence, document.due_at)
+    else:
+        assert obligation is not None
+        subject_ref = obligation.subject_ref
+        service_ref = obligation.service_ref
+        timing = obligation.collection_timing
+        service_period = ServicePeriodEvidenceV1(
+            status=ServicePeriodStatus(obligation.service_period_status),
+            starts_at=obligation.period_start,
+            ends_at=obligation.period_end,
+        )
     due_date_basis = _due_date_basis(document.due_date_basis)
     collectible = _money(outstanding, document.currency, document.minor_units)
     payload = {
@@ -1707,9 +1737,9 @@ def _receivable_exposure(
         "source_owner": "dotmac-billing",
         "exposure_ref": f"document:{document.id}",
         "billing_account_id": document.billing_account_id,
-        "subject_ref": obligation.subject_ref,
-        "service_ref": obligation.service_ref,
-        "collection_timing": obligation.collection_timing,
+        "subject_ref": subject_ref,
+        "service_ref": service_ref,
+        "collection_timing": timing,
         "source_version": source_version,
         "posting_group_watermark": posting_group_watermark,
         "source_authority": "internal",
@@ -1719,7 +1749,7 @@ def _receivable_exposure(
         "completeness_reason_code": None,
         "observed_at": observed_at,
         "service_period": service_period,
-        "due_at": document.due_at,
+        "due_at": due_at,
         "due_date_basis": due_date_basis,
         "financial_state": financial_state,
         "collectible_receivable": collectible,
@@ -1729,9 +1759,9 @@ def _receivable_exposure(
         source_owner="dotmac-billing",
         exposure_ref=f"document:{document.id}",
         billing_account_id=document.billing_account_id,
-        subject_ref=obligation.subject_ref,
-        service_ref=obligation.service_ref,
-        collection_timing=cast(CollectionTiming, obligation.collection_timing),
+        subject_ref=subject_ref,
+        service_ref=service_ref,
+        collection_timing=cast(CollectionTiming, timing),
         source_version=source_version,
         posting_group_watermark=posting_group_watermark,
         source_authority="internal",
@@ -1742,7 +1772,7 @@ def _receivable_exposure(
         state_fingerprint=fingerprint_of(_wire_value(payload)),
         observed_at=observed_at,
         service_period=service_period,
-        due_at=document.due_at,
+        due_at=due_at,
         due_date_basis=due_date_basis,
         financial_state=financial_state,
         collectible_receivable=collectible,
@@ -2042,8 +2072,11 @@ def _post_group(
     cash_source_order: tuple[CashCreditSourceOrderV1, ...] = (),
     corrects_posting_group_id: UUID | None = None,
     variance_fact: VarianceFactRequest | None = None,
+    migration: MigrationPosting | None = None,
     _earmark_permit: _EarmarkPermit | None = None,
 ) -> _PostingGroupRow:
+    from dotmac_billing.migration_items import AccountingFactV7
+
     plane = _models(scope)
     if reverses_group_id is not None:
         require_group_not_variance_resolution(
@@ -2099,6 +2132,19 @@ def _post_group(
         effects=opening_effects,
     )
     _persist_opening_receivables(db, scope=scope, bases=opening_bases)
+    if migration is not None:
+        # The item row follows its group (FK) and precedes every derivation that
+        # reads it: the room function takes a migration debit's base from it.
+        db.add(
+            models.MigrationItem(
+                **{
+                    **migration.row,
+                    "tenant_id": cast(TenantScope, scope).tenant_id,
+                    "posting_group_id": group_id,
+                }
+            )
+        )
+        db.flush()
     if non_cash_grant is not None:
         payload = _jsonable(non_cash_grant)
         db.add(
@@ -2441,8 +2487,31 @@ def _post_group(
         | AccountingFactV4
         | AccountingFactV5
         | AccountingFactV6
+        | AccountingFactV7
     )
-    if variance_fact is not None:
+    if migration is not None:
+        typed_fact = AccountingFactV7(
+            scope,
+            "dotmac-billing",
+            accounting_fact_id,
+            7,
+            account_id,
+            group_id,
+            source_ref,
+            "internal",
+            cast(Any, kind),
+            occurred_at,
+            observed_at,
+            tuple(
+                AccountingEffectV1(
+                    cast(Any, row.lane), _money(row.amount_delta, currency, minor_units)
+                )
+                for row in effect_rows
+            ),
+            migration.fact,
+            reverses_fact_id,
+        )
+    elif variance_fact is not None:
         if variance_fact.reverses_group_id is not None:
             reverses_fact_id = db.execute(
                 _where_scope(
@@ -2723,7 +2792,14 @@ def _post_group(
         )
     )
     db.flush()
-    if isinstance(typed_fact, AccountingFactV6):
+    if isinstance(typed_fact, AccountingFactV7):
+        _emit(
+            db,
+            scope=scope,
+            event_type="billing.accounting.fact.v7",
+            payload=fact_payload,
+        )
+    elif isinstance(typed_fact, AccountingFactV6):
         _emit(
             db,
             scope=scope,
@@ -3625,6 +3701,12 @@ def freeze_issued_invoice_withholding(
                 "an opening-imported invoice cannot be frozen yet: it has no line "
                 "source and billing holds no party mapping for its account",
             )
+        if document.authoring_mode == "migration_item":
+            raise BillingRuleViolation(
+                "withholding_freeze_migration_item_unavailable",
+                "a migration debit never had a native issue: no withholding "
+                "expectation can be frozen on it",
+            )
         _require_credit_target(
             session, scope=scope, document=document, account_id=account.id
         )
@@ -4098,6 +4180,11 @@ def void_document(
                 "opening_account_owner_required",
                 "imported principal requires its full opening unwind owner",
             )
+        if document.authoring_mode == "migration_item":
+            raise BillingRuleViolation(
+                "migration_item_owner_required",
+                "a migration debit is reversed only through reverse_migration_item",
+            )
         if document.issued_at is None:
             raise BillingRuleViolation(
                 "not_issued", "only an issued document can be voided"
@@ -4117,6 +4204,13 @@ def void_document(
         if allocated != 0:
             raise BillingRuleViolation(
                 "void_has_allocations", "deallocate the document before voiding it"
+            )
+        from dotmac_billing.migration_items import migration_net_credit
+
+        if migration_net_credit(session, scope=scope, document_id=document_id) != 0:
+            raise BillingRuleViolation(
+                "void_has_migration_credit",
+                "reverse the document's migration credits before voiding it",
             )
         if document.document_kind == "invoice" and _document_credited(
             session, scope=scope, document_id=document_id
@@ -7175,6 +7269,15 @@ def _require_opening_reversal_owner(
             "opening_cash_owner_required",
             "use the complete opening cash correction owner",
         )
+    if original.group_kind in {
+        "migration_debit_recorded",
+        "migration_credit_applied",
+        "migration_item_reversed",
+    }:
+        raise BillingRuleViolation(
+            "migration_item_owner_required",
+            "a migration group is reversed only through reverse_migration_item",
+        )
 
 
 def _opening_effect(
@@ -9450,6 +9553,17 @@ def _import_opening_account_v2(
                     recorded_at,
                 )
             )
+        session.flush()
+        from dotmac_billing.migration_items import write_tax_snapshots
+
+        for basis_fact in bases:
+            if basis_fact.source.original is not None:
+                write_tax_snapshots(
+                    session,
+                    scope=scope,
+                    document_id=basis_fact.document_id,
+                    original=basis_fact.source.original,
+                )
         session.flush()
         lots = tuple(
             OpeningCashLotFactV1(

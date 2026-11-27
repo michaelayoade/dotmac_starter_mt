@@ -38,6 +38,20 @@ KERNEL_VERSIONS = (
 )
 
 _TENANT_ONLY_RELATIONS = (
+    ("migration_items", ("window_id",), "opening_windows", ("id",)),
+    (
+        "migration_items",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "migration_items",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    ("migration_items", ("reverses_item_id",), "migration_items", ("id",)),
     (
         "withholding_releases",
         ("component_id", "billing_account_id", "document_id"),
