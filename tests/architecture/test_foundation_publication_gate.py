@@ -1308,7 +1308,7 @@ UNCHANGED = {
         "8f94a69f8f44540c12881f020036f32ca3fd328d88ae4d49cfeac43f98af9e1b"
     ),
     ".github/workflows/release-module.yml": (
-        "ab3bd34edfac2f777cd5ac7b339d7687b788fdd1cebac7af8c19d5b624d597fe"
+        "57c8f9163b923a34bae99f89db27115d15aa0d3fab59158a28fcbaf8d9284c1a"
     ),
     ".github/workflows/release-ui.yml": (
         "02882ce5e449984c2b3ed4be2edda5a851c3daa6ac0360b0560f1a43e24bf58b"

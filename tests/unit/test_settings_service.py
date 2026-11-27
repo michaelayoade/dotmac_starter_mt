@@ -1,7 +1,7 @@
 """TDD for the settings spec registry + resolver (Task 4).
 
 `dotmac_kernel.settings_resolver` holds the registry mechanism and resolution
-logic; `app.features.settings.spec` declares the three initial specs and
+logic; `dotmac_settings_admin.specs` declares the three initial specs and
 registers them at import time (imported below purely for that side effect).
 
 SQLite note: the model's partial-unique indexes
@@ -23,11 +23,11 @@ import pytest
 from dotmac_kernel import settings_resolver as sr
 from dotmac_kernel.setting_scopes import SettingScope
 from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
-from sqlalchemy import func, select
 
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days.
-from app.features.settings import spec as _settings_spec  # noqa: F401
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
+from sqlalchemy import func, select
 
 # ---------------------------------------------------------------------------
 # Registry

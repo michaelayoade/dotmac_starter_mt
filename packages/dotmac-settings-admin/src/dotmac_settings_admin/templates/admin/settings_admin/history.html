@@ -1,0 +1,33 @@
+{# Change history. Context: `setting`, `entries` (HistoryEntry), `error`. A secret's values are never recorded. #}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:60rem;">
+  {{ ui.heading("History: " ~ (setting.label or setting.key)) }}
+  {{ ui.error_box(error) }}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    {% for e in entries %}
+    <tr style="border-bottom:1px solid var(--dmui-border-default);">
+      <td style="padding:var(--dmui-space-sm);">{{ e.changed_at | local_datetime }}<br>{{ ui.badge(e.action) }}</td>
+      <td style="padding:var(--dmui-space-sm);">
+        {% if e.secret_changed %}<em>secret changed (value not recorded)</em>
+        {% else %}<code>{{ e.value_before }}</code> &rarr; <code>{{ e.value_after }}</code>{% endif %}
+        {% if e.reason %}<br><span style="color:var(--dmui-text-muted);">{{ e.reason }}</span>{% endif %}
+      </td>
+      <td style="padding:var(--dmui-space-sm);">
+        {% if e.restorable %}
+        <form method="post" action="{{ surface_url('restore', domain=setting.domain, key=setting.key, history_id=e.id) }}"
+              style="display:flex; gap:var(--dmui-space-xs); align-items:end;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ ui.reason_field() }}
+          {{ ui.button("Restore previous") }}
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {{ ui.link(surface_url('domain', domain=setting.domain), "Back") }}
+</div>
+{% endblock %}

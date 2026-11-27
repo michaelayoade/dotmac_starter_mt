@@ -37,11 +37,16 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
+import dotmac_settings_admin
 import dotmac_template_studio
 import dotmac_ticketing
 import dotmac_ui
 from dotmac_kernel.api_documentation import environment_api_documentation_policy
 from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
 from dotmac_kernel.permission_provisioning import (
@@ -65,6 +70,8 @@ from dotmac_kernel.web_surfaces import (
     WebFacetMount,
     WebRouteRef,
 )
+from dotmac_settings_admin.audit_seam import configure_audit_writer
+from dotmac_settings_admin.seed import seed_platform_defaults
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
@@ -118,7 +125,32 @@ dotmac_template_studio.register_contexts(
     )
 )
 
+# Stateless settings-admin owns no audit storage and cannot declare the audit
+# prerequisite, so the assembly (which runs the kernel lineage) binds the writer.
+configure_audit_writer(write_audit_event)
+
+logger = logging.getLogger(__name__)
+
 _DISABLED_MODULES = frozenset(settings.disabled_feature_set)
+
+
+async def _seed_setting_defaults() -> None:
+    """Seed platform-default setting rows at startup (the reference app's choice).
+
+    Bound here, not on the published `settings_admin` manifest: an adopter that
+    composes the module must not silently gain unaudited NULL-tenant platform
+    writes at boot. Gated like every seed on `SEED_ON_STARTUP`, skipped when the
+    module is disabled, run off the event loop, and DEFERRED, NON-FATAL exactly
+    like the kernel's own seed dispatch: an unreachable database never stops the
+    app serving (`/health` stays DB-free) and the next boot retries.
+    """
+    if "settings_admin" in _DISABLED_MODULES or not settings.seed_on_startup:
+        return
+    try:
+        await asyncio.to_thread(seed_platform_defaults)
+    except Exception as exc:  # seed failure never downs startup
+        logger.warning("Module settings_admin seed skipped: %s", exc)
+
 
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
@@ -133,6 +165,7 @@ assembly = ProductAssemblySpec(
     # module nor `dotmac-ui` imports this assembly or one another.
     modules=[
         *load_manifests(FEATURE_MODULES),
+        dotmac_settings_admin.module,
         dotmac_template_studio.module,
         dotmac_ticketing.module,
     ],
@@ -152,6 +185,9 @@ assembly = ProductAssemblySpec(
                 RoleGrant("admin", "rbac.roles.manage"),
                 RoleGrant("admin", "rbac.grants.manage"),
                 RoleGrant("admin", "rbac.audit.read"),
+                RoleGrant("admin", "settings_admin.read"),
+                RoleGrant("admin", "settings_admin.manage"),
+                RoleGrant("admin", "settings_admin.approve"),
                 RoleGrant("admin", "template_studio.templates.read"),
                 RoleGrant("admin", "template_studio.templates.manage"),
                 RoleGrant("admin", "template_studio.templates.publish"),
@@ -172,6 +208,7 @@ assembly = ProductAssemblySpec(
             planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
         ),
     ),
+    startup_hooks=(_seed_setting_defaults,),
     web_enabled=settings.web_enabled,
     # Resolved from ENVIRONMENT at composition time, failing CLOSED: only the
     # enumerated development and test spellings publish. Unset, blank, a typo

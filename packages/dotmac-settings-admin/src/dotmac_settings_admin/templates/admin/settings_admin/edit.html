@@ -1,0 +1,40 @@
+{#
+  Generic editor. Context: `setting`, `error`, `form` (`value`, `reason`).
+  A secret's value input is ALWAYS blank and write-only.
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:40rem;">
+  {{ ui.heading("Edit " ~ (setting.label or setting.key)) }}
+  <p style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">{{ setting.domain }} / {{ setting.key }}
+    {% if setting.is_secret %} &middot; currently {{ "set" if setting.is_set else "unset" }}{% endif %}</p>
+  {% if setting.description %}<p style="font-size:var(--dmui-font-size-sm);">{{ setting.description }}</p>{% endif %}
+  {{ ui.error_box(error) }}
+  <form method="post" action="{{ surface_url('edit_submit', domain=setting.domain, key=setting.key) }}"
+        style="display:flex; flex-direction:column; gap:var(--dmui-space-md);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if setting.is_secret %}
+    {{ ui.field("value", setting.label or setting.key, "", "password", "Write-only: the current value is never shown.") }}
+    {% elif setting.value_type == "boolean" %}
+    <label><input type="checkbox" name="value" {% if form.get("value") %}checked{% endif %}> {{ setting.label or setting.key }}</label>
+    {% elif setting.value_type == "json" %}
+    <label style="display:flex; flex-direction:column;">{{ setting.label or setting.key }}
+      <textarea name="value" rows="8">{{ form.get("value", "") }}</textarea></label>
+    {% else %}
+    {{ ui.field("value", setting.label or setting.key, form.get("value", "")) }}
+    {% endif %}
+    {{ ui.reason_field(form.get("reason", "")) }}
+    <div>{{ ui.button("Save") }} {{ ui.link(surface_url('domain', domain=setting.domain), "Cancel") }}</div>
+  </form>
+  {% if setting.has_override %}
+  <form method="post" action="{{ surface_url('clear', domain=setting.domain, key=setting.key) }}"
+        style="margin-top:var(--dmui-space-lg); display:flex; gap:var(--dmui-space-sm); align-items:end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ ui.reason_field() }}
+    {{ ui.button("Remove override (inherit)") }}
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

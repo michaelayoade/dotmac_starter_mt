@@ -218,7 +218,7 @@ decision must not misrepresent (see `docs/inventories/starter-surfaces.md` and
 `branding-settings.md`):
 
 - `custom_css` today renders **only inside the branding editor's own preview
-  pane** (`templates/admin/settings/branding.html`), never in `base.html`. The
+  pane** (`dotmac_settings_admin/templates/admin/settings_admin/branding.html`), never in `base.html`. The
   site-wide exposure is therefore *latent*, not live — it becomes real the moment
   someone "finishes the feature" by wiring it into the base layout, which is
   exactly why the decision is being taken now rather than after.

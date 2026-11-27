@@ -221,6 +221,11 @@ CAPABILITY_RAISED_FLOORS = {
     # claim_conflict_savepoint_commit, conflict_savepoint_requires_rollback
     # and current_conflict_savepoint, first published together in a105.
     "dotmac-delivery-resend": ("0.1.0a105", "0.1.0a88"),
+    # Settings admin owns no lineage and no namespace allocation; it registers a
+    # stateless contract-2 ModuleManifest (supported since a88, the config-layers
+    # coordinate) and consumes the settings history writer, `stored_at` and
+    # contract-2 web surfaces, matching its declared dependency floor of a110.
+    "dotmac-settings-admin": ("0.1.0a110", "0.1.0a88"),
     # Files has been raised three times and the table records only the highest:
     # mod_files was ALLOCATED in a54, a56 made fi_0001's prerequisite
     # declarations installable, a61 carried ADR-0028's `supported_plane_sets`

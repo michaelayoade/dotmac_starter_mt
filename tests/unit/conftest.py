@@ -14,6 +14,7 @@ from datetime import date
 # these are bound to `mod_tstudio`, and `create_test_engine` ATTACHes every
 # schema it finds in `Base.metadata`, so the import must happen before the
 # engine fixture runs or the qualified CREATE TABLE has nowhere to land.
+import dotmac_settings_admin as settings_admin
 import dotmac_template_studio as template_studio
 import pytest
 
@@ -145,7 +146,20 @@ def _all_manifests():
     `require_permission` guard 500 and every `write_audit_event` raise inside
     the unit lane while working perfectly in the real app.
     """
-    return [*load_manifests(FEATURE_MODULES), template_studio.module]
+    return [
+        *load_manifests(FEATURE_MODULES),
+        template_studio.module,
+        settings_admin.module,
+    ]
+
+
+@pytest.fixture(autouse=True)
+def _settings_admin_audit_writer():
+    """The assembly binds the audit writer at import; bare-app tests need it too."""
+    from dotmac_kernel.audit import write_audit_event
+
+    settings_admin.configure_audit_writer(write_audit_event)
+    yield
 
 
 @pytest.fixture(autouse=True)

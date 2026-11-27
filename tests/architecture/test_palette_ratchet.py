@@ -260,6 +260,7 @@ def test_template_roots_are_discovered_and_pinned() -> None:
     discovered = {root.relative_to(PROJECT_ROOT).as_posix() for root in roots}
     assert discovered == {
         "packages/dotmac-kernel/src/dotmac_kernel/templates",
+        "packages/dotmac-settings-admin/src/dotmac_settings_admin/templates",
         "packages/dotmac-template-studio/src/dotmac_template_studio/templates",
         # The design system's own component templates. Added deliberately when
         # `empty_state` shipped -- this assertion firing on that change is the

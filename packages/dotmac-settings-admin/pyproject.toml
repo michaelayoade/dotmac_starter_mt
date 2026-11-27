@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "dotmac-settings-admin"
+version = "0.1.0a1"
+description = "Generic, stateless settings administration for DotMac products: every declared setting domain is editable, audited, restorable and exportable"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_settings_admin", from = "src" }]
+include = [
+    { path = "src/dotmac_settings_admin/py.typed", format = ["sdist", "wheel"] },
+    # The admin screens are package data, composed through the manifest's
+    # namespaced `TemplatePackage` (module contract 2), not assembly files.
+    { path = "src/dotmac_settings_admin/templates/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# Contract-2 surfaces and `settings_admin` re-exports. Stateless: this module
+# depends on the kernel only (never an assembly, another module or dotmac-ui).
+dotmac-kernel = ">=0.1.0a110"
+fastapi = ">=0.111,<0.116"
+sqlalchemy = "^2.0"
+pydantic = ">=2.7.4,<3.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
