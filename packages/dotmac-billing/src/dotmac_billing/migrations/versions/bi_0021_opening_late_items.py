@@ -111,7 +111,7 @@ _ROOM_BLOCK_NEW = f"""{_GATE_BEGIN}
         room := room + late_delta; n := n + late_bad;
       END IF;
       {_GATE_END}
-      IF n <> 0 THEN"""
+      IF n <> 0 THEN"""  # nosec B608 -- fixed fragment, no input
 _LIVE_OLD = "SELECT CASE WHEN d.authoring_mode = 'imported_open_item' THEN"
 _LIVE_NEW = """SELECT CASE WHEN d.authoring_mode = 'opening_late_item' THEN
         mod_billing.has_opening_late_issuance(invoice_id, account_id, currency_code, scale, tenant)
