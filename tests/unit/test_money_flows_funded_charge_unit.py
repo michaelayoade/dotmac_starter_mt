@@ -42,8 +42,8 @@ from dotmac_money_flows.contracts import (
 from dotmac_money_flows.models import FundedChargeInstance
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import NoResultFound
 
 NGN = Currency("NGN", 2)
 DUE = datetime(2026, 11, 20, tzinfo=UTC)
