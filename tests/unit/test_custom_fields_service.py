@@ -17,15 +17,15 @@ from dotmac_kernel import settings_resolver as sr
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.models import Party, Tenant
 from dotmac_kernel.settings_models import SettingDomain
+
+# Import for the side effect: registers custom_fields/max_per_entity (and the
+# other spec-declared settings) with the core resolver registry.
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
 from sqlalchemy.orm import Session
 
 from app.features.custom_fields import service as cf_service
 from app.features.custom_fields.models import CustomFieldType
 from app.features.custom_fields.schemas import CustomFieldCreate
-
-# Import for the side effect: registers custom_fields/max_per_entity (and the
-# other spec-declared settings) with the core resolver registry.
-from app.features.settings import spec as _settings_spec  # noqa: F401
 
 
 def _payload(**overrides) -> CustomFieldCreate:

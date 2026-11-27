@@ -40,15 +40,15 @@ from dotmac_kernel.security import hash_password
 from dotmac_kernel.settings_models import SettingDomain
 from dotmac_kernel.settings_resolver import upsert_by_key
 from dotmac_kernel.web_deps import safe_next_url
+
+# Import for the side effect: registers branding/ui_branding into the
+# resolver registry (`load_branding` calls `resolve_value` against it).
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.features.auth.web import router as auth_web_router
-
-# Import for the side effect: registers branding/ui_branding into the
-# resolver registry (`load_branding` calls `resolve_value` against it).
-from app.features.settings import spec as _settings_spec  # noqa: F401
 from app.features.web.web import router as web_router
 
 PASSWORD = "correct horse battery staple"

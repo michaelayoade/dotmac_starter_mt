@@ -104,9 +104,9 @@ and the spec registry/tenant→platform→default resolver
 (`dotmac_kernel/settings_resolver.py`) live in core for the identical reason: the
 `custom_fields` feature must consume `resolve_value` directly (per-entity
 field limit), and features may never import each other — so the mechanics
-both `settings` and `custom_fields` need sit in core, while the `settings`
-feature package keeps only what nothing else needs (spec *declarations* in
-`app/features/settings/spec.py`, seed data, router, schemas).
+both settings admin and `custom_fields` need sit in core, while the
+`dotmac-settings-admin` module keeps only what nothing else needs (spec
+*declarations* in `dotmac_settings_admin/specs.py`, seed data, router, schemas).
 `CustomFieldDefinition` (field *shape*: type, validation, display) stays
 feature-local in `app/features/custom_fields/models.py` — nothing outside
 that feature touches it; field *values* live on the entity's own model
@@ -145,7 +145,7 @@ without touching core:
   and write it generically via `db.get(model, entity_id)`.
 - **Declare a setting spec.** Add a `SettingSpec` to a feature's own spec
   module and call `dotmac_kernel.settings_resolver.register_specs([...])` at
-  import time (see `app/features/settings/spec.py`), and declare the spec's
+  import time (see `packages/dotmac-settings-admin/src/dotmac_settings_admin/specs.py`), and declare the spec's
   DOMAIN on the owning module's manifest (`setting_domains=(...)`) — a write
   to an undeclared domain is rejected, and CI checks both directions
   (declared-with-no-spec, spec-with-no-declaration). `SettingDomain` is an

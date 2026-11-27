@@ -4,7 +4,7 @@
     "/platform",
     "/admin"
   ],
-  "total": 45,
+  "total": 40,
   "files": {
     "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields/_table.html": {
       "/admin": 2
@@ -47,15 +47,6 @@
     },
     "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/rbac/roles.html": {
       "/admin": 2
-    },
-    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/settings/branding.html": {
-      "/admin": 1
-    },
-    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/settings/edit.html": {
-      "/admin": 1
-    },
-    "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/settings/index.html": {
-      "/admin": 3
     },
     "packages/dotmac-kernel/src/dotmac_kernel/templates/auth/login.html": {
       "/admin": 2

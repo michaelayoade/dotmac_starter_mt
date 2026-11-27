@@ -1,0 +1,38 @@
+{#
+  Import with preview. Context: `plan` (ImportPlan or None), `error`, `form` (`document`, `reason`).
+  Step 1 posts the document (no digest) and renders the plan; step 2 posts it back with
+  the plan digest and a reason. Secrets are refused entries, never values.
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+{% import "settings_admin/admin/settings_admin/_macros.html" as ui %}
+
+{% block admin_content %}
+<div style="max-width:56rem;">
+  {{ ui.heading("Import settings") }}
+  {{ ui.error_box(error) }}
+  {% if plan %}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    {% for e in plan.entries %}
+    <tr style="border-bottom:1px solid var(--dmui-border-default);">
+      <td style="padding:var(--dmui-space-sm);"><code>{{ e.domain }}/{{ e.key }}</code></td>
+      <td style="padding:var(--dmui-space-sm);">{{ ui.badge(e.status) }} {{ e.detail }}</td>
+      <td style="padding:var(--dmui-space-sm);"><code>{{ e.current | tojson }}</code> &rarr; <code>{{ e.new | tojson }}</code></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <form method="post" action="{{ surface_url('import_submit') }}"
+        style="display:flex; flex-direction:column; gap:var(--dmui-space-md); margin-top:var(--dmui-space-md);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label style="display:flex; flex-direction:column;">Export document (JSON)
+      <textarea name="document" rows="10">{{ form.get("document", "") }}</textarea></label>
+    {% if plan and plan.ok %}
+    <input type="hidden" name="digest" value="{{ plan.digest }}">
+    {{ ui.reason_field(form.get("reason", "")) }}
+    {{ ui.button("Apply " ~ plan.changes | length ~ " change(s)") }}
+    {% else %}
+    {{ ui.button("Preview") }}
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

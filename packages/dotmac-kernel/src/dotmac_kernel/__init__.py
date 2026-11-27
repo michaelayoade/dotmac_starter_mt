@@ -166,6 +166,7 @@ from dotmac_kernel.flags import (
     install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.jobs import JobSpec, JobSpecError
 from dotmac_kernel.machine_auth import (
     API_KEY_HEADER,
     MACHINE_KEY_SECRET_NAME,
@@ -341,6 +342,11 @@ from dotmac_kernel.source_applications import (
     install_source_applications,
     validate_source_application,
 )
+from dotmac_kernel.surface_selection import (
+    SELECT_ALL,
+    SurfaceSelection,
+    SurfaceSelectionError,
+)
 from dotmac_kernel.web_surfaces import (
     AuthenticationProfileBinding,
     BrowserAuthenticationProvider,
@@ -410,6 +416,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.identity",
         "dotmac_kernel.identity_storage",
         "dotmac_kernel.identity_provisioning",
+        "dotmac_kernel.jobs",
         "dotmac_kernel.licensing",
         "dotmac_kernel.logging",
         "dotmac_kernel.machine_auth",
@@ -477,6 +484,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.settings_shadow",
         "dotmac_kernel.secret_sources",
         "dotmac_kernel.source_applications",
+        "dotmac_kernel.surface_selection",
         "dotmac_kernel.templating",
         "dotmac_kernel.tenancy",
         "dotmac_kernel.testing",
@@ -484,6 +492,8 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.testing.harness",
         "dotmac_kernel.testing.licensing",
         "dotmac_kernel.testing.provisioning",
+        "dotmac_kernel.testing.route_inventory",
+        "dotmac_kernel.testing.surface_conformance",
         "dotmac_kernel.transactions",
         "dotmac_kernel.web_deps",
         "dotmac_kernel.web_surfaces",
@@ -614,6 +624,11 @@ __all__ = [
     "mount_features",
     # module manifest + registry (module control-plane step 2)
     "ModuleManifest",
+    "JobSpec",
+    "JobSpecError",
+    "SELECT_ALL",
+    "SurfaceSelection",
+    "SurfaceSelectionError",
     "ModuleRegistry",
     "ModuleInventoryEntry",
     "AnyManifest",

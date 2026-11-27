@@ -3,7 +3,7 @@
 Adapted from `dotmac_sub:tests/architecture/test_no_orphan_settings.py`,
 simplified for this app's much smaller spec registry: instead of a `SETTINGS_SPECS`
 module-level list, specs register themselves into `dotmac_kernel.settings_resolver`
-(`register_specs`, called by `app/features/settings/spec.py` at import time) —
+(`register_specs`, called by `dotmac_settings_admin/specs.py` at import time) —
 see that module's docstring for why the registry mechanism lives in core while
 the declarations live in the feature.
 
@@ -30,11 +30,11 @@ from dotmac_kernel.settings_resolver import all_specs
 
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days into the registry this test reads.
-from app.features.settings import spec as _settings_spec  # noqa: F401
+from dotmac_settings_admin import specs as _settings_spec  # noqa: F401
 
-# The settings feature package declares/seeds/serves every key — it is not a
-# "reader" for orphan-detection purposes (excluding it is what makes the test
-# meaningful at all: every key trivially appears in its own spec.py).
+# The settings-admin package declares/seeds/serves every key of its own specs; its
+# `specs.py` is the declaration site and is excluded from the reader corpus (a key
+# trivially appears in its own spec), exactly as the old feature's `spec.py` was.
 _EXCLUDED_DIR_PREFIX = "app/features/settings/"
 # The resolver module's own docstrings/tests-support code reference keys in
 # prose/comments while implementing the mechanism, not consuming a value —
@@ -45,6 +45,7 @@ _EXCLUDED_FILE = "dotmac_kernel/settings_resolver.py"
 _EXCLUDED_FILES = {
     _EXCLUDED_FILE,
     "dotmac_template_studio/settings.py",
+    "dotmac_settings_admin/specs.py",
 }
 
 # Burn-down allowlist — do NOT add to this without a task/plan reference in
@@ -77,6 +78,12 @@ def _reader_corpus(root: pathlib.Path) -> str:
         (
             root / "packages/dotmac-template-studio/src/dotmac_template_studio",
             "dotmac_template_studio",
+        ),
+        # Settings-admin reads its own policy/profile keys in `service.py`; the
+        # declaration site `specs.py` is excluded above.
+        (
+            root / "packages/dotmac-settings-admin/src/dotmac_settings_admin",
+            "dotmac_settings_admin",
         ),
     )
     chunks: list[str] = []
@@ -120,7 +127,7 @@ def test_no_new_orphan_settings() -> None:
     assert not new_orphans, (
         "Registered setting(s) with no reader (dead control): "
         f"{sorted(new_orphans)}. Either read the value somewhere (as a "
-        "quoted literal) outside app/features/settings/ and "
+        "quoted literal) outside dotmac_settings_admin/specs.py and "
         "dotmac_kernel/settings_resolver.py so it changes real behavior, or drop "
         "it from the spec registry. Do not add to _ALLOWED_ORPHAN_SETTINGS."
     )

@@ -126,10 +126,10 @@ def test_audit_events_are_bounded_by_tenant_retention_days_setting(
     set_retention = a.put(
         "/settings/audit/retention_days",
         headers={"Authorization": f"Bearer {a_token}"},
-        json={"value": 1},
+        json={"value": 1, "reason": "integration test"},
     )
     assert set_retention.status_code == 200, set_retention.text
-    assert set_retention.json()["value"] == 1
+    assert set_retention.json()["setting"]["value"] == 1
 
     old_event_id = uuid.uuid4()
     admin_session.execute(

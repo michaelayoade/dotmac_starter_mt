@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import dotmac_settings_admin.specs  # noqa: F401 — registration side effect
 import pytest
 from dotmac_kernel.deps import get_db
 from dotmac_kernel.display import DisplaySettings
@@ -43,7 +44,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-import app.features.settings.spec  # noqa: F401 — registration side effect
 from app.features.auth.web import router as auth_web_router
 from app.features.rbac.web import router as rbac_web_router
 
