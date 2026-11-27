@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 import tomllib
 from dataclasses import fields
 from pathlib import Path
@@ -152,7 +153,6 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
     assert _module_source(CLOCK_ALLOWED) != _module_source()
     source = _module_source(COMMIT_ALLOWED)
     for forbidden in (
-        "claim_outbox_batch",
         "claim_platform_outbox_batch",
         "SKIP LOCKED",
         "skip_locked",
@@ -166,7 +166,6 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
     # session, and the entrypoint never builds one directly either (it goes
     # through the kernel's DatabaseRuntime).
     for forbidden in (
-        "claim_outbox_batch",
         "claim_platform_outbox_batch",
         "SKIP LOCKED",
         "skip_locked",
@@ -180,6 +179,9 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
     # spellings are the only legal ones; the opening parenthesis keeps them so).
     for forbidden in ("run_once(", "claim_batch("):
         assert forbidden not in _module_source()
+    # The all-types kernel claim by name (the typed `claim_outbox_batch_by_type`
+    # is the one legal spelling, and the boot role check must name it).
+    assert not re.search(r"claim_outbox_batch(?!_by_type)", _module_source())
     for node in ast.walk(ast.parse(_module_source())):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
             "dotmac_kernel.messaging"

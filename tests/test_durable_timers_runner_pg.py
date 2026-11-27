@@ -874,9 +874,14 @@ def test_the_outbox_purge_never_deletes_another_modules_sent_rows(env) -> None:
     with env.admin.connect() as connection:
         remaining = list(
             connection.execute(
-                text("SELECT event_type, status FROM public.outbox_events")
+                text(
+                    "SELECT event_type, status FROM public.outbox_events "
+                    "WHERE status = 'sent'"
+                )
             )
         )
+    # Our own settled row is gone; the foreign settled row survives (the next
+    # generation's pending job_due row is not `sent` and is not counted).
     assert [(row.event_type, row.status) for row in remaining] == [
         (FOREIGN_EVENT, "sent")
     ]
