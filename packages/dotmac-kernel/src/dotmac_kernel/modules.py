@@ -274,6 +274,7 @@ class ModuleManifest:
     # `dotmac-durable-timers` executes them. Last, to preserve every positional
     # constructor.
     jobs: Sequence[JobSpec] = field(default_factory=tuple)
+    #
     # Kernel facilities this STATELESS module CALLS at request time, named by
     # prerequisite (`dotmac_kernel.prerequisites`). `requires` means "order my
     # migrations after this effect", which is meaningless for a module that has

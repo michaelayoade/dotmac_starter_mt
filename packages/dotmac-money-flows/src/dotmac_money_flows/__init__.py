@@ -87,7 +87,7 @@ from dotmac_money_flows.settle import (
     settle_confirmation,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "DEFAULT_ACCEPTED_SOURCES",

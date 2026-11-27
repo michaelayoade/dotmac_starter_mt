@@ -1080,6 +1080,7 @@
         "registered_verifiers",
         "require_prerequisites",
         "require_runtime_prerequisites",
+        "require_runtime_prerequisites_at_heads",
         "role_violations",
         "verify_idempotency_ledger",
         "verify_identity_admin",

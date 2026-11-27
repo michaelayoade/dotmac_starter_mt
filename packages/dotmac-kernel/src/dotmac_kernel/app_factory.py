@@ -698,6 +698,9 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     registry = ModuleRegistry(spec.modules)
     manifests = list(registry.startup_order())
     enabled_manifests = list(registry.enabled_order(disabled))
+    # Facility use is not a surface: refuse an unbound `runtime_requires` on the
+    # ENABLED set BEFORE surface selection strips anything.
+    _refuse_unbound_runtime_requires(enabled_manifests, spec.prerequisite_bindings)
     # Assembly surface selection (fail-closed). Validated against every
     # INSTALLED manifest so an entry naming an absent module/surface refuses
     # the boot; applied to the enabled set so an unselected API router set or
@@ -723,7 +726,6 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             "mode). Declare an explicit selection.",
             spec.name,
         )
-    _refuse_unbound_runtime_requires(enabled_manifests, spec.prerequisite_bindings)
     logger.info(
         "Module startup order (%d of %d enabled): %s",
         len(enabled_manifests),
