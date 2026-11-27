@@ -370,6 +370,16 @@ def upgrade() -> None:
                     RAISE EXCEPTION 'the source invoice is carried by the opening'
                       USING ERRCODE = 'unique_violation';
                 END IF;
+                -- Also any key of the sealed manifest, held partitions included.
+                IF EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(coalesce(
+                        win.evidence::jsonb->'window'->'manifest'->'receivables',
+                        '[]'::jsonb)) e
+                     WHERE e->>'source_invoice_key' = NEW.source_key
+                ) THEN
+                    RAISE EXCEPTION 'the source invoice is in the sealed opening population'
+                      USING ERRCODE = 'unique_violation';
+                END IF;
                 SELECT count(*) INTO n
                   FROM mod_billing.opening_late_items x
                  WHERE x.tenant_id = NEW.tenant_id AND x.kind = 'debit'
@@ -539,29 +549,6 @@ def upgrade() -> None:
         CREATE TRIGGER posting_groups_opening_late_reversal BEFORE INSERT
           ON mod_billing.posting_groups
           FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_opening_late_group_reversal();
-
-        -- An opening basis cannot take a source key with an unreversed R8 debit.
-        CREATE FUNCTION mod_billing.guard_opening_late_basis_key() RETURNS trigger AS $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM mod_billing.{_TABLE} x
-                 WHERE x.tenant_id = NEW.tenant_id AND x.kind = 'debit'
-                   AND x.source_installation_id = NEW.installation_id
-                   AND x.source_system = NEW.source_system
-                   AND x.source_key = NEW.source_invoice_key
-                   AND NOT EXISTS (
-                       SELECT 1 FROM mod_billing.{_TABLE} r
-                        WHERE r.reverses_item_id = x.id AND r.tenant_id = x.tenant_id))
-            THEN
-                RAISE EXCEPTION 'the source invoice has an unreversed opening late debit'
-                  USING ERRCODE = 'unique_violation';
-            END IF;
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-        CREATE TRIGGER opening_receivable_bases_opening_late_key BEFORE INSERT
-          ON mod_billing.opening_receivable_bases
-          FOR EACH ROW EXECUTE FUNCTION mod_billing.guard_opening_late_basis_key();
 
         -- Additive: an opening late document, or one carrying a net item credit,
         -- cannot be generically voided (guard_imported_owner is not replaced).

@@ -646,6 +646,14 @@ def record_opening_late_debit(
                 "opening_late_debit_key_carried",
                 "the source invoice is carried by the opening",
             )
+        if any(
+            item.source_invoice_key == source.key
+            for item in getattr(window.manifest, "receivables", ())
+        ):
+            raise BillingConflict(
+                "opening_late_debit_key_in_opening_population",
+                "the source invoice is in the sealed opening population",
+            )
         prior = (
             session.execute(
                 select(m.id).where(

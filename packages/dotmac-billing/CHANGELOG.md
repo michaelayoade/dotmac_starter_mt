@@ -18,9 +18,11 @@ a14 is published and tagged (`dotmac-billing-v0.1.0a14`); `bi_0021` chains after
   namespace and `dual_control = 'off'`, locks the account then the document, and
   keeps the invoice room within `[0, base]` (so a credit stays within the room and
   a debit is reversible only while untouched). A credit also stays within the room
-  not claimed by undischarged frozen expected withholding. A debit key carried by
-  the opening or by an unreversed debit is refused; re-recording takes the next
-  generation. The credits of one source note stay on one account within its total.
+  not claimed by undischarged frozen expected withholding. A debit is refused
+  for any key in the sealed window's manifest (held partitions included, so a
+  held partition's later admission never meets a late debit for its key), for a
+  key carried by an opening basis, and for a key with an unreversed debit;
+  re-recording takes the next generation. The credits of one source note stay on one account within its total.
   A deferred check requires one item, one V7 fact and one receivable effect per
   R8 posting group. `authoring_mode` gains `opening_late_item`.
 - `opening_invoice_room_at`, `has_live_invoice_issuance` and

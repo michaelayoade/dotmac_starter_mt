@@ -44,7 +44,8 @@ from dotmac_billing.withholding_release import (
 )
 from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.planes import ModulePlane
-from sqlalchemy import func, select, text
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command as alembic_command
@@ -817,7 +818,7 @@ def _chain(exc: BaseException) -> str:
     return " | ".join(parts)
 
 
-def test_held_partitions_take_no_item_and_their_key_is_guarded_on_admission(scratch):
+def _held_world(scratch):
     scope, url = noncash._scope_url(scratch, "tenant")
     with cash._session(scratch, url, scope) as db:
         admitted, held = hold._two_partitions(db, scope, dual_control="off")
@@ -825,11 +826,25 @@ def test_held_partitions_take_no_item_and_their_key_is_guarded_on_admission(scra
         db.commit()
         hold._seal(db, scope, held=[hold._held_id(held)])
         db.commit()
-    held_id = hold._held_id(held)
     w = SimpleNamespace(
         scope=scope, url=url, cmd=admitted, cap=admitted.manifest.capture
     )
-    with b._session(url, scope) as db:
+    return w, admitted, held
+
+
+def _held_key(held):
+    held_id = hold._held_id(held)
+    return next(
+        x.source_invoice_key
+        for x in held.manifest.receivables
+        if x.partition.account_id == held_id
+    )
+
+
+def test_held_partitions_take_no_item_and_no_key_of_the_sealed_population(scratch):
+    w, admitted, held = _held_world(scratch)
+    held_id = hold._held_id(held)
+    with b._session(w.url, w.scope) as db:
         with pytest.raises(BillingRuleViolation) as caught:
             _record(db, w, _debit(w, held_id, "held-1"))
         assert _code(caught) == "opening_late_item_account_held"
@@ -840,20 +855,48 @@ def test_held_partitions_take_no_item_and_their_key_is_guarded_on_admission(scra
                 _record(db, w, _debit(w, held_id, "held-2"))
         assert "held opening partition" in str(caught.value)
         db.rollback()
-        # A key the held partition will carry, recorded as an R8 debit elsewhere.
-        other = cash._new_account(db, scope)
-        carried = next(
-            x.source_invoice_key
-            for x in held.manifest.receivables
-            if x.partition.account_id == held_id
-        )
-        _record(db, w, _debit(w, other, carried))
-        db.commit()
-    with cash._session(scratch, url, scope) as db:
-        with pytest.raises(Exception) as caught:
-            hold._admit(db, scope, held, approval_request_id=None)
-        assert "unreversed opening late debit" in _chain(caught.value)
+        # A key of a held partition, recorded as a late debit on another account,
+        # is refused before that partition is admitted (Python, then SQL alone).
+        other = cash._new_account(db, w.scope)
+        key = _held_key(held)
+        with pytest.raises(BillingConflict) as caught:
+            _record(db, w, _debit(w, other, key))
+        assert _code(caught) == "opening_late_debit_key_in_opening_population"
         db.rollback()
+        real = mi.get_opening_window(db, scope=w.scope)
+        stripped = SimpleNamespace(
+            dual_control=real.dual_control,
+            window_id=real.window_id,
+            manifest=SimpleNamespace(capture=real.manifest.capture, receivables=()),
+        )
+        with mock.patch.object(mi, "get_opening_window", lambda *a, **k: stripped):
+            with pytest.raises(DBAPIError) as caught:
+                _record(db, w, _debit(w, other, key, command_id=f"sql-{uuid4()}"))
+        assert "sealed opening population" in str(caught.value)
+        db.rollback()
+
+
+def test_a_held_admission_needs_no_select_on_the_late_item_table(scratch):
+    w, admitted, held = _held_world(scratch)
+    with b._session(w.url, w.scope) as db:
+        other = cash._new_account(db, w.scope)
+        _record(db, w, _debit(w, other, "unrelated-1"))  # the table has rows
+        db.commit()
+    role = scratch.principals["tenant"][0]
+    database = make_url(scratch[0]).database
+    engine = create_engine(b._url_for(b._superuser_url(), database))
+    table = "mod_billing.opening_late_items"
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f'REVOKE SELECT ON {table} FROM "{role}"'))
+        with cash._session(scratch, w.url, w.scope) as db:
+            receipt = hold._admit(db, w.scope, held, approval_request_id=None)
+            assert receipt.billing_account_id == hold._held_id(held)
+            db.commit()
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'GRANT SELECT ON {table} TO "{role}"'))
+        engine.dispose()
 
 
 def test_the_withholding_freeze_refuses_an_opening_late_debit(scratch):
