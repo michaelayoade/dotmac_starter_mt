@@ -92,14 +92,12 @@ _ROOM_DECLARE_OLD = "void_at_target boolean;"
 _ROOM_DECLARE_NEW = "void_at_target boolean; late_delta numeric; late_bad bigint;"
 _ROOM_BLOCK_OLD = "IF n <> 0 THEN"
 _ROOM_BLOCK_NEW = f"""{_GATE_BEGIN}
-      -- Runs only once a seal exists, and never for the opening principal acting on
-      -- a held partition (no item can exist there before its admission).
-      IF EXISTS (SELECT 1 FROM mod_billing.opening_window_seals s WHERE s.tenant_id = tenant)
-        AND NOT EXISTS (
-          SELECT 1 FROM mod_billing.opening_windows w
-            JOIN mod_billing.opening_window_seals s ON s.window_id = w.id AND s.tenant_id = w.tenant_id
-            WHERE w.tenant_id = tenant AND w.principal_name = current_user
-              AND coalesce(s.evidence::jsonb->'command'->'held_account_ids', '[]'::jsonb) ? account_id::text)
+      -- Runs only for an account that has a late group (posting groups are readable
+      -- by every role), so a role that cannot read the late-item table is never
+      -- planned against it unless the account really carries late items.
+      IF EXISTS (SELECT 1 FROM mod_billing.posting_groups g
+          WHERE g.tenant_id = tenant AND g.billing_account_id = account_id
+            AND g.group_kind IN {_KINDS})
       THEN
         SELECT coalesce(sum(x.receivable_delta) FILTER (WHERE g.source_version <= target_version), 0),
             count(*) FILTER (WHERE g.id IS NULL OR g.billing_account_id <> account_id OR x.billing_account_id <> account_id

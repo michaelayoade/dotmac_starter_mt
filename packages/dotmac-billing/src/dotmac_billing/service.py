@@ -8756,6 +8756,42 @@ def reverse_cash_credit_draw(
 
 
 @_exact_cash_operation
+def _require_no_opening_late_items(
+    db: Session, *, scope: Scope, account_id: UUID
+) -> None:
+    """An opening import cannot be unwound once its account has any late item.
+
+    Late groups are append-only and stay even after the items are reversed. The
+    check reads only posting groups (the opening principal reads no late-item
+    table), and runs before any room or position read.
+    """
+
+    plane = _models(scope)
+    found = db.execute(
+        _where_scope(
+            select(plane.group.id)
+            .where(
+                plane.group.billing_account_id == account_id,
+                plane.group.group_kind.in_(
+                    (
+                        "opening_late_debit_recorded",
+                        "opening_late_credit_applied",
+                        "opening_late_item_reversed",
+                    )
+                ),
+            )
+            .limit(1),
+            scope,
+            plane.group,
+        )
+    ).first()
+    if found is not None:
+        raise BillingRuleViolation(
+            "opening_import_has_late_items",
+            "an account with opening late items cannot unwind its opening import",
+        )
+
+
 def reverse_opening_account_import(
     db: Session,
     *,
@@ -8830,6 +8866,7 @@ def reverse_opening_account_import(
         row_id=original.billing_account_id,
         lock=True,
     )
+    _require_no_opening_late_items(db, scope=scope, account_id=account.id)
 
     def operation(session: Session) -> dict[str, object]:
         if (
@@ -9905,6 +9942,7 @@ def reverse_opening_account_import_v2(
         row_id=original.billing_account_id,
         lock=True,
     )
+    _require_no_opening_late_items(db, scope=scope, account_id=account.id)
 
     def operation(session: Session) -> dict[str, object]:
         if (

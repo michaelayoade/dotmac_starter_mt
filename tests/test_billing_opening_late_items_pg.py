@@ -27,6 +27,7 @@ from dotmac_billing.commands import (
 )
 from dotmac_billing.document_queries import get_document_exposure
 from dotmac_billing.errors import BillingConflict, BillingRuleViolation
+from dotmac_billing.opening_commands import ReverseOpeningAccountImportV1
 from dotmac_billing.opening_late_items import (
     OpeningLateSourceV1,
     RecordOpeningLateCreditV1,
@@ -945,6 +946,45 @@ def test_late_items_on_an_admitted_held_account_and_an_imported_document_count(
         _undo(db, w, _reverse(w, debit.item_id))
         assert live() is False
         db.commit()
+
+
+def test_an_import_cannot_be_unwound_once_its_account_has_a_late_item(scratch):
+    w = _world(scratch)
+    unwind = ReverseOpeningAccountImportV1(
+        w.scope, w.receipt.receipt_id, "fixture:fresh-authority", str(uuid4()), NOW
+    )
+
+    def refused(session):
+        with pytest.raises(BillingRuleViolation) as caught:
+            s.reverse_opening_account_import_v2(
+                session,
+                scope=w.scope,
+                command=unwind,
+                verifier=ar.evidence.TrustedVerifier(),
+            )
+        assert _code(caught) == "opening_import_has_late_items"
+        session.rollback()
+
+    with b._session(w.url, w.scope) as db:
+        first, _ = ar._bases(db, w.scope, w.receipt)
+        item = _apply(db, w, _credit(w, first.document_id, "unw-1", amount="10.00"))
+        db.commit()
+        refused(db)  # the online role
+        # The late groups are append-only: reversing the item does not lift it.
+        _undo(db, w, _reverse(w, item.item_id))
+        db.commit()
+        refused(db)
+    with cash._session(scratch, w.url, w.scope) as db:
+        with cash._as_opening_principal(db):  # the opening principal, no SELECT
+            with pytest.raises(BillingRuleViolation) as caught:
+                s.reverse_opening_account_import_v2(
+                    db,
+                    scope=w.scope,
+                    command=unwind,
+                    verifier=ar.evidence.TrustedVerifier(),
+                )
+            assert _code(caught) == "opening_import_has_late_items"
+        db.rollback()
 
 
 def test_the_late_item_table_is_named_only_in_gated_blocks_of_the_upgraded_functions(
