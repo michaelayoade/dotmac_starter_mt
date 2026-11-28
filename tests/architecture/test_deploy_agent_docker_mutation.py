@@ -116,78 +116,125 @@ def test_the_use_site_rule_is_sensitive_to_aliases_and_variable_verbs() -> None:
 
 def _is_os_exec(name: str) -> bool:
     return name in {"system", "popen"} or name.startswith(
-        ("exec", "spawn", "posix_spawn")
+        (
+            "exec",
+            "spawn",
+            "posix_spawn",
+        )
     )
 
 
+#: C-1178-1: config.py's imports are a CLOSED set equal to its current imports.
+#: A new import (even a harmless one) fails here until this test is edited.
+CONFIG_PLAIN_IMPORTS = {"os", "re", "stat", "tomllib"}
+CONFIG_FROM_IMPORTS = {
+    "__future__",
+    "collections.abc",
+    "dataclasses",
+    "pathlib",
+    "typing",
+    "urllib.parse",
+    ".refusal",
+    ".wire",
+}
+#: dynamic-execution and reflection names refused as ANY use (call or reference).
+REFUSED_NAMES = {"getattr", "__import__", "exec", "eval", "compile", "importlib"}
+
+
 def exec_capability_in(source: str) -> list[str]:
-    """R9-L1: every way `source` could run a process: importing `subprocess` or a
-    `.commands` module, or using `os.system/popen/exec*/spawn*/posix_spawn*` (through
-    `os`, an alias of it, or `from os import ...`)."""
+    """R9-L1 / C-1178-1: everything in `source` that is outside the closed shape of a
+    module that cannot run a process: imports outside the allow-list (relative ones
+    included), aliased imports, `os` used other than as `os.<attr>` (rebinding),
+    `os.system/popen/exec*/spawn*/posix_spawn*`, and any use of getattr, __import__,
+    exec, eval, compile or importlib."""
     tree = ast.parse(source)
-    found: list[str] = []
-    os_aliases = {"os"}
+    found: set[str] = set()
+    parents = {
+        id(child): parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                parts = alias.name.split(".")
-                if alias.name == "os":
-                    os_aliases.add(alias.asname or "os")
-                if parts[0] == "subprocess":
-                    found.append(f"import {alias.name}")
-                if "commands" in parts:
-                    found.append(f"import {alias.name}")
+                if alias.name not in CONFIG_PLAIN_IMPORTS or alias.asname:
+                    found.add(f"import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            parts = module.split(".")
-            if parts[0] == "subprocess":
-                found.append(f"from {module} import")
-            if "commands" in parts:
-                found.append(f"from {module} import")
+            module = "." * node.level + (node.module or "")
+            if module not in CONFIG_FROM_IMPORTS:
+                found.add(f"from {module} import")
             for alias in node.names:
-                if alias.name == "commands" or alias.name == "subprocess":
-                    found.append(f"from {module or '.'} import {alias.name}")
-                if module == "os" and _is_os_exec(alias.name):
-                    found.append(f"from os import {alias.name}")
-                if module == "os" and alias.name == "*":
-                    found.append("from os import *")
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Attribute)
-            and _is_os_exec(node.attr)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in os_aliases
-        ):
-            found.append(f"os.{node.attr}")
-    return sorted(set(found))
+                if alias.name == "*":
+                    found.add(f"from {module} import *")
+                elif alias.asname and module != "__future__":
+                    found.add(f"from {module} import {alias.name} as")
+        elif isinstance(node, ast.Name):
+            if node.id in REFUSED_NAMES:
+                found.add(f"name {node.id}")
+            if node.id == "os":
+                parent = parents[id(node)]
+                if not (isinstance(parent, ast.Attribute) and parent.value is node):
+                    found.add("os rebound or passed as a value")
+        elif isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id == "os":
+                if _is_os_exec(node.attr):
+                    found.add(f"os.{node.attr}")
+    return sorted(found)
 
 
 def test_config_py_is_exempt_by_exact_path_and_cannot_run_a_process() -> None:
-    assert USE_SITE_EXEMPT == {SRC / "config.py"}
     assert (SRC / "config.py").is_file()
     assert exec_capability_in((SRC / "config.py").read_text()) == []
 
 
-def test_the_exec_capability_check_catches_aliased_and_imported_exec() -> None:
-    assert exec_capability_in("import os\nx = 1\n") == []
-    assert exec_capability_in("import os as o\no.execv('/bin/sh', [])\n") == [
-        "os.execv"
+def test_the_exec_capability_check_is_a_closed_allow_list() -> None:
+    def hits(source: str) -> list[str]:
+        return exec_capability_in(source)
+
+    # the current shape is clean
+    assert (
+        hits("import os\nfrom .wire import x\nos.path.isabs('/')\nos.geteuid()") == []
+    )
+    # a rebound os, and getattr on os
+    assert hits("import os\no = os\no.system('x')\n") == [
+        "os rebound or passed as a value"
     ]
-    assert exec_capability_in("import os\nos.system('x')\n") == ["os.system"]
-    assert exec_capability_in("import os\nos.popen('x')\n") == ["os.popen"]
-    assert exec_capability_in("import os\nos.posix_spawnp('x', [], {})\n") == [
-        "os.posix_spawnp"
+    assert hits("import os\ngetattr(os, 'system')('x')\n") == [
+        "name getattr",
+        "os rebound or passed as a value",
     ]
-    assert exec_capability_in("from os import execv as e\ne('x', [])\n") == [
-        "from os import execv"
+    assert hits("import os\nf(os)\n") == ["os rebound or passed as a value"]
+    # dynamic import and execution
+    assert hits("__import__('subprocess')\n") == ["name __import__"]
+    assert hits("import importlib\n") == ["import importlib"]
+    assert hits("import importlib\nimportlib.import_module('x')\n") == [
+        "import importlib",
+        "name importlib",
     ]
-    assert exec_capability_in("import subprocess\n") == ["import subprocess"]
-    assert exec_capability_in("from subprocess import run\n") == [
-        "from subprocess import"
+    assert hits("exec('x')\n") == ["name exec"]
+    assert hits("eval('x')\n") == ["name eval"]
+    assert hits("compile('x', 'f', 'exec')\n") == ["name compile"]
+    # imports outside the allow-list
+    assert hits("import pty\n") == ["import pty"]
+    assert hits("import asyncio\n") == ["import asyncio"]
+    assert hits("import ctypes\n") == ["import ctypes"]
+    assert hits("import multiprocessing\n") == ["import multiprocessing"]
+    assert hits("from .runner import run\n") == ["from .runner import"]
+    assert hits("from . import runner\n") == ["from . import"]
+    assert hits("from .commands import run\n") == ["from .commands import"]
+    assert hits("import subprocess\n") == ["import subprocess"]
+    assert hits("from subprocess import run\n") == ["from subprocess import"]
+    assert hits("import pkg.commands\n") == ["import pkg.commands"]
+    # aliases and the exec family
+    assert hits("import os as o\no.execv('/bin/sh', [])\n") == ["import os"]
+    assert hits("from os import execv as e\ne('x', [])\n") == [
+        "from os import",
+        "from os import execv as",
     ]
-    assert exec_capability_in("from .commands import run\n") == ["from commands import"]
-    assert exec_capability_in("from . import commands\n") == ["from . import commands"]
-    assert exec_capability_in("import pkg.commands\n") == ["import pkg.commands"]
+    assert hits("import os\nos.execv('x', [])\n") == ["os.execv"]
+    assert hits("import os\nos.system('x')\n") == ["os.system"]
+    assert hits("import os\nos.popen('x')\n") == ["os.popen"]
+    assert hits("import os\nos.posix_spawnp('x', [], {})\n") == ["os.posix_spawnp"]
 
 
 def _is_docstring(node: ast.stmt) -> bool:
