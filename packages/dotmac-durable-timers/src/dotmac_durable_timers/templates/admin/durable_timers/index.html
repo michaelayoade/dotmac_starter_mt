@@ -1,0 +1,93 @@
+{#
+  Background jobs: declared jobs, next due, last outcome, dead letters, and
+  the governed run-now / pause / resume commands.
+
+  Context: `jobs` and `dead_letters` (list[JobView]).
+
+  Styled with `var(--dmui-*)` tokens only: this file ships inside a
+  pip-installed package, so host utility classes are not guaranteed to exist
+  (see the Template Studio index for the full rationale).
+#}
+{% extends surface.shell or "layouts/admin.html" %}
+
+{% block admin_content %}
+<div style="margin-bottom:var(--dmui-space-lg);">
+  <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary);">Background jobs</h1>
+  <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+    Jobs declared by installed modules for this tenant.
+  </p>
+</div>
+
+{% if dead_letters %}
+<section style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                background:var(--dmui-surface-elevated); padding:var(--dmui-space-md);
+                margin-bottom:var(--dmui-space-lg);">
+  <h2 style="font-size:var(--dmui-font-size-lg); color:var(--dmui-status-negative-foreground);">Dead letters</h2>
+  <ul style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+    {% for job in dead_letters %}
+    <li><code>{{ job.module_code }}:{{ job.job_code }}</code>
+      generation {{ job.dead_letter_generation }},
+      {{ job.dead_lettered_at | local_datetime }}: {{ job.last_detail }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<div style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+            background:var(--dmui-surface-elevated); overflow:hidden;">
+  {% if jobs %}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    <thead>
+      <tr style="background:var(--dmui-surface-secondary); text-align:left;">
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Job</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Cadence</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Next due</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Last outcome</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr style="border-top:1px solid var(--dmui-border-subtle);">
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          <code>{{ job.module_code }}:{{ job.job_code }}</code>
+          {% if job.paused %}<strong>(paused)</strong>{% endif %}
+          <div style="color:var(--dmui-text-muted); font-size:var(--dmui-font-size-xs);">{{ job.description }}</div>
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary);">{{ job.cadence }}</td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          {% if job.next_due_at %}{{ job.next_due_at | local_datetime }}{% else %}-{% endif %}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          {% if job.last_outcome %}{{ job.last_outcome }}
+            {% if job.last_run_at %}({{ job.last_run_at | local_datetime }}){% endif %}
+          {% else %}never run{% endif %}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); display:flex; gap:var(--dmui-space-xs);">
+          <form method="post" action="{{ surface_url('run', module_code=job.module_code, job_code=job.job_code) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">Run now</button>
+          </form>
+          {% if job.paused %}
+          <form method="post" action="{{ surface_url('resume', module_code=job.module_code, job_code=job.job_code) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">Resume</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ surface_url('pause', module_code=job.module_code, job_code=job.job_code) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">Pause</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="padding:var(--dmui-space-lg); color:var(--dmui-text-muted); font-size:var(--dmui-font-size-sm);">
+    No installed module declares a job.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

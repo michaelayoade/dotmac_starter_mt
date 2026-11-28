@@ -40,8 +40,9 @@ noise, which is how a guard stops being read.
 
 A module that calls a MAPPED facility must
 
-1. declare the prerequisite on its `ModuleManifest`, so composition can refuse
-   an assembly that cannot supply the effect; AND
+1. declare the prerequisite on its `ModuleManifest` (`requires` for a stateful
+   module; `runtime_requires` for a STATELESS one, which owns no lineage), so
+   composition can refuse an assembly that cannot supply the effect; AND
 2. verify it in a migration's requires tuple, so DEPLOY refuses a database that
    does not have it.
 
@@ -201,6 +202,86 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "audit:write_audit_event",
         "tenant_audit_log.v1",
         "writes the append-only public.audit_events tenant trail",
+    ),
+    Facility(
+        "identity_admin:create_person",
+        "identity_admin.v1",
+        "governed command: flushes the Party and person subtype rows; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:ensure_grant",
+        "identity_admin.v1",
+        "governed command: inserts a PartyRoleGrant under the party lock; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:find_party_normalized_email",
+        "identity_admin.v1",
+        "governed command: reads Party by normalised email; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:lock_grants",
+        "identity_admin.v1",
+        "governed command: locks PartyRoleGrant rows under party locks; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:lock_parties",
+        "identity_admin.v1",
+        "governed command: locks Party rows in UUID order; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:remove_grants",
+        "identity_admin.v1",
+        "governed command: deletes an exact PartyRoleGrant cohort; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:revoke_party_sessions",
+        "identity_admin.v1",
+        "governed command: updates the AuthSession cohort's revoked_at; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:set_party_active",
+        "identity_admin.v1",
+        "governed command: updates Party.is_active under the party lock; "
+        "a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:create_tenant_role",
+        "identity_admin.v1",
+        "governed command: inserts a tenant Role; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "identity_admin:rename_tenant_role",
+        "identity_admin.v1",
+        "governed command: updates a tenant Role name; a stateless "
+        "caller declares it in `runtime_requires`",
+    ),
+    Facility(
+        "messaging/relay:claim_batch_by_type",
+        "outbox_typed_claim.v1",
+        "calls claim_outbox_batch_by_type; a separate effect from "
+        "outbox_relay.v1 (the function and its dispatcher grant arrive later)",
+    ),
+    Facility(
+        "messaging/worker:run_once_by_type",
+        "outbox_typed_claim.v1",
+        "claims through claim_batch_by_type; event_types is required",
+    ),
+    Facility(
+        "messaging/worker:run_forever_by_type",
+        "outbox_typed_claim.v1",
+        "claims through claim_batch_by_type; event_types is required",
     ),
     Facility(
         "audit:write_platform_audit_event",
@@ -446,7 +527,11 @@ OUT_OF_SCOPE: Final[dict[str, str]] = {
     "settings_shadow": "settings storage; see the settings ruling in FROZEN",
     "settings_resolver": "settings storage; see the settings ruling in FROZEN",
     "flag_models": "flag storage; see the flags entry in FROZEN",
-    "messaging/worker": "the dispatcher process, not a module call path",
+    # Key-granular, NOT the whole module: the typed worker entry points are
+    # MAPPED to `outbox_typed_claim.v1` above, so a caller that names event types
+    # is visible to the gate. Only the all-types loop stays exempt.
+    "messaging/worker:run_once": "the dispatcher process, not a module call path",
+    "messaging/worker:run_forever": "the dispatcher process, not a module call path",
     "messaging/platform_worker": "the dispatcher process, not a module call path",
 }
 

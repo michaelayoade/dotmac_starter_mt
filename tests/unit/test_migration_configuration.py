@@ -88,6 +88,15 @@ def _run_reference_adapter(
     monkeypatch.setattr(context, "is_offline_mode", lambda: offline)
     monkeypatch.setattr(context, "begin_transaction", nullcontext)
     monkeypatch.setattr(context, "run_migrations", run_migrations)
+    monkeypatch.setattr(
+        context,
+        "get_context",
+        lambda: SimpleNamespace(get_current_heads=lambda: ("head-a",)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        context, "get_head_revisions", lambda: ("head-a",), raising=False
+    )
     monkeypatch.setattr("sqlalchemy.engine_from_config", engine_factory)
 
     # Model registration and bindings are product concerns. Retain their call
@@ -100,7 +109,11 @@ def _run_reference_adapter(
         "dotmac_kernel.settings_models": {},
         "dotmac_kernel.messaging.models": {},
         "dotmac_kernel.models": {"Base": SimpleNamespace(metadata=object())},
-        "app.assembly": {"assembly": SimpleNamespace(module_planes=())},
+        "app.assembly": {
+            "assembly": SimpleNamespace(
+                module_planes=(), modules=(), disabled_modules=frozenset()
+            )
+        },
         "app.features.custom_fields.models": {},
         "app.migration_bindings": {"ASSEMBLY_PREREQUISITE_BINDINGS": ()},
     }

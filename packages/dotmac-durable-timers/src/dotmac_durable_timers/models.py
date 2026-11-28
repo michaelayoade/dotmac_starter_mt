@@ -14,6 +14,7 @@ from uuid import UUID
 from dotmac_kernel.models import Base, Tenant, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -32,6 +33,7 @@ TENANT_TABLES: tuple[str, ...] = (
     "timers",
     "timer_acceptances",
     "timer_rejections",
+    "job_states",
 )
 PLATFORM_TABLES: tuple[str, ...] = (
     "platform_timers",
@@ -291,10 +293,56 @@ class PlatformTimerRejection(Base, _RejectionColumns):
     id: Mapped[UUID] = uuid_pk()
 
 
+class JobState(Base):
+    """Operator and outcome state of one declared job in one tenant.
+
+    The timer rows own the SCHEDULE (generation, due instant). This row owns
+    what a timer cannot: whether staff paused the job, and the outcome of its
+    last run, so the staff surface never has to infer either from outbox rows
+    (the dispatcher credential cannot read them and staff should not need to).
+    It is state, not identity: a deleted row means "never run, not paused".
+    """
+
+    __tablename__ = "job_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "module_code", "job_code", name="uq_job_states_tenant_job"
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    module_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    job_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paused_by: Mapped[str | None] = mapped_column(String(255))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_generation: Mapped[int | None] = mapped_column(Integer)
+    last_outcome: Mapped[str | None] = mapped_column(String(20))
+    last_detail: Mapped[str | None] = mapped_column(String(500))
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    #: The event whose final attempt failed (committed with the failure record,
+    #: before the dead-letter hook runs): a re-delivery never runs the handler.
+    exhausted_event_id: Mapped[UUID | None] = mapped_column(Uuid())
+    dead_letter_event_id: Mapped[UUID | None] = mapped_column(Uuid())
+    dead_letter_generation: Mapped[int | None] = mapped_column(Integer)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 ALL_MODELS = (
     Timer,
     TimerAcceptance,
     TimerRejection,
+    JobState,
     PlatformTimer,
     PlatformTimerAcceptance,
     PlatformTimerRejection,
@@ -305,6 +353,7 @@ __all__ = [
     "PLATFORM_TABLES",
     "SCHEMA",
     "TENANT_TABLES",
+    "JobState",
     "PlatformTimer",
     "PlatformTimerAcceptance",
     "PlatformTimerRejection",

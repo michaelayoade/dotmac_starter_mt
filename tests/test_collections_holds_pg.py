@@ -1054,3 +1054,92 @@ def test_a_chained_ladder_opened_at_due_plus_40_skips_both(
         assert timer.current(session, step) is None
         assert _skipped_steps(session) == ["notice_1", "notice_2"]
         assert session.scalars(select(CollectionNoticeRequest)).all() == []
+
+
+_HALTING = (
+    ("notice_1", 1, 7, "exposure_at"),
+    ("notice_2", 2, 23, "accepted_notice_receipt_at"),
+)
+
+
+def _halt_transitions(session) -> list:
+    from dotmac_collections.models import CollectionCaseTransition
+
+    return [
+        t
+        for t in session.scalars(select(CollectionCaseTransition))
+        if t.reason_code == "policy_ladder_halted_no_anchor"
+    ]
+
+
+def test_a_ladder_that_halts_for_want_of_an_anchor_records_one_transition(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_ladder(session, scope, _HALTING)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, DUE + timedelta(days=10))
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        step = TimerIdentityV1(
+            scope,
+            "collections.case",
+            "collection_case",
+            str(opened.case_id),
+            "next_step",
+        )
+        # notice_1 was skipped; notice_2 counts from a receipt that cannot exist.
+        assert _skipped_steps(session) == ["notice_1"]
+        assert timer.current(session, step) is None
+        halts = _halt_transitions(session)
+        assert len(halts) == 1
+        assert halts[0].case_id == opened.case_id
+        assert (halts[0].from_state, halts[0].to_state) == ("active", "active")
+
+
+def test_resume_and_hold_lift_record_no_second_halt_transition(
+    scratch: tuple[str, str, str],
+) -> None:
+    from dotmac_collections.service import CaseLifecycleCommandV1
+
+    admin_url, app_url, _ = scratch
+    tenant_id, _ = _seed_tenants(admin_url)
+    scope = TenantScope(tenant_id)
+    subject = "subscriber:concurrency"
+    with _tenant_session(app_url, tenant_id) as session:
+        policy = _publish_ladder(session, scope, _HALTING)
+        timer = FakeCollectionsTimer()
+        opened = _assess_open(session, scope, policy, timer, DUE + timedelta(days=10))
+        session.commit()
+        assert isinstance(opened, CaseAssessed)
+        assert len(_halt_transitions(session)) == 1
+
+        def move(to_state: str, at) -> None:
+            CollectionCaseService.transition(
+                session,
+                command=CaseLifecycleCommandV1(
+                    command_id=uuid.uuid4(),
+                    idempotency_key=f"move:{to_state}:{at}",
+                    scope=scope,
+                    case_id=opened.case_id,
+                    actor_ref="staff:1",
+                    reason_code="staff_decision",
+                    occurred_at=at,
+                ),
+                to_state=to_state,  # type: ignore[arg-type]
+                timer=timer,
+            )
+
+        move("paused", DUE + timedelta(days=11))
+        move("active", DUE + timedelta(days=12))
+        CollectionHoldService.place(
+            session, _place_command(scope, subject, "dispute:halt")
+        )
+        CollectionHoldService.lift(
+            session, _lift_command(scope, subject, "dispute:halt"), timer
+        )
+        session.commit()
+        assert len(_halt_transitions(session)) == 1
