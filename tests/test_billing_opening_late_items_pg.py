@@ -11,7 +11,6 @@ imported open items (residuals 70.00 and 50.00; source totals 120.00 and 80.00).
 from __future__ import annotations
 
 import threading
-from contextlib import contextmanager
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
@@ -876,36 +875,33 @@ def test_held_partitions_take_no_item_and_no_key_of_the_sealed_population(scratc
         db.rollback()
 
 
-@contextmanager
-def _principal_without_select(scratch):
-    """Revoke the opening principal's SELECT on the late-item table, this test only."""
+def test_the_opening_principal_needs_no_select_on_the_late_item_table(scratch):
+    """First import, the sealed window's exposure V2 and a held admission all run
+    as the opening principal, which the fixture grants no access to the late-item
+    table (the production shape)."""
     role = scratch.principals["tenant"][0]
     database = make_url(scratch[0]).database
     engine = create_engine(b._url_for(b._superuser_url(), database))
-    table = "mod_billing.opening_late_items"
     try:
-        with engine.begin() as connection:
-            connection.execute(text(f'REVOKE SELECT ON {table} FROM "{role}"'))
-        yield
+        with engine.connect() as connection:
+            assert not connection.execute(
+                text(
+                    "SELECT has_table_privilege(:r, "
+                    "'mod_billing.opening_late_items', 'SELECT')"
+                ),
+                {"r": role},
+            ).scalar_one()
     finally:
-        with engine.begin() as connection:
-            connection.execute(text(f'GRANT SELECT ON {table} TO "{role}"'))
         engine.dispose()
-
-
-def test_the_opening_principal_needs_no_select_on_the_late_item_table(scratch):
-    """First import, the sealed window's exposure V2 and a held admission all run
-    as the opening principal with no SELECT on the late-item table."""
-    with _principal_without_select(scratch):
-        w, admitted, held = _held_world(scratch)  # imports and seals as the principal
-        with b._session(w.url, w.scope) as db:
-            other = cash._new_account(db, w.scope)
-            _record(db, w, _debit(w, other, "unrelated-1"))  # the table has rows
-            db.commit()
-        with cash._session(scratch, w.url, w.scope) as db:
-            receipt = hold._admit(db, w.scope, held, approval_request_id=None)
-            assert receipt.billing_account_id == hold._held_id(held)
-            db.commit()
+    w, admitted, held = _held_world(scratch)  # imports and seals as the principal
+    with b._session(w.url, w.scope) as db:
+        other = cash._new_account(db, w.scope)
+        _record(db, w, _debit(w, other, "unrelated-1"))  # the table has rows
+        db.commit()
+    with cash._session(scratch, w.url, w.scope) as db:
+        receipt = hold._admit(db, w.scope, held, approval_request_id=None)
+        assert receipt.billing_account_id == hold._held_id(held)
+        db.commit()
 
 
 def test_late_items_on_an_admitted_held_account_and_an_imported_document_count(

@@ -50,10 +50,13 @@ a14 is published and tagged (`dotmac-billing-v0.1.0a14`); `bi_0021` chains after
   `dual_control = 'on'` refuses every opening late item
   (`opening_late_item_dual_control_unsupported`); two-person approval for these
   items is not built yet.
+- After the seal, any role other than the opening principal that computes opening
+  room or exposure needs SELECT on `opening_late_items` (the online role,
+  `app_user`, has it); the opening principal needs none.
 - A document read `get_opening_late_item`. Generic `void_document`, the withholding
   freeze and `reverse_posting_group` refuse opening late documents and groups.
 
-## 0.1.0a14 — UNRELEASED
+## 0.1.0a14 — published 2026-11-26
 
 Release of frozen expected withholding (Q-F; design approved by Michael 2026-11-25
 at its defaults). a13 is tagged; `bi_0020` chains after `bi_0019_opening_dual_control`.
