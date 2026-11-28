@@ -11,6 +11,23 @@ here.
 No version is bumped or allocated here; kernel releases are owned by the release
 allocation (this ships with the next allocated release).
 
+- Pre-tag follow-up to the surface contract (R0 delta). `surface_selection=None`
+  is a warning in development and a FATAL startup error in production; every
+  consumer adds an explicit selection in the PR that bumps its kernel pin (census:
+  `docs/inventories/surface-selection-census.md`). Contract-1 and kernel built-in
+  surfaces are exempt from the reserved-root rule by their registered flags, not by
+  a route-name substring; the module code `kernel_platform` and the contract-2
+  surface code `legacy` are refused. Job handlers must live in `dotmac_<code>`
+  (or the new `ModuleManifest.job_package`). The reserved-path check now also covers
+  module `api_routers` under `/docs`, `/redoc`, `/openapi.json`, `/static`, and
+  `/platform` when enabled; `/api/...` and `/health/...` stay allowed for modules.
+  `/platform` is the operator plane: a module API enters it only by assembly
+  declaration (`ProductAssemblySpec.platform_api_modules`), only behind
+  `require_platform_admin` (matched by identity) and only on a static first
+  segment the kernel's platform routes do not use. A module API route named
+  `web:...` is refused, and the root check no longer depends on a route name.
+  `job_package` may not name the kernel or another module's `dotmac_*` package. An exact `/health` twin is refused by the duplicate
+  check.
 - `dotmac_kernel.jobs` adds `JobSpec` and `ModuleManifest.jobs` (module contract
   2 only): code, handler import path, explicit plane, interval or five-field
   cron cadence, max attempts, backoff, `concurrency='single'`. `ModuleRegistry`

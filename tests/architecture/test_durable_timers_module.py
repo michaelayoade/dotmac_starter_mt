@@ -182,6 +182,21 @@ def test_module_has_no_clock_due_scan_claim_loop_or_transaction_authority() -> N
     # The all-types kernel claim by name (the typed `claim_outbox_batch_by_type`
     # is the one legal spelling, and the boot role check must name it).
     assert not re.search(r"claim_outbox_batch(?!_by_type)", _module_source())
+    # The attribute form (`worker.run_forever(...)`) is caught too. The runner's
+    # own `JobRunner.run_forever` is the one legal receiver (`runner`).
+    for node in ast.walk(ast.parse(_module_source())):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"run_once", "run_forever", "claim_batch"}
+        ):
+            receiver = node.func.value
+            own_runner = (
+                node.func.attr == "run_forever"
+                and isinstance(receiver, ast.Name)
+                and receiver.id in {"runner", "self"}
+            )
+            assert own_runner, ast.unparse(node)
     for node in ast.walk(ast.parse(_module_source())):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
             "dotmac_kernel.messaging"
@@ -256,3 +271,17 @@ def test_package_root_exports_ports_not_orm_models() -> None:
     ):
         assert private_model not in dotmac_durable_timers.__all__
         assert not hasattr(dotmac_durable_timers, private_model)
+
+
+def test_the_attribute_form_canary_has_a_sensitivity_proof() -> None:
+    tree = ast.parse(
+        "worker.run_forever(x)\nrelay.claim_batch(db)\nrunner.run_forever(s)"
+    )
+    hits = [
+        ast.unparse(n)
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr in {"run_once", "run_forever", "claim_batch"}
+    ]
+    assert len(hits) == 3

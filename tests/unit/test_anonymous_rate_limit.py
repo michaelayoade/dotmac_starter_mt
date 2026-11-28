@@ -38,6 +38,7 @@ from dotmac_kernel.request_evidence import (
     RequestEvidenceContextV1,
     TrustedProxyPolicy,
 )
+from dotmac_kernel.surface_selection import SELECT_ALL
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -415,7 +416,9 @@ def test_create_app_fails_closed_in_production_with_the_memory_store(
     )
     monkeypatch.setattr(app_factory.settings, "anonymous_rate_limit_store", "memory")
     spec = ProductAssemblySpec(
-        api_documentation=api_documentation_policy("development"), name="k2-probe"
+        api_documentation=api_documentation_policy("development"),
+        name="k2-probe",
+        surface_selection=SELECT_ALL,
     )
 
     with pytest.raises(AnonymousRateLimitStoreError, match="refused in production"):
@@ -964,7 +967,9 @@ def test_create_app_in_production_refuses_anonymous_limits_without_request_evide
         app_factory.settings, "anonymous_rate_limit_key_secret", KEY_SECRET
     )
     spec = ProductAssemblySpec(
-        api_documentation=api_documentation_policy("development"), name="k2-no-evidence"
+        api_documentation=api_documentation_policy("development"),
+        name="k2-no-evidence",
+        surface_selection=SELECT_ALL,
     )
 
     with pytest.raises(AnonymousRateLimitConfigurationError, match="request_evidence"):
