@@ -711,8 +711,55 @@ def test_a_failing_deduction_is_named_by_position_and_component(monkeypatch):
     assert first.tax_evidence.component_ref not in notes
 
 
+def _release(account, document, *, recorded_at=NOW, reverses=None):
+    return SimpleNamespace(
+        release_id=uuid4(),
+        billing_account_id=account,
+        document_id=document,
+        reverses_release_id=reverses,
+        recorded_at=recorded_at,
+    )
+
+
+def _record(account, document, *, recorded_at=NOW, occurred_at=None, reverses=None):
+    return SimpleNamespace(
+        discharge_id=uuid4(),
+        billing_account_id=account,
+        document_id=document,
+        reverses_discharge_id=reverses,
+        recorded_at=recorded_at,
+        occurred_at=occurred_at or recorded_at,
+    )
+
+
+def _no_lock(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("a balance pass ran for an unverified trigger")
+
+    monkeypatch.setattr(flows, "get_funding_availability", boom)
+    monkeypatch.setattr(flows, "get_document_exposure", boom)
+    monkeypatch.setattr(flows, "_balance_pass", boom)
+
+
+def _released(request):
+    return flows.apply_balance_on_withholding_released(
+        None, scope=TenantScope(uuid4()), request=request, ports=_ports(ACCOUNT)
+    )
+
+
+def _accepted(request):
+    return flows.apply_balance_on_withholding_accepted(
+        None, scope=TenantScope(uuid4()), request=request, ports=_ports(ACCOUNT)
+    )
+
+
 def test_the_withholding_entry_point_refuses_another_accounts_document(monkeypatch):
-    document = uuid4()
+    document, acct = uuid4(), uuid4()
+    monkeypatch.setattr(
+        flows,
+        "get_withholding_discharge_record",
+        lambda *a, **k: _record(acct, document),
+    )
     monkeypatch.setattr(
         flows,
         "get_document_exposure",
@@ -724,18 +771,19 @@ def test_the_withholding_entry_point_refuses_another_accounts_document(monkeypat
 
     monkeypatch.setattr(flows, "get_funding_availability", boom)
     with pytest.raises(BalancePassFailed) as caught:
-        flows.apply_balance_on_withholding_accepted(
-            None,
-            scope=TenantScope(uuid4()),
-            request=WithholdingAcceptedV1(uuid4(), document, uuid4(), NOW),
-            ports=_ports(ACCOUNT),
-        )
+        _accepted(WithholdingAcceptedV1(acct, document, uuid4(), NOW))
     assert caught.value.code == "document_account_mismatch"
 
 
 def test_the_release_entry_point_refuses_another_accounts_document(monkeypatch):
     from dotmac_money_flows import WithholdingReleasedV1
 
+    document, acct = uuid4(), uuid4()
+    monkeypatch.setattr(
+        flows,
+        "get_withholding_release",
+        lambda *a, **k: _release(acct, document),
+    )
     monkeypatch.setattr(
         flows,
         "get_document_exposure",
@@ -747,12 +795,7 @@ def test_the_release_entry_point_refuses_another_accounts_document(monkeypatch):
 
     monkeypatch.setattr(flows, "get_funding_availability", boom)
     with pytest.raises(BalancePassFailed) as caught:
-        flows.apply_balance_on_withholding_released(
-            None,
-            scope=TenantScope(uuid4()),
-            request=WithholdingReleasedV1(uuid4(), uuid4(), uuid4(), NOW),
-            ports=_ports(ACCOUNT),
-        )
+        _released(WithholdingReleasedV1(acct, document, uuid4(), NOW))
     assert caught.value.code == "document_account_mismatch"
 
 
@@ -768,13 +811,14 @@ def test_the_release_entry_point_floors_dating_and_keys_refs_on_the_release(
         return "outcome"
 
     monkeypatch.setattr(flows, "_balance_pass", capture)
-    request = WithholdingReleasedV1(uuid4(), uuid4(), uuid4(), NOW)
-    assert (
-        flows.apply_balance_on_withholding_released(
-            None, scope=TenantScope(uuid4()), request=request, ports=_ports(ACCOUNT)
-        )
-        == "outcome"
+    account, document = uuid4(), uuid4()
+    monkeypatch.setattr(
+        flows,
+        "get_withholding_release",
+        lambda *a, **k: _release(account, document),
     )
+    request = WithholdingReleasedV1(account, document, uuid4(), NOW)
+    assert _released(request) == "outcome"
     assert seen["trigger"] == request.document_id
     assert seen["expected_account"] == request.billing_account_id
     assert seen["not_before"] == NOW
@@ -782,3 +826,120 @@ def test_the_release_entry_point_floors_dating_and_keys_refs_on_the_release(
         f"money-flows:settle:release:{request.release_id}:{request.document_id}"
     )
     assert not seen["ref_prefix"].startswith("money-flows:settle:issue:")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        ({"reverses": uuid4()}, "withholding_trigger_is_reversal"),
+        ({"account": uuid4()}, "document_account_mismatch"),
+        ({"document": uuid4()}, "withholding_trigger_mismatch"),
+        ({"recorded_at": NOW + timedelta(seconds=1)}, "withholding_instant_mismatch"),
+    ],
+)
+def test_a_release_trigger_that_disagrees_with_billing_is_refused_before_any_lock(
+    monkeypatch, mutate, code
+):
+    from dotmac_money_flows import WithholdingReleasedV1
+
+    account, document = uuid4(), uuid4()
+    stored = _release(
+        mutate.get("account", account),
+        mutate.get("document", document),
+        recorded_at=mutate.get("recorded_at", NOW),
+        reverses=mutate.get("reverses"),
+    )
+    monkeypatch.setattr(flows, "get_withholding_release", lambda *a, **k: stored)
+    _no_lock(monkeypatch)
+    with pytest.raises(BalancePassFailed) as caught:
+        _released(WithholdingReleasedV1(account, document, stored.release_id, NOW))
+    assert caught.value.code == code
+
+
+def test_a_naive_released_at_never_matches_billings_instant(monkeypatch):
+    from dotmac_money_flows import WithholdingReleasedV1
+
+    account, document = uuid4(), uuid4()
+    monkeypatch.setattr(
+        flows, "get_withholding_release", lambda *a, **k: _release(account, document)
+    )
+    _no_lock(monkeypatch)
+    with pytest.raises(BalancePassFailed) as caught:
+        _released(
+            WithholdingReleasedV1(account, document, uuid4(), NOW.replace(tzinfo=None))
+        )
+    assert caught.value.code == "withholding_instant_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        ({"reverses": uuid4()}, "withholding_trigger_is_reversal"),
+        ({"account": uuid4()}, "document_account_mismatch"),
+        ({"document": uuid4()}, "withholding_trigger_mismatch"),
+        ({"recorded_at": NOW - timedelta(seconds=1)}, "withholding_instant_mismatch"),
+    ],
+)
+def test_an_accepted_trigger_that_disagrees_with_billing_is_refused_before_any_lock(
+    monkeypatch, mutate, code
+):
+    account, document = uuid4(), uuid4()
+    stored = _record(
+        mutate.get("account", account),
+        mutate.get("document", document),
+        recorded_at=mutate.get("recorded_at", NOW),
+        reverses=mutate.get("reverses"),
+    )
+    monkeypatch.setattr(
+        flows, "get_withholding_discharge_record", lambda *a, **k: stored
+    )
+    _no_lock(monkeypatch)
+    with pytest.raises(BalancePassFailed) as caught:
+        _accepted(WithholdingAcceptedV1(account, document, stored.discharge_id, NOW))
+    assert caught.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("recorded_at", "occurred_at", "floor"),
+    [
+        (NOW, NOW - timedelta(days=2), NOW),
+        (NOW, NOW + timedelta(days=2), NOW + timedelta(days=2)),
+        (NOW, NOW, NOW),
+    ],
+)
+def test_the_accepted_floor_is_the_later_of_recorded_and_occurred(
+    monkeypatch, recorded_at, occurred_at, floor
+):
+    seen = {}
+
+    def capture(db, **kwargs):
+        seen.update(kwargs)
+        return "outcome"
+
+    monkeypatch.setattr(flows, "_balance_pass", capture)
+    account, document = uuid4(), uuid4()
+    stored = _record(
+        account, document, recorded_at=recorded_at, occurred_at=occurred_at
+    )
+    monkeypatch.setattr(
+        flows, "get_withholding_discharge_record", lambda *a, **k: stored
+    )
+    request = WithholdingAcceptedV1(account, document, stored.discharge_id, recorded_at)
+    assert _accepted(request) == "outcome"
+    assert seen["not_before"] == floor
+    assert seen["expected_account"] == account
+    assert seen["ref_prefix"] == (
+        f"money-flows:settle:wht:{request.discharge_id}:{request.document_id}"
+    )
+
+
+def test_the_floor_is_billings_value_not_the_callers(monkeypatch):
+    from dotmac_money_flows import WithholdingReleasedV1
+
+    seen = {}
+    monkeypatch.setattr(flows, "_balance_pass", lambda db, **k: seen.update(k))
+    account, document = uuid4(), uuid4()
+    stored = _release(account, document, recorded_at=NOW)
+    monkeypatch.setattr(flows, "get_withholding_release", lambda *a, **k: stored)
+    _released(WithholdingReleasedV1(account, document, stored.release_id, NOW))
+    assert seen["not_before"] is stored.recorded_at

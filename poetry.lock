@@ -1517,7 +1517,7 @@ url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-money-flows"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1526,7 +1526,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-billing = ">=0.1.0a14"
+dotmac-billing = ">=0.1.0a16"
 dotmac-collections = ">=0.1.0a3"
 dotmac-kernel = ">=0.1.0a110"
 dotmac-payments = ">=0.1.0a4"

@@ -1,5 +1,27 @@
 # Changelog — dotmac-money-flows
 
+## 0.1.0a5 — source candidate, not yet published (W04 PR-C: withholding triggers verified against Billing)
+
+Source only. a4 is an unpublished candidate and must be tagged `dotmac-money-flows-v0.1.0a4`
+before this merges, so a4 ships at its reviewed source. No migration, no schema or grant change.
+The Billing requirement floor rises to `dotmac-billing >=0.1.0a16` (Billing a16 adds
+`get_withholding_discharge_record`).
+
+- `apply_balance_on_withholding_released` re-reads the release with Billing's
+  `get_withholding_release`; `apply_balance_on_withholding_accepted` re-reads the discharge with
+  `get_withholding_discharge_record`. The published V1 request shapes are unchanged; the caller's
+  values are checked, never trusted. Before the account lock a mismatch raises `BalancePassFailed`:
+  `withholding_trigger_is_reversal` (an undo or reversal row is the trigger),
+  `document_account_mismatch` (published a3 code), `withholding_trigger_mismatch` (document),
+  `withholding_instant_mismatch` (`released_at` / `accepted_at` is not Billing's `recorded_at`; a
+  naive value never matches).
+- Dating floor comes from Billing: `recorded_at` for a release; the later of `recorded_at` and the
+  discharge's ledger `occurred_at` for an accepted deduction. A trigger whose original was reversed
+  later is not special-cased; Billing's fresh gates decide.
+- Architecture allowlist: `get_withholding_release` and `get_withholding_discharge_record` are
+  read-only names permitted in `settle.py` only.
+- `apply_balance_on_withholding_released` is added to `settle.__all__` (the package export existed).
+
 ## 0.1.0a4 — source candidate, not yet published (GAP-4 follow-up: database faults redeliver)
 
 Source only. a3 is published and tagged `dotmac-money-flows-v0.1.0a3`; released

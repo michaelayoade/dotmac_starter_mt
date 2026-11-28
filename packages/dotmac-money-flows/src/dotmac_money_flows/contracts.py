@@ -207,10 +207,12 @@ class InvoiceIssuedV1:
 class WithholdingAcceptedV1:
     """Trigger: Billing accepted a withholding discharge for this document.
 
-    The assembly maps Billing's accepted fact to it. The account and document are
-    cross-checked against Billing (a mismatch raises); ``discharge_id`` keys the
-    idempotent source references; ``accepted_at`` is the instant Billing accepted
-    the discharge and floors the payment dating. No amount is carried.
+    The assembly maps Billing's accepted fact to it. Every value is verified
+    against Billing's stored discharge record and a mismatch raises: the account,
+    the document, that it is not a reversal row, and that ``accepted_at`` is
+    Billing's ``recorded_at`` instant. ``discharge_id`` keys the idempotent source
+    references; the payment dating floor is taken from Billing (the later of
+    ``recorded_at`` and the ledger ``occurred_at``). No amount is carried.
     """
 
     billing_account_id: UUID
@@ -225,10 +227,12 @@ class WithholdingReleasedV1:
 
     The assembly maps ``billing.withholding.released.v1`` (ids only) to it,
     reading ``released_at`` (the database instant Billing recorded) from
-    Billing's ``get_withholding_release``. The account and document are
-    cross-checked against Billing (a mismatch raises); ``release_id`` keys the
-    idempotent source references; ``released_at`` floors the payment dating so
-    an application never predates the decision. No amount is carried.
+    Billing's ``get_withholding_release``. Every value is verified against
+    Billing's stored release and a mismatch raises: the account, the document,
+    that it is not an undo row, and that ``released_at`` is Billing's
+    ``recorded_at`` instant. ``release_id`` keys the idempotent source
+    references; the dating floor is Billing's ``recorded_at``, so an application
+    never predates the decision. No amount is carried.
     """
 
     billing_account_id: UUID

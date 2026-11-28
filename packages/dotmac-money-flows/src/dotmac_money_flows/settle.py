@@ -88,6 +88,8 @@ from dotmac_billing import (
     get_document_exposure,
     get_effective_account_terms,
     get_funding_availability,
+    get_withholding_discharge_record,
+    get_withholding_release,
     list_open_receivable_documents,
 )
 from dotmac_kernel.cache import TenantScope
@@ -944,22 +946,47 @@ def apply_balance_on_withholding_accepted(
     of the discharged document. Nothing is wired here: the assembly routes
     Billing's accepted fact to it.
 
+    The trigger is verified against Billing, not trusted. Before the account
+    lock this re-reads the discharge with ``get_withholding_discharge_record``
+    and raises ``BalancePassFailed`` when it is a reversal row
+    (``withholding_trigger_is_reversal``), when its account is not the request's
+    (``document_account_mismatch``), when its document is not the request's
+    (``withholding_trigger_mismatch``) or when ``accepted_at`` is not Billing's
+    ``recorded_at`` instant (``withholding_instant_mismatch``; a naive value
+    never matches). The request keeps its published shape; its values are only
+    checked.
+
     Dating: each application is at the later of the usual dating rule (the
-    invoice issue dates and the newest cash since) and ``accepted_at``, the
-    instant Billing accepted the discharge, so a payment is never dated before
-    the deduction that made the invoice fit. Idempotent: the source reference
-    carries the discharge id and the document's Billing ``source_version``, a
-    replay finds the invoice already paid, and a refused draw leaves no record.
-    A discharge naming another account than the document's raises
-    ``BalancePassFailed("document_account_mismatch")``.
+    invoice issue dates and the newest cash since) and the later of Billing's
+    ``recorded_at`` (the instant it accepted the discharge) and the discharge's
+    ledger ``occurred_at``, so a payment is never dated before the deduction
+    that made the invoice fit nor before the discharge's ledger date.
+    Idempotent: the source reference carries the discharge id and the document's
+    Billing ``source_version``, a replay finds the invoice already paid, and a
+    refused draw leaves no record. A discharge naming another account than the
+    document's raises ``BalancePassFailed("document_account_mismatch")``. A
+    discharge whose original was reversed later is not special-cased: Billing's
+    fresh gates decide.
     """
+    _tenant(scope)
+    record = get_withholding_discharge_record(
+        db, scope=scope, discharge_id=request.discharge_id
+    )
+    if record.reverses_discharge_id is not None:
+        raise BalancePassFailed("withholding_trigger_is_reversal")
+    if record.billing_account_id != request.billing_account_id:
+        raise BalancePassFailed("document_account_mismatch")
+    if record.document_id != request.document_id:
+        raise BalancePassFailed("withholding_trigger_mismatch")
+    if request.accepted_at != record.recorded_at:
+        raise BalancePassFailed("withholding_instant_mismatch")
     return _balance_pass(
         db,
         scope=scope,
         ports=ports,
         trigger=request.document_id,
         expected_account=request.billing_account_id,
-        not_before=request.accepted_at,
+        not_before=max(record.recorded_at, record.occurred_at),
         ref_prefix=(
             f"money-flows:settle:wht:{request.discharge_id}:{request.document_id}"
         ),
@@ -984,19 +1011,39 @@ def apply_balance_on_withholding_released(
     inside the release transaction; a failure raises and delivery retries. The
     next deposit or invoice-issue pass would pay the invoice anyway.
 
-    Dating: the later of the usual dating rule and ``released_at``, so a
-    payment never predates the decision. The source reference carries the
+    The trigger is verified against Billing, not trusted. Before the account
+    lock this re-reads the release with ``get_withholding_release`` and raises
+    ``BalancePassFailed`` when it is an undo row
+    (``withholding_trigger_is_reversal``), when its account is not the request's
+    (``document_account_mismatch``), when its document is not the request's
+    (``withholding_trigger_mismatch``) or when ``released_at`` is not Billing's
+    ``recorded_at`` instant (``withholding_instant_mismatch``; a naive value
+    never matches). The request keeps its published shape; its values are only
+    checked.
+
+    Dating: the later of the usual dating rule and Billing's ``recorded_at``,
+    so a payment never predates the decision. The source reference carries the
     release id and the document's Billing ``source_version`` and cannot collide
-    with the issue or deposit references. A release naming another account
-    than the document's raises ``BalancePassFailed("document_account_mismatch")``.
+    with the issue or deposit references. A release that was undone later is
+    not special-cased: Billing's fresh gates decide.
     """
+    _tenant(scope)
+    release = get_withholding_release(db, scope=scope, release_id=request.release_id)
+    if release.reverses_release_id is not None:
+        raise BalancePassFailed("withholding_trigger_is_reversal")
+    if release.billing_account_id != request.billing_account_id:
+        raise BalancePassFailed("document_account_mismatch")
+    if release.document_id != request.document_id:
+        raise BalancePassFailed("withholding_trigger_mismatch")
+    if request.released_at != release.recorded_at:
+        raise BalancePassFailed("withholding_instant_mismatch")
     return _balance_pass(
         db,
         scope=scope,
         ports=ports,
         trigger=request.document_id,
         expected_account=request.billing_account_id,
-        not_before=request.released_at,
+        not_before=release.recorded_at,
         ref_prefix=(
             f"money-flows:settle:release:{request.release_id}:{request.document_id}"
         ),
@@ -1161,6 +1208,7 @@ def list_settle_attention(
 __all__ = [
     "apply_balance_on_invoice_issued",
     "apply_balance_on_withholding_accepted",
+    "apply_balance_on_withholding_released",
     "CONFIRMATION_UNIQUE_CONSTRAINT",
     "REPLAY_CONSTRAINTS",
     "get_settle_instance",
