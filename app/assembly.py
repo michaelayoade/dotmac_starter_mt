@@ -164,6 +164,9 @@ assembly = ProductAssemblySpec(
     # The same tuple `alembic/env.py` installs; `create_app` resolves enabled
     # modules' `runtime_requires` through it.
     prerequisite_bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+    # `tenants` is the operator-plane API (`/platform/tenants`, guarded by
+    # `require_platform_admin`); no other module may enter `/platform`.
+    platform_api_modules=frozenset({"tenants"}),
     # The assembly's own features, plus every INSTALLED MODULE it composes.
     #
     # `dotmac_template_studio.module` is a `ModuleManifest`, not a
