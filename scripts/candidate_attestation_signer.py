@@ -36,6 +36,23 @@ What this script is not: it never builds an ``InstalledHostAttestationSubjectV2`
 or an installed-host envelope, imports no host-attestation module, and performs
 no trust-root registration (Control owns enrolment).
 
+Scope (Slice A of the DR3_DR5 adoption-clearance design, 2026-11-28)
+--------------------------------------------------------------------
+Every command takes ``--scope {candidate,production}``; the default,
+``candidate``, is byte-identical to the behaviour before the flag existed (the
+ordinary audience, no new import, no new check). ``production`` renders,
+assembles and verifies an envelope whose audience is
+``<facility>/<blocks>``, the audience a production-class target's Control
+admission policy requires. It calls ``foundation_adoption_gate``'s
+``require-adoptable`` BEFORE anything else, so this tool and the publish lane
+refuse to produce or publish a production-scope envelope without a verified
+DrillClearance.v1 for every adoption condition on the version. That is defence
+in depth, not the cryptographic barrier: the ceremony's transit key signs
+whatever ``signed_bytes`` it is given, and Control/Foundation admission check
+only the key, the audience and the lifetime. The real barrier is custody of
+that transit key. The scope names every Foundation operation on a production
+target, not only a deploy: admission compares the audience for all of them.
+
 The envelope is written through
 ``dotmac_deployment_foundation.attestation_store.write_attestation_record``,
 the package's own atomic-once writer; this script has no JSON writer of its own.
@@ -90,6 +107,13 @@ UNSIGNED_PLACEHOLDER = "unsigned"
 _INERT_ROLE_DOMAIN = "inert-role-for-candidate-only-verification"
 
 
+#: ``--scope`` values. ``candidate`` is the default and the only scope that
+#: existed before the adoption-clearance gate.
+SCOPE_CANDIDATE = "candidate"
+SCOPE_PRODUCTION = "production"
+SCOPES = (SCOPE_CANDIDATE, SCOPE_PRODUCTION)
+
+
 class Refused(SystemExit):
     """A fail-closed refusal; the message names the cause, never a value."""
 
@@ -113,6 +137,40 @@ def _parse_instant(text: str, name: str) -> datetime:
 
 def fingerprint_of(raw_public_key: bytes) -> str:
     return f"sha256:{hashlib.sha256(raw_public_key).hexdigest()}"
+
+
+def _adoption_gate():
+    """The clearance gate, imported only when a production scope is asked for."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import foundation_adoption_gate as adoption
+
+    return adoption
+
+
+def audience_for_scope(scope: str, facility: str) -> str:
+    """The envelope audience for a scope. The default scope never imports."""
+    if scope == SCOPE_CANDIDATE:
+        return CANDIDATE_AUDIENCE
+    if scope == SCOPE_PRODUCTION:
+        return _adoption_gate().production_audience(facility)
+    raise Refused(f"unknown --scope {scope!r}")
+
+
+def require_scope_cleared(scope: str, facility: str, version: str) -> None:
+    """Refuse a production-scope act unless every blocking condition is cleared.
+
+    A no-op for the default scope. Any refusal or indeterminate answer from the
+    gate is a refusal here; there is no path that proceeds on an error.
+    """
+    if scope == SCOPE_CANDIDATE:
+        return
+    if scope != SCOPE_PRODUCTION:
+        raise Refused(f"unknown --scope {scope!r}")
+    adoption = _adoption_gate()
+    try:
+        adoption.require_adoptable(facility, version)
+    except (adoption.gate.GateRefused, adoption.gate.GateIndeterminate) as exc:
+        raise Refused(f"adoption gate: {exc}") from exc
 
 
 def load_candidate_artifact_receipt(path: Path) -> dict[str, Any]:
@@ -162,7 +220,8 @@ def render_unsigned_envelope(
 
     Purpose, issuer, custody domain, audience and algorithm are constants of
     this role, never parameters, so there is no way to render an envelope for
-    another role or another custody.
+    another role or another custody. The production-scope audience is applied
+    only by ``cmd_render``, after the adoption gate has passed.
     """
     return AttestationEnvelopeV2(
         schema=ATTESTATION_SCHEMA,
@@ -225,6 +284,7 @@ def _pinned_policy(
     pinned_fingerprint: str,
     trust_root_version: str,
     envelope: AttestationEnvelopeV2,
+    audience: str = CANDIDATE_AUDIENCE,
 ) -> AttestationTrustPolicy:
     try:
         raw = base64.b64decode(public_key_b64, validate=True)
@@ -266,7 +326,7 @@ def _pinned_policy(
     return AttestationTrustPolicy(
         candidate_roots=(candidate_root,),
         installed_roots=(inert_root,),
-        candidate_audience=CANDIDATE_AUDIENCE,
+        candidate_audience=audience,
         installed_audience="inert",
     )
 
@@ -280,6 +340,7 @@ def verify_published_envelope(
     pinned_fingerprint: str,
     trust_root_version: str,
     now: datetime,
+    audience: str = CANDIDATE_AUDIENCE,
 ) -> CandidateAttestationSubjectV2:
     """Authenticate the envelope against the pinned identity and the receipt.
 
@@ -299,6 +360,7 @@ def verify_published_envelope(
         pinned_fingerprint=pinned_fingerprint,
         trust_root_version=trust_root_version,
         envelope=envelope,
+        audience=audience,
     )
     try:
         subject = verify_candidate_attestation(
@@ -338,6 +400,9 @@ def _load_envelope(path: str) -> AttestationEnvelopeV2:
 
 def cmd_render(args: argparse.Namespace) -> int:
     receipt = load_candidate_artifact_receipt(Path(args.receipt))
+    scope = args.scope
+    require_scope_cleared(scope, str(receipt["facility"]), str(receipt["version"]))
+    audience = audience_for_scope(scope, str(receipt["facility"]))
     issued_at = _parse_instant(args.issued_at, "--issued-at")
     expires_at = _parse_instant(args.expires_at, "--expires-at")
     if expires_at <= issued_at:
@@ -355,6 +420,8 @@ def cmd_render(args: argparse.Namespace) -> int:
         expires_at=expires_at,
         observation_id=args.observation_id,
     )
+    if audience != CANDIDATE_AUDIENCE:
+        unsigned = dataclasses.replace(unsigned, audience=audience)
     signed_bytes = unsigned.signed_bytes()
     write_attestation_record(Path(args.out_envelope), unsigned)
     Path(args.out_signed_bytes).write_bytes(signed_bytes)
@@ -368,6 +435,18 @@ def cmd_render(args: argparse.Namespace) -> int:
 
 def cmd_assemble(args: argparse.Namespace) -> int:
     unsigned = _load_envelope(args.unsigned)
+    scope = args.scope
+    if scope == SCOPE_CANDIDATE:
+        # A hand-edited production-audience envelope must not be assembled
+        # without the clearance check. Valid default inputs are unchanged.
+        if unsigned.audience != CANDIDATE_AUDIENCE:
+            raise Refused("the envelope audience is not the candidate audience")
+    else:
+        subject = unsigned.subject_mapping()
+        facility, version = str(subject.get("package")), str(subject.get("version"))
+        require_scope_cleared(scope, facility, version)
+        if unsigned.audience != audience_for_scope(scope, facility):
+            raise Refused("the envelope audience is not the production audience")
     signature = Path(args.signature_file).read_text(encoding="ascii").strip()
     envelope = assemble_envelope(unsigned, signature)
     write_attestation_record(Path(args.out), envelope)
@@ -377,6 +456,9 @@ def cmd_assemble(args: argparse.Namespace) -> int:
 
 def cmd_verify(args: argparse.Namespace) -> int:
     receipt = load_candidate_artifact_receipt(Path(args.receipt))
+    scope = args.scope
+    require_scope_cleared(scope, str(receipt["facility"]), str(receipt["version"]))
+    audience = audience_for_scope(scope, str(receipt["facility"]))
     envelope = _load_envelope(args.envelope)
     now = _parse_instant(args.now, "--now") if args.now else datetime.now(UTC)
     subject = verify_published_envelope(
@@ -387,6 +469,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         pinned_fingerprint=args.public_key_fingerprint,
         trust_root_version=args.trust_root_version,
         now=now,
+        audience=audience,
     )
     if args.out:
         # Published bytes are the package's canonical record of the VERIFIED
@@ -405,6 +488,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "accepts it yet (ADR-0070, 2026-09-08 amendment, decision 5).\n\n"
                 "| fact | value |\n|---|---|\n"
                 f"| purpose | `{envelope.purpose}` |\n"
+                f"| audience | `{envelope.audience}` |\n"
                 f"| package | `{subject.package}` |\n"
                 f"| version | `{subject.version}` |\n"
                 f"| fingerprint | `{envelope.public_key_fingerprint}` |\n"
@@ -418,6 +502,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+
+    def add_scope(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--scope", choices=SCOPES, default=SCOPE_CANDIDATE)
+
     sub = parser.add_subparsers(dest="command", required=True)
 
     render = sub.add_parser("render", help="unsigned envelope + signed_bytes")
@@ -431,12 +519,14 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--observation-id", default=None)
     render.add_argument("--out-envelope", required=True)
     render.add_argument("--out-signed-bytes", required=True)
+    add_scope(render)
 
     assemble = sub.add_parser("assemble", help="attach an external signature")
     assemble.set_defaults(handler=cmd_assemble)
     assemble.add_argument("--unsigned", required=True)
     assemble.add_argument("--signature-file", required=True)
     assemble.add_argument("--out", required=True)
+    add_scope(assemble)
 
     verify = sub.add_parser("verify", help="verify against the pinned identity")
     verify.set_defaults(handler=cmd_verify)
@@ -449,6 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--out", default="")
     verify.add_argument("--now", default="")
     verify.add_argument("--summary", default="")
+    add_scope(verify)
     return parser
 
 

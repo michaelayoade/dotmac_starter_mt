@@ -83,6 +83,19 @@ on:
           the pinned fingerprint repository variable.
         required: true
         type: string
+      scope:
+        description: >-
+          `candidate` (the default) publishes the ordinary-audience envelope,
+          exactly as before. `production` publishes the envelope whose audience
+          a production-class target's admission policy requires, and is
+          refused unless every adoption condition blocking production on this
+          version has a verified, committed DrillClearance.v1.
+        required: false
+        default: candidate
+        type: choice
+        options:
+          - candidate
+          - production
 
 permissions:
   contents: read
@@ -167,6 +180,21 @@ jobs:
             "${FACILITY}" --version "${VERSION}" \
             --dist candidate-dist
 
+      # PRODUCTION SCOPE ONLY. Runs before the envelope is verified, so a
+      # production-scope envelope is never authenticated, let alone uploaded,
+      # while a blocking adoption condition has no clearance. The clearance is
+      # read from the protected-main tree (this run is asserted to be the
+      # current main SHA above), never from a dispatch input. The default scope
+      # skips this step entirely.
+      - name: Require the adoption clearance for production scope
+        if: ${{ inputs.scope == 'production' }}
+        env:
+          FACILITY: ${{ inputs.facility }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 -I scripts/foundation_adoption_gate.py require-adoptable \
+            "${FACILITY}" --version "${VERSION}" --scope production
+
       # Authenticate the ceremony-signed envelope against the pinned public
       # identity and the committed receipt. Inputs travel through env, never
       # interpolated into the script.
@@ -178,6 +206,7 @@ jobs:
           FINGERPRINT: ${{ vars.FOUNDATION_CANDIDATE_PUBLIC_KEY_FINGERPRINT }}
           TRUST_ROOT_VERSION: ${{ vars.FOUNDATION_CANDIDATE_TRUST_ROOT_VERSION }}
           RECEIPT: ${{ steps.candidate.outputs.candidate_receipt }}
+          SCOPE: ${{ inputs.scope }}
         run: |
           set -euo pipefail
           for name in KEY_ID FINGERPRINT TRUST_ROOT_VERSION; do
@@ -197,7 +226,8 @@ jobs:
             --key-id "${KEY_ID}" \
             --public-key-fingerprint "${FINGERPRINT}" \
             --trust-root-version "${TRUST_ROOT_VERSION}" \
-            --summary "${GITHUB_STEP_SUMMARY}"
+            --summary "${GITHUB_STEP_SUMMARY}" \
+            --scope "${SCOPE}"
 
       # Uploaded, NOT committed. A separate, reviewed change moves this into
       # `docs/inventories/` under a name a human chose, exactly as every
@@ -205,7 +235,7 @@ jobs:
       - name: Upload the verified candidate attestation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ inputs.facility }}-candidate-attestation
+          name: ${{ inputs.facility }}-${{ inputs.scope == 'production' && 'production' || 'candidate' }}-attestation
           path: candidate-attestation.json
           retention-days: 90
           if-no-files-found: error
