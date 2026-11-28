@@ -128,6 +128,9 @@ FUNDED_CHARGE_SETTLE_AND_RECEIVABLES = FUNDED_CHARGE_AND_SETTLE | RECEIVABLES_ON
 # reached the account; Settle and FundedCharge call it and never read the
 # statement themselves.
 CREDIT_DATING_ONLY = frozenset({"_credit_dating.py"})
+# W04 PR-C: Settle re-reads the withholding release / discharge record from Billing
+# to verify the trigger it is handed (read-only reads of immutable evidence).
+SETTLE_ONLY = frozenset({"settle.py"})
 # The §2.6 owner calls F1 will use, plus the contract types they need. PR C may
 # narrow this to modules; PR E adds the F3/F5 modules to the restricted names.
 OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
@@ -160,6 +163,8 @@ OWNER_NAME_ALLOWLIST: Mapping[str, frozenset[str]] = {
     "GetFundingAvailabilityV1": FUNDED_CHARGE_AND_SETTLE,
     "get_account_statement": CREDIT_DATING_ONLY,
     "GetAccountStatementV1": CREDIT_DATING_ONLY,
+    "get_withholding_release": SETTLE_ONLY,
+    "get_withholding_discharge_record": SETTLE_ONLY,
     "get_confirmed_settlement": FUNDED_CHARGE_ONLY,
     "GetConfirmedSettlementV1": FUNDED_CHARGE_ONLY,
     "IssueRatedInvoiceV3": FUNDED_CHARGE_ONLY,
@@ -803,7 +808,7 @@ def test_package_version_surfaces_agree() -> None:
     version = pyproject["tool"]["poetry"]["version"]
     import dotmac_money_flows
 
-    assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a4"
+    assert version == module.version == dotmac_money_flows.__version__ == "0.1.0a5"
 
 
 def test_public_surface_is_the_settle_and_funded_charge_contract() -> None:

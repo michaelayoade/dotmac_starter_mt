@@ -21,9 +21,11 @@ from dotmac_billing import (
     GetAccountStatementV1,
     get_account_statement,
     get_document_exposure,
+    get_withholding_discharge_record,
+    reverse_withholding_discharge,
 )
 from dotmac_billing import models as billing_models
-from dotmac_billing.commands import DeallocationCommand
+from dotmac_billing.commands import DeallocationCommand, ReverseWithholdingDischarge
 from dotmac_billing.errors import BillingRuleViolation
 from dotmac_billing.service import deallocate_settlement, rebuild_receivable_position
 from dotmac_kernel.money import Currency
@@ -738,9 +740,35 @@ def test_a_cash_free_deduction_then_the_entry_point_pays_the_fitting_invoice(scr
         assert _outstanding(db, scope, doc) == 90
         assert _credit(db, scope, account_id) == 90
 
-    request = WithholdingAcceptedV1(
-        account_id, doc, discharge_id, ISSUED + timedelta(hours=2)
-    )
+    with session(scratch, scope) as db:
+        record = get_withholding_discharge_record(
+            db, scope=scope, discharge_id=discharge_id
+        )
+    # The request carries Billing's own recording instant: it is verified, not trusted.
+    request = WithholdingAcceptedV1(account_id, doc, discharge_id, record.recorded_at)
+    for wrong in (
+        WithholdingAcceptedV1(
+            account_id, doc, discharge_id, record.recorded_at + timedelta(seconds=1)
+        ),
+        WithholdingAcceptedV1(
+            account_id, doc, discharge_id, record.recorded_at.replace(tzinfo=None)
+        ),
+    ):
+        with session(scratch, scope) as db, pytest.raises(flows.BalancePassFailed) as e:
+            apply_balance_on_withholding_accepted(
+                db, scope=scope, request=wrong, ports=_ports()
+            )
+        assert e.value.code == "withholding_instant_mismatch"
+    with session(scratch, scope) as db, pytest.raises(flows.BalancePassFailed) as e:
+        apply_balance_on_withholding_accepted(
+            db,
+            scope=scope,
+            request=WithholdingAcceptedV1(
+                account_id, uuid4(), discharge_id, record.recorded_at
+            ),
+            ports=_ports(),
+        )
+    assert e.value.code == "withholding_trigger_mismatch"
 
     def run():
         with session(scratch, scope) as db:
@@ -757,9 +785,67 @@ def test_a_cash_free_deduction_then_the_entry_point_pays_the_fitting_invoice(scr
         assert _outstanding(db, scope, doc) == 0
         assert _credit(db, scope, account_id) == 0
         assert _allocations(db) == 1
+        # Dating floor: never before Billing's recording instant or ledger date.
+        occurred = db.scalar(
+            select(billing_models.PostingGroup.occurred_at).where(
+                billing_models.PostingGroup.source_ref.like(
+                    f"money-flows:settle:wht:{discharge_id}:%"
+                )
+            )
+        )
+        assert occurred is not None
+        assert occurred >= max(record.recorded_at, record.occurred_at)
 
     replay = run()  # idempotent: the invoice is already paid, nothing posts twice
     assert replay.applied_document_ids == ()
     assert replay.reason_code == "invoice_not_open"
     with session(scratch, scope) as db:
         assert _allocations(db) == 1
+
+
+def test_a_reversal_row_is_refused_as_the_accepted_trigger(scratch):
+    """The undo of a discharge is not a trigger: the pass refuses it before the lock."""
+    from dataclasses import replace
+
+    from dotmac_billing import accept_withholding_discharge
+
+    scope, account_id, (doc,) = _world(scratch, balance="90.00")
+    with session(scratch, scope) as db:
+        command = withholding_command(
+            db, account_id, doc, scope=scope, claimed="54.00", accepted="54.00"
+        )
+        db.commit()
+    command = replace(command, occurred_at=ISSUED + timedelta(hours=2))
+    with session(scratch, scope) as db:
+        discharge = accept_withholding_discharge(db, scope=scope, command=command)
+        discharge_id = discharge.id
+        db.commit()
+    with session(scratch, scope) as db:
+        inverse = reverse_withholding_discharge(
+            db,
+            scope=scope,
+            command=ReverseWithholdingDischarge(
+                scope,
+                discharge_id,
+                f"undo-retry:{discharge_id}",
+                f"undo:{discharge_id}",
+                "finance-user:fixture",
+                "audit:undo",
+                ISSUED + timedelta(hours=3),
+            ),
+        )
+        undo_id = inverse.id
+        db.commit()
+    with session(scratch, scope) as db:
+        record = get_withholding_discharge_record(db, scope=scope, discharge_id=undo_id)
+    assert record.reverses_discharge_id == discharge_id
+    with session(scratch, scope) as db, pytest.raises(flows.BalancePassFailed) as e:
+        apply_balance_on_withholding_accepted(
+            db,
+            scope=scope,
+            request=WithholdingAcceptedV1(account_id, doc, undo_id, record.recorded_at),
+            ports=_ports(),
+        )
+    assert e.value.code == "withholding_trigger_is_reversal"
+    with session(scratch, scope) as db:
+        assert _allocations(db) == 0

@@ -8,15 +8,22 @@ the shared pass in a new transaction.
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
-from dotmac_billing import get_withholding_release, release_withholding_component
+from dotmac_billing import (
+    get_withholding_release,
+    release_withholding_component,
+    reverse_withholding_release,
+)
 from dotmac_billing import models as billing_models
 from dotmac_billing.commands import (
     WITHHOLDING_RELEASE_PERMISSION,
     ReleaseWithholdingComponent,
+    ReverseWithholdingRelease,
 )
 from dotmac_money_flows import (
+    BalancePassFailed,
     InvoiceIssuedV1,
     WithholdingReleasedV1,
     apply_balance_on_invoice_issued,
@@ -160,3 +167,82 @@ def test_a_prepaid_account_and_an_empty_balance_are_quiet_no_ops(scratch):
             ports=_ports(),
         )
     assert outcome.reason_code == "no_balance"
+
+
+def _undo(scratch, scope, release_id):
+    with session(scratch, scope) as db:
+        undo = reverse_withholding_release(
+            db,
+            scope=scope,
+            command=ReverseWithholdingRelease(
+                scope, release_id, f"undo:{release_id}", ACTOR, "certificate mistaken"
+            ),
+            permissions=_Reader(),
+        )
+        db.commit()
+        return get_withholding_release(db, scope=scope, release_id=undo.release_id)
+
+
+def test_the_undo_row_is_refused_as_the_trigger_and_a_wrong_instant_raises(scratch):
+    scope, account_id, (doc,) = _world(scratch, balance="144.00")
+    component = _freeze_and_release(scratch, scope, account_id, doc)
+    release = _release(scratch, scope, account_id, doc, component)
+    undo = _undo(scratch, scope, release.release_id)
+    assert undo.reverses_release_id == release.release_id
+
+    def refused(request):
+        with session(scratch, scope) as db:
+            with pytest.raises(BalancePassFailed) as caught:
+                apply_balance_on_withholding_released(
+                    db, scope=scope, request=request, ports=_ports()
+                )
+            return caught.value.code
+
+    assert (
+        refused(
+            WithholdingReleasedV1(account_id, doc, undo.release_id, undo.recorded_at)
+        )
+        == "withholding_trigger_is_reversal"
+    )
+    assert (
+        refused(
+            WithholdingReleasedV1(
+                account_id,
+                doc,
+                release.release_id,
+                release.recorded_at + timedelta(seconds=1),
+            )
+        )
+        == "withholding_instant_mismatch"
+    )
+    assert (
+        refused(
+            WithholdingReleasedV1(
+                account_id, uuid4(), release.release_id, release.recorded_at
+            )
+        )
+        == "withholding_trigger_mismatch"
+    )
+    with session(scratch, scope) as db:
+        assert _allocations(db) == 0
+
+
+def test_a_release_that_was_undone_later_runs_quietly(scratch):
+    """Not special-cased: the undo restored the room, so Billing's gates say no fit."""
+    scope, account_id, (doc,) = _world(scratch, balance="144.00")
+    component = _freeze_and_release(scratch, scope, account_id, doc)
+    release = _release(scratch, scope, account_id, doc, component)
+    _undo(scratch, scope, release.release_id)
+    with session(scratch, scope) as db:
+        outcome = apply_balance_on_withholding_released(
+            db,
+            scope=scope,
+            request=WithholdingReleasedV1(
+                account_id, doc, release.release_id, release.recorded_at
+            ),
+            ports=_ports(),
+        )
+        db.commit()
+    assert outcome.applied_document_ids == ()
+    with session(scratch, scope) as db:
+        assert _allocations(db) == 0
