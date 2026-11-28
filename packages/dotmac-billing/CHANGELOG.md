@@ -19,7 +19,7 @@ DDL, grant or migration (`bi_0021` is still the head) and must merge only after 
 - Additive read `get_withholding_discharge_record(db, *, scope, discharge_id)`
   returning `WithholdingDischargeRecordV1` (discharge, account, document and posting
   group ids, `reverses_discharge_id`, `occurred_at` = the posting group's business
-  time, `recorded_at` = the row's database instant, and the validated
+  time, `recorded_at` = the row's database transaction timestamp (`now()`), and the validated
   `WithholdingDischargeEffectV1`). Both planes, explicit scope, read only. The
   posting group must be on the same plane and account and of the matching withholding
   kind, else `withholding_evidence_corrupt`; an unknown id is `not_found`.

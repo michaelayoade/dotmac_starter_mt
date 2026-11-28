@@ -1192,8 +1192,9 @@ class WithholdingDischargeEffectV1:
 class WithholdingDischargeRecordV1:
     """A stored discharge with the recording identity its effect does not carry.
 
-    ``recorded_at`` is the database instant the row was written (not caller
-    supplied); ``occurred_at`` is the business time of its posting group.
+    ``recorded_at`` is the database transaction timestamp (``now()``) of
+    the writing transaction, not caller supplied and not a wall-clock write
+    instant; ``occurred_at`` is the business time of its posting group.
     """
 
     discharge_id: UUID

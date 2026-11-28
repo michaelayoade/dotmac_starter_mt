@@ -28,6 +28,7 @@ from dotmac_kernel.money import Currency, Money
 
 from tests import test_billing_isolation as billing
 from tests import test_billing_public_invoice_authoring as authoring
+from tests import test_billing_tax_dependency_evidence as dependency
 from tests import test_billing_tax_determination_evidence as fixtures
 from tests.unit.test_billing_withholding_contracts import evidence as v1_evidence
 
@@ -283,3 +284,86 @@ def test_record_requires_an_explicit_scope():
             scope=object(),
             discharge_id=uuid4(),  # type: ignore[arg-type]
         )
+
+
+# --- V3 intake and V2 discharge evidence -----------------------------------
+
+
+def _v2_wrong_side(scope, side):
+    pair = dependency._evidence(scope)
+    wht = replace(
+        pair[1], determination=replace(pair[1].determination, transaction_side=side)
+    )
+    return (pair[0], wht)
+
+
+@pytest.mark.parametrize("side", ["output", "input", "liability"])
+def test_v3_intake_refuses_expected_withholding_on_another_side(side):
+    scope = TenantScope(uuid4())
+    tax = _v2_wrong_side(scope, side)
+    obligation = dependency._command(uuid4(), scope, tax).obligation
+    assert type(obligation).__name__ == "AcceptRatedObligationV3"
+    with pytest.raises(BillingRuleViolation) as refused:
+        service._require_rated_tax_evidence(obligation, scope=scope)
+    assert refused.value.code == CODE
+
+
+def test_v3_intake_accepts_the_withholding_side():
+    scope = TenantScope(uuid4())
+    obligation = dependency._command(
+        uuid4(), scope, dependency._evidence(scope)
+    ).obligation
+    service._require_rated_tax_evidence(obligation, scope=scope)
+
+
+def test_v2_discharge_evidence_refuses_a_non_withholding_side():
+    scope = TenantScope(uuid4())
+    account, invoice = uuid4(), uuid4()
+    base = billing._withholding_command(account, invoice, scope=scope)
+    good = dependency._discharge_evidence(
+        scope, account, invoice, dependency._evidence(scope)[1]
+    )
+    assert good.transaction_side == "withholding"
+    service._require_withholding_command(
+        scope=scope, command=replace(base, tax_evidence=good)
+    )
+    bad = dependency._discharge_evidence(
+        scope, account, invoice, _v2_wrong_side(scope, "output")[1]
+    )
+    assert bad.transaction_side == "output"
+    with pytest.raises(BillingRuleViolation) as refused:
+        service._require_withholding_command(
+            scope=scope, command=replace(base, tax_evidence=bad)
+        )
+    assert refused.value.code == CODE
+
+
+def test_issue_precheck_refuses_stored_wrong_side_before_any_write(monkeypatch):
+    scope = TenantScope(uuid4())
+
+    class Rows:
+        def scalars(self):
+            return iter([SimpleNamespace(obligation_id=uuid4(), id=uuid4())])
+
+    class Db:
+        def execute(self, statement):
+            return Rows()
+
+    obligation = SimpleNamespace(
+        id=uuid4(),
+        tax_evidence=[{}],
+        tax_amount=Decimal("0"),
+        currency="NGN",
+        minor_units=2,
+    )
+    monkeypatch.setattr(service, "_one", lambda *a, **k: obligation)
+    document = SimpleNamespace(document_kind="invoice", id=uuid4())
+    args = {"scope": scope, "plane": service._models(scope), "document": document}
+    monkeypatch.setattr(
+        service, "_decode_tax_evidence", lambda *a, **k: (_wht(scope, "output"),)
+    )
+    with pytest.raises(BillingRuleViolation) as refused:
+        service._require_stored_withholding_sides(Db(), **args)
+    assert refused.value.code == CODE
+    monkeypatch.setattr(service, "_decode_tax_evidence", lambda *a, **k: (_wht(scope),))
+    service._require_stored_withholding_sides(Db(), **args)

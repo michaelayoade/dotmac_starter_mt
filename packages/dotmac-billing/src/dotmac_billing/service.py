@@ -3320,6 +3320,42 @@ def _frozen_component_row(
     )
 
 
+def _require_stored_withholding_sides(
+    db: Session, *, scope: Scope, plane: _PlaneModels, document: _DocumentRow
+) -> None:
+    """Refuse an invoice whose stored expected-withholding evidence has a wrong side.
+
+    Runs before numbering, postings and facts so a refusal leaves no write.
+    """
+
+    if document.document_kind != "invoice":
+        return
+    lines = db.execute(
+        _where_scope(
+            select(plane.line).where(plane.line.document_id == document.id),
+            scope,
+            plane.line,
+        )
+    ).scalars()
+    for line in lines:
+        if line.obligation_id is None:
+            continue
+        obligation = _one(
+            db, scope=scope, model=plane.obligation, row_id=line.obligation_id
+        )
+        if obligation.tax_evidence is None:
+            continue
+        _require_withholding_side(
+            _decode_tax_evidence(
+                obligation.tax_evidence,
+                scope=scope,
+                tax_amount=_money(
+                    obligation.tax_amount, obligation.currency, obligation.minor_units
+                ),
+            )
+        )
+
+
 def _freeze_withholding_components(
     db: Session, *, scope: Scope, plane: _PlaneModels, document: _DocumentRow
 ) -> int:
@@ -4079,6 +4115,9 @@ def issue_document(
             _validate_invoice_lines(
                 session, scope=scope, plane=plane, document=document
             )
+        _require_stored_withholding_sides(
+            session, scope=scope, plane=plane, document=document
+        )
         number = numbering.allocate(
             session,
             scope=scope,
