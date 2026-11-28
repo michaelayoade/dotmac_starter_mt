@@ -66,7 +66,8 @@ def test_the_only_mutating_container_command_is_rm_in_one_function() -> None:
 
 #: config.py only DEFINES `docker_path` and lists it among the paths it validates;
 #: it never builds an argv, so it is the one file the use-site rule skips.
-USE_SITE_EXEMPT = {"config.py"}
+#: R9-L1: keyed on the EXACT path; a subpackage `config.py` is not exempt.
+USE_SITE_EXEMPT = {SRC / "config.py"}
 
 
 def stray_docker_path_uses(tree: ast.AST) -> list[int]:
@@ -94,9 +95,9 @@ def stray_docker_path_uses(tree: ast.AST) -> list[int]:
 
 def test_every_docker_path_use_heads_an_argv_with_a_constant_verb() -> None:
     for path in sorted(SRC.rglob("*.py")):
-        if path.name in USE_SITE_EXEMPT:
+        if path in USE_SITE_EXEMPT:
             continue
-        assert stray_docker_path_uses(ast.parse(path.read_text())) == [], path.name
+        assert stray_docker_path_uses(ast.parse(path.read_text())) == [], str(path)
 
 
 def test_the_use_site_rule_is_sensitive_to_aliases_and_variable_verbs() -> None:
@@ -111,6 +112,82 @@ def test_the_use_site_rule_is_sensitive_to_aliases_and_variable_verbs() -> None:
     assert stray("a = ('x', str(cfg.docker_path), 'ps')") == [1]  # not first
     assert stray("f(cfg.docker_path)") == [1]  # passed along
     assert stray("a = (docker_path, 'ps')") == []
+
+
+def _is_os_exec(name: str) -> bool:
+    return name in {"system", "popen"} or name.startswith(
+        ("exec", "spawn", "posix_spawn")
+    )
+
+
+def exec_capability_in(source: str) -> list[str]:
+    """R9-L1: every way `source` could run a process: importing `subprocess` or a
+    `.commands` module, or using `os.system/popen/exec*/spawn*/posix_spawn*` (through
+    `os`, an alias of it, or `from os import ...`)."""
+    tree = ast.parse(source)
+    found: list[str] = []
+    os_aliases = {"os"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if alias.name == "os":
+                    os_aliases.add(alias.asname or "os")
+                if parts[0] == "subprocess":
+                    found.append(f"import {alias.name}")
+                if "commands" in parts:
+                    found.append(f"import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            parts = module.split(".")
+            if parts[0] == "subprocess":
+                found.append(f"from {module} import")
+            if "commands" in parts:
+                found.append(f"from {module} import")
+            for alias in node.names:
+                if alias.name == "commands" or alias.name == "subprocess":
+                    found.append(f"from {module or '.'} import {alias.name}")
+                if module == "os" and _is_os_exec(alias.name):
+                    found.append(f"from os import {alias.name}")
+                if module == "os" and alias.name == "*":
+                    found.append("from os import *")
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and _is_os_exec(node.attr)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in os_aliases
+        ):
+            found.append(f"os.{node.attr}")
+    return sorted(set(found))
+
+
+def test_config_py_is_exempt_by_exact_path_and_cannot_run_a_process() -> None:
+    assert USE_SITE_EXEMPT == {SRC / "config.py"}
+    assert (SRC / "config.py").is_file()
+    assert exec_capability_in((SRC / "config.py").read_text()) == []
+
+
+def test_the_exec_capability_check_catches_aliased_and_imported_exec() -> None:
+    assert exec_capability_in("import os\nx = 1\n") == []
+    assert exec_capability_in("import os as o\no.execv('/bin/sh', [])\n") == [
+        "os.execv"
+    ]
+    assert exec_capability_in("import os\nos.system('x')\n") == ["os.system"]
+    assert exec_capability_in("import os\nos.popen('x')\n") == ["os.popen"]
+    assert exec_capability_in("import os\nos.posix_spawnp('x', [], {})\n") == [
+        "os.posix_spawnp"
+    ]
+    assert exec_capability_in("from os import execv as e\ne('x', [])\n") == [
+        "from os import execv"
+    ]
+    assert exec_capability_in("import subprocess\n") == ["import subprocess"]
+    assert exec_capability_in("from subprocess import run\n") == [
+        "from subprocess import"
+    ]
+    assert exec_capability_in("from .commands import run\n") == ["from commands import"]
+    assert exec_capability_in("from . import commands\n") == ["from . import commands"]
+    assert exec_capability_in("import pkg.commands\n") == ["import pkg.commands"]
 
 
 def _is_docstring(node: ast.stmt) -> bool:
