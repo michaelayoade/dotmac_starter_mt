@@ -1307,9 +1307,6 @@ UNCHANGED = {
     ".github/workflows/release-kernel.yml": (
         "8f94a69f8f44540c12881f020036f32ca3fd328d88ae4d49cfeac43f98af9e1b"
     ),
-    ".github/workflows/release-module.yml": (
-        "57c8f9163b923a34bae99f89db27115d15aa0d3fab59158a28fcbaf8d9284c1a"
-    ),
     ".github/workflows/release-ui.yml": (
         "02882ce5e449984c2b3ed4be2edda5a851c3daa6ac0360b0560f1a43e24bf58b"
     ),
@@ -1348,6 +1345,128 @@ def test_the_other_lanes_and_the_lane3_oracle_are_byte_unchanged(path):
         "and the new gate files only; if this edit is deliberate, re-pin it in "
         "its own reviewed change."
     )
+
+
+# `release-module.yml` is checked STRUCTURALLY, not by byte hash, so a harmless
+# edit does not break the suite. What the a2 publication gate (SPEC-a2 section 3,
+# "release-module.yml and the other lanes are unchanged") needs is isolation:
+# the module lane never reaches Gate 2 or Lane 3, never publishes the
+# deployment foundation, is dispatch-only and keeps its permissions and its one
+# publish step in the main-only release environment.
+MODULE_LANE = ".github/workflows/release-module.yml"
+FOUNDATION_DIST = "dotmac-deployment-foundation"
+GATE_MARKERS = (
+    "foundation_publication_gate",
+    "foundation-publication-gates",
+    "require_rehearsal",
+    "recheck_offline_result",
+    "lane3_offline",
+    "gate2",
+    "verify-gate2",
+    "recheck-gate2",
+    "publication_gate",
+    "release_facility",
+)
+
+
+def _module_lane_violations(document: dict, text: str) -> list[str]:
+    bad: list[str] = []
+    triggers = document.get(True, document.get("on"))
+    if not isinstance(triggers, dict) or set(triggers) != {"workflow_dispatch"}:
+        bad.append("triggers must be exactly workflow_dispatch")
+    else:
+        inputs = triggers["workflow_dispatch"].get("inputs", {})
+        if set(inputs) != {"module", "version", "compose_kernel", "compose_with"}:
+            bad.append("dispatch inputs changed (a gate selector must not be added)")
+        options = inputs.get("module", {}).get("options", [])
+        if FOUNDATION_DIST in options:
+            bad.append("the foundation is selectable in the module lane")
+    if document.get("permissions") != {"contents": "read"}:
+        bad.append("top-level permissions must be contents: read")
+    jobs = document.get("jobs", {})
+    if list(jobs) != ["build", "publish", "verify"]:
+        bad.append("jobs must be build, publish, verify")
+        return bad
+    expected_perms = {
+        "build": None,
+        "publish": {"contents": "read"},
+        "verify": {"contents": "write"},
+    }
+    for name, perms in expected_perms.items():
+        if jobs[name].get("permissions") != perms:
+            bad.append(f"{name}: permissions changed")
+    if jobs["publish"].get("environment") != "registry-release":
+        bad.append("publish: must run in the registry-release environment")
+    if jobs["publish"].get("needs") != "build":
+        bad.append("publish: must need build")
+    uploads = [
+        (job, step.get("name"))
+        for job, body in jobs.items()
+        for step in body.get("steps", [])
+        if "twine upload" in step.get("run", "")
+    ]
+    if uploads != [("publish", "Publish to the Forgejo private index")]:
+        bad.append(f"exactly one publish step expected, found {uploads}")
+    for marker in GATE_MARKERS:
+        if marker in text:
+            bad.append(f"references the gate machinery: {marker}")
+    if FOUNDATION_DIST in text:
+        bad.append("names the deployment foundation")
+    return bad
+
+
+def _module_lane() -> tuple[dict, str]:
+    text = (REPO / MODULE_LANE).read_text()
+    return yaml.safe_load(text), text
+
+
+def test_the_module_lane_cannot_reach_the_gate_or_publish_the_foundation():
+    document, text = _module_lane()
+    assert _module_lane_violations(document, text) == []
+
+
+def _mutated(edit) -> tuple[dict, str]:
+    document, text = _module_lane()
+    document = copy.deepcopy(document)
+    edit(document)
+    return document, text
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d[True].update(push={"branches": ["main"]}),
+        lambda d: d[True]["workflow_dispatch"]["inputs"].update(gate={}),
+        lambda d: d[True]["workflow_dispatch"]["inputs"]["module"]["options"].append(
+            FOUNDATION_DIST
+        ),
+        lambda d: d.update(permissions={"contents": "write"}),
+        lambda d: d["jobs"]["publish"].update(permissions={"contents": "write"}),
+        lambda d: d["jobs"]["publish"].update(environment="other"),
+        lambda d: d["jobs"]["publish"].pop("needs"),
+        lambda d: d["jobs"]["verify"]["steps"].append(
+            {"name": "second publish", "run": "python -m twine upload dist/*"}
+        ),
+        lambda d: d["jobs"].pop("verify"),
+    ],
+)
+def test_the_module_lane_check_refuses_structural_mutations(edit):
+    document, text = _mutated(edit)
+    assert _module_lane_violations(document, text)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "python scripts/require_rehearsal.py",
+        "python scripts/foundation_publication_gate.py select",
+        "recheck-gate2",
+        "pip download dotmac-deployment-foundation",
+    ],
+)
+def test_the_module_lane_check_refuses_gate_or_foundation_references(extra):
+    document, text = _module_lane()
+    assert _module_lane_violations(document, text + "\n# " + extra + "\n")
 
 
 def test_no_foundation_package_source_is_part_of_this_change():
