@@ -423,6 +423,7 @@ def test_platform_plane_refuses_withholding_evidence_and_discharge(scratch):
                 evidence_fixtures._command(account.id, scope, (evidence,)),
             )
         assert refused.value.code == "billing.tax_evidence_invalid"
+        assert "scope differs from invoice scope" in str(refused.value)
         session.rollback()
     with billing._session(platform_url, scope) as session:
         account = create_billing_account(
@@ -450,4 +451,52 @@ def test_platform_plane_refuses_withholding_evidence_and_discharge(scratch):
             ).scalar_one()
             == 0
         )
+        session.rollback()
+
+
+@pytest.mark.parametrize(
+    ("amount", "classified"),
+    [("0.50", False), ("0.00", True)],
+    ids=["positive-without-classification", "zero-with-classification"],
+)
+def test_each_half_of_the_election_rule_is_needed_to_freeze(
+    scratch, amount, classified
+):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=str(uuid4()),
+            currency="NGN",
+            minor_units=2,
+        )
+        item = evidence_fixtures._evidence(
+            scope,
+            purpose="expected_withholding",
+            rates=(None, None),
+            taxes=(AMOUNTS[WHT], amount),
+        )
+        elected, other = item.determination.components
+        components = (
+            replace(
+                elected, party_category="wht-elected", party_classification_id=uuid4()
+            ),
+            replace(
+                other,
+                party_category="govt-agency" if classified else None,
+                party_classification_id=uuid4() if classified else None,
+            ),
+        )
+        evidence = replace(
+            item, determination=replace(item.determination, components=components)
+        )
+        issued = authoring._issue(
+            session, scope, evidence_fixtures._command(account.id, scope, (evidence,))
+        )
+        session.flush()
+        rows = _frozen(session, issued.invoice_id)
+        assert [row.component_ref for row in rows] == [str(elected.determination_id)]
+        assert str(other.determination_id) not in {row.component_ref for row in rows}
         session.rollback()
