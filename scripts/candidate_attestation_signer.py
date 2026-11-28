@@ -44,9 +44,13 @@ ordinary audience, no new import, no new check). ``production`` renders,
 assembles and verifies an envelope whose audience is
 ``<facility>/<blocks>``, the audience a production-class target's Control
 admission policy requires. It calls ``foundation_adoption_gate``'s
-``require-adoptable`` BEFORE anything else, so no production-scope envelope
-exists without a verified DrillClearance.v1 for every adoption condition on
-the version. The scope names every Foundation operation on a production
+``require-adoptable`` BEFORE anything else, so this tool and the publish lane
+refuse to produce or publish a production-scope envelope without a verified
+DrillClearance.v1 for every adoption condition on the version. That is defence
+in depth, not the cryptographic barrier: the ceremony's transit key signs
+whatever ``signed_bytes`` it is given, and Control/Foundation admission check
+only the key, the audience and the lifetime. The real barrier is custody of
+that transit key. The scope names every Foundation operation on a production
 target, not only a deploy: admission compares the audience for all of them.
 
 The envelope is written through
@@ -432,7 +436,12 @@ def cmd_render(args: argparse.Namespace) -> int:
 def cmd_assemble(args: argparse.Namespace) -> int:
     unsigned = _load_envelope(args.unsigned)
     scope = args.scope
-    if scope != SCOPE_CANDIDATE:
+    if scope == SCOPE_CANDIDATE:
+        # A hand-edited production-audience envelope must not be assembled
+        # without the clearance check. Valid default inputs are unchanged.
+        if unsigned.audience != CANDIDATE_AUDIENCE:
+            raise Refused("the envelope audience is not the candidate audience")
+    else:
         subject = unsigned.subject_mapping()
         facility, version = str(subject.get("package")), str(subject.get("version"))
         require_scope_cleared(scope, facility, version)
@@ -479,6 +488,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "accepts it yet (ADR-0070, 2026-09-08 amendment, decision 5).\n\n"
                 "| fact | value |\n|---|---|\n"
                 f"| purpose | `{envelope.purpose}` |\n"
+                f"| audience | `{envelope.audience}` |\n"
                 f"| package | `{subject.package}` |\n"
                 f"| version | `{subject.version}` |\n"
                 f"| fingerprint | `{envelope.public_key_fingerprint}` |\n"

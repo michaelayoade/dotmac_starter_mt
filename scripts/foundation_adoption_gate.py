@@ -5,7 +5,9 @@ The Foundation 0.4.0a2 publication gate (``foundation_publication_gate.py``)
 lets DR3_DR5 be WAIVED under a policy ``adoption_conditions`` entry
 (``DR3_DR5_STAGING_DRILL``) that blocks production use of the version until a
 staging drill has been run. Nothing downstream read that condition. This module
-is the read side, and nothing else:
+is the read side, and nothing else. It is defence in depth: the tool and the
+publish lane refuse without a clearance, but the cryptographic barrier is custody
+of the ceremony's transit key, which signs whatever bytes it is given:
 
 * ``verify-clearance`` authenticates a Michael-signed ``DrillClearance.v1``
   (SSHSIG over the exact bytes, its OWN namespace and OWN signer file) and binds
@@ -510,7 +512,11 @@ def require_adoptable(facility: str, version: str) -> None:
         return
     for condition in selected.adoption_conditions:
         if condition.blocks != gate.CONDITION_BLOCKS:
-            continue
+            # Every adoption condition blocks production; an unknown scope
+            # fails closed rather than being skipped.
+            raise gate.GateRefused(
+                f"adoption_condition_unsatisfied:{condition.id}:unknown_scope"
+            )
         clearance_path, signature_path = clearance_paths(
             facility, version, condition.id
         )

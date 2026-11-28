@@ -994,3 +994,96 @@ def test_the_production_clearance_step_gates_before_verify_and_only_in_productio
     assert '--scope "${SCOPE}"' in verify["run"]
     assert verify["env"]["SCOPE"] == "${{ inputs.scope }}"
     assert "if" not in verify
+
+
+# ── architect review of #1182: M-1, M-2, L-1, L-2 ──────────────────────────
+
+
+def test_m1_default_scope_assemble_refuses_a_production_audience(
+    world: World, tmp_path
+) -> None:
+    import dataclasses
+
+    world.commit()
+    key = Ed25519PrivateKey.generate()
+    _ceremony(tmp_path, key, "candidate")
+    unsigned = SIGNER._load_envelope(str(tmp_path / "u-candidate.json"))
+    edited = dataclasses.replace(
+        unsigned, audience=f"{FACILITY}/{gate.CONDITION_BLOCKS}"
+    )
+    SIGNER.write_attestation_record(tmp_path / "edited.json", edited)
+    with pytest.raises(SystemExit) as caught:
+        SIGNER.main(
+            [
+                "assemble",
+                "--unsigned",
+                str(tmp_path / "edited.json"),
+                "--signature-file",
+                str(tmp_path / "s-candidate"),
+                "--out",
+                str(tmp_path / "out.json"),
+            ]
+        )
+    assert "not the candidate audience" in str(caught.value)
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_m2_docstrings_name_transit_key_custody_as_the_real_barrier() -> None:
+    for raw in (SIGNER.__doc__, adoption.__doc__):
+        doc = " ".join(raw.split())
+        assert "custody" in doc and "transit key" in doc
+        assert "defence in depth" in doc or "defence-in-depth" in doc
+    assert "exists without a verified" not in SIGNER.__doc__
+
+
+def test_l1_an_unknown_blocks_scope_fails_closed(world: World, monkeypatch) -> None:
+    world.commit()
+    real = gate.load_policy()
+    selected = real.exceptions[(FACILITY, VERSION)]
+    odd = gate.AdoptionCondition(
+        id="OTHER_COND",
+        waives="DR3_DR5",
+        blocks="some_other_scope",
+        environment=selected.adoption_conditions[0].environment,
+        required_faults=selected.adoption_conditions[0].required_faults,
+        register_ref=2155,
+    )
+    patched = type(selected)(
+        **{
+            **{f: getattr(selected, f) for f in selected.__dataclass_fields__},
+            "adoption_conditions": (*selected.adoption_conditions, odd),
+        }
+    )
+    policy = gate.Policy(
+        default=real.default,
+        exceptions={**real.exceptions, (FACILITY, VERSION): patched},
+    )
+    monkeypatch.setattr(gate, "load_policy", lambda: policy)
+    assert refusal(adoption.require_adoptable, FACILITY, VERSION) == (
+        "adoption_condition_unsatisfied:OTHER_COND:unknown_scope"
+    )
+
+
+def test_l2_summary_shows_audience_and_production_artifact_is_named_apart(
+    world: World, tmp_path
+) -> None:
+    world.commit()
+    key = Ed25519PrivateKey.generate()
+    final, verify = _ceremony(tmp_path, key, "production")
+    summary = tmp_path / "summary.md"
+    assert (
+        SIGNER.main([*verify, "--scope", "production", "--summary", str(summary)]) == 0
+    )
+    assert f"| audience | `{FACILITY}/{gate.CONDITION_BLOCKS}` |" in summary.read_text()
+    steps = _workflow()["jobs"]["publish"]["steps"]
+    upload = next(
+        s for s in steps if s.get("name", "").startswith("Upload the verified")
+    )
+    name = upload["with"]["name"]
+    assert "inputs.scope == 'production' && 'production' || 'candidate'" in name
+    # The candidate name is byte-identical to the one before the flag existed.
+    rendered = name.replace(
+        "${{ inputs.scope == 'production' && 'production' || 'candidate' }}",
+        "candidate",
+    ).replace("${{ inputs.facility }}", FACILITY)
+    assert rendered == f"{FACILITY}-candidate-attestation"
