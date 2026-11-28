@@ -416,8 +416,24 @@ from dotmac_billing.service import (
     void_document,
 )
 
-__version__ = "0.1.0a14"
+__version__ = "0.1.0a15"
 
+from dotmac_billing.opening_late_items import (
+    AccountingFactV7,
+    OpeningLateItemFactBlockV1,
+    OpeningLateItemV1,
+    OpeningLateSourceV1,
+    OpenItemTaxSnapshotsV1,
+    RecordOpeningLateCreditV1,
+    RecordOpeningLateDebitV1,
+    ReverseOpeningLateItemV1,
+    get_accounting_fact_v7,
+    get_open_item_tax_snapshots,
+    get_opening_late_item,
+    record_opening_late_credit,
+    record_opening_late_debit,
+    reverse_opening_late_item,
+)
 from dotmac_billing.tax_dependency_evidence import (
     InvoiceTaxEvidenceV2,
     TaxBaseDependencyPolicyEvidenceV1,
@@ -685,6 +701,20 @@ __all__ = [
     "get_opening_receivable_exposure",
     "get_accounting_fact_v5",
     "get_accounting_fact_v6",
+    "AccountingFactV7",
+    "OpeningLateItemFactBlockV1",
+    "OpeningLateItemV1",
+    "OpeningLateSourceV1",
+    "OpenItemTaxSnapshotsV1",
+    "RecordOpeningLateCreditV1",
+    "RecordOpeningLateDebitV1",
+    "ReverseOpeningLateItemV1",
+    "get_accounting_fact_v7",
+    "get_opening_late_item",
+    "get_open_item_tax_snapshots",
+    "record_opening_late_credit",
+    "record_opening_late_debit",
+    "reverse_opening_late_item",
     "opening_manifest_fingerprint_v2",
     "opening_account_command_digest_v2",
     "opening_withholding_component_identity",

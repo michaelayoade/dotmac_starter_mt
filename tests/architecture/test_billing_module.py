@@ -38,6 +38,20 @@ KERNEL_VERSIONS = (
 )
 
 _TENANT_ONLY_RELATIONS = (
+    ("opening_late_items", ("window_id",), "opening_windows", ("id",)),
+    (
+        "opening_late_items",
+        ("document_id", "billing_account_id"),
+        "documents",
+        ("id", "billing_account_id"),
+    ),
+    (
+        "opening_late_items",
+        ("posting_group_id", "billing_account_id"),
+        "posting_groups",
+        ("id", "billing_account_id"),
+    ),
+    ("opening_late_items", ("reverses_item_id",), "opening_late_items", ("id",)),
     (
         "withholding_releases",
         ("component_id", "billing_account_id", "document_id"),
