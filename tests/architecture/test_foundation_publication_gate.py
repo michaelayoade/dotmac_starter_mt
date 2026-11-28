@@ -18,6 +18,7 @@ import copy
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -1307,9 +1308,6 @@ UNCHANGED = {
     ".github/workflows/release-kernel.yml": (
         "8f94a69f8f44540c12881f020036f32ca3fd328d88ae4d49cfeac43f98af9e1b"
     ),
-    ".github/workflows/release-module.yml": (
-        "57c8f9163b923a34bae99f89db27115d15aa0d3fab59158a28fcbaf8d9284c1a"
-    ),
     ".github/workflows/release-ui.yml": (
         "02882ce5e449984c2b3ed4be2edda5a851c3daa6ac0360b0560f1a43e24bf58b"
     ),
@@ -1348,6 +1346,318 @@ def test_the_other_lanes_and_the_lane3_oracle_are_byte_unchanged(path):
         "and the new gate files only; if this edit is deliberate, re-pin it in "
         "its own reviewed change."
     )
+
+
+# `release-module.yml` is checked STRUCTURALLY, not by byte hash, so a harmless
+# edit does not break the suite. What the a2 publication gate (SPEC-a2 section 3,
+# "release-module.yml and the other lanes are unchanged") needs is isolation:
+# the module lane never reaches Gate 2 or Lane 3, never publishes the
+# deployment foundation, and has exactly ONE way to publish. Credential
+# separation does not back this up (release-facility.yml uses the same
+# environment and token), so the workflow text is the whole control and the
+# property set below closes the publish routes instead of only naming them.
+# Residual (architect review of #1179): an obfuscated edit that names no tool or
+# marker (for example `bash -c "$(... | base64 -d)"`) is not caught; edits to this
+# workflow stay under architect review.
+MODULE_LANE = ".github/workflows/release-module.yml"
+MODULE_REGISTRY = ".github/release-modules.json"
+PUBLISH_STEP = ("publish", "Publish to the Forgejo private index")
+FOUNDATION_RE = re.compile(r"dotmac[-_.]+deployment[-_.]+foundation", re.IGNORECASE)
+GATE_MARKER_RE = re.compile(
+    r"foundation[-_]publication[-_]gate|require_rehearsal|recheck_offline_result"
+    r"|lane3_offline|gate2|publication_gate|release[-_]facility|foundation[-_]candidate",
+    re.IGNORECASE,
+)
+UPLOAD_RE = re.compile(
+    r"twine\s+upload"
+    r"|\b(uv|poetry|hatch|flit|pdm)\s+publish"
+    r"|\bgh\s+(release|api)\b"
+    r"|curl\b.*(\s-T\b|--upload-file|\s-F\b|--form|-X\s*(PUT|POST)|--data|\s-d\b)"
+    r"|wget\b.*--post",
+    re.IGNORECASE,
+)
+ALLOWED_USES = re.compile(
+    r"actions/(checkout|setup-python|upload-artifact|download-artifact)@[0-9a-f]{40}"
+)
+LOCAL_USES = {
+    "./.github/actions/setup-poetry",
+    "./.github/actions/release-recorder-token",
+}
+MODULE_SCRIPTS = {
+    "scripts/assert_current_main.sh",
+    "scripts/open_release_record_pr.sh",
+    "scripts/release_module.py",
+    "scripts/tag_module_release.py",
+    "scripts/write_release_record.py",
+}
+MODULE_SECRETS = {
+    "FORGEJO_PUBLISH_TOKEN",
+    "GITHUB_TOKEN",
+    "RELEASE_RECORDER_PRIVATE_KEY",
+}
+GUARD_STEPS = {
+    "Assert run is on the current protected main SHA",
+    "Resolve the allowlisted module",
+    "Re-assert the run SHA is still the current protected main",
+    "Re-assert the target is allowlisted",
+    "Recheck build-once bytes and current main before publication",
+    PUBLISH_STEP[1],
+}
+RECORDER_STEPS = {
+    "Mint the narrow release-recorder App token",
+    "Open the post-release record",
+}
+TERMINAL_RE = re.compile(r"\b(always|failure|cancelled)\s*\(")
+SHELL = "bash --noprofile --norc -eo pipefail {0}"
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def _env_name(job: dict):
+    environment = job.get("environment")
+    return environment.get("name") if isinstance(environment, dict) else environment
+
+
+def _module_lane_violations(document: dict, modules: dict) -> list[str]:
+    bad: list[str] = []
+    triggers = document.get(True, document.get("on"))
+    inputs: dict = {}
+    if not isinstance(triggers, dict) or set(triggers) != {"workflow_dispatch"}:
+        bad.append("triggers must be exactly workflow_dispatch")
+    else:
+        inputs = triggers["workflow_dispatch"].get("inputs", {})
+        if set(inputs) != {"module", "version", "compose_kernel", "compose_with"}:
+            bad.append("dispatch inputs changed (a gate selector must not be added)")
+    module_input = inputs.get("module", {})
+    if module_input.get("type") != "choice":
+        bad.append("inputs.module must stay type: choice")
+    if sorted(module_input.get("options", [])) != sorted(modules.get("modules", {})):
+        bad.append("module options differ from .github/release-modules.json")
+    if any(FOUNDATION_RE.search(name) for name in modules.get("modules", {})):
+        bad.append("the foundation is in .github/release-modules.json")
+    if document.get("permissions") != {"contents": "read"}:
+        bad.append("top-level permissions must be contents: read")
+    if document.get("defaults", {}).get("run", {}).get("shell") != SHELL:
+        bad.append("defaults.run.shell must keep -eo pipefail")
+    jobs = document.get("jobs", {})
+    if set(jobs) != {"build", "publish", "verify"}:
+        bad.append("jobs must be build, publish, verify")
+        return bad
+    expected_perms = {
+        "build": None,
+        "publish": {"contents": "read"},
+        "verify": {"contents": "write"},
+    }
+    for name, perms in expected_perms.items():
+        if jobs[name].get("permissions") != perms:
+            bad.append(f"{name}: permissions changed")
+    if _as_list(jobs["publish"].get("needs")) != ["build"]:
+        bad.append("publish: must need build")
+    if _env_name(jobs["publish"]) != "registry-release":
+        bad.append("publish: must run in the registry-release environment")
+    if _env_name(jobs["verify"]) != "registry-release":
+        bad.append("verify: must run in the registry-release environment")
+    if _env_name(jobs["build"]) is not None:
+        bad.append("build: must not enter an environment")
+    for name, job in jobs.items():
+        for key in ("uses", "secrets", "continue-on-error", "container", "services"):
+            if key in job:
+                bad.append(f"{name}: job-level {key} is refused")
+        if not re.match(r"^ubuntu-", str(job.get("runs-on", ""))):
+            bad.append(f"{name}: runs-on must be an ubuntu runner")
+    for name in ("publish", "verify"):
+        if "if" in jobs[name]:
+            bad.append(f"{name}: job-level if is refused")
+    hits: list[tuple[str, str]] = []
+    scripts: set[str] = set()
+    for jname, job in jobs.items():
+        for step in job.get("steps", []):
+            sname = step.get("name")
+            if "continue-on-error" in step:
+                bad.append(f"{jname}/{sname}: continue-on-error is refused")
+            if "shell" in step:
+                bad.append(f"{jname}/{sname}: step-level shell is refused")
+            condition = str(step.get("if", ""))
+            if sname in GUARD_STEPS and "if" in step:
+                bad.append(f"{jname}/{sname}: a guard step must be unconditional")
+            if TERMINAL_RE.search(condition) and sname not in RECORDER_STEPS:
+                bad.append(f"{jname}/{sname}: always/failure/cancelled is refused")
+            uses = step.get("uses")
+            if uses is not None and not (
+                ALLOWED_USES.fullmatch(uses) or uses in LOCAL_USES
+            ):
+                bad.append(f"{jname}/{sname}: uses {uses} is not allow-listed")
+            run = re.sub(r"\s+", " ", step.get("run", ""))
+            if UPLOAD_RE.search(run):
+                hits.append((jname, sname))
+            scripts |= set(re.findall(r"scripts/[\w./-]+", run))
+    if hits != [PUBLISH_STEP]:
+        bad.append(f"exactly one publish step expected, found {hits}")
+    if scripts != MODULE_SCRIPTS:
+        bad.append(f"the scripts invoked changed: {sorted(scripts ^ MODULE_SCRIPTS)}")
+    dumped = yaml.safe_dump(document)
+    if set(re.findall(r"secrets\.(\w+)", dumped)) != MODULE_SECRETS:
+        bad.append("the set of secrets referenced changed")
+    if "FORGEJO_PUBLISH_TOKEN" in yaml.safe_dump(jobs["build"]):
+        bad.append("build: must not hold the publish token")
+    if FOUNDATION_RE.search(dumped):
+        bad.append("names the deployment foundation")
+    marker = GATE_MARKER_RE.search(dumped)
+    if marker:
+        bad.append(f"references the gate machinery: {marker.group(0)}")
+    return bad
+
+
+def _module_lane() -> tuple[dict, dict]:
+    return (
+        yaml.safe_load((REPO / MODULE_LANE).read_text()),
+        json.loads((REPO / MODULE_REGISTRY).read_text()),
+    )
+
+
+def test_the_module_lane_cannot_reach_the_gate_or_publish_the_foundation():
+    document, modules = _module_lane()
+    assert _module_lane_violations(document, modules) == []
+
+
+def _step(document: dict, job: str, name: str) -> dict:
+    return next(s for s in document["jobs"][job]["steps"] if s.get("name") == name)
+
+
+def _add_step(document: dict, job: str, **step) -> None:
+    document["jobs"][job]["steps"].append({"name": "added", **step})
+
+
+_PIN = "a" * 40
+MODULE_LANE_MUTATIONS = [
+    # triggers, inputs, permissions
+    lambda d: d[True].update(push={"branches": ["main"]}),
+    lambda d: d[True]["workflow_dispatch"]["inputs"].update(gate={}),
+    lambda d: d[True]["workflow_dispatch"]["inputs"]["module"].update(type="string"),
+    lambda d: d[True]["workflow_dispatch"]["inputs"]["module"]["options"].append(
+        "dotmac-deployment-foundation"
+    ),
+    lambda d: d[True]["workflow_dispatch"]["inputs"]["module"]["options"].pop(),
+    lambda d: d.update(permissions={"contents": "write"}),
+    lambda d: d["jobs"]["publish"].update(permissions={"contents": "write"}),
+    lambda d: d["jobs"]["publish"].update(
+        permissions={"contents": "read", "id-token": "write"}
+    ),
+    # structure of publish / verify
+    lambda d: d["jobs"]["publish"].update(environment="other"),
+    lambda d: d["jobs"]["publish"].pop("needs"),
+    lambda d: d["jobs"].pop("verify"),
+    lambda d: d["jobs"]["build"].update(environment="registry-release"),
+    lambda d: d["jobs"]["verify"].update(environment="other"),
+    lambda d: d["jobs"]["publish"].update(**{"runs-on": "self-hosted"}),
+    # H1: other publish routes
+    lambda d: _add_step(d, "verify", run="python -m twine upload dist/*"),
+    lambda d: _add_step(d, "verify", run="python -m twine   upload dist/*"),
+    lambda d: _add_step(d, "verify", run="python -m TWINE\tupload dist/*"),
+    lambda d: _add_step(
+        d,
+        "verify",
+        uses=f"pypa/gh-action-pypi-publish@{_PIN}",
+        **{"with": {"repository-url": "$INDEX"}},
+    ),
+    lambda d: _add_step(d, "publish", run="uv publish dist/*"),
+    lambda d: _add_step(d, "publish", run="poetry publish --build"),
+    lambda d: _add_step(d, "verify", run='curl -F content=@w.whl "$INDEX"'),
+    lambda d: _add_step(d, "verify", run="curl --upload-file w.whl $INDEX"),
+    lambda d: _add_step(d, "verify", run="gh release create v1 dist/*"),
+    lambda d: _add_step(d, "verify", run="gh api repos/o/r/releases -f x=1"),
+    lambda d: d["jobs"].update(
+        verify={"uses": "./.github/workflows/x.yml", "secrets": "inherit"}
+    ),
+    lambda d: d["jobs"]["publish"].update(secrets="inherit"),
+    lambda d: _add_step(d, "build", uses="actions/checkout@v4"),
+    lambda d: _add_step(d, "build", uses=f"someone/else@{_PIN}"),
+    lambda d: _add_step(d, "build", run="bash scripts/new_helper.sh"),
+    # M1: guard integrity
+    lambda d: _step(
+        d, "build", "Assert run is on the current protected main SHA"
+    ).update(**{"if": "false"}),
+    lambda d: _step(
+        d, "publish", "Re-assert the run SHA is still the current protected main"
+    ).update(**{"if": "false"}),
+    lambda d: _step(d, "publish", "Re-assert the target is allowlisted").update(
+        **{"continue-on-error": True}
+    ),
+    lambda d: _step(d, "publish", PUBLISH_STEP[1]).update(**{"if": "true"}),
+    lambda d: d["jobs"]["publish"].update(**{"if": "always()"}),
+    lambda d: d["jobs"]["verify"].update(**{"if": "success()"}),
+    lambda d: _step(d, "build", "Upload built artifacts").update(**{"if": "failure()"}),
+    lambda d: d["defaults"]["run"].update(**{"shell": "bash"}),
+    lambda d: _step(d, "build", "Inspect artifacts").update(**{"shell": "bash {0}"}),
+    # M2: secrets
+    lambda d: _add_step(
+        d, "build", run="true", env={"T": "${{ secrets.CANDIDATE_SOURCE_TOKEN }}"}
+    ),
+    lambda d: _add_step(
+        d, "build", run="true", env={"T": "${{ secrets.FORGEJO_PUBLISH_TOKEN }}"}
+    ),
+    # M3: every spelling of the foundation
+    lambda d: _add_step(d, "build", run="echo dotmac-deployment-foundation"),
+    lambda d: _add_step(d, "build", run="echo dotmac_deployment_foundation"),
+    lambda d: _add_step(
+        d, "build", run="ls Dotmac.Deployment.Foundation-0.4.0a2-py3-none-any.whl"
+    ),
+    # gate machinery in any value
+    lambda d: _add_step(d, "build", run="python scripts/require_rehearsal.py"),
+    lambda d: _add_step(
+        d, "build", run="python scripts/foundation_publication_gate.py"
+    ),
+    lambda d: _add_step(d, "build", run="python scripts/release_facility.py"),
+    lambda d: _add_step(d, "build", run="gh workflow run release-facility.yml"),
+    lambda d: _add_step(d, "build", run="gh workflow run foundation-candidate.yml"),
+    lambda d: _add_step(d, "build", run="recheck-gate2"),
+]
+
+
+@pytest.mark.parametrize("edit", MODULE_LANE_MUTATIONS)
+def test_the_module_lane_check_refuses_structural_mutations(edit):
+    document, modules = _module_lane()
+    document = copy.deepcopy(document)
+    edit(document)
+    assert _module_lane_violations(document, modules)
+
+
+def test_the_module_lane_check_refuses_a_foundation_in_the_module_registry():
+    document, modules = _module_lane()
+    modules = copy.deepcopy(modules)
+    modules["modules"]["dotmac-deployment-foundation"] = {}
+    document = copy.deepcopy(document)
+    document[True]["workflow_dispatch"]["inputs"]["module"]["options"].append(
+        "dotmac-deployment-foundation"
+    )
+    assert _module_lane_violations(document, modules)
+    modules["modules"].pop("dotmac-deployment-foundation")
+    assert any(
+        "options differ" in v for v in _module_lane_violations(document, modules)
+    )
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda d: d["jobs"]["publish"].update(needs=["build"]),
+        lambda d: d["jobs"]["publish"].update(environment={"name": "registry-release"}),
+        lambda d: d.update(jobs=dict(reversed(list(d["jobs"].items())))),
+    ],
+)
+def test_the_module_lane_check_allows_harmless_edits(edit):
+    document, modules = _module_lane()
+    document = copy.deepcopy(document)
+    edit(document)
+    assert _module_lane_violations(document, modules) == []
+
+
+def test_comments_in_the_module_lane_are_free_to_mention_the_gate():
+    text = (REPO / MODULE_LANE).read_text() + "\n# see gate2 and publication_gate\n"
+    _, modules = _module_lane()
+    assert _module_lane_violations(yaml.safe_load(text), modules) == []
 
 
 def test_no_foundation_package_source_is_part_of_this_change():
