@@ -131,7 +131,7 @@ def verify_role_split(
             member = bool(
                 _scalar(
                     tenant_factory,
-                    "SELECT pg_catalog.pg_has_role(current_user, :r, 'USAGE')",
+                    "SELECT pg_catalog.pg_has_role(current_user, :r, 'MEMBER')",
                     r=member_of,
                 )
             )

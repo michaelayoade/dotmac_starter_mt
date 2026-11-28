@@ -94,8 +94,10 @@ class Heartbeat:
         """Record that a drain pass returned without raising."""
         previous = self._drain_ok_at
         self._drain_ok_at = self._clock().timestamp()
-        # Idle polling is once a second: write on the first success and then
-        # only about once per beat; the beat thread carries the stamp otherwise.
+        # Idle polling is once a second, so this does not write every call: it
+        # writes on the first success and again once a beat has elapsed since the
+        # previous stamp. Between those writes the stamp is only held in memory
+        # and the beat thread writes the live value every ``beat_seconds``.
         if previous is None or self._drain_ok_at - previous >= self._beat:
             self._write()
 
