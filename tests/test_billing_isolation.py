@@ -4114,7 +4114,7 @@ def _withholding_command(
         document_id=document_id,
         recognition_basis_code="invoice_issued",
         fact_kind="invoice",
-        transaction_side="sale",
+        transaction_side="withholding",
         determined_at=NOW,
     )
     return AcceptWithholdingDischarge(

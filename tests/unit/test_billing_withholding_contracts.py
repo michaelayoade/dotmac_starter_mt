@@ -38,7 +38,7 @@ def evidence():
         uuid4(),
         "invoice_issued",
         "invoice",
-        "sale",
+        "withholding",
         datetime.now(UTC),
     )
 
@@ -111,7 +111,7 @@ def test_actual_tax_public_result_maps_losslessly_without_rate_reconstruction():
         occurred_on=date(2026, 10, 13),
         fact_kind="invoice",
         recognition_basis_code="invoice_issued",
-        transaction_side="sale",
+        transaction_side="withholding",
         source_amount=money("100000"),
         net_amount=money("100000"),
         tax_amount=money("5000"),

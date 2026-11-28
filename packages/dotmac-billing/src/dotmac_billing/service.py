@@ -777,6 +777,25 @@ def _obligation_discounts(obligation: _ObligationRow) -> tuple[DiscountSnapshotV
     return discounts
 
 
+def _require_withholding_side(items: Iterable[Any]) -> None:
+    """Refuse expected-withholding evidence whose Tax side is not ``withholding``.
+
+    Write paths only. The shared validators also decode stored rows, so they
+    are deliberately not tightened.
+    """
+
+    for item in items:
+        if (
+            getattr(item, "purpose", None) == "expected_withholding"
+            and item.determination.transaction_side != "withholding"
+        ):
+            raise BillingRuleViolation(
+                "withholding_transaction_side_invalid",
+                "expected-withholding evidence must carry the withholding "
+                "transaction side",
+            )
+
+
 def _require_rated_tax_evidence(
     command: AcceptRatedObligationV1, *, scope: Scope
 ) -> None:
@@ -799,6 +818,7 @@ def _require_rated_tax_evidence(
             )
         except (ValueError, TypeError) as exc:
             raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
+        _require_withholding_side(command.tax_evidence)
 
 
 def accept_rated_obligation(
@@ -3340,6 +3360,7 @@ def _freeze_withholding_components(
                 obligation.tax_amount, obligation.currency, obligation.minor_units
             ),
         )
+        _require_withholding_side(evidence)
         for item in evidence:
             if item.purpose != "expected_withholding":
                 continue
@@ -3753,6 +3774,7 @@ def freeze_issued_invoice_withholding(
             )
         except (ValueError, TypeError, DecimalException) as exc:
             raise BillingRuleViolation("tax_evidence_invalid", str(exc)) from exc
+        _require_withholding_side((evidence,))
         result = evidence.determination
         try:
             issue_date = document.issued_at.astimezone(
@@ -4987,6 +5009,11 @@ def _require_withholding_command(
     if isinstance(evidence, WithholdingTaxEvidenceV2):
         evidence.__post_init__()
     _require_scope_matches(routed=scope, declared=evidence.scope)
+    if evidence.transaction_side != "withholding":
+        raise BillingRuleViolation(
+            "withholding_transaction_side_invalid",
+            "withholding Tax evidence must carry the withholding transaction side",
+        )
     if (
         evidence.document_id != command.document_id
         or evidence.billing_account_id != command.billing_account_id

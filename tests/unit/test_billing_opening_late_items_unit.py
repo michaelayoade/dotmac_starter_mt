@@ -98,7 +98,7 @@ def test_the_permission_is_declared_with_the_admin_default():
 def test_the_manifest_declares_the_v7_event_and_the_version():
     assert ACCOUNTING_FACT_V7_CONTRACT == "billing.accounting.fact.v7"
     assert "billing.accounting.fact.v7" in manifest.module.outbox_event_types
-    assert manifest.module.version == dotmac_billing.__version__ == "0.1.0a15"
+    assert manifest.module.version == dotmac_billing.__version__ == "0.1.0a16"
     assert "opening_late_items" in manifest.module.tables
     assert not any(
         t.endswith("opening_late_items") for t in manifest.module.platform_tables

@@ -42,6 +42,7 @@ from dotmac_billing.contracts import (
     StoredInvoiceDocumentFactV2,
     StoredInvoiceDocumentFactV3,
     WithholdingDischargeEffectV1,
+    WithholdingDischargeRecordV1,
 )
 from dotmac_billing.errors import BillingRuleViolation
 
@@ -638,6 +639,7 @@ __all__ = [
     "get_invoice_document_fact",
     "get_invoice_document_fact_v2",
     "get_withholding_discharge",
+    "get_withholding_discharge_record",
 ]
 
 
@@ -690,6 +692,80 @@ def get_withholding_discharge(
         raise BillingRuleViolation(
             "withholding_evidence_corrupt", "stored withholding evidence is invalid"
         ) from exc
+
+
+def get_withholding_discharge_record(
+    db: Session, *, scope: Scope, discharge_id: UUID
+) -> WithholdingDischargeRecordV1:
+    """Read a discharge with its business time and its recording instant.
+
+    Read only, no lock. The posting group must be in the same plane, on the same
+    account, and of a withholding kind; otherwise the stored evidence is corrupt.
+    """
+    if not isinstance(scope, TenantScope | PlatformScope):
+        raise TypeError("withholding query requires an explicit scope")
+    effect = get_withholding_discharge(db, scope=scope, discharge_id=discharge_id)
+    tenant = isinstance(scope, TenantScope)
+    table = (
+        models.WithholdingDischarge.__table__
+        if tenant
+        else models.PlatformWithholdingDischarge.__table__
+    )
+    group = (
+        models.PostingGroup.__table__
+        if tenant
+        else models.PlatformPostingGroup.__table__
+    )
+    statement = select(
+        table.c.billing_account_id,
+        table.c.document_id,
+        table.c.posting_group_id,
+        table.c.reverses_discharge_id,
+        table.c.created_at,
+    ).where(table.c.id == discharge_id)
+    group_statement = select(
+        group.c.id,
+        group.c.billing_account_id,
+        group.c.group_kind,
+        group.c.occurred_at,
+    )
+    if isinstance(scope, TenantScope):
+        statement = statement.where(table.c.tenant_id == scope.tenant_id)
+        group_statement = group_statement.where(group.c.tenant_id == scope.tenant_id)
+    with db.no_autoflush:
+        row = db.execute(statement).mappings().one_or_none()
+        if row is None:
+            raise BillingRuleViolation(
+                "not_found", "withholding discharge was not found"
+            )
+        found = (
+            db.execute(group_statement.where(group.c.id == row["posting_group_id"]))
+            .mappings()
+            .one_or_none()
+        )
+    if (
+        found is None
+        or found["billing_account_id"] != row["billing_account_id"]
+        or found["group_kind"]
+        != (
+            "withholding_reversed"
+            if row["reverses_discharge_id"]
+            else "withholding_accepted"
+        )
+    ):
+        raise BillingRuleViolation(
+            "withholding_evidence_corrupt", "stored withholding evidence is invalid"
+        )
+    return WithholdingDischargeRecordV1(
+        discharge_id=discharge_id,
+        billing_account_id=row["billing_account_id"],
+        document_id=row["document_id"],
+        posting_group_id=row["posting_group_id"],
+        reverses_discharge_id=row["reverses_discharge_id"],
+        occurred_at=found["occurred_at"],
+        recorded_at=row["created_at"],
+        effect=effect,
+    )
 
 
 def get_non_cash_credit_grant(
