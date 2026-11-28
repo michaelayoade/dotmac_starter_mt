@@ -43,7 +43,11 @@ def _money(value):
     return Money(Decimal(value), Currency("NGN", 2))
 
 
-def _evidence(scope, *, purpose="invoice_tax", rates=(None,), taxes=("7.50",)):
+def _evidence(
+    scope, *, purpose="invoice_tax", rates=(None,), taxes=("7.50",), side=None
+):
+    if side is None:
+        side = "withholding" if purpose == "expected_withholding" else "output"
     set_id = uuid4()
     components = tuple(
         TaxDeterminationComponentEvidenceV1(
@@ -84,7 +88,7 @@ def _evidence(scope, *, purpose="invoice_tax", rates=(None,), taxes=("7.50",)):
             occurred_on=date(2026, 10, 28),
             fact_kind="invoice",
             recognition_basis_code="invoice_expectation",
-            transaction_side="output",
+            transaction_side=side,
             source_amount=_money("100"),
             net_amount=_money("100"),
             tax_amount=_money(str(tax_total)),

@@ -1189,6 +1189,25 @@ class WithholdingDischargeEffectV1:
 
 
 @dataclass(frozen=True, slots=True)
+class WithholdingDischargeRecordV1:
+    """A stored discharge with the recording identity its effect does not carry.
+
+    ``recorded_at`` is the database transaction timestamp (``now()``) of
+    the writing transaction, not caller supplied and not a wall-clock write
+    instant; ``occurred_at`` is the business time of its posting group.
+    """
+
+    discharge_id: UUID
+    billing_account_id: UUID
+    document_id: UUID
+    posting_group_id: UUID
+    reverses_discharge_id: UUID | None
+    occurred_at: datetime
+    recorded_at: datetime
+    effect: WithholdingDischargeEffectV1
+
+
+@dataclass(frozen=True, slots=True)
 class AccountingFactV2:
     """WHT-only successor; V1 fields, bytes and emissions remain unchanged."""
 
@@ -1459,6 +1478,7 @@ __all__ = [
     "WithholdingTaxEvidenceV1",
     "WithholdingCertificateObservationV1",
     "WithholdingDischargeEffectV1",
+    "WithholdingDischargeRecordV1",
     "ARTIFACT_COMMAND_CONTRACT",
     "ARTIFACT_REPAIR_CONTRACT",
     "DOCUMENT_FACT_CONTRACT",

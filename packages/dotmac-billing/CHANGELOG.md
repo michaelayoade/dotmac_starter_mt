@@ -2,6 +2,29 @@
 
 All notable changes follow Semantic Versioning.
 
+## 0.1.0a16 — UNRELEASED
+
+Withholding transaction-side refusal and a discharge record read (W04 follow-ups;
+Michael's rulings 2026-11-28). Allocated on top of the unreleased a15; it changes no
+DDL, grant or migration (`bi_0021` is still the head) and must merge only after the
+`dotmac-billing-v0.1.0a15` tag exists.
+
+- Expected-withholding Tax evidence must carry the Tax transaction side
+  `withholding`. New writes that carry another side are refused with
+  `billing.withholding_transaction_side_invalid` before any write, at: obligation
+  intake (rated V2 and V3 evidence), the withholding freeze command, the issue-time
+  freeze of stored obligation evidence (fail closed) and the discharge command
+  (V1 and V2 evidence). The shared evidence validators and the decode of stored rows
+  are not tightened, so stored evidence still reads.
+- Additive read `get_withholding_discharge_record(db, *, scope, discharge_id)`
+  returning `WithholdingDischargeRecordV1` (discharge, account, document and posting
+  group ids, `reverses_discharge_id`, `occurred_at` = the posting group's business
+  time, `recorded_at` = the row's database transaction timestamp (`now()`), and the validated
+  `WithholdingDischargeEffectV1`). Both planes, explicit scope, read only. The
+  posting group must be on the same plane and account and of the matching withholding
+  kind, else `withholding_evidence_corrupt`; an unknown id is `not_found`.
+  `WithholdingDischargeEffectV1` and `AccountingFactV2` are unchanged.
+
 ## 0.1.0a15 — UNRELEASED
 
 Post-seal opening late items (R8; design approved by Michael 2026-11-27) and a

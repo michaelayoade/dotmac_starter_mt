@@ -111,6 +111,7 @@ from dotmac_billing.contracts import (
     WithholdingCashRequirementV1,
     WithholdingCertificateObservationV1,
     WithholdingDischargeEffectV1,
+    WithholdingDischargeRecordV1,
     WithholdingTaxEvidenceV1,
     WithholdingTaxEvidenceV2,
     WithholdingTaxLineV1,
@@ -397,6 +398,7 @@ from dotmac_billing.queries import (
     get_non_cash_credit_grant,
     get_receivable_position_v2,
     get_withholding_discharge,
+    get_withholding_discharge_record,
 )
 from dotmac_billing.service import (
     accept_settlement,
@@ -416,7 +418,7 @@ from dotmac_billing.service import (
     void_document,
 )
 
-__version__ = "0.1.0a15"
+__version__ = "0.1.0a16"
 
 from dotmac_billing.opening_late_items import (
     AccountingFactV7,
@@ -800,7 +802,9 @@ __all__ = [
     "WithholdingCashRequirementV1",
     "WithholdingCertificateObservationV1",
     "WithholdingDischargeEffectV1",
+    "WithholdingDischargeRecordV1",
     "get_withholding_discharge",
+    "get_withholding_discharge_record",
     "AcceptRatedObligationV1",
     "AcceptSettlementV1",
     "AccountingAllocationEffectV1",
