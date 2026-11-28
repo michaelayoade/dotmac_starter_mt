@@ -8755,7 +8755,6 @@ def reverse_cash_credit_draw(
     )
 
 
-@_exact_cash_operation
 def _require_no_opening_late_items(
     db: Session, *, scope: Scope, account_id: UUID
 ) -> None:
@@ -8792,6 +8791,7 @@ def _require_no_opening_late_items(
         )
 
 
+@_exact_cash_operation
 def reverse_opening_account_import(
     db: Session,
     *,
@@ -8866,9 +8866,11 @@ def reverse_opening_account_import(
         row_id=original.billing_account_id,
         lock=True,
     )
-    _require_no_opening_late_items(db, scope=scope, account_id=account.id)
 
     def operation(session: Session) -> dict[str, object]:
+        # Runs only for a new unwind: an exact replay returns its stored receipt
+        # before this operation, so a retry self-heals after a later late item.
+        _require_no_opening_late_items(session, scope=scope, account_id=account.id)
         if (
             session.execute(
                 _where_scope(
@@ -9942,9 +9944,11 @@ def reverse_opening_account_import_v2(
         row_id=original.billing_account_id,
         lock=True,
     )
-    _require_no_opening_late_items(db, scope=scope, account_id=account.id)
 
     def operation(session: Session) -> dict[str, object]:
+        # Runs only for a new unwind: an exact replay returns its stored receipt
+        # before this operation, so a retry self-heals after a later late item.
+        _require_no_opening_late_items(session, scope=scope, account_id=account.id)
         if (
             session.execute(
                 _where_scope(

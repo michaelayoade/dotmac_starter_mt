@@ -987,6 +987,67 @@ def test_an_import_cannot_be_unwound_once_its_account_has_a_late_item(scratch):
         db.rollback()
 
 
+def test_a_v1_import_cannot_be_unwound_once_its_account_has_a_late_item(scratch):
+    scope, url = noncash._scope_url(scratch, "tenant")
+    with cash._session(scratch, url, scope) as db:
+        account = cash._new_account(db, scope)
+        cmd = cash._command(db, scope, account)
+        cash._prepare_window(db, scope, cmd, "off")
+        receipt = cash._import_command(
+            db, scope=scope, command=cmd, verifier=cash.TrustedVerifier(), version=1
+        )
+        cash._seal_window(db, scope)
+        db.commit()
+    donor = ar.evidence._candidate().manifest.receivables
+    w = SimpleNamespace(
+        scope=scope,
+        url=url,
+        cmd=SimpleNamespace(manifest=SimpleNamespace(receivables=donor)),
+        cap=cmd.manifest.capture,
+    )
+    unwind = ReverseOpeningAccountImportV1(
+        scope, receipt.receipt_id, "fixture:fresh-authority", str(uuid4()), NOW
+    )
+    with b._session(url, scope) as db:
+        _record(db, w, _debit(w, account, "v1-late-1"))
+        db.commit()
+        with pytest.raises(BillingRuleViolation) as caught:
+            s.reverse_opening_account_import(
+                db, scope=scope, command=unwind, verifier=cash.TrustedVerifier()
+            )
+        assert _code(caught) == "opening_import_has_late_items"
+        db.rollback()
+
+
+def test_an_exact_replay_of_a_committed_unwind_still_returns_its_receipt(scratch):
+    w = _world(scratch)
+    unwind = ReverseOpeningAccountImportV1(
+        w.scope, w.receipt.receipt_id, "fixture:fresh-authority", str(uuid4()), NOW
+    )
+    with b._session(w.url, w.scope) as db:
+        inverse = s.reverse_opening_account_import_v2(
+            db, scope=w.scope, command=unwind, verifier=ar.evidence.TrustedVerifier()
+        )
+        db.commit()
+        # A late item is recorded on the account afterwards.
+        _record(db, w, _debit(w, w.account, "after-unwind-1"))
+        db.commit()
+        again = s.reverse_opening_account_import_v2(
+            db, scope=w.scope, command=unwind, verifier=ar.evidence.TrustedVerifier()
+        )
+        assert again == inverse
+        # A new unwind of the same receipt is still refused for the late item.
+        fresh = ReverseOpeningAccountImportV1(
+            w.scope, w.receipt.receipt_id, "fixture:fresh-authority", str(uuid4()), NOW
+        )
+        with pytest.raises(BillingRuleViolation) as caught:
+            s.reverse_opening_account_import_v2(
+                db, scope=w.scope, command=fresh, verifier=ar.evidence.TrustedVerifier()
+            )
+        assert _code(caught) == "opening_import_has_late_items"
+        db.rollback()
+
+
 def test_the_late_item_table_is_named_only_in_gated_blocks_of_the_upgraded_functions(
     scratch,
 ):
