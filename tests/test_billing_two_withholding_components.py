@@ -23,7 +23,7 @@ from dotmac_billing.service import (
     create_billing_account,
     rebuild_receivable_position,
 )
-from dotmac_kernel.cache import TenantScope
+from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.planes import ModulePlane
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -175,12 +175,41 @@ def test_each_component_is_discharged_separately(scratch):
         assert stamp.component_ref != wht.component_ref
         # Each component is taken once; a second draw on either is a conflict.
         for which in (WHT, STAMP):
-            with pytest.raises(BillingConflict):
+            with pytest.raises(BillingConflict) as reused:
                 accept_withholding_discharge(
                     session,
                     scope=scope,
                     command=_discharge(account, invoice_id, scope, evidence, which),
                 )
+            # The accepted component's receivable source claim answers first.
+            assert reused.value.code == "billing.historical_discharge_source_claimed"
+        session.rollback()
+
+
+def test_component_reuse_is_refused_by_the_service_when_no_claim_exists(
+    scratch, monkeypatch
+):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account, invoice_id, evidence = _invoice(session, scope)
+        accept_withholding_discharge(
+            session,
+            scope=scope,
+            command=_discharge(account, invoice_id, scope, evidence, WHT),
+        )
+        # With the source-claim guard out of the way (as for a row accepted
+        # before claims existed), the service's own component check refuses.
+        monkeypatch.setattr(
+            service, "_require_historical_source_unclaimed", lambda *a, **k: None
+        )
+        with pytest.raises(BillingConflict) as reused:
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=_discharge(account, invoice_id, scope, evidence, WHT),
+            )
+        assert reused.value.code == "billing.withholding_component_reused"
         session.rollback()
 
 
@@ -302,4 +331,172 @@ def test_credit_room_reserves_both_frozen_components(scratch):
             minor_units=2,
         )
         assert position.collectible_receivable == Decimal("0")
+        session.rollback()
+
+
+def test_zero_non_agency_component_is_not_frozen_or_dischargeable(scratch):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=str(uuid4()),
+            currency="NGN",
+            minor_units=2,
+        )
+        item = evidence_fixtures._evidence(
+            scope,
+            purpose="expected_withholding",
+            rates=(None, None, None),
+            taxes=(AMOUNTS[WHT], AMOUNTS[STAMP], "0.00"),
+        )
+        # The two positive components are elected; the zero one carries no Tax
+        # party classification (party_classification_id stays None).
+        components = tuple(
+            replace(component, party_category=category, party_classification_id=cid)
+            for component, category, cid in zip(
+                item.determination.components,
+                ("wht-elected", "govt-agency", None),
+                (uuid4(), uuid4(), None),
+                strict=True,
+            )
+        )
+        evidence = replace(
+            item, determination=replace(item.determination, components=components)
+        )
+        zero = components[2]
+        issued = authoring._issue(
+            session, scope, evidence_fixtures._command(account.id, scope, (evidence,))
+        )
+        session.flush()
+        rows = _frozen(session, issued.invoice_id)
+        assert [row.tax_amount for row in rows] == [Decimal("5.00"), Decimal("0.50")]
+        assert str(zero.determination_id) not in {row.component_ref for row in rows}
+        count = session.execute(
+            text(
+                "SELECT count(*) FROM mod_billing.document_withholding_components "
+                "WHERE document_id = :d"
+            ),
+            {"d": issued.invoice_id},
+        ).scalar_one()
+        assert count == 2
+        with pytest.raises(BillingRuleViolation) as refused:
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=_discharge(
+                    account,
+                    issued.invoice_id,
+                    scope,
+                    evidence,
+                    2,
+                    # A zero-amount command cannot be built (positive money is
+                    # required), so name the zero component with a positive sum.
+                    accepted="0.50",
+                    amount=_money("0.50"),
+                ),
+            )
+        assert refused.value.code == "billing.withholding_not_elected"
+        session.rollback()
+
+
+def test_platform_plane_refuses_withholding_evidence_and_discharge(scratch):
+    admin_url, _, platform_url = scratch
+    scope = PlatformScope()
+    tenant_scope = _scope(admin_url)
+    with billing._session(platform_url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=str(uuid4()),
+            currency="NGN",
+            minor_units=2,
+        )
+        # Expected-withholding evidence is tenant-only Tax: a platform issue
+        # carrying it is refused.
+        evidence = _two_component_evidence(tenant_scope)
+        with pytest.raises(BillingRuleViolation) as refused:
+            authoring._issue(
+                session,
+                scope,
+                evidence_fixtures._command(account.id, scope, (evidence,)),
+            )
+        assert refused.value.code == "billing.tax_evidence_invalid"
+        assert "scope differs from invoice scope" in str(refused.value)
+        session.rollback()
+    with billing._session(platform_url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=str(uuid4()),
+            currency="NGN",
+            minor_units=2,
+        )
+        issued = authoring._issue(session, scope, authoring._command(account.id, scope))
+        session.flush()
+        # V1 evidence on the platform plane has no frozen component to name.
+        with pytest.raises(BillingRuleViolation) as refused:
+            accept_withholding_discharge(
+                session,
+                scope=scope,
+                command=billing._withholding_command(
+                    account.id, issued.invoice_id, scope=scope
+                ),
+            )
+        assert refused.value.code == "billing.withholding_not_elected"
+        assert (
+            session.execute(
+                text("SELECT count(*) FROM mod_billing.platform_withholding_discharges")
+            ).scalar_one()
+            == 0
+        )
+        session.rollback()
+
+
+@pytest.mark.parametrize(
+    ("amount", "classified"),
+    [("0.50", False), ("0.00", True)],
+    ids=["positive-without-classification", "zero-with-classification"],
+)
+def test_each_half_of_the_election_rule_is_needed_to_freeze(
+    scratch, amount, classified
+):
+    admin_url, tenant_url, _ = scratch
+    scope = _scope(admin_url)
+    with billing._session(tenant_url, scope) as session:
+        account = create_billing_account(
+            session,
+            scope=scope,
+            external_account_ref=str(uuid4()),
+            currency="NGN",
+            minor_units=2,
+        )
+        item = evidence_fixtures._evidence(
+            scope,
+            purpose="expected_withholding",
+            rates=(None, None),
+            taxes=(AMOUNTS[WHT], amount),
+        )
+        elected, other = item.determination.components
+        components = (
+            replace(
+                elected, party_category="wht-elected", party_classification_id=uuid4()
+            ),
+            replace(
+                other,
+                party_category="govt-agency" if classified else None,
+                party_classification_id=uuid4() if classified else None,
+            ),
+        )
+        evidence = replace(
+            item, determination=replace(item.determination, components=components)
+        )
+        issued = authoring._issue(
+            session, scope, evidence_fixtures._command(account.id, scope, (evidence,))
+        )
+        session.flush()
+        rows = _frozen(session, issued.invoice_id)
+        assert [row.component_ref for row in rows] == [str(elected.determination_id)]
+        assert str(other.determination_id) not in {row.component_ref for row in rows}
         session.rollback()
