@@ -14,7 +14,7 @@ from dotmac_billing.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="billing",
-    version="0.1.0a14",
+    version="0.1.0a15",
     core=False,
     short_code="billing",
     migration_prefix="bi",
@@ -30,6 +30,7 @@ module = ModuleManifest(
         "billing.withholding.released.v1",
         "billing.settlement.earmarked.v1",
         "billing.settlement.earmark.changed.v1",
+        "billing.accounting.fact.v7",
         "billing.accounting.fact.v6",
         "billing.accounting.fact.v5",
         "billing.receivable.exposure.v2",
@@ -55,6 +56,17 @@ module = ModuleManifest(
                 "Freeze expected withholding on an already issued invoice that has "
                 "no frozen component. Append-only and Tax-confirmed; the actor, "
                 "command id and reason are recorded on every row."
+            ),
+            default_roles=("admin",),
+        ),
+        PermissionSpec(
+            code="billing.opening_late_item.record",
+            description=(
+                "Record, apply or reverse a post-seal opening late item: a source "
+                "open invoice the opening did not carry, or a source credit note "
+                "applied to one open invoice. Books no revenue and no tax. "
+                "Append-only; the actor, command id and evidence are recorded on "
+                "every row."
             ),
             default_roles=("admin",),
         ),

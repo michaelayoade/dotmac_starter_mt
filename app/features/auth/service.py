@@ -213,11 +213,16 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
             else None
         )
         owner.check()  # includes ORM population/refresh callbacks
-        if credential is None:
+        if credential is None or party is None or not party.is_active:
             # Constant-work miss path (Task 5): burn one real verification
             # against the dummy hash so "unknown email"/"no credential" costs
             # the same as "wrong password" — closing the 2c-auth backlog's
-            # timing-oracle line.
+            # timing-oracle line. An INACTIVE party takes this same path
+            # (identical error, one dummy verification), so a correct password
+            # for a deactivated account is indistinguishable from a wrong one.
+            # `party` was read FOR UPDATE with populate_existing above, so a
+            # deactivation that held the party lock first is already committed
+            # and visible here: a racing login issues no session.
             verify_password(payload.password, _DUMMY_HASH)
             owner.check()
             raise UnauthorizedError("Invalid credentials")

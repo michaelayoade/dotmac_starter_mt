@@ -66,6 +66,14 @@ class OutboxEvent(Base, TimestampMixin):
         Index("ix_outbox_events_status_available_at", "status", "available_at"),
         # Stale-lease reclaim scans claimed rows by lease age.
         Index("ix_outbox_events_status_leased_at", "status", "leased_at"),
+        # Serves the event-type-scoped claim (0035) so a consumer of one type
+        # does not scan past foreign rows in `available_at` order.
+        Index(
+            "ix_outbox_events_type_available",
+            "event_type",
+            "available_at",
+            postgresql_where=sa.text("status IN ('pending', 'claimed')"),
+        ),
     )
 
     id: Mapped[UUID] = uuid_pk()

@@ -520,7 +520,9 @@
           "dotmac_billing/migrations/versions/bi_0018_account_terms.py",
           "dotmac_billing/migrations/versions/bi_0019_opening_dual_control.py",
           "dotmac_billing/migrations/versions/bi_0020_withholding_releases.py",
+          "dotmac_billing/migrations/versions/bi_0021_opening_late_items.py",
           "dotmac_billing/withholding_release.py",
+          "dotmac_billing/opening_late_items.py",
           "dotmac_billing/account_terms.py",
           "dotmac_billing/account_statement.py"
         ],
@@ -1044,8 +1046,26 @@
           "dotmac_durable_timers/manifest.py",
           "dotmac_durable_timers/models.py",
           "dotmac_durable_timers/service.py",
+          "dotmac_durable_timers/admin.py",
+          "dotmac_durable_timers/builtin.py",
+          "dotmac_durable_timers/cadence.py",
+          "dotmac_durable_timers/dispatch.py",
+          "dotmac_durable_timers/health.py",
+          "dotmac_durable_timers/jobs.py",
+          "dotmac_durable_timers/router.py",
+          "dotmac_durable_timers/dsnfile.py",
+          "dotmac_durable_timers/heartbeat.py",
+          "dotmac_durable_timers/probe.py",
+          "dotmac_durable_timers/rolecheck.py",
+          "dotmac_durable_timers/run.py",
+          "dotmac_durable_timers/runner.py",
+          "dotmac_durable_timers/runtime.py",
+          "dotmac_durable_timers/web.py",
+          "dotmac_durable_timers/templates/admin/durable_timers/index.html",
           "dotmac_durable_timers/migrations/__init__.py",
-          "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py"
+          "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py",
+          "dotmac_durable_timers/migrations/versions/dt_0002_job_states.py",
+          "dotmac_durable_timers/migrations/versions/dt_0003_typed_claim.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -1055,6 +1075,7 @@
         ],
         "allowed_requires": [
           "dotmac-kernel",
+          "fastapi",
           "sqlalchemy",
           "python"
         ]
@@ -1308,7 +1329,7 @@
         "ADOPTION milestone that cannot be built against an unreleased wheel."
       ],
       "module_dependencies": {
-        "durable_timers": "dotmac-durable-timers==0.1.0a2"
+        "durable_timers": "dotmac-durable-timers==0.1.0a3"
       },
       "package_dir": "packages/dotmac-fulfillment",
       "import_name": "dotmac_fulfillment",
@@ -2231,8 +2252,8 @@
         "receivable-observation contract, read by receivables.py) through their",
         "top-level public exports, so those four are allowed wheel requirements.",
         "kernel_floor is a110: the first published kernel that allocates mod_mflows /",
-        "mf / money_flows and ships communication-dispatch migration 0032 and the",
-        "0033/0034 append-only receipts the composition relies on."
+        "mf / money_flows. Flows needs only the three manifest prerequisites",
+        "(module database roles, outbox relay, tenant scope catalog)."
       ],
       "package_dir": "packages/dotmac-money-flows",
       "import_name": "dotmac_money_flows",
@@ -2250,6 +2271,8 @@
           "dotmac_money_flows/settle.py",
           "dotmac_money_flows/funded_charge.py",
           "dotmac_money_flows/receivables.py",
+          "dotmac_money_flows/_credit_dating.py",
+          "dotmac_money_flows/_service_period.py",
           "dotmac_money_flows/migrations/__init__.py",
           "dotmac_money_flows/migrations/versions/mf_0001_settle_instances.py",
           "dotmac_money_flows/migrations/versions/mf_0002_funded_charge_instances.py",

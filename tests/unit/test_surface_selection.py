@@ -285,3 +285,202 @@ def test_api_route_twin_of_a_surface_route_is_refused() -> None:
     )
     with pytest.raises(Exception, match="mounted twice|claimed by"):
         create_app(spec)
+
+
+def test_a_v2_surface_cannot_be_called_legacy() -> None:
+    surface = _surface("legacy")
+    with pytest.raises(Exception, match="reserved"):
+        create_app(_spec(_module(surface), surface_selection=SELECT_ALL))
+
+
+def test_no_selection_is_fatal_in_production_and_a_warning_elsewhere() -> None:
+    from dotmac_kernel.app_factory import _note_absent_surface_selection
+
+    with pytest.raises(ValueError, match="sets no surface_selection"):
+        _note_absent_surface_selection("x", production=True)
+    _note_absent_surface_selection("x", production=False)
+
+
+def test_module_api_route_under_a_kernel_owned_root_is_refused() -> None:
+    module = ModuleManifest(
+        code="demo",
+        version="1.0.0",
+        api_routers=(_router("/static/steal", "steal"),),
+    )
+    with pytest.raises(ValueError, match="kernel-owned root"):
+        create_app(
+            ProductAssemblySpec(
+                api_documentation=_DOCS,
+                name="api-reserved",
+                modules=(module,),
+                platform_surface_enabled=False,
+                surface_selection=SELECT_ALL,
+            )
+        )
+
+
+# --- /platform is the operator plane: module APIs enter by declaration only ---
+
+
+def _platform_module(
+    path: str, *, guarded: bool = True, code: str = "ops", name: str = "ops_view"
+) -> ModuleManifest:
+    from dotmac_kernel.platform_auth import require_platform_admin
+    from fastapi import Depends
+
+    router = APIRouter(
+        dependencies=[Depends(require_platform_admin)] if guarded else []
+    )
+
+    @router.get(path, name=name)
+    def view() -> dict[str, bool]:
+        return {"ok": True}
+
+    return ModuleManifest(code=code, version="1.0.0", api_routers=(router,))
+
+
+def _platform_spec(module: ModuleManifest, **kwargs: object) -> ProductAssemblySpec:
+    return ProductAssemblySpec(
+        api_documentation=_DOCS,
+        name="platform-api",
+        modules=(module,),
+        web_enabled=False,
+        surface_selection=SELECT_ALL,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_listed_guarded_module_may_serve_under_platform() -> None:
+    spec = _platform_spec(
+        _platform_module("/platform/ops/items"),
+        platform_api_modules=frozenset({"ops"}),
+    )
+    assert "/platform/ops/items" in _paths(create_app(spec))
+
+
+def test_unlisted_module_under_platform_is_refused() -> None:
+    with pytest.raises(ValueError, match="platform_api_modules"):
+        create_app(_platform_spec(_platform_module("/platform/ops/items")))
+
+
+def test_unlisted_module_wildcard_takeover_of_platform_is_refused() -> None:
+    with pytest.raises(ValueError, match="platform_api_modules"):
+        create_app(_platform_spec(_platform_module("/platform/{anything}")))
+
+
+def test_listed_module_without_platform_admin_guard_is_refused() -> None:
+    spec = _platform_spec(
+        _platform_module("/platform/ops/items", guarded=False),
+        platform_api_modules=frozenset({"ops"}),
+    )
+    with pytest.raises(ValueError, match="without require_platform_admin"):
+        create_app(spec)
+
+
+@pytest.mark.parametrize("path", ["/platform/{x}", "/platform/auth/extra", "/platform"])
+def test_listed_module_must_use_a_static_free_first_segment(path: str) -> None:
+    spec = _platform_spec(
+        _platform_module(path), platform_api_modules=frozenset({"ops"})
+    )
+    with pytest.raises(ValueError, match="static segment"):
+        create_app(spec)
+
+
+def test_platform_api_modules_must_name_installed_modules() -> None:
+    spec = _platform_spec(
+        _platform_module("/platform/ops/items"),
+        platform_api_modules=frozenset({"nope"}),
+    )
+    with pytest.raises(ValueError, match="not installed"):
+        create_app(spec)
+
+
+def test_module_api_route_named_like_a_surface_cannot_skip_the_root_check() -> None:
+    module = ModuleManifest(
+        code="demo",
+        version="1.0.0",
+        api_routers=(
+            _router(
+                "/static/steal", "web:platform_admin:kernel_platform:control_plane:x"
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match=r"kernel-owned root|named like a browser"):
+        create_app(
+            ProductAssemblySpec(
+                api_documentation=_DOCS,
+                name="api-named-web",
+                modules=(module,),
+                platform_surface_enabled=False,
+                surface_selection=SELECT_ALL,
+            )
+        )
+
+
+def test_create_app_refuses_no_selection_in_production(monkeypatch) -> None:
+    from dotmac_kernel import app_factory
+
+    monkeypatch.setattr(app_factory.settings, "environment", "production")
+    spec = ProductAssemblySpec(
+        api_documentation=_DOCS,
+        name="no-selection",
+        modules=(_module(api=True),),
+        platform_surface_enabled=False,
+        web_enabled=False,
+    )
+    with pytest.raises(ValueError, match="sets no surface_selection"):
+        create_app(spec)
+
+
+def test_a_plain_starlette_route_in_module_api_routers_is_refused() -> None:
+    from starlette.responses import PlainTextResponse
+
+    router = APIRouter()
+    router.add_route(
+        "/platform/{x}", lambda request: PlainTextResponse("x"), methods=["GET", "POST"]
+    )
+    module = ModuleManifest(code="sneaky", version="1.0.0", api_routers=(router,))
+    with pytest.raises(ValueError, match="only FastAPI APIRoutes"):
+        create_app(_platform_spec(module))
+
+
+@pytest.mark.parametrize("path", ["/platform/login", "/platform/flags/x"])
+def test_listed_module_cannot_take_a_kernel_platform_surface_path(path: str) -> None:
+    spec = ProductAssemblySpec(
+        api_documentation=_DOCS,
+        name="platform-web",
+        modules=(_platform_module(path),),
+        surface_selection=SELECT_ALL,
+        platform_api_modules=frozenset({"ops"}),
+    )
+    with pytest.raises(ValueError, match="route composition refused"):
+        create_app(spec)
+
+
+def test_only_the_built_in_surface_is_exempt_from_the_platform_root() -> None:
+    from dotmac_kernel.app_factory import _validate_route_collisions
+    from fastapi import FastAPI
+
+    built_in = "web:platform_admin:kernel_platform:control_plane:"
+    legacy = "web:staff_admin:old:legacy:"
+
+    def app_with(legacy_path: str) -> FastAPI:
+        app = FastAPI()
+        app.add_api_route(
+            "/platform/login", lambda: None, methods=["GET"], name=f"{built_in}login"
+        )
+        app.add_api_route(legacy_path, lambda: None, methods=["GET"], name=f"{legacy}x")
+        return app
+
+    def check(app: FastAPI) -> None:
+        _validate_route_collisions(
+            app,
+            platform_enabled=True,
+            exempt_prefixes=(built_in, legacy),
+            built_in_prefixes=(built_in,),
+            module_api_keys={},
+        )
+
+    with pytest.raises(ValueError, match="reserved root"):
+        check(app_with("/platform/{x}"))
+    check(app_with("/api/x"))

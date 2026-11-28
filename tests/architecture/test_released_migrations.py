@@ -9216,8 +9216,9 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # `bi_0013` to `bi_0017` shipped in billing 0.1.0a11 and a12 (published) and are
     # frozen. `bi_0018` (account terms) and `bi_0019` (per-window opening
     # two-person policy) shipped in a13 (tagged) and are frozen. `bi_0020` (Q-F
-    # withholding releases) is a14's, editable until a14 is tagged.
-    "dotmac-billing": frozenset(),
+    # withholding releases) shipped in a14 (tagged) and is frozen. `bi_0021`
+    # (R8 opening late items) is a15's, editable until a15 is tagged.
+    "dotmac-billing": frozenset({"bi_0021_opening_late_items.py"}),
     # `cl_0002` adds the per-account access hold (a3); editable until a3 is tagged.
     "dotmac-collections": frozenset(),
     "dotmac-fulfillment": frozenset(),
@@ -9246,7 +9247,15 @@ UNRELEASED: dict[str, frozenset[str]] = {
     # editable until a verified published tag carries them and their digests
     # are recorded above.
     # (`0031_rate_limit_buckets` is released: see its digest above.)
-    "dotmac-kernel": frozenset(),
+    # `0035_outbox_typed_claim` (event-type-filtered claim function) and
+    # `0036_typed_claim_grant` (its one EXECUTE grant to `outbox_dispatcher`)
+    # are editable until a verified published tag carries them.
+    "dotmac-kernel": frozenset(
+        {
+            "20261125_0035_outbox_typed_claim.py",
+            "20261125_0036_typed_claim_grant.py",
+        }
+    ),
     "dotmac-accounting": frozenset(),
     "dotmac-analytics": frozenset(),
     "dotmac-application-directory": frozenset(),
@@ -9256,7 +9265,11 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-campaigns": frozenset({"ca_0002_delivery_deadline.py"}),
     "dotmac-content": frozenset(),
     "dotmac-documents": frozenset(),
-    "dotmac-durable-timers": frozenset(),
+    # `dt_0002` adds the per-tenant job state (pause flag, last outcome) for the
+    # job runner; editable until `dotmac-durable-timers` 0.1.0a3 is tagged.
+    "dotmac-durable-timers": frozenset(
+        {"dt_0002_job_states.py", "dt_0003_typed_claim.py"}
+    ),
     # `ex_0002` adds the claim liability lifecycle; editable until
     # `dotmac-expenses` 0.1.0a2 is tagged.
     "dotmac-expenses": frozenset(),

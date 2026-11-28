@@ -57,6 +57,9 @@ def assembled(monkeypatch, db):
         ProductAssemblySpec(
             name="request-owner-proof",
             modules=(FeatureManifest(name="evidence_consumer", routers=(router,)),),
+            # The probe route is an operator-plane API guarded by
+            # require_platform_admin, declared as such.
+            platform_api_modules=frozenset({"evidence_consumer"}),
             api_documentation=api_documentation_policy("development"),
             request_evidence=RequestEvidenceConfigurationV1(
                 trusted_proxies=TrustedProxyPolicy.from_declaration(

@@ -667,7 +667,7 @@ url = "packages/dotmac-banking"
 
 [[package]]
 name = "dotmac-billing"
-version = "0.1.0a14"
+version = "0.1.0a15"
 description = "DotMac dual-plane operational receivables owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -724,7 +724,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac dual-plane collections policy and case owner"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1163,7 +1163,7 @@ url = "packages/dotmac-documents"
 
 [[package]]
 name = "dotmac-durable-timers"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1173,6 +1173,7 @@ develop = true
 
 [package.dependencies]
 dotmac-kernel = ">=0.1.0a72"
+fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1516,7 +1517,7 @@ url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-money-flows"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Tenant-plane composition of money flows over published owners: instance state only"
 optional = false
 python-versions = ">=3.11,<3.14"

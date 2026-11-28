@@ -192,6 +192,7 @@ An empty assembly (no feature modules) boots to just the kernel surface.
 """
 
 from dotmac_kernel import (
+    SELECT_ALL,
     ProductAssemblySpec,
     create_app,
     environment_api_documentation_policy,
@@ -205,6 +206,8 @@ app = create_app(
         name="ext-consumer",
         modules=(),
         api_documentation=environment_api_documentation_policy(),
+        # Explicit: an unselected assembly is fatal in production.
+        surface_selection=SELECT_ALL,
     )
 )
 PY
@@ -231,6 +234,7 @@ import dotmac_kernel
 import dotmac_kernel.migrations as kmig
 import dotmac_kernel.templating as ktpl
 from dotmac_kernel import (
+    SELECT_ALL,
     FeatureManifest,
     ProductAssemblySpec,
     create_app,
@@ -288,6 +292,7 @@ for kind, guard, expected_error in (
                 # Declared so this probe still fails on the DECLARATION
                 # validation it is testing, not on the documentation policy.
                 api_documentation=environment_api_documentation_policy(),
+                surface_selection=SELECT_ALL,
             )
         )
     except expected_error:

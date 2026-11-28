@@ -13,7 +13,7 @@ from threading import Barrier, Thread
 from uuid import uuid4
 
 import pytest
-from dotmac_billing import list_open_receivable_documents, models
+from dotmac_billing import list_open_receivable_documents, models, opening_late_items
 from dotmac_billing import opening_queries as cash_queries
 from dotmac_billing import opening_receivable_queries as q
 from dotmac_billing import service as s
@@ -2194,6 +2194,12 @@ def test_real_bi7_upgrade_preserves_cash_and_accounting_v1_through_v4_history(
             )
             # bi7 predates the frozen withholding component table (bi_0016).
             historical.setattr(s, "_require_frozen_withholding", lambda *a, **k: None)
+            # bi7 predates opening_late_items (bi_0021): no late credit can exist.
+            historical.setattr(
+                opening_late_items,
+                "opening_late_net_credit",
+                lambda *a, **k: Decimal(0),
+            )
             historical.setattr(
                 s, "_undischarged_frozen_withholding", lambda *a, **k: Decimal(0)
             )

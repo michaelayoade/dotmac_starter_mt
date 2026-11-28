@@ -123,6 +123,10 @@ def _principal(scratch, plane):
                 is None
             ):
                 continue
+            # The opening principal holds no grant on the post-seal late-item
+            # table: every principal path proves it needs none.
+            if name == "opening_late_items":
+                continue
             privileges = (
                 "SELECT, INSERT"
                 if name.removeprefix("platform_") in writes

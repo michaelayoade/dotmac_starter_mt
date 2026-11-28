@@ -110,7 +110,7 @@ from dotmac_kernel.messaging import enqueue_event
 from dotmac_kernel.money import Money
 from dotmac_service_access_policy import AccessSignal, RecordAccessInputV2
 from sqlalchemy import BigInteger, Text, and_, exists, func, literal, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_money_flows._credit_dating import newest_credit_at
@@ -856,6 +856,9 @@ def _discharge(
         command: IssueRatedInvoiceV3 = ctx.ports.charges.issue_command(
             ctx.db, scope=ctx.scope, key=key, issue_at=issue_at
         )
+    except DBAPIError:
+        # A database fault (not an ORM usage error) is not a bad row: redeliver.
+        raise
     except Exception as exc:
         if row is None:
             raise
@@ -991,6 +994,9 @@ def _reevaluate_funded(
     key = key_for_charge_ref(row.charge_ref)
     try:
         charge = ctx.ports.charges.read(ctx.db, scope=ctx.scope, key=key)
+    except DBAPIError:
+        # A database fault (not an ORM usage error) is not a bad row: redeliver.
+        raise
     except Exception as exc:
         raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
     was_active = _begin_service(ctx, row.service_ref)
@@ -1222,6 +1228,9 @@ def _recheck_terms(
     key = key_for_charge_ref(row.charge_ref)
     try:
         charge = ctx.ports.charges.read(ctx.db, scope=ctx.scope, key=key)
+    except DBAPIError:
+        # A database fault (not an ORM usage error) is not a bad row: redeliver.
+        raise
     except Exception as exc:
         raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
     was_active = _begin_service(ctx, row.service_ref)
@@ -1461,6 +1470,9 @@ def retry_funded_charge(
         charge = ports.charges.read(
             db, scope=scope, key=key_for_charge_ref(row.charge_ref)
         )
+    except DBAPIError:
+        # A database fault (not an ORM usage error) is not a bad row: redeliver.
+        raise
     except Exception as exc:
         raise FundedChargeStepFailed(row.id, _SOURCE_ERROR) from exc
     was_active = _begin_service(ctx, row.service_ref)

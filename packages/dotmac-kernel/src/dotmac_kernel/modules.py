@@ -120,6 +120,10 @@ SUPPORTED_MODULE_CONTRACT_VERSIONS: Final[frozenset[int]] = frozenset({1, 2})
 UNVERSIONED: Final[str] = "0.0.0"
 
 
+#: Module codes only the kernel may own (its built-in platform surface owner).
+RESERVED_MODULE_CODES: Final[frozenset[str]] = frozenset({"kernel_platform"})
+
+
 class ModuleRegistryError(ValueError):
     """Base for every fail-closed module-registry validation error, so a caller
     can catch the whole class of "the installed module set is incoherent"."""
@@ -274,10 +278,31 @@ class ModuleManifest:
     # `dotmac-durable-timers` executes them. Last, to preserve every positional
     # constructor.
     jobs: Sequence[JobSpec] = field(default_factory=tuple)
+    #
+    # Kernel facilities this STATELESS module CALLS at request time, named by
+    # prerequisite (`dotmac_kernel.prerequisites`). `requires` means "order my
+    # migrations after this effect", which is meaningless for a module that has
+    # no lineage, so the registry still refuses `requires` there. Calling a
+    # facility is a different obligation: a runtime dependency that composition
+    # must refuse when the assembly cannot supply it (`create_app` checks every
+    # entry against the assembly's binding table, the same one `requires`
+    # resolves through). Legal ONLY on a stateless module: a stateful module
+    # keeps `requires` plus a verifying migration, nothing is relaxed for it.
+    # Appended last to preserve every historical positional constructor.
+    runtime_requires: Sequence[str] = field(default_factory=tuple)
+    # The top-level Python package job handlers must live in. None means the
+    # convention `dotmac_<code>`; set it only for a module whose package does not
+    # follow it. Never inferred from another module's router or seed.
+    job_package: str | None = None
 
     def __post_init__(self) -> None:
         if not self.code:
             raise ModuleRegistryError("module manifest requires a non-empty `code`")
+        if self.code in RESERVED_MODULE_CODES:
+            raise ModuleRegistryError(
+                f"module code {self.code!r} is reserved for the kernel's own "
+                "built-in surface"
+            )
         if not self.version:
             raise ModuleRegistryError(
                 f"module {self.code!r} requires a non-empty `version`"
@@ -311,6 +336,7 @@ class ModuleManifest:
             "tenant_requires",
             "platform_requires",
             "jobs",
+            "runtime_requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         self._validate_jobs()
@@ -338,10 +364,12 @@ class ModuleManifest:
         validate_prerequisites(self.requires)
         validate_prerequisites(self.tenant_requires)
         validate_prerequisites(self.platform_requires)
+        validate_prerequisites(self.runtime_requires)
         prerequisite_lists = {
             "requires": set(self.requires),
             "tenant_requires": set(self.tenant_requires),
             "platform_requires": set(self.platform_requires),
+            "runtime_requires": set(self.runtime_requires),
         }
         overlap = {
             name
@@ -372,6 +400,20 @@ class ModuleManifest:
                 f"module {self.code!r} declares migration prerequisites but owns "
                 "no lineage — `requires` orders migrations, so a module with no "
                 "migrations has nothing to order"
+            )
+        if self.runtime_requires and (
+            self.short_code is not None
+            or self.migration_prefix is not None
+            or self.migration_branch is not None
+            or self.tables
+            or self.platform_tables
+        ):
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares `runtime_requires` but is "
+                "stateful (it owns a lineage, schema or tables) — "
+                "`runtime_requires` is legal only on a stateless module. A "
+                "stateful module declares `requires` and verifies the effect "
+                "in a migration"
             )
         try:
             supported = _supported_plane_sets(self)
@@ -775,26 +817,35 @@ class ModuleRegistry:
     def _check_job_handlers(manifests: Sequence[ModuleManifest]) -> None:
         """Every declared job handler must import, be a plain synchronous
         function, accept the contract signature, and live in the declaring
-        module's own package, so a typo or a cross-module import fails the
-        start, not the first due run."""
-        owned: dict[str, set[str]] = {}
+        module's own package (``dotmac_<code>`` unless ``job_package`` says
+        otherwise), so a typo or a cross-module import fails the start, not the
+        first due run. A ``job_package`` is itself checked: it may not be the
+        kernel, nor a ``dotmac_*`` package other than the module's own
+        ``dotmac_<code>``, nor another manifest's effective ``dotmac_*`` package."""
+        effective = {
+            manifest.code: manifest.job_package or f"dotmac_{manifest.code}"
+            for manifest in manifests
+        }
         for manifest in manifests:
-            packages: set[str] = set()
-            routers = [
-                *manifest.api_routers,
-                *(r for s in manifest.web_surfaces for r in s.routers),
-            ]
-            for router in routers:
-                for route in getattr(router, "routes", ()):
-                    endpoint = getattr(route, "endpoint", None)
-                    module_name = getattr(endpoint, "__module__", "") or ""
-                    if module_name:
-                        packages.add(module_name.partition(".")[0])
-            seed_module = getattr(manifest.seed, "__module__", "") or ""
-            if seed_module:
-                packages.add(seed_module.partition(".")[0])
-            owned[manifest.code] = packages
-        for manifest in manifests:
+            expected = effective[manifest.code]
+            declared = manifest.job_package
+            if declared is not None and (
+                declared == "dotmac_kernel"
+                or (
+                    declared.startswith("dotmac_")
+                    and (
+                        declared != f"dotmac_{manifest.code}"
+                        or any(
+                            code != manifest.code and package == declared
+                            for code, package in effective.items()
+                        )
+                    )
+                )
+            ):
+                raise ModuleRegistryError(
+                    f"module {manifest.code!r}: job_package {declared!r} belongs "
+                    "to the kernel or to another module"
+                )
             for job in manifest.jobs:
                 try:
                     resolve_job_handler(job)
@@ -803,17 +854,13 @@ class ModuleRegistry:
                         f"module {manifest.code!r}: {exc}"
                     ) from exc
                 package = handler_package(job.handler)
-                for other_code, packages in owned.items():
-                    if (
-                        other_code != manifest.code
-                        and package in packages
-                        and package not in owned[manifest.code]
-                    ):
-                        raise ModuleRegistryError(
-                            f"module {manifest.code!r}: job {job.code!r} handler "
-                            f"{job.handler!r} belongs to module {other_code!r}'s "
-                            "package; modules never import each other"
-                        )
+                if package != expected:
+                    raise ModuleRegistryError(
+                        f"module {manifest.code!r}: job {job.code!r} handler "
+                        f"{job.handler!r} is in package {package!r}, expected "
+                        f"{expected!r} (set `job_package` only if the module's "
+                        "package does not follow `dotmac_<code>`)"
+                    )
 
     @staticmethod
     def _topological_order(

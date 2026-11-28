@@ -1,8 +1,20 @@
 # Changelog — dotmac-money-flows
 
-## 0.1.0a3 — unreleased (C2b: several deductions on one MANUAL confirmation)
+## 0.1.0a4 — source candidate, not yet published (GAP-4 follow-up: database faults redeliver)
 
-Source only; one additive migration. a2 is released and tagged.
+Source only. a3 is published and tagged `dotmac-money-flows-v0.1.0a3`; released
+`mf_0001`..`mf_0003` bytes are unchanged. No migration, no Billing requirement
+change, and the `dotmac-collections >=0.1.0a3` floor stays (the Collections a4
+change is internal to Collections).
+
+- A charge-source read failure that is a `sqlalchemy.exc.DBAPIError` (a database fault) is
+  re-raised so the message redelivers, instead of becoming a per-row
+  `charge_source_error` step failure. Every other source error stays a per-row step
+  failure, including ORM usage errors such as `NoResultFound`. Applies to the four reads: the issue command, the funded and terms re-checks, and retry.
+
+## 0.1.0a3 — released, tag `dotmac-money-flows-v0.1.0a3` (C2b: several deductions on one MANUAL confirmation)
+
+One additive migration. a2 is released and tagged.
 
 - `SettleConfirmationV2` (subclass of V1, so V1 callers are unchanged) carries a tuple
   `deductions` of `SettleWithholdingV1`, for example withholding tax plus agency stamp
@@ -39,7 +51,7 @@ Source only; one additive migration. a2 is released and tagged.
 
 ## 0.1.0a2 — released, tag `dotmac-money-flows-v0.1.0a2` (GAP-4: the X1 receivables reader)
 
-Source only. a1 was published first; this added one stateless module on top of it.
+Published after a1; this added one stateless module on top of it.
 
 - `receivables.BillingReceivablesReader` (X1): implements Collections'
   `ReceivablesReader` over Billing's sealed document exposure (native V1 and imported
@@ -61,9 +73,9 @@ Source only. a1 was published first; this added one stateless module on top of i
   `get_effective_account_terms`, `ReceivableExposureV1/V2` and `DueDateBasisStatus`.
 - Version surfaces move to `0.1.0a2` (pyproject, manifest, package, lock).
 
-## 0.1.0a1 — unreleased
+## 0.1.0a1 — released, tag `dotmac-money-flows-v0.1.0a1`
 
-Source only; not published, not composed into any assembly.
+Published first; not composed into any assembly by Starter.
 
 - Tenant-plane manifest (`money_flows` / `mflows` / `mod_mflows` / `mf`), the
   instance-table allowlist and the Settle outbox event types.
@@ -112,7 +124,7 @@ Source only; not published, not composed into any assembly.
   fixture exists in the repository yet (the opening scale fixture is a census,
   not an account's open documents), so none was built here.
 - Raise the kernel floor to the kernel release that carries the `money_flows`
-  migration-namespace reservation.
+  migration-namespace reservation. MET: the floor is kernel `0.1.0a110`.
 
 - Migration `mf_0002` creates `funded_charge_instances` (F2 FundedCharge) with
   forced row-level security, no DELETE grant and a guard trigger: insert only as
@@ -199,9 +211,10 @@ Source only; not published, not composed into any assembly.
 
 ### Release gates (F2)
 
-- Billing `0.1.0a13` must be published before money-flows `0.1.0a1`. This joins
-  the kernel `0.1.0a110` floor, the L6 deposit page-walk measurement and the
-  reseller-scale re-evaluation test (many pending rows on one account).
+- Billing `0.1.0a13` must be published before money-flows `0.1.0a1`. MET: it was
+  published before a1. The kernel `0.1.0a110` floor is also MET. The L6 deposit
+  page-walk measurement and the reseller-scale re-evaluation test (many pending
+  rows on one account) are not claimed met here.
 - Not covered by a test here: an opening-lot credit funding a charge (Billing
   admits opening lots through a sealed window under a restricted role, which the
   scratch fixture does not provision).
